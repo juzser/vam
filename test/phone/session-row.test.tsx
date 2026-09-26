@@ -191,21 +191,37 @@ describe('the text the phone list screen is made of', () => {
       );
     }
 
-    // The filter popover's two captions -- the phone's only text-search route
-    // reaches this surface, so they are on the critical path too.
+    // The popover's own captions -- the phone's only text-search route
+    // reaches this surface, so they are on the critical path too. "Origin"
+    // is "Filters" now (the workspace-options pass rebuilt the popover in
+    // orca's shape); "Group by" is new with the same pass and checked here
+    // for the same reason the sweep's own header states: found, not assumed.
     cleanup();
     render(<SessionList {...baseProps(entries())} phone width={undefined} filterMenuOpen />);
-    for (const text of ['Status', 'Origin']) {
+    for (const text of ['Status', 'Filters', 'Group by']) {
       for (const node of named(text)) {
         expect(node.className, text).not.toContain('text-ink-faint');
       }
     }
 
+    // NOT A BARE `<li>` ANY MORE. `SessionList.tsx`'s own `showGettingStarted`
+    // and `showStartingProvisional` used to mount at once -- an empty
+    // `OverlayScroll` (carrying this exact "No sessions yet" `<li>`) beside
+    // `GettingStarted`, both `flex-1` siblings splitting the free height
+    // between them. Exclusive now: with no session, no filter and no
+    // provisional project, `GettingStarted` is the WHOLE of the empty state,
+    // the `<li>` never mounts, and a `querySelector('li')` here would find
+    // nothing -- this file's own header line about a sweep that finds
+    // nothing being green over an empty corpus, reached the hard way.
     cleanup();
     render(<SessionList {...baseProps([])} phone width={undefined} />);
-    const empty = document.querySelector('li');
+    const empty = document.querySelector('[data-getting-started]');
+    expect(empty, 'the phone empty state').not.toBeNull();
     expect(empty?.textContent?.trim(), 'the empty state').not.toBe('');
-    expect(empty?.className).not.toContain('text-ink-faint');
+    const faint = [...(empty?.querySelectorAll('[class]') ?? [])].find((node) =>
+      node.className.includes('text-ink-faint'),
+    );
+    expect(faint?.outerHTML, 'no descendant of the empty state is text-ink-faint').toBeUndefined();
   });
 });
 

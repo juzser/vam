@@ -16,6 +16,7 @@
  */
 
 import {
+  Bell,
   Bot,
   Keyboard,
   type LucideIcon,
@@ -32,7 +33,14 @@ import {
   MODE_TITLES,
 } from '../keyboard/keysheet.js';
 
-export type SectionId = 'appearance' | 'behaviour' | 'sessions' | 'remote' | 'keyboard' | 'update';
+export type SectionId =
+  | 'appearance'
+  | 'behaviour'
+  | 'notifications'
+  | 'sessions'
+  | 'remote'
+  | 'keyboard'
+  | 'update';
 
 /**
  * WHAT A PHONE MAY SEE OF THIS OVERLAY, and why it is almost none of it.
@@ -52,6 +60,11 @@ export type SectionId = 'appearance' | 'behaviour' | 'sessions' | 'remote' | 'ke
  * folded a turn away or chose an indent width would be configuring the copy of
  * vam in its own browser. It is left out for the reason Appearance is, not by
  * default.
+ *
+ * NOTIFICATIONS IS OUT FOR A SECOND REASON ON TOP OF THAT ONE: its switch is
+ * `prefs` like the rest, and its button raises a banner through the desktop's
+ * main process, which a phone has no bridge to. A button drawn there would be
+ * a button that does nothing.
  *
  * Remote is the one whose subject is the DESKTOP rather than the device
  * holding it, which is exactly what a phone has a reason to look at.
@@ -112,6 +125,14 @@ export const SECTIONS: readonly {
   // switches today and one is a stepper, so a glyph that draws a switch would
   // be naming the controls it happens to hold rather than the section.
   { id: 'behaviour', label: 'Behaviour', Icon: SlidersHorizontal },
+  // Operator: "add a setting for notifications in the desktop app. Include a
+  // test-notification button too." Its switch was a Behaviour row (PR 440) and
+  // moved here, not copied, when the button arrived: a row and a button that
+  // exist to be found together are a section. AFTER BEHAVIOUR, because that
+  // is where the switch was yesterday, and before Sessions for the same
+  // reason Behaviour is before it. `Bell` is what every OS draws for the
+  // thing itself.
+  { id: 'notifications', label: 'Notifications', Icon: Bell },
   // Before Keyboard rather than after it: Keyboard is the reference section
   // and the longest, and a list that ends in a reference reads as a list that
   // ended. Nothing else depends on the position.

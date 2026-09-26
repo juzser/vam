@@ -26,6 +26,7 @@ export const CHANNELS = {
    * different way.
    */
   createSessionIn: 'vam:source:create-session-in',
+  resumeSession: 'vam:source:resume-session',
   /**
    * SCROLLING BACK through one session: the turns before a point, read on
    * demand. Distinct from `load`, which reads a fixed tail of every live
@@ -102,6 +103,14 @@ export const CHANNELS = {
    * `UsageSnapshot`, never an `IpcResult` -- see `src/main/usage/ipc.ts`.
    */
   usageGet: 'vam:usage:get',
+  /**
+   * Codex's own usage, read from its rollout files rather than the network --
+   * see `src/main/usage/codex-reader.ts`. Answers bare too, a
+   * `CodexUsageSnapshot`, for the same reason `usageGet` does: a reading
+   * failure is not a `SourceError`, there is no source and no session to
+   * refuse anything on.
+   */
+  usageCodexGet: 'vam:usage:codex:get',
   /**
    * The clipboard channel. Like `usageGet` it answers bare -- a `boolean`,
    * not an `IpcResult`: "did the text reach the clipboard" is the whole
@@ -341,6 +350,68 @@ export const CHANNELS = {
    */
   terminalSwitchModel: 'vam:terminal:switch-model',
   /**
+   * OPEN the Terminal tab's STREAMING connection -- a second, persistent
+   * `tmux -C` attached directly to the session the operator is viewing, so
+   * `%output` can feed xterm.js instead of `terminalRead` polling
+   * `capture-pane` on a timer (`docs/design/terminal-streaming.md`). Resolved
+   * the SAME way `terminalRead`/`terminalSend` are, by
+   * `listVamSessions`+`targetSession`, so a stream can never attach to a
+   * session those channels would have refused -- see
+   * `terminal/stream-ipc.ts`. Answers `{ok:true, streamId, seed}` (the first
+   * screen rides this response directly) or a typed `{ok:false, reason}`,
+   * never a throw across the bridge: a refused session, an unresolvable
+   * pairing and a `tmux -V` below this feature's minimum are all facts, not
+   * exceptions.
+   */
+  terminalStreamOpen: 'vam:terminal:stream:open',
+  /**
+   * CLOSE one streaming connection opened by `terminalStreamOpen`, by its
+   * `streamId`. Idempotent -- an already-closed or unknown id is a no-op:
+   * this push-based cleanup call may race the connection's own natural
+   * teardown (the child dying on its own), the same posture
+   * `stream/register.ts`'s ref-counted unsubscribe takes, though this is not
+   * ref-counted -- one `StreamClient` per `streamId`.
+   */
+  terminalStreamClose: 'vam:terminal:stream:close',
+  /**
+   * ONE keystroke (or a paste, or an escape sequence -- whatever xterm's own
+   * `onData` handed the renderer) into the pane a streaming connection is
+   * attached to. Silently ignored for an unknown/closed `streamId`: a
+   * keystroke arriving a tick after `terminalStreamClose` is not an error.
+   * Fire-and-forget like `terminalSend`, for the identical reason -- what
+   * tmux did with it arrives as `%output` on `terminalStreamData` regardless.
+   */
+  terminalStreamWrite: 'vam:terminal:stream:write',
+  /**
+   * PUSH: decoded `%output` for one open stream, `(streamId, chunk)`. Main
+   * sends unprompted, the same shape `vam:stream:change` already uses for a
+   * push channel, keyed per stream here rather than global.
+   */
+  terminalStreamData: 'vam:terminal:stream:data',
+  /**
+   * PUSH: a fresh screen for one open stream, `(streamId, seed)` -- fired on
+   * reconnect and on tmux's own `%pause`/`%continue` flow-control
+   * notification, NEVER on the stream's initial open (whose seed already
+   * rides `terminalStreamOpen`'s own response). The renderer is expected to
+   * replace its xterm buffer wholesale on this event rather than append.
+   */
+  terminalStreamSeed: 'vam:terminal:stream:seed',
+  /**
+   * PUSH, `(streamId, event)`: this stream's connection dropped, where
+   * `event` is `StreamClient`'s own `StreamDownEvent` (`terminal/stream/
+   * client.ts`) -- `{kind:'reconnecting', attempt}` while a backed-off retry
+   * is still pending (a `terminalStreamSeed` follows once one lands), or a
+   * TERMINAL `{kind:'gave-up', reason:'max-attempts'|'session-gone'}` once
+   * this client has stopped trying for good (a review finding: the payload
+   * used to be dropped entirely, so a renderer had no way to tell the two
+   * apart -- see `StreamClient`'s own `MAX_RECONNECT_ATTEMPTS`). Purely
+   * informational either way -- nothing on this side waits for an
+   * acknowledgement -- but `gave-up` is the renderer's one signal that
+   * NOTHING further will arrive on this `streamId` until it opens a fresh
+   * one itself.
+   */
+  terminalStreamDown: 'vam:terminal:stream:down',
+  /**
    * The directory picker. Answers BARE -- a path or `null` -- never an
    * `IpcResult`: "which directory" has exactly two answers and a cancelled
    * dialog is one of them, not a failure to report in a source's words. There
@@ -507,6 +578,56 @@ export const CHANNELS = {
    */
   mainErrorsGet: 'vam:errors:get',
   mainErrorsChanged: 'vam:errors:changed',
+  /**
+   * DESKTOP NOTIFICATIONS. The renderer decides WHEN (it is the only process
+   * holding a previous model, `src/renderer/notify/waiting.ts`); main makes
+   * the OS call (`src/main/notify/notify.ts`) because the renderer's own
+   * `Notification` sits behind the permission policy this app denies.
+   *
+   * `show` and `close` answer bare -- a boolean and nothing -- like
+   * `clipboardWrite`: there is no source to refuse in the words of, and what
+   * went wrong is not the caller's to render. It is written to main's failure
+   * buffer (`mainErrorsGet` above) with the OS's text verbatim, which is the
+   * whole instrument. `activated` is a PUSH, `{sourceId, sessionId}`, sent
+   * when a banner is clicked, so the renderer can go to that session.
+   *
+   * NOT MEMBERS OF `PreloadSourceApi`, for the reason `setConciseOutput` is
+   * not: a paired phone must not be able to raise a banner on the desktop.
+   *
+   * `test` is the settings button. No argument -- main chooses the title and
+   * the body -- and it answers a `NotifyVerdict` (`src/shared/notify.ts`)
+   * rather than a boolean, because the button exists to say inline what the
+   * OS did with the banner. Same notifier path, so the error log still gets
+   * what a real banner's failure would have written.
+   */
+  notifyShow: 'vam:notify:show',
+  notifyClose: 'vam:notify:close',
+  notifyTest: 'vam:notify:test',
+  notifyActivated: 'vam:notify:activated',
+  /**
+   * THE WORKTREES FEATURE'S THREE CHANNELS: list the linked worktrees of a
+   * project vam already knows, create one, remove one.
+   *
+   * DESKTOP-ONLY, LIKE `filesRead`/`filesWrite`/`filesList` -- NOT MEMBERS
+   * OF `PreloadSourceApi`, so `remote/server.ts`'s route table carries no
+   * matching path and a paired phone cannot reach any of the three. A
+   * worktree is a checkout on THIS machine's disk, spawning `git` as a
+   * child process of the desktop app; the operator's own decision for this
+   * feature's v1 is that a remote device may see and use the sessions a
+   * worktree already has, exactly as it can for any other project, but may
+   * not create or remove the worktree itself. Exposing that over the
+   * network is named explicitly as a phase 2 question in
+   * `docs/design/worktrees.md`, not decided here by omission.
+   *
+   * Every one of the three answers through the `IpcResult` envelope, like
+   * every other write/read below `describe`/`load` above: `worktrees.ts`'s
+   * own functions already resolve to `SourceError | T`, never throw, so the
+   * handler only has to fold that union into `{ok:false,error}` /
+   * `{ok:true,value}`.
+   */
+  worktreeList: 'vam:worktree:list',
+  worktreeCreate: 'vam:worktree:create',
+  worktreeRemove: 'vam:worktree:remove',
 } as const;
 
 /**

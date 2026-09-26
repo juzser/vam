@@ -49,7 +49,6 @@ function sessionWith(over: Partial<Session> = {}): Session {
   return {
     id: 's1',
     title: 'Provider survey',
-    icon: null,
     epic: null,
     branch: null,
     status: 'running',

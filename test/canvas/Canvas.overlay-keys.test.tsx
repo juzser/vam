@@ -14,7 +14,7 @@
  * the deafness while open, and the hearing restored the moment it closes.
  */
 
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
@@ -24,7 +24,6 @@ function session(id: string): Session {
   return {
     id,
     title: id,
-    icon: null,
     epic: null,
     branch: null,
     status: 'done',
@@ -68,7 +67,18 @@ function chord(first: string, second: string) {
 }
 
 const openSheet = () => press('?', { shiftKey: true });
-const openSettings = () => press(',');
+/** Async, unlike its two siblings: `SettingsOverlay` is its own lazy chunk
+ *  now (`Canvas.tsx`'s own `React.lazy` + `Suspense`), so the DOM this
+ *  opens is not there the instant the keystroke lands -- it resolves a
+ *  render tick or two later. `waitFor` (real timers, its default) rather
+ *  than a fixed `Promise.resolve()` count, the same reason
+ *  `DetailPanel.file-ref.test.tsx`'s own lazy-chunk wait gives. */
+const openSettings = async () => {
+  press(',');
+  await waitFor(() => {
+    if (!settings()) throw new Error('still pending');
+  });
+};
 // CMD, NOT CTRL: `Mod-k` is the command modifier alone for a letter since the
 // operator gave Ctrl+letter to the terminal (PR 361), and Cmd spells `Mod-k`
 // on every platform while Ctrl only does off macOS.
@@ -127,14 +137,14 @@ describe('an open overlay stops the canvas listening', () => {
     expect(focusedTitle()).toBe(before);
   });
 
-  it('leaves the cursor where it was when `j` is typed at the settings overlay', () => {
+  it('leaves the cursor where it was when `j` is typed at the settings overlay', async () => {
     render(<Canvas model={MODEL} />);
     press('g');
     press('g');
     const before = focusedTitle();
     expect(before).toBe('a1');
 
-    openSettings();
+    await openSettings();
     expect(settings()).not.toBeNull();
     press('j');
     expect(focusedTitle()).toBe(before);
@@ -149,12 +159,12 @@ describe('an open overlay stops the canvas listening', () => {
    * width), and it is exactly as reachable as `zc` was, keystroke for
    * keystroke, behind the same `z` prefix.
    */
-  it('does not let `z0` reset the panes under either overlay', () => {
+  it('does not let `z0` reset the panes under either overlay', async () => {
     for (const { name, open, node } of [OVERLAYS[0], OVERLAYS[1]]) {
       render(<Canvas model={MODEL} />);
       press('<'); // move the sidebar away from its default, so a reset is observable
       expect(sidebarWidth()).toBe(DEFAULT_PANES.sidebar - 24);
-      open();
+      await open();
       expect(node(), `${name} did not open`).not.toBeNull();
       chord('z', '0');
       expect(sidebarWidth(), `\`z0\` reached the shell under ${name}`).toBe(
@@ -165,9 +175,9 @@ describe('an open overlay stops the canvas listening', () => {
     }
   });
 
-  it('does not let a chord open a second overlay over the first', () => {
+  it('does not let a chord open a second overlay over the first', async () => {
     render(<Canvas model={MODEL} />);
-    openSettings();
+    await openSettings();
     expect(settings()).not.toBeNull();
     openSheet();
     expect(sheet(), 'a second overlay opened on top of the settings overlay').toBeNull();
@@ -177,9 +187,9 @@ describe('an open overlay stops the canvas listening', () => {
 
 describe('each overlay keeps its own way out', () => {
   for (const { name, open, node } of OVERLAYS) {
-    it(`closes ${name} on Escape`, () => {
+    it(`closes ${name} on Escape`, async () => {
       render(<Canvas model={MODEL} />);
-      open();
+      await open();
       expect(node(), `${name} did not open`).not.toBeNull();
       if (name === 'the command palette') {
         // The palette's input has focus, so its Escape is its own handler's.
@@ -220,11 +230,11 @@ describe('the canvas hears again once the overlay closes', () => {
     expect(focusedTitle()).toBe('a2');
   });
 
-  it('lets `z0` through again after the settings overlay closes', () => {
+  it('lets `z0` through again after the settings overlay closes', async () => {
     render(<Canvas model={MODEL} />);
     press('<');
     expect(sidebarWidth()).toBe(DEFAULT_PANES.sidebar - 24);
-    openSettings();
+    await openSettings();
     chord('z', '0');
     expect(sidebarWidth(), '`z0` reached the shell while settings was open').toBe(
       DEFAULT_PANES.sidebar - 24,

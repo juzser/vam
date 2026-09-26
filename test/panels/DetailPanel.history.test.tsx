@@ -39,7 +39,6 @@ const sessionWith = (decisions: readonly Decision[]): Session => ({
   vamControlled: true,
   id: 's1',
   title: 'A long one',
-  icon: null,
   epic: null,
   branch: null,
   status: 'running',

@@ -17,6 +17,7 @@
 import type { AgentWork } from '../../shared/agent-work.js';
 import type { HistoryCursor, TranscriptPage } from '../../shared/history.js';
 import { setPrRepoOverrides } from '../sources/claude-code/pr-repos.js';
+import { combineSources } from '../sources/combine.js';
 import type { MainSource } from '../sources/source.js';
 import { CHANNELS, type IpcResult, type SourceError } from './channels.js';
 import {
@@ -57,6 +58,7 @@ const ARGUMENTS: Record<string, readonly ((value: unknown) => boolean)[]> = {
   [CHANNELS.closeSession]: [isText, isOptionalBool],
   [CHANNELS.createSession]: [isText, isText, isOptionalText],
   [CHANNELS.createSessionIn]: [isDirectoryPath, isText, isOptionalText],
+  [CHANNELS.resumeSession]: [isText],
   [CHANNELS.sessionHistory]: [isText, isCursor],
   [CHANNELS.sessionAgentWork]: [isText, isText],
   [CHANNELS.applyWaivers]: [isText, isTextList],
@@ -82,14 +84,22 @@ function validate(channel: string, args: readonly unknown[]): SourceError | null
 }
 
 /**
- * Registers every channel against `source`.
+ * Registers every channel against the SOURCES main is serving.
+ *
+ * A LIST, NOT ONE SOURCE, since `docs/design/a-second-source.md` Stage 0: this
+ * is one of the three places main held exactly one. The list is folded back
+ * into a single object by `combineSources`, which is what the bridge's fixed
+ * shape still needs -- and a list of one folds to that one member by
+ * reference, so nothing below can behave differently while vam serves a
+ * single source.
  *
  * The write and governance channels exist because the bridge's shape is fixed
  * at preload time and cannot depend on what a source can do
  * (`src/shared/preload-api.ts`). They validate, then refuse in the source's own
  * words -- there is no write surface behind them to reach.
  */
-export function registerSourceIpc(ipcMain: IpcMainLike, source: MainSource): void {
+export function registerSourceIpc(ipcMain: IpcMainLike, sources: readonly MainSource[]): void {
+  const source = combineSources(sources);
   const answer = <T>(produce: () => Promise<T> | T) => {
     return async (): Promise<IpcResult<T>> => {
       try {
@@ -206,6 +216,7 @@ export function registerSourceIpc(ipcMain: IpcMainLike, source: MainSource): voi
     [CHANNELS.closeSession, 'closeSession'],
     [CHANNELS.createSession, 'createSession'],
     [CHANNELS.createSessionIn, 'createSession'],
+    [CHANNELS.resumeSession, 'resumeSession'],
     [CHANNELS.applyWaivers, 'governance'],
     [CHANNELS.transitionLesson, 'governance'],
   ];

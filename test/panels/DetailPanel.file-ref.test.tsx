@@ -18,7 +18,7 @@
  * calls the worst thing this tab could get wrong.
  */
 
-import { act, cleanup, render } from '@testing-library/react';
+import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FileReadResult, FileRefTarget } from '../../src/main/files/types.js';
 import type { Decision, Project, Session } from '../../src/renderer/domain/model.js';
@@ -42,7 +42,6 @@ const DECISION: Decision = {
 const SESSION: Session = {
   id: 's1',
   title: 'atlas work',
-  icon: null,
   epic: null,
   branch: null,
   status: 'waiting',
@@ -89,7 +88,7 @@ afterEach(() => {
   resetUnsavedRegistry();
 });
 
-function draw(over: Partial<DetailPanelProps> = {}) {
+async function draw(over: Partial<DetailPanelProps> = {}) {
   const props: DetailPanelProps = {
     entry: ENTRY,
     decision: DECISION,
@@ -107,6 +106,17 @@ function draw(over: Partial<DetailPanelProps> = {}) {
     ...over,
   };
   render(<DetailPanel {...props} />);
+  // `data-out-file-ref` lives inside the transcript's markdown render, which
+  // `DetailPanel.tsx` now mounts behind a `React.lazy` + `Suspense` boundary
+  // (`LazyMarkdown.tsx`) -- see that file's header for why. Resolving the
+  // dynamic `import()` goes through Vite's own module transform, not a bare
+  // microtask, so this polls (real timers, `waitFor`'s default) rather than
+  // awaiting a fixed number of `Promise.resolve()` ticks. `ANSWER` carries a
+  // file reference in every test this file has, so the control's arrival is
+  // exactly the signal "the lazy chunk resolved and rendered".
+  await waitFor(() => {
+    if (!document.querySelector('[data-out-file-ref]')) throw new Error('still pending');
+  });
 }
 
 const press = async (el: Element | null) => {
@@ -123,11 +133,18 @@ describe('pressing a path:line reference an agent wrote', () => {
   it('opens the Files tab on that file, with the caret on that line', async () => {
     const resolve = vi.fn(async () => ({ path: FILE, line: 3 }));
     withBridge(resolve);
-    draw();
+    await draw();
     await press(refControl());
     expect(resolve).toHaveBeenCalledWith('s1', 'src/index.ts:3');
     // The tab really changed -- not merely a request recorded somewhere.
     expect(q<HTMLElement>('[data-view="files"]')?.getAttribute('aria-pressed')).toBe('true');
+    // `FilesTab` IS A LAZY CHUNK NOW, like the markdown stack above it, so the
+    // editor is not in the tree on the tick the tab flips -- the dynamic
+    // import resolves a turn later. Polled rather than tick-counted, for the
+    // reason the `waitFor` in `draw` already gives.
+    await waitFor(() => {
+      expect(q<HTMLTextAreaElement>('[data-files-editor]')).not.toBeNull();
+    });
     const editor = q<HTMLTextAreaElement>('[data-files-editor]');
     expect(editor?.value).toBe(CONTENT);
     // Line 3 starts after "const a = 1\nconst b = 2\n" -- 24 characters.
@@ -136,7 +153,7 @@ describe('pressing a path:line reference an agent wrote', () => {
 
   it('draws the refusal in the answer, and stays on Response, when main says no', async () => {
     withBridge(async () => Promise.reject(refusal('not-authorized', 'outside this project')));
-    draw();
+    await draw();
     await press(refControl());
     expect(q('[data-files-editor]')).toBeNull();
     expect(
@@ -147,7 +164,7 @@ describe('pressing a path:line reference an agent wrote', () => {
   });
 
   it('says so rather than doing nothing when the build has no files bridge', async () => {
-    draw({ files: false });
+    await draw({ files: false });
     await press(refControl());
     expect(
       qa<HTMLElement>('[role="status"]').some((el) => /desktop app/.test(el.textContent ?? '')),
@@ -166,7 +183,7 @@ describe('pressing a path:line reference an agent wrote', () => {
       signature: { size: CONTENT.length, mtimeMs: 1, sha256: 'abc' },
     }));
     withBridge(async () => ({ path: FILE, line: 2 }), read);
-    draw();
+    await draw();
     await press(refControl());
     await press(refControl());
     expect(read).toHaveBeenCalledTimes(1);

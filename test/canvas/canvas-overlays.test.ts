@@ -53,10 +53,18 @@ describe('useCanvasOverlays', () => {
     const { result } = renderHook(() => useCanvasOverlays());
 
     act(() => {
-      result.current.setConfirmForceClose({ sessionId: 's1', title: 'Session One' });
+      result.current.setConfirmForceClose({
+        sessionId: 's1',
+        title: 'Session One',
+        reason: 'busy',
+      });
     });
 
-    expect(result.current.confirmForceClose).toEqual({ sessionId: 's1', title: 'Session One' });
+    expect(result.current.confirmForceClose).toEqual({
+      sessionId: 's1',
+      title: 'Session One',
+      reason: 'busy',
+    });
 
     act(() => {
       result.current.setConfirmForceClose(null);

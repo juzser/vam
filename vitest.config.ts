@@ -12,7 +12,25 @@ export default defineConfig({
     // It is excluded here and run by `pnpm test:app`, the same bargain `e2e/`
     // already has. THE COST IS REAL AND IS NOT HIDDEN: AC-13's proof that the
     // application boots does not run in CI until a display is provided there.
-    exclude: ['test/electron/launch.test.ts', '**/node_modules/**', '**/dist/**'],
+    //
+    // `test/electron/userdata-isolation.test.ts` spawns the same real
+    // Electron binary (see `vitest.app.config.ts`) for the same reason, and
+    // is excluded here for the same reason -- left in, its own `beforeAll`
+    // and 15s/30s launches blow the default suite's much shorter
+    // `testTimeout` regardless of a display, which is exactly what running
+    // it once, unexcluded, measured.
+    //
+    // `test/electron/getting-started-image.test.ts` is the same bargain
+    // again: it spawns a real Electron binary via `runProbe` and needs the
+    // longer timeout `vitest.app.config.ts` gives it, not the default
+    // suite's -- measured directly (5000ms timeout, unexcluded).
+    exclude: [
+      'test/electron/launch.test.ts',
+      'test/electron/userdata-isolation.test.ts',
+      'test/electron/getting-started-image.test.ts',
+      '**/node_modules/**',
+      '**/dist/**',
+    ],
     // Makes `localStorage` deterministic across Node majors: see
     // test/support/storage.ts for why the Node version otherwise decides
     // which branch a test's own `globalThis.localStorage ??= <stub>` takes.

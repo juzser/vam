@@ -58,7 +58,7 @@ describe('the key sheet documents the Files tab', () => {
           chordSymbols(key, mac),
         );
       }
-      expect(keys, 'the operator’s ask').toContain(mac ? '⌘P' : 'Ctrl+P');
+      expect(keys, 'the operator’s ask').toContain(mac ? '⌘ P' : 'Ctrl+P');
       cleanup();
     });
   });

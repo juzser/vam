@@ -266,7 +266,6 @@ function toSession(
     title: api.sessionId,
     // Nothing in the factory stores an icon for a session, so nothing is
     // invented. The picker still opens; nothing saves it.
-    icon: null,
     epic: epicOf(decisions),
     // The factory's API reports no branch or worktree per session -- there is
     // no field on `ApiRunningSession` to derive one from. `null` is the honest

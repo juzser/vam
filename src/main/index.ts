@@ -8,16 +8,27 @@
  */
 
 import { execFile, spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { readdir, readFile, realpath, rename, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { app, BrowserWindow, clipboard, dialog, ipcMain, session, shell } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  ipcMain,
+  Notification,
+  session,
+  shell,
+} from 'electron';
 import { registerClipboardIpc } from './clipboard/ipc.js';
 import { contentSecurityPolicy } from './csp.js';
 import { registerAttachImageIpc } from './dialog/attach-image.js';
 import { registerDialogIpc } from './dialog/ipc.js';
 import { applyLoginShellPath, probeLoginShellPath } from './env/resolve-path.js';
+import { resolveUserDataOverride } from './env/user-data-dir.js';
 import { applyUtf8Ctype } from './env/utf8-ctype.js';
 import { registerMainErrorIpc } from './errors/ipc.js';
 import { recordMainFailure } from './errors/log.js';
@@ -26,8 +37,11 @@ import { registerFilesListIpc } from './files/list-ipc.js';
 import { registerFilesResolveIpc } from './files/resolve-ipc.js';
 import { registerSourceIpc } from './ipc/handlers.js';
 import { registerIssueIpc } from './issue/ipc.js';
+import { LAUNCH_FIXTURE_PROJECTS } from './launch-fixture.js';
 import { registerLinkIpc } from './link/ipc.js';
 import { applyApplicationMenu } from './menu.js';
+import { notifyActivationRoute, registerNotifyIpc } from './notify/ipc.js';
+import { createNotifier } from './notify/notify.js';
 import { isSameOrigin } from './origin.js';
 import { registerPrIpc } from './pr/ipc.js';
 import { createQuitGuard, registerUnsavedIpc } from './quit/guard.js';
@@ -46,53 +60,74 @@ import { createPrActionRunner, runPrActionViaCli } from './sources/claude-code/p
 import { prRepoOverride } from './sources/claude-code/pr-repos.js';
 import { projectIdOf } from './sources/claude-code/project-id.js';
 import { CLAUDE_CODE_SOURCE } from './sources/claude-code/source.js';
+import { defaultCodexSource } from './sources/codex/source.js';
+import { combineSources } from './sources/combine.js';
 import type { MainSource } from './sources/source.js';
-import { createTmuxRunner } from './sources/tmux/spawn.js';
+import { createControlTmuxRunner } from './sources/tmux/control.js';
+import { createTmuxRunner, listVamSessions } from './sources/tmux/spawn.js';
 import { createNodeEventSource } from './stream/event-source.js';
 import { registerStreamIpc } from './stream/register.js';
 import { registerTerminalIpc } from './terminal/ipc.js';
+import { registerTerminalStreamIpc } from './terminal/stream-ipc.js';
 import { checkForUpdate } from './update/check.js';
 import { registerUpdateIpc } from './update/ipc.js';
-import { registerUsageIpc } from './usage/ipc.js';
+import { readCodexUsage } from './usage/codex-reader.js';
+import { registerCodexUsageIpc, registerUsageIpc } from './usage/ipc.js';
 import { readUsage } from './usage/reader.js';
+import { runGitViaCli } from './worktrees/git-run.js';
+import { registerWorktreesIpc } from './worktrees/ipc.js';
+import { resolveProjectDirectoryFrom } from './worktrees/resolve-directory.js';
 import { lockZoom } from './zoom.js';
 
 /**
+ * FIRST, BEFORE ANYTHING ELSE TOUCHES `app`: a test/fixture launch gets its
+ * own throwaway `userData`, never the operator's real profile.
+ *
+ * `app.setPath('userData', ...)` has to run before `app.whenReady()` and
+ * before any subsystem opens a file under the default location -- Chromium's
+ * disk caches, `Local Storage`, `Preferences` and the per-origin zoom level
+ * all resolve against whatever `userData` was when they first initialise,
+ * and nothing below this line is early enough to still redirect them. It is
+ * placed ahead of `app.on('web-contents-created', ...)` for the same reason,
+ * even though that handler does not itself touch `userData`: nothing in this
+ * module may run first.
+ *
+ * Read once, from `VAM_USER_DATA_DIR`: unset in every production launch
+ * (Finder, Dock, Spotlight, `pnpm run dev:app`), so this is a no-op there and
+ * the platform default is untouched. Only `test/electron/launch.test.ts` and
+ * `e2e/electron-launch.et.ts` ever set it, each to a fresh directory made
+ * with `fs.mkdtempSync` and torn down after the run.
+ */
+const userDataOverride = resolveUserDataOverride(process.env);
+if (userDataOverride !== undefined) {
+  app.setPath('userData', userDataOverride);
+}
+
+/**
  * Serves `test/electron/launch.test.ts` only, selected by `VAM_FIXTURE_SOURCE`
- * on the spawned process. A clean CI runner has no Claude Code sessions on
- * disk, so `CLAUDE_CODE_SOURCE.load()` there legitimately answers `[]` --
- * and AC-13's proof that the launched shell actually reaches a real model
- * needs at least one project to reach. One project, one session, with every
- * field `test/electron/launch.test.ts`'s shape assertion reads off
- * `DEMO_MODEL`'s first session (`waitingFor`, `vamControlled` included).
+ * on the spawned process. The data lives in `launch-fixture.ts`, not here --
+ * that file's own header says why (this one cannot be unit-imported at all).
  */
 const LAUNCH_FIXTURE_SOURCE: MainSource = {
   descriptor: CLAUDE_CODE_SOURCE.descriptor,
-  load: () =>
-    Promise.resolve([
-      {
-        id: 'launch-fixture',
-        name: 'launch fixture',
-        source: 'claude-code',
-        sessions: [
-          {
-            id: 'launch-fixture-1',
-            title: 'launch fixture session',
-            icon: null,
-            epic: null,
-            branch: null,
-            status: 'waiting',
-            runningAgents: 0,
-            activity: null,
-            age: null,
-            decisions: [],
-            agents: [],
-            waitingFor: null,
-            vamControlled: false,
-          },
-        ],
-      },
-    ]),
+  load: () => Promise.resolve(LAUNCH_FIXTURE_PROJECTS),
+};
+
+/**
+ * A SECOND FIXTURE VALUE, `VAM_FIXTURE_SOURCE=2`: genuinely nothing, for
+ * `test/electron/getting-started-image.test.ts` alone. `LAUNCH_FIXTURE_
+ * SOURCE` above always owns a session (AC-13's composer needs one on
+ * screen), which is exactly the state `GettingStarted.tsx`'s own `<img>`
+ * (vam's mark, wrapped in `IconFrame`) can never be reached in -- it draws
+ * only when vam owns no session ANYWHERE. That screen is, since
+ * "start-polish" (2026-09-23) moved `TerminalOnlyStart`'s mark to the
+ * session's own agent, the ONE place left in this app that draws an `<img>`
+ * at all, so it needs its own launch to prove the same `file://`-relative-
+ * path regression `LAUNCH_FIXTURE_SOURCE` used to cover through it.
+ */
+const EMPTY_FIXTURE_SOURCE: MainSource = {
+  descriptor: CLAUDE_CODE_SOURCE.descriptor,
+  load: () => Promise.resolve([]),
 };
 
 /**
@@ -112,8 +147,44 @@ const LAUNCH_FIXTURE_SOURCE: MainSource = {
  * browser build cannot use it and does not import it -- `src/renderer` never
  * names this module, and the web target is unaffected.
  */
-const DESKTOP_SOURCE =
-  process.env.VAM_FIXTURE_SOURCE === '1' ? LAUNCH_FIXTURE_SOURCE : CLAUDE_CODE_SOURCE;
+/**
+ * A LIST, IN THE ORDER VAM ASKS THEM, and the list is where a second source
+ * arrives -- `docs/design/a-second-source.md` Stage 0. One member today, and
+ * `combineSources` folds a list of one to that member by reference, so this
+ * is the same object every consumer below held before it became a list.
+ *
+ * THE ORDER IS PART OF THE CONTRACT, not incidental: it is the order projects
+ * are concatenated in, and the order `createSessionInDirectory` picks its
+ * first willing source from -- a route with no session and no project to key
+ * on. Written here, where it can be read, rather than derived somewhere a
+ * reader would have to reconstruct it.
+ */
+const DESKTOP_SOURCES: readonly MainSource[] =
+  process.env.VAM_FIXTURE_SOURCE === '1'
+    ? [LAUNCH_FIXTURE_SOURCE]
+    : process.env.VAM_FIXTURE_SOURCE === '2'
+      ? [EMPTY_FIXTURE_SOURCE]
+      : [
+          CLAUDE_CODE_SOURCE,
+          /**
+           * THE OPERATOR'S OWN CODEX THREADS, read from `~/.codex/state_5.sqlite`
+           * and their rollout files, with `codex queue` as the one write.
+           *
+           * SECOND, AND THE ORDER IS THE CONTRACT ABOVE: Claude Code's rows come
+           * first in the canvas, and `createSessionInDirectory` -- the "new
+           * project" route, which has no session and no project to key on --
+           * goes to the first source that advertises `createSession`, which is
+           * Claude Code. The Codex source withdraws `createSession` for exactly
+           * that reason: starting a Codex session is Stage 2.
+           *
+           * Registered whether or not Codex is installed. A machine with no
+           * `~/.codex` gets a source that withdraws everything and SAYS WHY in
+           * its label and in every decline, which is the version answer this
+           * source owes; an empty list of threads would read as "you have no
+           * Codex sessions", which is the one lie it must not tell.
+           */
+          defaultCodexSource(existsSync),
+        ];
 
 /**
  * Where main's own change-stream connects, absolute (main is not served from
@@ -237,6 +308,24 @@ function registerContentSecurityPolicy(): void {
 }
 
 /**
+ * The Terminal tab's persistent tmux connection, so `before-quit` below can
+ * close it. `null` until `app.whenReady()` creates it (`registerTerminalIpc`'s
+ * own call site) -- a quit before then has nothing to dispose of, which
+ * `?.dispose()` already says without a second check.
+ */
+let terminalTmuxRunner: ReturnType<typeof createControlTmuxRunner> | null = null;
+
+/**
+ * Every open Terminal-tab STREAMING connection, so `before-quit` below can
+ * dispose them alongside `terminalTmuxRunner`'s own connection -- the same
+ * "no orphan `tmux -C` process may survive app quit" requirement, for the
+ * SECOND persistent client this app now keeps. `null` until `createWindow()`
+ * registers it (it needs a window's own `webContents` to push to, the same
+ * reason `registerStreamIpc` below is registered there and not here).
+ */
+let terminalStreamRegistration: ReturnType<typeof registerTerminalStreamIpc> | null = null;
+
+/**
  * THE GUARD ON CMD-Q, and the one piece of renderer state main keeps a copy of.
  *
  * The Files tab holds unsaved edits in renderer memory and nowhere else, and
@@ -328,6 +417,19 @@ function createWindow(): void {
     url: streamUrl,
     createEventSource: (url) => createNodeEventSource(url) as unknown as EventSource,
   });
+  // SAME REASON AS ABOVE -- it needs THIS window's `webContents` to push
+  // `%output`/reseed/down events to. Guarded on `terminalTmuxRunner` rather
+  // than asserted: `app.whenReady()` always sets it before calling
+  // `createWindow()` (below), but nothing here forces that ordering to stay
+  // true, and skipping registration is a strictly safer failure than a
+  // non-null assertion that turns out wrong.
+  if (terminalTmuxRunner !== null) {
+    terminalStreamRegistration = registerTerminalStreamIpc(
+      ipcMain,
+      window.webContents,
+      terminalTmuxRunner,
+    );
+  }
   // SAME REASON AS ABOVE -- it needs this window's `webContents` to push to.
   // Nothing recorded before this call is lost: `recordMainFailure`
   // (`./errors/log.js`) buffers unconditionally, and the renderer's own
@@ -337,6 +439,25 @@ function createWindow(): void {
   // a remote-endpoint failure recorded there is exactly the case this
   // ordering has to survive.
   registerMainErrorIpc(ipcMain, window.webContents);
+  // DESKTOP NOTIFICATIONS -- same reason again: a click on a banner has to
+  // reach THIS window. `Notification.isSupported()` is deliberately not
+  // consulted: it answers `true` on a machine where delivery is impossible,
+  // and the only honest signal is the `failed` event, which the notifier
+  // writes into the failure buffer above (`./notify/notify.js`).
+  registerNotifyIpc(
+    ipcMain,
+    createNotifier({
+      create: (options) => new Notification(options),
+      onActivate: notifyActivationRoute(window.webContents, () => {
+        // `steal: true` because the operator just clicked a banner ABOUT vam:
+        // that is the one gesture macOS treats as consent to bring an app
+        // forward over whatever they were in.
+        if (window.isMinimized()) window.restore();
+        window.show();
+        app.focus({ steal: true });
+      }),
+    }),
+  );
 
   if (devServerUrl === undefined) {
     void window.loadFile(rendererHtml);
@@ -452,7 +573,7 @@ function startRemoteTransport(): void {
         pairing,
         streams,
         webRoot,
-        source: DESKTOP_SOURCE,
+        sources: DESKTOP_SOURCES,
         subscribe,
       });
     } catch (error) {
@@ -561,6 +682,25 @@ async function resolveSessionCwd(sessionId: string): Promise<string | null> {
 }
 
 /**
+ * `projectId -> directory`, for the worktrees feature ALONE -- distinct from
+ * `resolveSessionCwd` above, which resolves a SESSION id, because a project
+ * with live sessions but no chosen one yet (the state right after "Start",
+ * `pane-row.ts`) still needs an answer here. The resolution itself is the
+ * SAME two-tier rule `create-session.ts`'s own `createSessionInProject`
+ * applies -- a live agent first, a live pane only when no agent answers --
+ * reimplemented as `resolve-directory.ts`'s pure `resolveProjectDirectoryFrom`
+ * so that module carries no dependency on this file's tmux wiring. Asked
+ * fresh per call, never cached, for `resolveSessionCwd`'s own reason.
+ */
+async function resolveWorktreeProjectDirectory(projectId: string): Promise<string | null> {
+  const agentsResult = await listLiveAgents();
+  const agents = agentsResult.kind === 'ok' ? agentsResult.agents : [];
+  const listed = await listVamSessions(createTmuxRunner());
+  const panes = listed.kind === 'ok' ? listed.sessions : [];
+  return resolveProjectDirectoryFrom(agents, panes, projectId);
+}
+
+/**
  * THE ONE RUNNER FOR THE WHOLE APPLICATION, and that singleness is the
  * guarantee rather than a tidiness.
  *
@@ -598,12 +738,17 @@ void app.whenReady().then(async () => {
   applyApplicationMenu();
   // Registered before the window is created, so the renderer's first call can
   // never race an unregistered channel.
-  registerSourceIpc(ipcMain, DESKTOP_SOURCE);
+  registerSourceIpc(ipcMain, DESKTOP_SOURCES);
   // Reads the Keychain and calls the real usage endpoint only when the
   // renderer asks; both side effects are `reader.ts`'s own, never this
   // module's -- main-process-only because a Keychain read is not a thing the
   // renderer, the least trusted process here, may ever perform.
   registerUsageIpc(ipcMain, () => readUsage());
+  // A filesystem scan of ~/.codex/sessions rather than a network call, but
+  // the same rule: main-process-only, read only when the renderer asks, and
+  // never on a floor the renderer itself controls (`codex-reader.ts`,
+  // `usage/ipc.ts`).
+  registerCodexUsageIpc(ipcMain, () => readCodexUsage());
   // Contacts github.com ONCE, here, as vam starts: one unauthenticated GET
   // carrying no token, no query and nothing about this machine's sessions,
   // projects or paths. Nothing is awaited -- the window is created below
@@ -676,7 +821,19 @@ void app.whenReady().then(async () => {
   // The Terminal tab's only route to tmux. Registered unconditionally, but it
   // spawns nothing until the renderer asks -- and the renderer asks only while
   // the tab is open, so a closed tab costs a process nothing.
-  registerTerminalIpc(ipcMain, createTmuxRunner());
+  //
+  // A CONTROL-MODE RUNNER, NOT A PLAIN `createTmuxRunner()`, since the
+  // typing-latency measurement this file's own history records: two
+  // `execFile` spawns per keystroke (`sendToPane`, `readAimedPane`) were over
+  // 90% of a steady keystroke's own keydown-to-painted cost. `control.ts`'s
+  // runner is a drop-in `TmuxRun` -- everything downstream is unchanged -- and
+  // degrades to exactly the spawn this replaced whenever its persistent
+  // connection is not available, so this line can never make the Terminal tab
+  // WORSE than it was, only faster when tmux is reachable. Assigned to the
+  // module-level `terminalTmuxRunner` so `before-quit` below can close its
+  // connection cleanly; nothing else in the app depends on that happening.
+  terminalTmuxRunner = createControlTmuxRunner();
+  registerTerminalIpc(ipcMain, terminalTmuxRunner);
   // The directory picker behind "new project". Only main can open one, and
   // only the operator's click gets a path out of it. See `./dialog/ipc.ts`.
   // Wrapped rather than passed: electron's `showOpenDialog` is an overload
@@ -749,6 +906,22 @@ void app.whenReady().then(async () => {
   // above, so a `..`, a look-alike sibling directory and a symlink out of the
   // project are all caught against the real disk. See `./files/resolve-ipc.ts`.
   registerFilesResolveIpc(ipcMain, resolveSessionCwd, (path) => realpath(path));
+  // list/create/remove a linked git worktree of a project vam already
+  // knows. `knownProjectIds` re-reads the SAME `source.load()` project set
+  // `remote/server.ts`'s own `confineToProjectSet` confines the
+  // create-session-in ROUTE to -- applied here to the LOCAL bridge instead,
+  // where the caller never hands over a raw path to canonicalise in the
+  // first place, only a project id. `resolveWorktreeProjectDirectory` above
+  // is the only way that id becomes a directory at all: `Project` carries no
+  // `cwd` (`renderer/domain/model.ts`'s own rule). DESKTOP-ONLY, like
+  // `registerFilesIpc` above -- see `CHANNELS.worktreeList`'s own comment
+  // for why a paired phone has no route to any of the three.
+  registerWorktreesIpc(ipcMain, {
+    run: runGitViaCli(),
+    realpathFn: (path) => realpath(path),
+    resolveProjectDirectory: resolveWorktreeProjectDirectory,
+    knownProjectIds: async () => (await combineSources(DESKTOP_SOURCES).load()).map((p) => p.id),
+  });
   // The file-editor tab's LAST channel, and the only one that carries no path
   // at all: how many of its buffers are unsaved, and what they are called.
   // Registered here rather than in `createWindow` because the guard it feeds
@@ -772,6 +945,18 @@ void app.whenReady().then(async () => {
  */
 app.on('before-quit', (event) => {
   quitGuard.beforeQuit(event);
+  // Best-effort only, and never awaited: the veto above is what may still
+  // stop the quit, and a persistent tmux client left running one more
+  // instant is an idle process, not a correctness problem. A tab reopened
+  // before the app actually exits just reconnects (`control.ts`'s own
+  // degrade-and-retry). `dispose()` now ALSO asks tmux to kill the `vamctl`
+  // housekeeping session itself (A9), not only this client's connection to
+  // it -- left alive, that session (and the whole tmux server, if it held
+  // nothing else) would otherwise outlive the app indefinitely.
+  terminalTmuxRunner?.dispose();
+  // Every open streaming connection, closed the same best-effort way --
+  // see `terminalStreamRegistration`'s own note.
+  terminalStreamRegistration?.dispose();
 });
 
 app.on('window-all-closed', () => {

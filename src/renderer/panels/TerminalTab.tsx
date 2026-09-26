@@ -49,6 +49,7 @@
 
 import { GitBranch } from 'lucide-react';
 import {
+  type ClipboardEvent,
   type CompositionEvent,
   type CSSProperties,
   type FocusEvent,
@@ -63,8 +64,15 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
-import type { PaneKey, PaneSendResult, PaneSize, PaneView } from '../../shared/terminal.js';
-import { isControlLetter } from '../../shared/terminal.js';
+import type {
+  NavKey,
+  PaneKey,
+  PaneReadMode,
+  PaneSendResult,
+  PaneSize,
+  PaneView,
+} from '../../shared/terminal.js';
+import { isControlLetter, MAX_COLUMNS, MAX_ROWS, MAX_WHEEL_TICKS } from '../../shared/terminal.js';
 import { insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
 import {
   activeTerminalFontSize,
@@ -80,20 +88,37 @@ import { OverlayScroll } from './OverlayScroll.js';
 import { parseAnsi, spanClasses } from './terminal-ansi.js';
 import { composedStrokes } from './terminal-compose.js';
 import { placeCursor } from './terminal-cursor.js';
+import { preparePastedText } from './terminal-paste.js';
 import { fitPane, sameSize } from './terminal-size.js';
 
 /**
  * How often the open tab re-reads the pane.
  *
- * One second. Each refresh is a single short-lived `tmux capture-pane` that
- * prints a screenful and exits, so the cost is bounded by the screen, not by
- * how long the session has run; a second is fast enough that a working agent
- * reads as live to a person, and slow enough that vam is not spawning
- * processes at interaction rates. It runs ONLY while this component is
- * mounted and the window is visible, which is the constraint that actually
- * bounds the cost -- a closed tab refreshes at no rate at all.
+ * A QUARTER OF A SECOND, and this constant is half of what the operator
+ * reported -- translated: "tmux streaming has quite a lot of delay". Nothing
+ * pushes output out of tmux (`main/terminal/ipc.ts`: there is no timer in main
+ * at all), so a line an agent prints is on screen when the next read asks for
+ * it: mean lag is half this interval. At one second that was 500ms of nothing
+ * happening after an agent spoke, which is the "delay" in the report. At 250ms
+ * it is 125ms, which reads as live.
+ *
+ * WHAT THE FOUR-PER-SECOND COSTS, measured on this machine (tmux 3.7b, a
+ * 200x50 pane with 1600 lines of coloured scrollback, private `-L` socket,
+ * n=30, load ~8): one read is a `list-sessions` spawn (~5ms) and one
+ * `display-message ; capture-pane -S -500` spawn (10.30ms median, 86,260
+ * bytes). So about 60ms of main-process work per second for a visible tab,
+ * against 15ms before. It is the whole of the cost, and it is bounded by the
+ * same two conditions it always was: this component is mounted only while the
+ * Terminal tab is open, and the interval runs only while the window is
+ * VISIBLE (see the effect below, which stops outright on `visibilitychange`).
+ * A hidden window and a closed tab both still refresh at no rate at all --
+ * that was true before this number moved and it is why it could move.
+ *
+ * It is also what bounds the echo read's one liberty: the pairing an `echo`
+ * rides is re-proven by this tick, so the mis-aim window it widens is a
+ * quarter of a second rather than a second (`main/terminal/ipc.ts`).
  */
-export const REFRESH_MS = 1_000;
+export const REFRESH_MS = 250;
 
 /**
  * How soon after a keystroke actually lands the tab re-reads the pane, and
@@ -115,13 +140,56 @@ export const REFRESH_MS = 1_000;
  *
  * WHAT IT COSTS, said plainly because `REFRESH_MS`'s own note says vam is
  * "not spawning processes at interaction rates": while a person is actually
- * typing into a pane, this spawns up to ten short-lived `capture-pane`
- * reads a second instead of one. That is a real change to that rule, and it
+ * typing into a pane, this spawns up to thirty short-lived `capture-pane`
+ * reads a second instead of four. That is a real change to that rule, and it
  * is deliberately bounded to exactly the moment it buys something -- a human
  * typing at a keyboard, watching for their own characters. Idle costs
  * nothing extra: no key, no read.
+ *
+ * THIRTY-THREE MILLISECONDS, AND WHAT PAID FOR IT. This was 100ms, which is
+ * the other half of the operator's report -- translated: "[it] makes the
+ * prompt-typing experience bad". A leading-edge throttle adds a mean wait of
+ * half its window, so 100 was ~50ms added to every character after the first;
+ * 33 is ~17ms, which is under the ~24ms the rest of the path costs and so
+ * stops being the thing you feel. It is affordable because an echo read at
+ * the live end no longer asks for the scrollback: measured here, 7,760 bytes
+ * and 5.55ms instead of 86,260 and 10.30ms, plus the `list-sessions` (~5ms)
+ * it no longer spawns either (`shared/terminal.ts`, `PaneReadMode`). About
+ * 6ms of main-process work per read instead of ~15, which is what makes 30 a
+ * second a smaller total than 10 a second was.
+ *
+ * AND IT DOES NOT GO LOWER, nor become a setting. Below about 30ms the win
+ * stops being perceptible -- the rest of the path is the floor -- so every
+ * millisecond under this buys nothing and is paid for in spawns on a machine
+ * that is running somebody's agents.
  */
-export const ECHO_MS = 100;
+export const ECHO_MS = 33;
+
+/**
+ * How many consecutive `poll-live` ticks the interval may take before it
+ * forces one real `poll` -- the whole window -- regardless of where the
+ * operator is scrolled to.
+ *
+ * A CORRECTNESS BOUND, not a taste. `composeScreen` splices a screen-shaped
+ * answer onto the history already drawn on the assumption that the screen is
+ * still a suffix of that same window (its own note) -- true between two
+ * nearby reads of a STABLE program, false the moment the program in the pane
+ * changes shape: a shell exits into a fullscreen TUI, or a session ends and
+ * another is created under the exact same name. Before `poll-live` existed
+ * this healed itself for free, because the interval's OWN read never
+ * spliced -- `paneShape('poll')` is always `'window'` -- so whatever drifted
+ * onto an `echo` answer between two polls was overwritten with ground truth
+ * within `REFRESH_MS`. Making the interval itself splice removed that free
+ * correction, and it was FALSIFIED directly: with no resync, phase B of
+ * `e2e/terminal-echo-scroll-shots.mjs` drew 340 lines of a dead session's
+ * shell history glued onto a 50-line alternate-screen program that has none.
+ * Forcing a resync at least this often puts the ceiling back: at most
+ * `POLL_LIVE_RESYNC_TICKS * REFRESH_MS` (1 second, at the current constants)
+ * before the interval reads the window for real again and overwrites any bad
+ * splice with ground truth -- the same one second the whole tab polled at,
+ * unquestioned, before `REFRESH_MS` was ever cut to a quarter of one.
+ */
+export const POLL_LIVE_RESYNC_TICKS = 4;
 
 /**
  * The reader the tab is given: `window.api.terminal.read`, or nothing.
@@ -130,8 +198,17 @@ export const ECHO_MS = 100;
  * the tmux session vam started for it is recorded on the tmux session at
  * creation and read back (`main/terminal/pane.ts`); a title reached the name
  * once, was slugged and truncated on the way, and matched nothing.
+ *
+ * `mode` IS THE SITUATION THIS TAB IS IN, and only this tab knows it: main
+ * cannot see where the operator has scrolled to, and that is what decides
+ * whether the scrollback is worth fetching (`shared/terminal.ts`,
+ * `PaneReadMode`, which holds the measurements and the trade).
  */
-export type ReadPane = (projectId: string, rowId?: string) => Promise<PaneView>;
+export type ReadPane = (
+  projectId: string,
+  rowId?: string,
+  mode?: PaneReadMode,
+) => Promise<PaneView>;
 
 /**
  * Telling tmux how big to draw: `window.api.terminal.resize`, or nothing.
@@ -243,9 +320,18 @@ function measurePane(pane: HTMLElement, ruler: HTMLElement): PaneSize | null {
  * `null` for every other named key -- the arrows, the Page keys, Home/End --
  * which is what leaves the browser scrolling a region whose scrollbar is
  * hidden, the reason this element takes focus at all.
+ *
+ * `shiftKey` IS ASKED ABOUT FOR EXACTLY ONE KEY. The operator's report was
+ * that Shift+Enter submits in here instead of inserting a line, which is
+ * `onKeyDown` calling this with the key name alone and nothing this function
+ * could have answered differently with. The modifier now rides along on
+ * `PaneKey.enter.shift` (`shared/terminal.ts` has the measurement main's
+ * `sendNewlineArgv` acts on); every other branch below is unaffected because
+ * a modified letter already arrives pre-shifted in `key` itself (`Shift+a` is
+ * `'A'`), so there is nothing else for a modifier parameter to change.
  */
-function strokeFor(key: string): PaneKey | null {
-  if (key === 'Enter') return { kind: 'enter' };
+function strokeFor(key: string, shiftKey: boolean): PaneKey | null {
+  if (key === 'Enter') return { kind: 'enter', shift: shiftKey };
   if (key === 'Escape') return { kind: 'escape' };
   // Correcting a typo is part of typing: a pane that takes characters and
   // cannot take them back strands the operator on a wrong line. It is a KEY,
@@ -255,15 +341,83 @@ function strokeFor(key: string): PaneKey | null {
   // so an accented character arrives already composed and a named key
   // (`ArrowUp`, `F5`) never matches.
   //
-  // `key.length` IS A CODE-UNIT COUNT, AND THAT IS LEFT ALONE DELIBERATELY.
-  // It rejects anything outside the BMP -- an emoji is two units -- which
-  // sounds like a bug and is not reachable as one: no keyboard produces a
-  // non-BMP `event.key`, because nothing is one keystroke there. An emoji
-  // arrives from the picker, dictation or a paste, all of which are
-  // INSERTIONS into the box below rather than keydowns, and never pass
-  // through here at all. Widening this to count code points would change the
-  // behaviour of exactly no input anyone has.
+  // `key.length` IS A CODE-UNIT COUNT, AND THAT USED TO BE LEFT ALONE ON THE
+  // ARGUMENT THAT NO KEYBOARD PRODUCES A LONGER ONE -- WHICH WAS WRONG.
+  // `composedKeydownStrokes`, right below, is the correction: OpenKey (the
+  // Vietnamese input utility -- see its own note) posts a synthetic keydown
+  // whose `key` is a WHOLE corrected syllable, routinely more than one code
+  // unit, through exactly this path (not composing, no modifier held) --
+  // this function still answers `null` for it and the caller falls back to
+  // the wider rule. What is still true here: an EMOJI never reaches this
+  // function as a keydown -- the picker, dictation and a paste are all
+  // INSERTIONS into the box below, never keydowns -- so `key.length === 1`
+  // remains the right first answer for the common case, and is cheap besides.
   return key.length === 1 ? { kind: 'text', text: key } : null;
+}
+
+/**
+ * WHAT `strokeFor` DECLINED, RECONSIDERED AS A WHOLE STRING RATHER THAN AS
+ * NO KEYSTROKE AT ALL.
+ *
+ * THE REPORT, translated: "When typing Vietnamese in tmux (the Terminal
+ * tab), some special letters like ố, ồ … get lost, and then as I keep
+ * typing, characters keep getting deleted one after another." The operator
+ * runs OpenKey (github.com/tuyenvm/OpenKey), a `CGEventTap`-based Telex
+ * engine rather than a standard input method: it holds no marked-text
+ * session with Chromium at all, so a correction never sets
+ * `isComposing`. When a later keystroke changes an earlier letter (`toois`
+ * settling on `tối`), it posts one synthetic Backspace keyDown/keyUp pair
+ * per character to erase (`SendBackspace`, `Sources/OpenKey/macOS/ModernKey
+ * /OpenKey.mm`) and then ONE keyDown/keyUp pair carrying the WHOLE corrected
+ * string via `CGEventKeyboardSetUnicodeString` (`SendNewCharString`, same
+ * file) -- not the single changed letter, and not one character at a time.
+ * Neither event opens a composition, so this codebase's own measured
+ * precedent for a synchronous, non-composing, multi-character keydown
+ * applies (`onKeyDown`'s note on `Option+e`'s dead-key result): the
+ * replacement arrives as an ordinary keydown, `isComposing: false`, whose
+ * `key` is the whole corrected string.
+ *
+ * `strokeFor` answered `null` for every one of those, and the caller's
+ * `stroke === null` branch returned before `preventDefault` -- so the
+ * keystroke was not merely unsent, it fell through to the browser's own
+ * default handling of that same event, landed in the hidden box's `onInput`,
+ * and was dropped there as "arrived without a composition". THE ACCENTED
+ * LETTER WAS LOST, exactly as reported -- and the Backspace that preceded it
+ * in the SAME correction had already reached the pane and deleted a real
+ * character, so the pane fell behind OpenKey's own idea of what it had typed
+ * by however many code points the dropped string carried. THE NEXT
+ * correction computes its backspace count against OpenKey's own buffer, not
+ * against the pane, so it deletes into whatever the pane actually has at
+ * that position -- which is "characters keep getting deleted one after
+ * another" as the operator keeps typing and the drift compounds.
+ *
+ * A NAMED KEY IS NOT TEXT, HOWEVER MANY CHARACTERS SPELL ITS NAME. Every
+ * value the DOM hands out for a key that produced no character --
+ * `ArrowLeft`, `Shift`, `F5`, `Tab`, `Dead`, `Unidentified` -- is plain ASCII;
+ * that is the UI Events spec's own definition of a Named Key Attribute
+ * Value. A correction OpenKey ever has reason to send carries at least one
+ * character OUTSIDE ASCII, because the only reason it corrects anything at
+ * all is to apply a diacritic -- so "contains a non-ASCII code point" is the
+ * one check this function needs, and it can never mistake a modifier or a
+ * navigation key for one. A bare control character is declined too, on the
+ * same footing `strokeFor`'s own three special cases already stand on: this
+ * function's business is a REPLACEMENT SYLLABLE, not an escape sequence.
+ *
+ * NFC AND THE BOUND ARE `composedStrokes`'s, reused rather than repeated --
+ * `terminal-compose.ts` carries why a commit is normalised before it is
+ * counted, and `MAX_KEY_TEXT`'s note is unchanged by having a second caller.
+ */
+function composedKeydownStrokes(key: string): readonly PaneKey[] | null {
+  let sawNonAscii = false;
+  for (const point of key) {
+    const code = point.codePointAt(0) ?? 0;
+    // A control character is never a syllable a person typed; declining it
+    // costs nothing a real correction would ever have sent.
+    if (code < 0x20) return null;
+    if (code > 0x7f) sawNonAscii = true;
+  }
+  if (!sawNonAscii) return null;
+  return composedStrokes(key);
 }
 
 /**
@@ -357,34 +511,60 @@ function controlStrokeFor(key: string): PaneKey | null {
 }
 
 /**
- * WHAT A FOCUSED TEXT CONTROL TAKES AWAY, AND THE PANE DOES FOR ITSELF.
+ * THE OPERATOR'S REPORT: "in the terminal, the arrow keys can't be used to
+ * select options." This used to be the opposite function -- `SCROLL_KEYS`
+ * mapped these six DOM key names to a scroll of THIS element's own view,
+ * ahead of anything the pane could be sent, on the argument that a focused
+ * text control eats them for its own caret before a scroll container ever
+ * sees them (still true, and still argued below at `SCROLL_CHORDS`). What
+ * that argument missed is that Claude Code's own option pickers --
+ * `AskUserQuestion`, a permission prompt, `/model`, `/config`, plan approval,
+ * and as of 2.1.280 all four with Home/End/PageUp/PageDown too -- are walked
+ * with exactly these keys, so a tab that swallowed them into its own
+ * scrollbar left every one of those pickers unreachable from inside vam.
+ * `ArrowLeft`/`ArrowRight` were never even scroll keys here; `strokeFor`
+ * declined them outright (a named key is never one printable character), so
+ * they reached neither the pane nor vam's own grammar at all.
  *
- * The pane is a scroll region with a hidden scrollbar, and the focus stop
- * exists so that the keyboard can read past the first screenful -- that is the
- * original reason this element takes focus at all. THE HIDDEN BOX BREAKS THAT
- * FOR FREE, because the browser gives these keys to whatever text control has
- * the keyboard before it gives them to a scroll container. Measured in
- * Chromium with an empty one-by-one `<textarea>` focused inside a scrolling
- * `<section>`: `PageDown`, `PageUp`, `Home` and `End` moved the pane not at
- * all, and `ArrowUp`/`ArrowDown` moved it only sometimes -- they fall through
- * to the container when the caret cannot move, which stops being true the
- * moment an input method puts a candidate in the box.
- *
- * So the pane scrolls itself, for all six, rather than leaving a surface whose
- * only reason to take focus has silently stopped working. The distance is
- * measured in the SCREEN'S own rows (the ruler, the same character the column
- * count is derived from), which is what a terminal scrolls in, and what the
- * browser's 40px guess was only ever approximating.
- *
- * Nothing is stopped from PROPAGATING: these keys still reach vam's own window
- * listener exactly as they did, where the pane's `data-insert-scope` stands the
- * canvas grammar down.
+ * A TERMINAL BEHAVES LIKE A TERMINAL: all eight go to the program now, PRESSED
+ * exactly as a Ctrl chord is (`shared/terminal.ts`'s `PaneKey.nav`,
+ * `sources/tmux/argv.ts`'s `sendNavArgv`) -- and vam's own scrollback, which
+ * still needs a keyboard route now that these are the program's, moved to
+ * `SCROLL_CHORDS` below: Shift+PageUp/PageDown/Home/End, the chords a real
+ * terminal (xterm, GNOME Terminal) already reserves for its own scrollback
+ * rather than the program.
  */
-type PaneScroll = 'up' | 'down' | 'page-up' | 'page-down' | 'top' | 'bottom';
-
-const SCROLL_KEYS: Readonly<Record<string, PaneScroll>> = {
+const NAV_KEYS: Readonly<Record<string, NavKey>> = {
   ArrowUp: 'up',
   ArrowDown: 'down',
+  ArrowLeft: 'left',
+  ArrowRight: 'right',
+  Home: 'home',
+  End: 'end',
+  PageUp: 'page-up',
+  PageDown: 'page-down',
+};
+
+/**
+ * VAM'S OWN SCROLLBACK, ONLY EVER Shift-HELD -- the four of `NAV_KEYS`'s
+ * eight that a real terminal also binds to ITS OWN history rather than to the
+ * program (there is no terminal convention for a Shift-held single-row arrow,
+ * so the arrows carry no vam meaning at all now; the wheel is what scrolls a
+ * row at a time). Checked FIRST, ahead of `NAV_KEYS`, and only while
+ * `event.shiftKey` holds -- a bare `PageUp` etc. is the program's, exactly
+ * like a bare arrow.
+ *
+ * Measured in Chromium with an empty one-by-one `<textarea>` focused inside a
+ * scrolling `<section>` (the ORIGINAL reason this element takes focus at
+ * all): `PageDown`, `PageUp`, `Home` and `End` moved the pane not at all on
+ * their own -- a focused text control eats them for its own caret before a
+ * scroll container ever sees them -- so the pane still has to scroll itself
+ * for these four, or the operator's own scrollback becomes unreachable by
+ * keyboard the moment the hidden box holds the caret.
+ */
+type PaneScroll = 'page-up' | 'page-down' | 'top' | 'bottom';
+
+const SCROLL_CHORDS: Readonly<Record<string, PaneScroll>> = {
   PageUp: 'page-up',
   PageDown: 'page-down',
   Home: 'top',
@@ -406,13 +586,9 @@ export function scrollPane(pane: HTMLElement, how: PaneScroll, row: number): voi
       ? 0
       : how === 'bottom'
         ? pane.scrollHeight
-        : how === 'up'
-          ? from - row
-          : how === 'down'
-            ? from + row
-            : how === 'page-up'
-              ? from - page
-              : from + page;
+        : how === 'page-up'
+          ? from - page
+          : from + page;
   // Clamped at the top by hand because a negative `scrollTop` is not a
   // position; the bottom is clamped by the browser against the real content
   // height, which is the only thing that knows it.
@@ -452,14 +628,14 @@ export function atBottom(
  * to do with the newer one.
  *
  * WHY THIS EXISTS AT ALL. Every read allocates a new `PaneView`, so the state
- * changes identity once a second whether or not one pixel of the operator's
- * terminal did, and the whole scrollback is re-parsed and re-reconciled for
- * it. Measured in Chromium against the real bundle, on a 137x41 pane of
- * densely coloured output: 5.7ms per update at the five hundred lines
- * `PANE_HISTORY_LINES` asks for, against 0.9ms for the screen alone. Dropping
- * an unchanged capture here makes an IDLE tab cost nothing at all rather than
- * that every second, and it is what keeps a `scrollTop` the operator set from
- * being disturbed by a screen that did not move.
+ * changes identity four times a second whether or not one pixel of the
+ * operator's terminal did, and the whole scrollback is re-parsed and
+ * re-reconciled for it. Measured in Chromium against the real bundle, on a
+ * 137x41 pane of densely coloured output: 5.7ms per update at the five hundred
+ * lines `PANE_HISTORY_LINES` asks for, against 0.9ms for the screen alone.
+ * Dropping an unchanged capture here makes an IDLE tab cost nothing at all
+ * rather than that four times a second, and it is what keeps a `scrollTop` the
+ * operator set from being disturbed by a screen that did not move.
  *
  * ONLY `ok` IS EVER THE SAME. A failure carries a message, and two failures
  * that read alike are still two separate answers about a live tmux -- and
@@ -467,9 +643,181 @@ export function atBottom(
  * re-asserted. The caret is part of the comparison because the caret moving IS
  * the screen changing: it is what a character typed at a prompt moves first.
  */
+/**
+ * WHICH QUESTION A READ ASKED -- "the screen", or "the screen and the 500
+ * lines above it".
+ *
+ * A MIRROR OF `main/terminal/ipc.ts`'s own `mode === 'echo' || mode ===
+ * 'poll-live' ? 0 : PANE_HISTORY_LINES`, and it is written as its own
+ * function so that the mirror has a name rather than being an expression
+ * buried in a comparison. Two modes ask the SCREEN alone -- `echo` and
+ * `poll-live`, both asked while the operator is at the live end -- and two
+ * ask the whole window: `poll` (scrolled away, or nothing drawn yet) and
+ * `echo-scrollback` (an echo for an operator who has scrolled up).
+ *
+ * It exists for `composeScreen`'s sake -- see the call site in `poll`.
+ */
+export function paneShape(mode: PaneReadMode): 'screen' | 'window' {
+  return mode === 'echo' || mode === 'poll-live' ? 'screen' : 'window';
+}
+
+/**
+ * How many whole rows a wheel event is worth, and what is left over.
+ *
+ * ── THE DEFECT THIS EXISTS FOR ───────────────────────────────────────────
+ * The operator's report on the build carrying PR 439, translated: "still can't
+ * scroll in the terminal". MEASURED on a private tmux socket (3.7b) against
+ * Claude Code 2.1.278 started the way vam starts it -- straight into
+ * `claude`, with `"tui": "fullscreen"` in the operator's settings:
+ *
+ *   alternate_on=1  history_size=0  mouse_any_flag=1
+ *
+ * steady from three seconds on, and `capture-pane -S -500` answers with
+ * exactly the pane's rows. The program draws in the ALTERNATE SCREEN, for
+ * which tmux keeps no scrollback: the window read is the screen, the pane
+ * holds one boxful, and a wheel over it has nothing to move. The scrollback
+ * is inside Claude Code, which asked the terminal for mouse reports so that
+ * it could scroll its own viewport -- and every terminal honours that: a
+ * wheel over a program that owns the mouse is DELIVERED to it, not spent on
+ * the terminal's history. (PR 439's splice was fixing a collapse that never
+ * happened here; its premise was measured intact on the same session.)
+ *
+ * So, while the pane's program has the mouse (`PaneView.mouse`), a wheel
+ * over the pane becomes `wheel` keys (`shared/terminal.ts`) instead of a
+ * scroll of the DOM. Main spells them as SGR mouse reports; measured, three
+ * reports moved Claude Code's viewport three lines.
+ *
+ * ── THE ARITHMETIC ───────────────────────────────────────────────────────
+ * A wheel in LINE units (`deltaMode` 1) is already notches. In PIXELS (a
+ * trackpad, and Chromium's default) it is divided by the row the ruler
+ * measures, and the remainder is CARRIED to the next event rather than
+ * dropped or rounded up: a slow drag of a few pixels per frame would
+ * otherwise either never scroll or scroll a row per frame. Page units are
+ * read as a page of rows. The sign is kept; the caller reads it as the
+ * direction and takes the size.
+ */
+export function wheelNotches(
+  carry: number,
+  delta: { readonly deltaY: number; readonly deltaMode: number },
+  row: { readonly px: number; readonly perPage: number },
+): { readonly ticks: number; readonly carry: number } {
+  if (delta.deltaMode === 1) return { ticks: Math.trunc(delta.deltaY), carry };
+  const px = delta.deltaMode === 2 ? delta.deltaY * row.perPage * row.px : delta.deltaY;
+  const total = carry + px;
+  const ticks = Math.trunc(total / row.px);
+  return { ticks, carry: total - ticks * row.px };
+}
+
+/**
+ * The cell under the pointer, 1-based as the mouse protocol counts, in the
+ * SCREEN the program drew rather than in the text the tab drew: with history
+ * above the screen the tab's first line is not the program's first row, so
+ * the row is taken from the bottom. A pointer above the screen, or a ruler
+ * with no layout yet, names the first cell -- a wheel is not a click, and
+ * the program reads the position, if at all, only to pick a region.
+ */
+export function cellUnder(
+  pointer: { readonly x: number; readonly y: number },
+  screen: { readonly left: number; readonly top: number },
+  advance: { readonly width: number; readonly height: number },
+  size: { readonly columns: number; readonly rows: number },
+  drawnRows: number,
+): { readonly column: number; readonly row: number } {
+  const clamp = (value: number, max: number): number =>
+    Number.isFinite(value) ? Math.min(Math.max(1, value), max) : 1;
+  const column = advance.width > 0 ? Math.floor((pointer.x - screen.left) / advance.width) + 1 : 1;
+  const above = Math.max(0, drawnRows - size.rows);
+  const row =
+    advance.height > 0 ? Math.floor((pointer.y - screen.top) / advance.height) + 1 - above : 1;
+  return { column: clamp(column, size.columns), row: clamp(row, size.rows) };
+}
+
+/**
+ * THE SCREEN AN ECHO READ ANSWERED WITH, PUT BACK ON TOP OF THE HISTORY THE
+ * OPERATOR CAN STILL SCROLL INTO.
+ *
+ * ── THE DEFECT THIS EXISTS FOR ───────────────────────────────────────────
+ * The operator's report, translated: "can't scroll in the terminal view". An
+ * `echo` read asks for the screen alone, which is the whole of its measured
+ * win (7,760 bytes and 5.55ms against 86,260 and 10.30ms, `shared/
+ * terminal.ts`), and that answer was being put on screen AS THE VIEW -- so
+ * the five hundred lines above it left the DOM with it. What follows is a
+ * chicken and egg, and it locks:
+ *
+ *   a pane holding one screen has `scrollHeight === clientHeight`, so there
+ *   is nothing to scroll; so `atLiveEnd()` is permanently true; so
+ *   `echo-scrollback` is never the mode asked for; and while typing
+ *   continues the echo sequence (one every `ECHO_MS`) outruns every poll's
+ *   full window, whose answer the sequence guard then drops as stale -- so
+ *   the history does not come back until the typing stops.
+ *
+ * MEASURED in Chromium against the real bundle: `scrollHeight` collapsed
+ * 10401 -> 714 against a `clientHeight` of 714 the moment typing began, and a
+ * wheel over the pane moved `scrollTop` by 0 for as long as it lasted.
+ * * THAT MEASUREMENT WAS AGAINST A STUB `read`, and the build carrying this
+ * splice was still reported as "can't scroll": the operator's pane runs a
+ * program that owns the alternate screen and the mouse, where there is no
+ * scrollback for this to keep and the wheel has to reach the program instead
+ * (`wheelNotches`). The splice is kept because its own defect is real for a
+ * pane with history; against real bytes it is pinned by the fixtures in
+ * `TerminalTab.echo-splice.test.tsx` and phase A of the e2e guard.
+ *
+ * ── WHY SPLICING IS SOUND ────────────────────────────────────────────────
+ * The screen is a SUFFIX of the window -- `capture-pane` with no `-S` returns
+ * exactly the window's rows, and with `-S -500` the same rows with history
+ * above them (verified against tmux 3.7b, and the property the pin's own note
+ * already rested on). So the shown text's last `n` lines are the previous
+ * answer to the same question the echo has just re-answered, and replacing
+ * them is the same rectangle rather than a guess about one.
+ *
+ * THE CARET MOVES WITH IT, and that is not a detail: `PaneCursor.row` is an
+ * index into whichever text arrived with it (`shared/terminal.ts`), so a row
+ * counted from the top of a forty-line screen names a line of the SCROLLBACK
+ * once five hundred lines sit above it. A composition that carried it across
+ * unchanged would draw the block cursor somewhere in the history on every
+ * keystroke.
+ *
+ * ── WHAT IT REFUSES TO DO ────────────────────────────────────────────────
+ * It never invents history. A view that has drawn nothing, a failure on
+ * either side, an answer about a DIFFERENT SESSION, and a screen at least as
+ * long as the whole view all yield the answer untouched -- the last because
+ * a session with no scrollback yet really does return the same lines to both
+ * questions, and there is then nothing above the screen to keep.
+ *
+ * A pure function of its two answers and the mode, which is what lets it live
+ * inside a `setState` updater: React may call an updater twice, and anything
+ * that wrote a ref in there would be written twice for one answer.
+ */
+export function composeScreen(
+  shown: PaneView | null,
+  next: PaneView,
+  mode: PaneReadMode,
+): PaneView {
+  if (paneShape(mode) === 'window') return next;
+  if (next.kind !== 'ok' || shown === null || shown.kind !== 'ok') return next;
+  if (shown.name !== next.name) return next;
+  const drawn = shown.text.split('\n');
+  const screen = next.text.split('\n');
+  const above = drawn.length - screen.length;
+  if (above <= 0) return next;
+  return {
+    kind: 'ok',
+    name: next.name,
+    text: [...drawn.slice(0, above), ...screen].join('\n'),
+    cursor:
+      next.cursor.kind === 'at' ? { ...next.cursor, row: next.cursor.row + above } : next.cursor,
+    // A fact about the capture the screen came from, like the caret: the
+    // program may have asked for the mouse since the last window read.
+    ...(next.mouse === undefined ? {} : { mouse: next.mouse }),
+  };
+}
+
 export function sameScreen(previous: PaneView | null, next: PaneView): boolean {
   if (previous === null || previous.kind !== 'ok' || next.kind !== 'ok') return false;
   if (previous.name !== next.name || previous.text !== next.text) return false;
+  // The program taking or releasing the mouse IS a change of screen for the
+  // one reader that cares: it decides where the next wheel goes.
+  if (previous.mouse !== next.mouse) return false;
   const a = previous.cursor;
   const b = next.cursor;
   if (a.kind !== b.kind) return false;
@@ -519,6 +867,7 @@ export function TerminalTab({
   resize,
   send,
   branch,
+  notice,
 }: {
   readonly projectId: string | null;
   /**
@@ -554,6 +903,16 @@ export function TerminalTab({
    * this is a sentence, and a sentence says nothing rather than saying a dash.
    */
   readonly branch?: string | null;
+  /**
+   * ONE LINE, drawn above the pane exactly like `data-terminal-blank`/
+   * `data-terminal-refused` already are, when this tab is standing in for
+   * streaming rather than being the operator's own choice
+   * (`TerminalAutoTab.tsx`, `docs/design/terminal-streaming.md`'s "Flipping
+   * the default"). `undefined`/`null` draw nothing -- the ordinary case,
+   * every existing caller of this tab today, none of which know this prop
+   * exists.
+   */
+  readonly notice?: string | null;
 }) {
   /**
    * `null` is "has not answered yet", and it is a state rather than an
@@ -576,6 +935,16 @@ export function TerminalTab({
   const shownFor = useRef(projectId);
   /** The size tmux was last told, for the session it was told about. */
   const sent = useRef<PaneSize | null>(null);
+  /**
+   * THERE IS NO `shownShape` REF HERE ANY MORE, and the absence is the fix:
+   * it recorded which question the drawn answer came from, so that the
+   * bail-out below never compared a screen-only answer against a windowed
+   * one -- two coordinate systems, since `PaneCursor.row` indexes whichever
+   * text arrived with it. `composeScreen` removes the mismatch at its source
+   * by putting every screen-shaped answer back into the shown answer's own
+   * coordinates before anything looks at it, so what reaches `sameScreen` is
+   * always two answers to one question and the guard has nothing left to do.
+   */
   if (shownFor.current !== projectId) {
     shownFor.current = projectId;
     // The remembered size belongs to the session it was sent for. Keeping it
@@ -586,6 +955,41 @@ export function TerminalTab({
   }
 
   /**
+   * THE SCROLL REGION ITSELF, and its one-row ruler.
+   *
+   * DECLARED HERE, ABOVE THE POLL, and the position is load-bearing rather
+   * than tidy: `echo` below has to ask where the operator is looking BEFORE
+   * it issues a read, because that is what decides whether the read asks for
+   * the scrollback. The layout effect that pins the pane to the bottom is
+   * still the only other reader, and it is where the rest of the argument
+   * about these two elements lives.
+   */
+  const paneRef = useRef<HTMLElement | null>(null);
+  const rulerRef = useRef<HTMLElement | null>(null);
+
+  /**
+   * IS THE OPERATOR LOOKING AT THE LIVE END, right now?
+   *
+   * Against the pane's CURRENT `scrollHeight`, which is the one difference
+   * from the layout effect's use of `atBottom` and the reason it is worth
+   * naming: there, the content has just changed under a preserved `scrollTop`
+   * and the only meaningful height is the previous one. Here nothing has
+   * changed -- this runs between renders, on a settled DOM -- so the height
+   * the element reports is the height the operator is scrolling in.
+   *
+   * `true` when there is no pane yet, which is the same answer `atBottom`
+   * gives for a height it has never measured: a tab with nothing drawn is
+   * showing the live end by definition, and a first read that asked for 500
+   * lines of somebody else's scrollback to draw none of would be the cost
+   * this exists to avoid.
+   */
+  const atLiveEnd = useCallback((): boolean => {
+    const pane = paneRef.current;
+    if (pane === null) return true;
+    return atBottom(pane.scrollHeight, pane, rulerRef.current?.getBoundingClientRect().height ?? 0);
+  }, []);
+
+  /**
    * The running effect's own `tick`, published so the SEND path can ask for a
    * read out of band. A ref rather than a second `poll` call site: `tick`
    * owns the `issued` sequence that decides which answer is still wanted
@@ -594,16 +998,24 @@ export function TerminalTab({
    * stop. `null` whenever nothing is polling: a hidden window, no bridge, no
    * project. Asking then is not deferred, it is declined.
    */
-  const readNow = useRef<(() => void) | null>(null);
+  const readNow = useRef<((mode: PaneReadMode) => void) | null>(null);
   const lastEcho = useRef(0);
   const echoTimer = useRef<number | undefined>(undefined);
 
-  /** Ask for a read now, or at the end of the current `ECHO_MS` window. */
+  /**
+   * Ask for a read now, or at the end of the current `ECHO_MS` window.
+   *
+   * THE SITUATION IS DECIDED WHEN THE READ IS ISSUED, not when it was asked
+   * for: a trailing echo fires up to `ECHO_MS` after the key landed, and the
+   * operator may have scrolled in between. `fire` is therefore the only place
+   * that asks `atLiveEnd`, which keeps the window between the question and
+   * the argv it becomes down to the length of one bridge call.
+   */
   const echo = useCallback(() => {
     const fire = () => {
       lastEcho.current = Date.now();
       echoTimer.current = undefined;
-      readNow.current?.();
+      readNow.current?.(atLiveEnd() ? 'echo' : 'echo-scrollback');
     };
     if (echoTimer.current !== undefined) return;
     const waited = Date.now() - lastEcho.current;
@@ -612,7 +1024,7 @@ export function TerminalTab({
       return;
     }
     echoTimer.current = window.setTimeout(fire, ECHO_MS - waited);
-  }, []);
+  }, [atLiveEnd]);
 
   useEffect(
     () => () => {
@@ -622,9 +1034,9 @@ export function TerminalTab({
   );
 
   const poll = useCallback(
-    (mine: () => boolean) => {
+    (mode: PaneReadMode, mine: () => boolean) => {
       if (read === undefined || projectId === null) return;
-      read(projectId, rowId)
+      read(projectId, rowId, mode)
         .then((next) => {
           // AN UNCHANGED SCREEN IS NOT A STATE CHANGE. Returning the state it
           // was given makes React bail out of the whole re-render -- the
@@ -633,7 +1045,18 @@ export function TerminalTab({
           // keeps no dependency on `view` (one would restart the interval
           // below on every read). See `sameScreen` for what it costs and
           // saves.
-          if (mine()) setView((shown) => (sameScreen(shown, next) ? shown : next));
+          //
+          // COMPOSED FIRST, AND THAT ORDER IS THE WHOLE FIX. A screen-shaped
+          // answer is put back on top of the history already drawn
+          // (`composeScreen`) before it is either compared or shown, so the
+          // pane never holds one boxful with nothing to scroll -- and so the
+          // comparison below is always between two answers in one coordinate
+          // system, which is what it used to need a shape guard to be.
+          if (!mine()) return;
+          setView((shown) => {
+            const composed = composeScreen(shown, next, mode);
+            return sameScreen(shown, composed) ? shown : composed;
+          });
         })
         .catch((cause: unknown) => {
           // A rejected bridge call is vam not having asked. Reporting it as an
@@ -665,18 +1088,53 @@ export function TerminalTab({
     let issued = 0;
     let timer: number | undefined;
 
-    const tick = () => {
+    const tick = (mode: PaneReadMode) => {
       issued += 1;
       const seq = issued;
-      poll(() => !cancelled && seq === issued);
+      poll(mode, () => !cancelled && seq === issued);
     };
+    /**
+     * How many `poll-live` ticks have run since the interval last read the
+     * whole window. Reset to `0` by every `poll` this effect issues, forced
+     * or not, so a naturally full tick (the operator has scrolled away) is
+     * itself a resync and does not leave one owed on top of it
+     * (`POLL_LIVE_RESYNC_TICKS`).
+     */
+    let ticksSinceFullPoll = 0;
     const start = () => {
       if (timer !== undefined) return;
       // Published only while a poll is actually running, so `echo` cannot ask
       // a hidden window (or a tab with no bridge) for a screen nobody reads.
+      // This is also what bounds what an echo read is allowed to assume: the
+      // pairing it rides is re-proven by the interval below, and the two stop
+      // together (`main/terminal/ipc.ts`).
       readNow.current = tick;
-      tick();
-      timer = window.setInterval(tick, REFRESH_MS);
+      // ALWAYS THE FULL WINDOW, ON THIS ONE CALL. `shown` is `null` the first
+      // time a session is ever drawn (mount, or a switch of `projectId` --
+      // see `shownFor` above), and `composeScreen` has nothing to splice a
+      // screen-shaped answer onto: asking `poll-live` here would draw one
+      // screen with nothing above it and nothing left to ever re-fetch the
+      // history it never asked for (`shared/terminal.ts`'s own note on the
+      // chicken-and-egg an all-screen echo used to lock into).
+      tick('poll');
+      timer = window.setInterval(() => {
+        // FORCED, EVERY `POLL_LIVE_RESYNC_TICKS`th TICK, WHATEVER THE SCROLL
+        // POSITION IS -- see that constant for why a splice-only interval is
+        // unsound without it. Otherwise `poll-live` INSTEAD OF `poll` once
+        // pinned, decided AT FIRE TIME, the same as `echo` decides `echo` vs
+        // `echo-scrollback`: the operator may have scrolled between two
+        // ticks. Still never an `echo`: this is the read that re-proves the
+        // pairing, and it must keep doing that on every tick regardless of
+        // where the view is scrolled to (`main/terminal/ipc.ts`'s own note on
+        // `poll`/`poll-live` both proving).
+        if (ticksSinceFullPoll >= POLL_LIVE_RESYNC_TICKS - 1 || !atLiveEnd()) {
+          ticksSinceFullPoll = 0;
+          tick('poll');
+          return;
+        }
+        ticksSinceFullPoll += 1;
+        tick('poll-live');
+      }, REFRESH_MS);
     };
     const stop = () => {
       if (timer === undefined) return;
@@ -699,10 +1157,8 @@ export function TerminalTab({
       stop();
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [poll, read, projectId]);
+  }, [poll, read, projectId, atLiveEnd]);
 
-  const paneRef = useRef<HTMLElement | null>(null);
-  const rulerRef = useRef<HTMLElement | null>(null);
   /**
    * THE SIZE THE SCREEN IS DRAWN AT, read from the store rather than taken as
    * a prop -- `prefs/terminal-font.ts` carries the whole argument, and the
@@ -751,11 +1207,14 @@ export function TerminalTab({
    * reflow a terminal belonging to work vam has nothing to do with.
    */
   const showing = view !== null && view.kind === 'ok';
+  /** How many lines are drawn, for the wheel listener that must not re-subscribe per read. */
+  const drawnRows = useRef(0);
 
   /**
    * The screen, parsed once per screen rather than once per render. The tab
    * re-renders for focus, for a refusal and for every resize observation; the
-   * text only changes when a read answers, which is once a second.
+   * text only changes when a read answers, which is four times a second and,
+   * while somebody is typing, up to thirty.
    */
   const lines = useMemo(
     () =>
@@ -769,6 +1228,7 @@ export function TerminalTab({
       ),
     [view],
   );
+  drawnRows.current = lines.length;
 
   /**
    * How tall the pane's content was the last time this ran. `null` until the
@@ -805,6 +1265,18 @@ export function TerminalTab({
    * of lines that left, which is not in the DOM and would have to be carried
    * from main; it is left undone rather than guessed at, and it is bounded by
    * the output rate of the pane being read.
+   *
+   * AND WHY THE ECHO READ'S SHORTER ANSWER DOES NOT REACH IT. While somebody
+   * is typing at the live end, the answers alternate: ~50 lines from an echo
+   * read, ~550 from the interval read behind it (`shared/terminal.ts`,
+   * `PaneReadMode`). The first cut let the shorter one become the whole view,
+   * on the argument that the rectangle on screen was the same either way --
+   * true, and beside the point: a view one boxful tall has nothing to scroll,
+   * so the operator could not leave the live end while typing, and could not
+   * therefore ever be asked `echo-scrollback` (`composeScreen` records the
+   * lock and the measurement). Now a screen-shaped answer is spliced onto the
+   * history before it is shown, so the content height does not move between
+   * the two kinds of read and this pin sees one steady document.
    */
   // biome-ignore lint/correctness/useExhaustiveDependencies: `fontSize` is not read here, it is read by the LAYOUT this measures -- the content height moves when the type does, and the remembered height has to move with it
   useLayoutEffect(() => {
@@ -848,12 +1320,14 @@ export function TerminalTab({
    * composition, and hands over the committed string, which the pane then
    * sends as TEXT rather than as the keystrokes it was built from.
    *
-   * IT IS A STAGING AREA AND NOT A VALUE. Nothing here is ever read except
-   * `compositionend`'s own data; anything else that lands in it (a paste, a
-   * drop, the emoji picker) is emptied and dropped, which is precisely what
-   * happened to those before the box existed -- this surface types keystrokes,
-   * and `MAX_KEY_TEXT` exists so that it can never become a paste into a
-   * running agent.
+   * IT IS A STAGING AREA AND NOT A VALUE. What is ever read is
+   * `compositionend`'s own data, and -- since the OpenKey report,
+   * `TerminalTab.openkey.test.tsx` carries why -- an `input` whose
+   * `inputType` says a keystroke wrote it (`'insertText'`) rather than a
+   * paste or a drop. Anything else that lands in it is emptied and dropped,
+   * which is precisely what happened to those before the box existed -- this
+   * surface types keystrokes, and `MAX_KEY_TEXT` exists so that it can never
+   * become a paste into a running agent.
    */
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -1094,17 +1568,18 @@ export function TerminalTab({
    * carries no Shift bit on a control character, so `Ctrl+Shift+P` is `C-p`
    * and the pane owes it to the agent.
    *
-   * A printable key, Return and Backspace are the PANE'S, and they are stopped
-   * here. The canvas reads a focused element as text entry only when it is an
-   * `INPUT` or a `TEXTAREA`, and this is a `section`: without stopping the
-   * event, typing `j` here would type a `j` into the agent AND move vam's
-   * cursor.
+   * A printable key, Return, Backspace and now the eight navigation keys
+   * (`NAV_KEYS`) are the PANE'S, and they are stopped here. The canvas reads a
+   * focused element as text entry only when it is an `INPUT` or a `TEXTAREA`,
+   * and this is a `section`: without stopping the event, typing `j` here
+   * would type a `j` into the agent AND move vam's cursor -- and an unstopped
+   * arrow would walk a Claude Code picker AND vam's own session list at once.
    *
-   * Everything else is the BROWSER'S -- the arrows, the Page keys, Home/End,
-   * Tab. The first six are why this element takes focus at all (the pane is a
-   * scroll region with a hidden scrollbar), and Tab is the second way out.
-   * They are not forwarded to tmux, so scrolling the transcript is still
-   * scrolling and not a keypress inside the agent.
+   * TAB IS STILL THE BROWSER'S, and it is the only thing left that is: the way
+   * out of a surface that now consumes every other named key. `SCROLL_CHORDS`
+   * (Shift+PageUp/PageDown/Home/End) is vam's own, checked first and never
+   * forwarded to tmux -- see its own doc for why it exists at all now that the
+   * bare keys are the pane's.
    */
   const onKeyDown = useCallback(
     (event: KeyboardEvent<HTMLElement>) => {
@@ -1220,19 +1695,56 @@ export function TerminalTab({
       // keyboard back so the next syllable has somewhere to compose. Deferred
       // so it cannot move focus out from under this event's own default.
       if (event.target !== inputRef.current) queueMicrotask(takeKeyboard);
-      // The six keys a focused text control would eat -- see `SCROLL_KEYS`.
-      // Cancelled, because the pane is doing the browser's job here; not
-      // stopped, because they still belong to vam's own keyboard afterwards.
-      const scroll = SCROLL_KEYS[event.key];
-      if (scroll !== undefined) {
-        const pane = paneRef.current;
-        if (pane === null) return;
+      // VAM'S OWN SCROLLBACK, Shift-HELD ONLY -- `SCROLL_CHORDS`'s own doc has
+      // why these four moved here. Cancelled, because the pane is doing the
+      // browser's job here; not stopped, because they still belong to vam's
+      // own keyboard afterwards, exactly as the six keys they replace always
+      // did. Checked before `NAV_KEYS` below so a bare `PageUp` still reaches
+      // the program once this declines it (no Shift held).
+      if (event.shiftKey) {
+        const scroll = SCROLL_CHORDS[event.key];
+        if (scroll !== undefined) {
+          const pane = paneRef.current;
+          if (pane === null) return;
+          event.preventDefault();
+          scrollPane(pane, scroll, rulerRef.current?.getBoundingClientRect().height ?? 0);
+          return;
+        }
+      }
+      // THE EIGHT NAVIGATION KEYS -- an arrow, Home, End, PageUp or PageDown
+      // -- are the PANE'S now, exactly like a printable character. `NAV_KEYS`
+      // carries the report this answers.
+      const nav = NAV_KEYS[event.key];
+      if (nav !== undefined) {
+        // THE SAME GUARD, IN THE SAME ORDER, AS EVERY OTHER SEND BELOW: a
+        // build with no bridge behind it must not eat an arrow key either, or
+        // a browser build would silently kill the browser's own scrolling of
+        // whatever ends up focused here with nothing to replace it.
+        if (send === undefined || projectId === null) return;
         event.preventDefault();
-        scrollPane(pane, scroll, rulerRef.current?.getBoundingClientRect().height ?? 0);
+        event.stopPropagation();
+        queue([{ kind: 'nav', nav }]);
+        // TERMINAL CONVENTION: a key delivered to the program returns the
+        // view to the live end, so the operator can see what they just
+        // navigated to. Unconditional -- the same call the sticky-follow
+        // layout effect makes (`scrollPane(pane, 'bottom', row)`) -- rather
+        // than guarded on `atBottom`, because it is a no-op there and the one
+        // case worth this line is the operator scrolled away from it.
+        const pane = paneRef.current;
+        if (pane !== null) {
+          scrollPane(pane, 'bottom', rulerRef.current?.getBoundingClientRect().height ?? 0);
+        }
         return;
       }
-      const stroke = strokeFor(event.key);
-      if (stroke === null) return;
+      const stroke = strokeFor(event.key, event.shiftKey);
+      // `composedKeydownStrokes` IS THE FALLBACK, NOT THE FIRST ASK -- see its
+      // own note for why. `strokeFor` answers every ordinary keystroke by
+      // itself and is cheaper; this only runs for the `key`s it declined,
+      // which is every named key in the DOM's vocabulary (`null`, stays
+      // declined) and OpenKey's whole-syllable replacement (a list of one or
+      // more `text` strokes, chunked and NFC-normalised by `composedStrokes`).
+      const strokes = stroke !== null ? [stroke] : composedKeydownStrokes(event.key);
+      if (strokes === null || strokes.length === 0) return;
       // THE GUARD COMES BEFORE THE CANCELLING, and it did not. A build with no
       // bridge behind it -- the browser one -- consumed every printable key,
       // Return and Backspace and delivered none of them, which left vam's own
@@ -1244,7 +1756,7 @@ export function TerminalTab({
       event.stopPropagation();
       // Return is NOT sent behind the text: each keystroke is one call, so
       // submitting is the operator pressing Return and never vam adding one.
-      queue([stroke]);
+      queue(strokes);
     },
     [send, projectId, queue, takeKeyboard],
   );
@@ -1275,6 +1787,66 @@ export function TerminalTab({
     },
     [queue],
   );
+
+  /**
+   * WHILE THE PROGRAM HAS THE MOUSE, THE WHEEL IS ITS. See `wheelNotches` for
+   * the measurement this rests on.
+   *
+   * A NATIVE LISTENER, NOT `onWheel`: React registers its wheel handlers as
+   * passive, so a `preventDefault` inside one is ignored with a warning and
+   * the pane would scroll (or try to) as well as sending the report. The
+   * listener is attached only while the program has the mouse, so a pane
+   * whose program has not asked -- and every pane read by a tmux that did not
+   * say -- keeps the browser's own scrolling, untouched.
+   *
+   * The report is queued through the same chain as a keystroke, so it cannot
+   * interleave with a syllable being typed, and a delivered one asks for the
+   * echo read the way a key does: the viewport the program scrolled is on
+   * screen within `ECHO_MS`.
+   */
+  const wheelCarry = useRef(0);
+  const mouseWanted = view !== null && view.kind === 'ok' && view.mouse === true;
+  useEffect(() => {
+    const pane = paneRef.current;
+    if (pane === null || !mouseWanted) return;
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      const measured = rulerRef.current?.getBoundingClientRect();
+      const advance =
+        measured !== undefined && measured.height > 0
+          ? { width: measured.width / RULER_TEXT.length, height: measured.height }
+          : // No layout to measure (a hidden pane, a test): the row the type
+            // would have, so pixels still mean something rather than nothing.
+            { width: 0, height: fontSize * TERMINAL_LINE_HEIGHT };
+      const size = sent.current ?? { columns: MAX_COLUMNS, rows: MAX_ROWS };
+      const { ticks, carry } = wheelNotches(
+        wheelCarry.current,
+        { deltaY: event.deltaY, deltaMode: event.deltaMode },
+        { px: advance.height, perPage: size.rows },
+      );
+      wheelCarry.current = carry;
+      if (ticks === 0) return;
+      const screen = pane.querySelector('pre')?.getBoundingClientRect() ?? { left: 0, top: 0 };
+      const cell = cellUnder(
+        { x: event.clientX, y: event.clientY },
+        screen,
+        advance,
+        size,
+        drawnRows.current,
+      );
+      queue([
+        {
+          kind: 'wheel',
+          direction: ticks < 0 ? 'up' : 'down',
+          ticks: Math.min(Math.abs(ticks), MAX_WHEEL_TICKS),
+          column: cell.column,
+          row: cell.row,
+        },
+      ]);
+    };
+    pane.addEventListener('wheel', onWheel, { passive: false });
+    return () => pane.removeEventListener('wheel', onWheel);
+  }, [mouseWanted, queue, fontSize]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `fontSize` is not read by this effect, it is read by the LAYOUT this effect measures -- `measurePane` divides the pane box by the advance of a character rendered AT that size, so the value is what makes a measurement stale, and the rule cannot see a dependency that reaches the DOM rather than the closure
   useEffect(() => {
@@ -1318,72 +1890,101 @@ export function TerminalTab({
     // one, and the only symptom would be lines wrapping in the wrong place.
   }, [showing, resize, projectId, rowId, fontSize]);
 
+  // THE FALLBACK NOTICE (`notice`'s own header, `TerminalAutoTab.tsx`),
+  // computed once and prepended to EVERY branch below, including the ones
+  // that never reach a real screen -- an operator whose tmux just failed
+  // the streaming version gate deserves to know why this tab changed even
+  // when the SAME tmux also cannot answer a `capture-pane` read. `<>...</>`
+  // rather than folding it into each `<p>`'s own text: this is a sentence
+  // about the SWITCH, not part of the sentence about the pane's own state.
+  const noticeEl =
+    typeof notice === 'string' && notice !== '' ? (
+      <p data-terminal-fallback-notice className="flex-none font-sans text-control text-ink-faint">
+        {notice}
+      </p>
+    ) : null;
+
   // Nothing is focused, so there is no project to ask about and the effect
   // above never asks. Saying "reading the session's screen" here -- which is
   // what the pending state below says -- would be vam claiming to be looking
   // at something it had not asked a single question about, forever.
   if (projectId === null) {
     return (
-      <p data-terminal data-terminal-empty className="text-control text-ink-faint">
-        No session selected — pick one in the sidebar.
-      </p>
+      <>
+        {noticeEl}
+        <p data-terminal data-terminal-empty className="text-control text-ink-faint">
+          No session selected — pick one in the sidebar.
+        </p>
+      </>
     );
   }
   if (view === null) {
     return (
-      <p data-terminal data-terminal-pending className="text-control text-ink-faint">
-        Reading the session’s screen…
-      </p>
+      <>
+        {noticeEl}
+        <p data-terminal data-terminal-pending className="text-control text-ink-faint">
+          Reading the session’s screen…
+        </p>
+      </>
     );
   }
   if (view.kind === 'unavailable') {
     return (
-      <p
-        data-terminal
-        data-terminal-unavailable
-        data-terminal-code={view.error.code}
-        className="text-control text-ink-faint"
-      >
-        {/* vam could not ask. Not "there is no session". */}
-        {view.error.message}
-      </p>
+      <>
+        {noticeEl}
+        <p
+          data-terminal
+          data-terminal-unavailable
+          data-terminal-code={view.error.code}
+          className="text-control text-ink-faint"
+        >
+          {/* vam could not ask. Not "there is no session". */}
+          {view.error.message}
+        </p>
+      </>
     );
   }
   if (view.kind === 'mispaired') {
     return (
-      <p
-        data-terminal
-        data-terminal-empty
-        data-terminal-mispaired
-        className="text-control text-ink-faint"
-      >
-        {/* NOT "vam did not start a session for this one", which is what stood
-            here and was false in the way that costs an operator time: vam did
-            start sessions for this project, it just cannot prove that any of
-            them is THIS row's. The row published the pane it believes it is
-            in, and vam is refusing to substitute a different live session for
-            it -- so the name it published is the one useful thing to say. The
-            same refusal is why nothing is typed here: there is no pane
-            element on this branch at all, so the surface cannot take a key it
-            could not deliver. */}
-        {`vam cannot tell which screen is this session's: it reports that it is running in the tmux pane ${view.published}, which is not one vam started for this project. Rather than show another session's screen, it is showing none.`}
-      </p>
+      <>
+        {noticeEl}
+        <p
+          data-terminal
+          data-terminal-empty
+          data-terminal-mispaired
+          className="text-control text-ink-faint"
+        >
+          {/* NOT "vam did not start a session for this one", which is what stood
+              here and was false in the way that costs an operator time: vam did
+              start sessions for this project, it just cannot prove that any of
+              them is THIS row's. The row published the pane it believes it is
+              in, and vam is refusing to substitute a different live session for
+              it -- so the name it published is the one useful thing to say. The
+              same refusal is why nothing is typed here: there is no pane
+              element on this branch at all, so the surface cannot take a key it
+              could not deliver. */}
+          {`vam cannot tell which screen is this session's: it reports that it is running in the tmux pane ${view.published}, which is not one vam started for this project. Rather than show another session's screen, it is showing none.`}
+        </p>
+      </>
     );
   }
   if (view.kind !== 'ok') {
     return (
-      <p data-terminal data-terminal-empty className="text-control text-ink-faint">
-        {view.kind === 'gone'
-          ? 'The tmux session vam started for this one has ended.'
-          : view.kind === 'ambiguous'
-            ? // Neither screen, and both names. Drawing one of them would be a
-              // coin toss the operator has no way of seeing was tossed.
-              `vam started more than one tmux session for this project, so it will not guess which screen you meant: ${view.names.join(', ')}.`
-            : // No offer to connect to anything: vam can show the sessions it
-              // started and no others, because no process can take over
-              // another's controlling TTY.
-              'vam did not start a tmux session for this one, so there is no screen to show.'}
-      </p>
+      <>
+        {noticeEl}
+        <p data-terminal data-terminal-empty className="text-control text-ink-faint">
+          {view.kind === 'gone'
+            ? 'The tmux session vam started for this one has ended.'
+            : view.kind === 'ambiguous'
+              ? // Neither screen, and both names. Drawing one of them would be a
+                // coin toss the operator has no way of seeing was tossed.
+                `vam started more than one tmux session for this project, so it will not guess which screen you meant: ${view.names.join(', ')}.`
+              : // No offer to connect to anything: vam can show the sessions it
+                // started and no others, because no process can take over
+                // another's controlling TTY.
+                'vam did not start a tmux session for this one, so there is no screen to show.'}
+        </p>
+      </>
     );
   }
   return (
@@ -1430,6 +2031,12 @@ export function TerminalTab({
           nothing said about it, which is the exact silence this tab exists to
           replace. `trim` because tmux pads every row to the pane's width, so
           a screen of only spaces is the same fact as an empty string. */}
+      {/* THE FALLBACK NOTICE, computed once above and shared with every
+          early-return branch -- drawn first, in the same `font-sans`
+          register `data-terminal-blank`/`data-terminal-refused` below
+          already use for a sentence ABOUT the pane rather than a line OF
+          it. */}
+      {noticeEl}
       {view.text.trim() === '' && (
         /* `font-sans` because the element above carries `font-mono` purely so
            that `ch` means one terminal cell -- see its own note. This is an
@@ -1480,11 +2087,15 @@ export function TerminalTab({
           first can no longer be justified by the old reasoning. It began as a
           scroll region: `vam-no-scrollbar` hides the bar, so without a focus
           stop there was no way at all, mouse or key, to read past the first
-          screenful. That is still true, and the arrows, Page keys and
-          Home/End still scroll here because they are still not bound.
-          What changed is that printable keys and Return are bound, and are
-          typed into a running agent. So this is no longer "a focus stop that
-          activates nothing": it activates something on someone else's
+          screenful. That is still true, and Shift+PageUp/PageDown/Home/End
+          (`SCROLL_CHORDS`) still scroll THIS view for exactly that reason --
+          the bare arrows and Page keys and Home/End are bound to the PANE now
+          (`NAV_KEYS`, vam/terminal-arrows), not to vam's own scroll, because
+          Claude Code's own option pickers are walked with them and a tab that
+          swallowed them left every picker unreachable from in here. What
+          changed before that is that printable keys and Return are bound, and
+          are typed into a running agent. So this is no longer "a focus stop
+          that activates nothing": it activates something on someone else's
           machine. It is therefore focused deliberately on arrival, and left by
           TAB -- Escape is not an exit here, it is one of the keys sent into
           the agent, which is the point of the pane. Tab is the way out, and it
@@ -1710,17 +2321,103 @@ export function TerminalTab({
             setComposing(event.data)
           }
           onCompositionEnd={onCompositionEnd}
+          onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
+            // A REAL PASTE, HANDLED HERE RATHER THAN LEFT TO REACH `onInput`
+            // AT ALL. `preventDefault` cancels the browser's own default for
+            // this event -- inserting the clipboard's text into this (empty)
+            // box and raising `input` with `inputType: 'insertFromPaste'`,
+            // which `onInput`'s guard below drops on the floor. That drop
+            // used to be the WHOLE of vam's answer to a paste; the operator
+            // asked for it back.
+            //
+            // NO PERMISSION IS NEEDED TO READ IT. `event.clipboardData` is
+            // handed over because the operator pressed the keys (or used the
+            // Edit menu's Paste, or a platform's middle-click paste -- all
+            // three raise this same event); it is not `navigator.clipboard`,
+            // whose read this app's permission policy denies
+            // (`composer-paste.ts` carries the same argument for the prompt
+            // box's own image paste).
+            //
+            // IT IS ITS OWN `PaneKey` KIND, NOT SIXTEEN-CHARACTER `text`
+            // pieces the way a composed IME commit is chunked
+            // (`composedStrokes`): that bound exists to cap what one keydown
+            // could ever produce, and a paste routinely carries a whole
+            // file. `preparePastedText` is the one place both Terminal
+            // renderers sanitise a paste (CRLF/LF -> CR, NUL stripped, a
+            // forged bracketed-paste marker neutralised); main's
+            // `sendPasteArgv` delivers the result through tmux's OWN paste
+            // buffer, which is what decides whether the pane's own program
+            // gets bracketed-paste codes around it.
+            event.preventDefault();
+            const raw = event.clipboardData.getData('text/plain');
+            if (raw === '') return;
+            const text = preparePastedText(raw);
+            if (text === '') return;
+            queue([{ kind: 'paste', text }]);
+          }}
           onInput={(event) => {
-            // TEXT THAT ARRIVED WITHOUT A COMPOSITION IS DROPPED, and the ref
-            // rather than the state is what decides (see `composingNow`). A
-            // paste, a drop, the emoji picker and an Option-chord's own
-            // character all land here; none of them is a keystroke, this
-            // channel is bounded at sixteen characters precisely so that it
-            // cannot become a paste into a running agent, and every one of
-            // them typed nothing before this box existed. Emptying it is what
-            // keeps that true -- and keeps a hidden box from quietly
-            // accumulating the operator's clipboard.
+            // TEXT THAT ARRIVED WITHOUT A COMPOSITION IS DROPPED BY DEFAULT,
+            // and the ref rather than the state is what decides (see
+            // `composingNow`). A real paste no longer reaches here at all --
+            // `onPaste` above cancels the browser's default before this event
+            // is ever raised for one -- so what is left to drop is a DROP
+            // (drag-and-drop, `insertFromDrop`) and anything an engine or a
+            // test supplies with no recognised `inputType`. Neither is a
+            // keystroke, and this channel is bounded precisely so that it
+            // cannot become one.
             if (composingNow.current) return;
+            /**
+             * `inputType: 'insertText'` IS THE ONE EXCEPTION, and it is
+             * OpenKey's -- the Vietnamese input utility behind the report
+             * this box exists to answer a second time (`TerminalTab.openkey
+             * .test.tsx` carries it in full). OpenKey holds no marked-text
+             * session with Chromium, so a correction longer than one
+             * character never reaches `onKeyDown` as a usable `keydown` at
+             * all: MEASURED over CDP against a real Chromium, a synthetic
+             * multi-character key event produces no `keydown` whose `key`
+             * survives, only `beforeinput`/`input` with `isComposing: false`
+             * and `inputType: 'insertText'`, carrying the whole replacement
+             * as `data`/`value`. Read literally, THIS handler's own comment
+             * -- "none of them is a keystroke" -- stopped being true the
+             * moment that became reachable, because to this guard OpenKey's
+             * insertion looks exactly like a paste.
+             *
+             * `'insertText'` IS WHAT A REAL PASTE NEVER CARRIES. MEASURED
+             * against a real OS clipboard and a real Cmd+V in the same probe:
+             * `inputType` there is `'insertFromPaste'`, and a drop is
+             * `'insertFromDrop'` -- the W3C `InputEvent` spec's own split
+             * between text a person or an input method actually typed and
+             * text that arrived from somewhere else. Every OTHER value,
+             * including no value at all (an engine, or a test, that supplies
+             * none), is still declined below: this is a widening of WHICH
+             * insertions the guard treats as a keystroke, not a loosening of
+             * the guard itself, and `MAX_KEY_TEXT`'s promise -- through
+             * `composedStrokes`, the same chunking and NFC normalisation the
+             * composition-commit path already uses -- is exactly as intact as
+             * it was.
+             */
+            const native = event.nativeEvent as InputEvent;
+            if (native.inputType === 'insertText') {
+              const text = event.currentTarget.value;
+              event.currentTarget.value = '';
+              queue(composedStrokes(text));
+              return;
+            }
+            // EVERYTHING ELSE IS STILL DROPPED: a paste (`insertFromPaste`,
+            // MEASURED against a real Cmd+V) and a drop (`insertFromDrop`,
+            // spelled the same way by the same spec), plus anything an
+            // engine or a test reports no `inputType` for at all. What this
+            // comment no longer claims, because it was never measured rather
+            // than because it is now false, is that the emoji picker and an
+            // Option-chord's own character are among the dropped: on macOS
+            // both insert through Cocoa's `insertText:`, the SAME call
+            // OpenKey's replacement makes, so there is a real chance
+            // `inputType` reads `insertText` for them too and they now reach
+            // the agent the way a real keystroke does. Left unverified on
+            // purpose rather than guessed at -- see this file's own header --
+            // and not a hazard either way: `MAX_KEY_TEXT` still bounds every
+            // piece, and an operator who opened the system emoji picker while
+            // this pane held the keyboard typed something on purpose.
             event.currentTarget.value = '';
           }}
           className="sr-only"

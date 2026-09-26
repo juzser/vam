@@ -66,9 +66,9 @@ import {
   MessageSquare,
   SquareTerminal,
 } from 'lucide-react';
-import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from 'react';
+import { type ComponentProps, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import type { Project, Session } from '../domain/model.js';
-import { orderedInProject } from '../domain/selectors.js';
+import type { SessionEntry } from '../domain/selectors.js';
 import { DetailPanel } from '../panels/DetailPanel.js';
 import { SessionList } from '../panels/SessionList.js';
 import { type Tab, visibleTabs } from '../panels/tabs.js';
@@ -85,6 +85,16 @@ export type PhoneShellProps = {
   readonly sidebar: ComponentProps<typeof SessionList>;
   /** The same object the detail column is built from. `width` is dropped. */
   readonly detail: ComponentProps<typeof DetailPanel>;
+  /**
+   * `Canvas.tsx`'s own `paneEligibleEntries` -- every session vam has not
+   * positively excluded (not foreign, not dismissed), the set its pane tab
+   * strips draw from. `SessionTabStrip` below narrows this to one project the
+   * same way `Canvas.tsx` does, rather than reading `entry.project.sessions`
+   * directly: that field is the RAW project off the model, unfiltered, and
+   * reading it straight was the phone half of the bug report -- a session
+   * the list screen hid still drew as a chip here.
+   */
+  readonly paneEligibleEntries: readonly SessionEntry[];
   /**
    * The `data-source` readout, lifted out of the canvas top bar -- which is
    * not drawn here. Mandatory: over a tunnel, a dropped connection and an idle
@@ -234,14 +244,23 @@ const STATUS_DOT: Readonly<Record<Session['status'], string>> = {
   running: 'bg-running',
   waiting: 'bg-waiting',
   idle: 'bg-idle',
+  // The neutral `idle` shares: an empty pane is the absence of news too.
+  unstarted: 'bg-idle',
+  // A pane and a known conversation, at rest -- same neutral hue as the two
+  // above; `status-mark.tsx`'s glyph is what a 6px dot has no room to draw.
+  terminal: 'bg-idle',
   done: 'bg-done',
   failed: 'bg-failed',
 };
 
 /**
  * Which session, in this project -- a different axis from `ViewIcons`, which
- * answers which facet of ONE session. Ordered by `orderedInProject`, the same
- * urgency-first rule the canvas itself uses, scoped to one project.
+ * answers which facet of ONE session. `sessions` is `projectPaneSessions`
+ * below, the same pane-eligible, urgency-first list `Canvas.tsx`'s own tab
+ * strips draw from, scoped to one project -- not `orderedInProject(project)`
+ * read straight off the model, which used to hand this strip every session
+ * the project has, foreign and dismissed ones the list screen already hid
+ * included.
  *
  * ONE SESSION RENDERS NOTHING: a strip that can only ever show one tab,
  * permanently selected, teaches nothing and costs a full row on every
@@ -347,6 +366,7 @@ function isTyping(target: EventTarget | null): boolean {
 export function PhoneShell({
   sidebar,
   detail,
+  paneEligibleEntries,
   sourceReadout,
   records,
   failureCount,
@@ -365,6 +385,19 @@ export function PhoneShell({
    * sized in `100dvh` and needs no listener to sit above the keyboard.
    */
   const [typing, setTyping] = useState(false);
+  /**
+   * Is a question open on the session showing right now?
+   *
+   * `DetailPanel` derives this (`openQuestion`, its own state plus the
+   * pane-read fallback for a tool-approval prompt with no transcript
+   * record) and reports it up through `onQuestionOpenChange` -- see that
+   * prop's own doc for why this shell cannot derive it independently. Used
+   * below to collapse `SessionTabStrip` the same way `!typing` already does
+   * (docs/design/phone-core-loop.md §3.2): the strip's 45px is exactly what
+   * the operator's brief is about returning to the transcript the moment
+   * there is a question to read.
+   */
+  const [questionOpen, setQuestionOpen] = useState(false);
   /**
    * Which view the icon row shows as on, and the request that puts the pane
    * there. Two pieces because they say different things: the pane owns its tab
@@ -393,6 +426,23 @@ export function PhoneShell({
 
   const entry = detail.entry;
   const session = entry?.session ?? null;
+  /**
+   * THIS SCREEN'S OWN `SessionTabStrip`, scoped to `entry.project` -- the
+   * status-rank order `orderedInProject` gives directly, for free:
+   * `paneEligibleEntries` is `Canvas.tsx`'s `allEntries` (itself built
+   * project-major, urgency-first per project, `selectors.ts`'s
+   * `orderedSessions`) narrowed by the same filter, so a project's slice of
+   * it is already in that order without a second sort.
+   */
+  const projectPaneSessions = useMemo(
+    () =>
+      entry === null
+        ? []
+        : paneEligibleEntries
+            .filter((e) => e.project.id === entry.project.id)
+            .map((e) => e.session),
+    [paneEligibleEntries, entry],
+  );
   /**
    * The step this screen shows: the newest, always.
    *
@@ -461,9 +511,18 @@ export function PhoneShell({
   if (!open || entry === null) {
     return (
       <div data-phone-shell="list" className="flex h-[100dvh] min-h-0 flex-col bg-ground">
-        <header className="flex h-12 flex-none select-none items-center gap-2 border-line border-b bg-panel px-3">
-          {sourceReadout}
-        </header>
+        {/* NO DEDICATED BAR FOR THIS ANY MORE -- there used to be a second
+            `<header>` here, above `SessionList`'s own, whose only content
+            was this readout. For the healthy arm that is a LONE DOT (see
+            `SourceReadout`'s own comment on why nothing else paints), so a
+            48px, full-width, bordered bar existed to hold seven visible
+            pixels -- the operator's own report, translated: "an empty gap
+            and a blue dot" at the very top of the getting-started screen,
+            measured at y:0 w:390 h:48 holding one 7x16 dot. `SessionList`
+            now takes the readout as a prop and folds it into the row it
+            already draws for the avatar and the theme toggle -- a row that
+            exists whether or not there is anything to say here, so the
+            readout stops needing a bar of its own to be seen in. */}
         <div className="flex min-h-0 flex-1 flex-col">
           <SessionList
             {...sidebar}
@@ -473,6 +532,7 @@ export function PhoneShell({
             // it, no detail pane answers a question, and no cursor has
             // anywhere to be. The row says so itself (UI spec D1).
             phone
+            sourceReadout={sourceReadout}
             onPick={(id) => {
               sidebar.onPick(id);
               show();
@@ -494,13 +554,26 @@ export function PhoneShell({
             one job something at the bottom of this screen always has
             (`styles.css`). The element stays in the tree either way: see the
             refusal cell's own comment below for why its PRESENCE must not be
-            the signal. */}
+            the signal.
+
+            `bg-sidebar`, ON BOTH ARMS, WHICH IS NEW: neither used to set a
+            background at all when this bar was empty, so `SessionList`'s
+            own `bg-sidebar` pane ended one pixel above the footer's box and
+            the SHELL's `bg-ground` -- darker, meant for the app's outer
+            canvas, never for a surface an operator reads text against --
+            showed through the safe-area padding instead. A second reviewer
+            caught it on the regenerated screenshot: a dark band along the
+            very bottom edge, the same family as the fix above but inside
+            the shell's own paint rather than past its edge. The non-empty
+            arm carried `bg-panel` for the same reason and the same bug, one
+            shade off `bg-sidebar` rather than two -- less visible, not
+            absent, so it moved too. */}
         <footer
           data-phone-status-bar
           className={
             statusCell === null && failureCount === 0
-              ? 'flex flex-none items-center'
-              : 'flex min-h-[44px] flex-none items-center gap-3 border-line border-t bg-panel px-3 font-mono text-meta text-ink-dim'
+              ? 'flex flex-none items-center bg-sidebar'
+              : 'flex min-h-[44px] flex-none items-center gap-3 border-line border-t bg-sidebar px-3 font-mono text-meta text-ink-dim'
           }
         >
           {/* Drawn always, empty and out of layout when there is nothing to
@@ -541,7 +614,14 @@ export function PhoneShell({
       data-phone-keyboard={typing ? 'open' : 'closed'}
       className={`flex h-[100dvh] min-h-0 flex-col bg-ground ${typing ? 'vam-phone-typing' : ''}`}
     >
-      <header className="flex h-12 flex-none select-none items-center gap-2 border-line border-b bg-panel px-2">
+      {/* `data-phone-top-bar`: B13, `styles.css`'s own comment on the rule --
+          `min-h-12`, not `h-12`, so `env(safe-area-inset-top)` GROWS this bar
+          under a landscape status-bar-shaped cutout rather than squeezing its
+          icons into a box that stayed fixed at 48px. */}
+      <header
+        data-phone-top-bar
+        className="flex min-h-12 flex-none select-none items-center gap-2 border-line border-b bg-panel px-2"
+      >
         <button
           type="button"
           aria-label="back to sessions"
@@ -637,10 +717,10 @@ export function PhoneShell({
           step rail's old slot without being the step rail's return; see this
           file's header comment. The limits band that used to stand under it
           is gone from this screen entirely (see above `isTyping`). */}
-      {!typing && (
+      {!typing && !questionOpen && (
         <SessionTabStrip
           project={entry.project}
-          sessions={orderedInProject(entry.project)}
+          sessions={projectPaneSessions}
           currentSessionId={entry.session.id}
           onPick={(sessionId) => sidebar.onPick(sessionId)}
         />
@@ -683,6 +763,7 @@ export function PhoneShell({
           initialTab="Response"
           tabRequest={viewRequest}
           records={records}
+          onQuestionOpenChange={setQuestionOpen}
         />
       </div>
     </div>

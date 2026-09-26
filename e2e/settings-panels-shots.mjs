@@ -54,7 +54,17 @@ const ROWS = [
   ['terminal text', '[data-terminal-size-option]', 'appearance', 'behaviour'],
   ['the terminal colours', '[data-terminal-swatch]', 'appearance', 'behaviour'],
   ['file editor colours', '[data-switch="editor-highlight"]', 'appearance', 'behaviour'],
+  // The notifications switch shipped as a Behaviour row (#440) and moved to
+  // a section of its own with the Test notification button. Both directions
+  // again: a switch drawn in both panels is a half-finished move. The button's
+  // BLOCK rather than the button: this bundle has no bridge, so the button is
+  // not drawn and its row says so instead (`NotifyTest.tsx`).
+  ['desktop notifications', '[data-switch="notify-waiting"]', 'notifications', 'behaviour'],
+  ['the delivery check', '[data-settings-block="notify-test"]', 'notifications', 'behaviour'],
 ];
+
+/** The fewest labelled rows each swept panel may draw: the corpus floor. */
+const ROW_FLOOR = { appearance: 3, behaviour: 3, notifications: 2 };
 
 const browser = await chromium.launch();
 
@@ -116,7 +126,13 @@ console.log('=== which panel each setting is in, measured as paint');
     throw new Error(`${await named.count()} tabs answer to the name "Behaviour"`);
   }
 
-  for (const section of ['appearance', 'behaviour']) {
+  if (ids.indexOf('notifications') !== ids.indexOf('behaviour') + 1) {
+    throw new Error(
+      `Notifications is at ${ids.indexOf('notifications')} and Behaviour at ${ids.indexOf('behaviour')} — the switch's new home is not beside its old one`,
+    );
+  }
+
+  for (const section of ['appearance', 'behaviour', 'notifications']) {
     await page.locator(`[data-settings-nav-item="${section}"]`).click();
     await page.waitForTimeout(150);
 
@@ -140,7 +156,7 @@ console.log('=== which panel each setting is in, measured as paint');
       section,
     );
     console.log(`  [${section}] ${rows} labelled row(s)`);
-    if (rows < 3) {
+    if (rows < ROW_FLOOR[section]) {
       throw new Error(`the ${section} panel drew ${rows} rows, so this sweep is about nothing`);
     }
 

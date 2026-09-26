@@ -54,7 +54,7 @@ describe('a remote port that is already in use', () => {
           port,
           devices,
           allowWrites: false,
-          source,
+          sources: [source],
           subscribe: () => () => {},
         }),
       ).rejects.toThrow(new RegExp(`${port}`));
@@ -65,7 +65,7 @@ describe('a remote port that is already in use', () => {
           port,
           devices,
           allowWrites: false,
-          source,
+          sources: [source],
           subscribe: () => () => {},
         }),
       ).rejects.toThrow(/in use/i);
@@ -85,7 +85,13 @@ describe('a remote port that is already in use', () => {
   it('rejects with a RemoteBindError whose reason is port-in-use', async () => {
     const port = await squat();
     await expect(
-      startRemoteServer({ port, devices, allowWrites: false, source, subscribe: () => () => {} }),
+      startRemoteServer({
+        port,
+        devices,
+        allowWrites: false,
+        sources: [source],
+        subscribe: () => () => {},
+      }),
     ).rejects.toMatchObject({ reason: 'port-in-use' });
   });
 });
@@ -100,7 +106,7 @@ describe('a remote port that cannot be bound for some other reason', () => {
         port: 1,
         devices,
         allowWrites: false,
-        source,
+        sources: [source],
         subscribe: () => () => {},
       }),
     ).rejects.toMatchObject({ reason: 'other' });

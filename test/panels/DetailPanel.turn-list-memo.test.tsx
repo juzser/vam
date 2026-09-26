@@ -58,7 +58,6 @@ const DECISIONS: readonly Decision[] = [decision('d3'), decision('d2'), decision
 const SESSION: Session = {
   id: 's1',
   title: 'a session',
-  icon: null,
   epic: null,
   branch: null,
   status: 'waiting',

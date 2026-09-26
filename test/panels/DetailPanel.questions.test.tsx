@@ -40,7 +40,6 @@ const QUESTION: AgentQuestion = {
 const SESSION: Session = {
   id: 's1',
   title: 'Provider survey',
-  icon: null,
   epic: null,
   branch: null,
   status: 'waiting',
@@ -90,6 +89,23 @@ describe('an open question is drawn, with everything the record carries', () => 
     // The description is the half that says why you would pick it.
     expect(text()).toContain('a second CLI agent, read the same way');
     expect(text()).toContain('a local editor agent');
+  });
+
+  it('reserves the number column ahead of a description, so it lines up under the label', () => {
+    // MEASURED on Claude Code 2.1.280: "fixed multi-select option descriptions
+    // being indented under the option number instead of under the label".
+    // The real geometry is `e2e/key-truth-shots.mjs`'s to prove; what a unit
+    // test can pin is the DOM shape the alignment depends on -- a spacer the
+    // same width as the visible number, ahead of the description, costing
+    // nothing in `textContent` or the accessible name.
+    draw([QUESTION]);
+    const first = all('[data-question-option]')[0];
+    const description = first?.querySelector('[data-question-description]');
+    const spacer = description?.previousElementSibling;
+    expect(spacer).not.toBeNull();
+    expect(spacer?.getAttribute('aria-hidden')).toBe('true');
+    expect(spacer?.textContent).toBe('');
+    expect(spacer?.className).toContain('tabular-nums');
   });
 
   it('draws a multi-select as multi-select and a single-select as single', () => {
@@ -553,7 +569,7 @@ describe('the question block draws only when there is a question', () => {
 });
 
 describe('an option that carries a preview', () => {
-  it('draws it under the description, and draws nothing when there is none', () => {
+  it('marks the row quietly and draws the full text in the panel instead, never inline', () => {
     draw([
       {
         ...QUESTION,
@@ -563,8 +579,13 @@ describe('an option that carries a preview', () => {
         ],
       },
     ]);
-    const previews = all('[data-question-preview]');
-    expect(previews).toHaveLength(1);
-    expect(previews[0]?.textContent).toBe('rgb(143, 29, 44)');
+    // ONE marker, on the option that carries one — see
+    // `DetailPanel.question-preview.test.tsx` for the panel's own rules.
+    const hints = all('[data-question-preview-hint]');
+    expect(hints).toHaveLength(1);
+    expect(hints[0]?.textContent).not.toContain('rgb(143, 29, 44)');
+    const panel = q('[data-question-preview-panel]');
+    expect(panel).not.toBeNull();
+    expect(panel?.textContent).toContain('rgb(143, 29, 44)');
   });
 });

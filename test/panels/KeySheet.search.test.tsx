@@ -81,9 +81,17 @@ describe('the sheet has a search box', () => {
   it('filters by the key itself, in the spelling this platform paints', () => {
     onBothPlatforms((mac) => {
       render(<KeySheet onClose={vi.fn()} />);
-      type(mac ? '⌘k' : 'ctrl+k');
-      expect(chords()).toContain(mac ? '⌘K' : 'Ctrl+K');
-      expect(rows().length).toBeLessThan(10);
+      type(mac ? '⌘ k' : 'ctrl+k');
+      expect(chords()).toContain(mac ? '⌘ K' : 'Ctrl+K');
+      // A loose bound, not a curated count: `filterSheet` ANDs terms across
+      // label-and-chord text (`keysheet.ts`'s own header), so the mac query's
+      // bare "k" term also lands on any row whose LABEL merely contains the
+      // letter — "new worktree of this session's project" (`Mod-Shift-w`,
+      // painted with the same ⌘ every Mod- chord gets on this platform) is
+      // one such row, added after this bound was chosen. The property this
+      // asserts — a two-term search narrows drastically from 80+ rows — is
+      // still true at 11; it would not be at 80.
+      expect(rows().length).toBeLessThan(11);
       cleanup();
     });
   });

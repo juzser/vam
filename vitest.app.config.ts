@@ -21,7 +21,11 @@ import { defineConfig } from 'vitest/config';
  */
 export default defineConfig({
   test: {
-    include: ['test/electron/launch.test.ts'],
+    include: [
+      'test/electron/launch.test.ts',
+      'test/electron/userdata-isolation.test.ts',
+      'test/electron/getting-started-image.test.ts',
+    ],
     environment: 'node',
     testTimeout: 60_000,
   },

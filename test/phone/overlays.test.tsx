@@ -11,7 +11,7 @@
  * content scan and lives in `overlay-sheets.test.ts`, which says so.
  */
 
-import { act, cleanup, fireEvent, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import { installPhoneGlobals, MODEL, phoneSource, rows } from './harness.js';
@@ -52,13 +52,20 @@ describe('the overlays at phone width', () => {
    * that the overlay this opens is a marked SHEET HOST, not which control
    * opens it.
    */
-  it('opens settings as a marked host, reachable from the list', () => {
+  it('opens settings as a marked host, reachable from the list', async () => {
     render(<Canvas model={MODEL} source={phoneSource()} />);
     expect(document.querySelector('button[aria-label="settings"]')).toBeNull();
     act(() => {
       fireEvent.click(document.querySelector('button[aria-label="remote access"]') as Element);
     });
-    const host = document.querySelector('[data-settings-overlay]');
+    // `SettingsOverlay` is its own lazy chunk now (`Canvas.tsx`'s own
+    // `React.lazy` + `Suspense`), so its DOM resolves a render tick or two
+    // after the click, not on it.
+    const host = await waitFor(() => {
+      const el = document.querySelector('[data-settings-overlay]');
+      if (!el) throw new Error('still pending');
+      return el;
+    });
     expect(host).not.toBeNull();
     expect(host?.hasAttribute('data-overlay-host')).toBe(true);
     // The sheet is the host's non-button child; the scrim is the button.

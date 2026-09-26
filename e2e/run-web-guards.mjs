@@ -159,15 +159,29 @@
  * running them would only turn a green tick into a broader claim than it is.
  *
  * Environment:
- *   VAM_E2E_PORT       preview port (default 5520)
- *   VAM_E2E_OUT        screenshot directory (default e2e/test-results/web-guards,
- *                      gitignored — never docs/ui, CI must not produce a repo diff)
- *   VAM_E2E_SKIP_BUILD serve whatever is already in dist-web. This is how the
- *                      guard itself gets falsified: mutate the built bundle,
- *                      re-run, watch it go red.
+ *   VAM_E2E_PORT          preview port (default 5520)
+ *   VAM_E2E_OUT           screenshot directory (default e2e/test-results/web-guards,
+ *                         gitignored — never docs/ui, CI must not produce a repo diff)
+ *   VAM_E2E_SKIP_BUILD    serve whatever is already in dist-web. This is how the
+ *                         guard itself gets falsified: mutate the built bundle,
+ *                         re-run, watch it go red.
+ *   VAM_E2E_CHECK_ORPHANS after every guard has run, compare this run's own
+ *                         output directory (never docs/ui, so this needs no
+ *                         extra port or build) against `docs/ui`'s committed
+ *                         PNGs. A committed PNG this run did not write AND
+ *                         that `git grep` finds referenced nowhere else in
+ *                         the tree (a doc, a source comment) is an orphan --
+ *                         a screenshot a rename or a removed guard left
+ *                         behind — and fails the run. Off by default because
+ *                         it is only meaningful on the FULL 50-guard list (a
+ *                         partial run would flag everything the guards it
+ *                         skipped would have written); the CI web-guards job
+ *                         sets it because that job always runs the full list
+ *                         anyway, and the check itself costs one `readdir`
+ *                         and a `git grep` per candidate, not another guard.
  */
-import { spawn } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { mkdirSync, readdirSync } from 'node:fs';
 
 const GUARDS = [
   'split-panes-shots',
@@ -196,16 +210,32 @@ const GUARDS = [
   'files-tree-resize-shots',
   'terminal-ime-shots',
   'sidebar-tree-shots',
+  'workspace-options-shots',
   'sidebar-seam-shots',
   'terminal-chrome-shots',
   'terminal-scheme-shots',
   'terminal-settings-shots',
+  // FRAME PARITY BETWEEN THE TWO TERMINAL TABS (docs/design/
+  // terminal-streaming.md): with `streamingTerminal` ON, `TerminalStreamTab.
+  // tsx`'s xterm.js pane has to be visually indistinguishable in its
+  // frame/chrome from `TerminalTab.tsx`'s own capture-pane view with the
+  // setting OFF -- the operator's own ask. Needs no real tmux (both
+  // `window.api.terminal` and `window.api.terminalStream` are stubs), so it
+  // runs here rather than by hand. `terminal-stream-frame-shots.mjs`'s own
+  // header holds the falsifications and what is deliberately not measured.
+  'terminal-stream-frame-shots',
   'command-palette-shots',
   'tree-icon-shots',
   'out-links-shots',
   'view-width-shots',
   'model-picker-shots',
   'terminal-scrollback-shots',
+  // THE SCROLLBACK SURVIVES A KEYSTROKE. The guard above proves the pane
+  // scrolls and the poll leaves it alone, against a stub that answers every
+  // read with the whole window whatever `mode` asked -- so the echo read's
+  // screen-only answer never reached its DOM, and "can't scroll" shipped past
+  // it green. This one's stub honours `mode` as main does, and it TYPES.
+  'terminal-echo-scroll-shots',
   'terminal-insert-shots',
   'prompt-popovers-shots',
   // The PRs tab, which `?demo=1` structurally cannot reach with content: the
@@ -232,6 +262,160 @@ const GUARDS = [
   // bytes -- and RASTERISES each glyph against the notdef box, because a tofu
   // is four identical bytes to every string assertion in the unit suite.
   'chord-symbol-shots',
+  // THE PROVIDER MARK on a sidebar row, at 1280, at the 200px sidebar floor
+  // and at 390px. Every claim in it is a rectangle, a rasterised glyph or a
+  // resolved token -- including the one the unit file gets WRONG: "before the
+  // title" is DOM ORDER there, and an `order-last` on the mark's wrapper moves
+  // the painted glyph past the title while leaving the whole unit file green.
+  // It also rewrites the served bundle's `orca` source to `codex` on one page,
+  // so the operator's actual pair is measured rather than argued from a
+  // fixture that contains neither.
+  'provider-mark-shots',
+  // THE START SCREEN of a pane with nothing in it, on the desktop and at
+  // 390px, plus the Terminal view of that row. Every claim is painted: the
+  // hollow status dot's lane and size beside the other five marks, the Start
+  // button inside the pane's fold, and a pane drawn rather than an
+  // `ambiguous` refusal for a pane-row id -- none of which a unit environment
+  // measures. Its three shots are `docs/ui/start-screen-*.png`.
+  'start-screen-shots',
+  // THE TERMINAL-ONLY STATE (`docs/design/vam-terminal-only.md`): a pane
+  // whose agent exited but whose conversation is known, and its getting-
+  // started screen -- the operator's own revision, replacing an earlier
+  // transcript-plus-Resume-bar draft. Fully stubs `window.api`, the same
+  // reason `sidebar-ownership-shots.mjs` does, because Resume has to reach a
+  // REAL `recordPrompt` with the row's own `resumeCommand` for this to prove
+  // anything past "the click did not throw". Every other claim is painted:
+  // the `terminal` mark beside its six neighbours in the sidebar AND on the
+  // tab (unlike `idle`/`unstarted`, visible without a click), the mark, the
+  // three shortcuts each with a chord chip, and both buttons inside the
+  // pane's fold on desktop and the phone's 44px floor. Its shots are
+  // `docs/ui/terminal-only-*.png`.
+  'terminal-only-shots',
+  // PER-KEYSTROKE TYPING LATENCY, against a REAL tmux, a REAL `claude`
+  // fullscreen TUI and the real renderer bundle -- the operator's third
+  // report of "still a noticeable delay when typing". No unit environment
+  // spawns a process or measures a `performance.now()` gap across an
+  // Electron-shaped IPC boundary, so this is the only guard that can catch a
+  // keystroke chain regressing back to a spawn per key
+  // (`terminal-typing-latency-shots.mjs`'s own header holds the measured
+  // before/after and the bound this asserts).
+  'terminal-typing-latency-shots',
+  // WHETHER A REAL `visibilitychange` REACHES `useVisibilityInterval`'S OWN
+  // LISTENER AT ALL -- the perf pass that gated three background polls on
+  // document visibility. jsdom/happy-dom let a unit test hand `visibilityState`
+  // a value and call a handler by hand; neither can say whether the app's own
+  // listener is wired to the right property at all, which this repo has
+  // already been burned by in visibility-driven code before. Stubs
+  // `window.api` (`?demo=1`'s own fixture never calls it, so it gives no hook
+  // to count against) and proves the load poller goes quiet over a real 3s
+  // hidden window and fires one immediate call on return
+  // (`attention-shots.mjs`'s own header holds the cadence math and the one
+  // poller this guard could not reach, and why).
+  'attention-shots',
+  // STAGE 1 OF `docs/design/vam-owns-the-session.md`: only vam's own
+  // sessions show by default, the toggle that reveals the rest, the sidebar
+  // that never goes empty when tmux itself cannot be read, and the row a
+  // bare `tmux new-session -s vam-x` earns with nothing started in it yet.
+  // Stubs `window.api` for the same reason `attention-shots.mjs` and
+  // `prs-tab-shots.mjs` both do, and measures four DOM states no unit test
+  // drives end to end: a real click on the popover's toggle, and a real
+  // reading of the reason text a degraded load leaves on screen
+  // (`sidebar-ownership-shots.mjs`'s own header holds the falsifications).
+  'sidebar-ownership-shots',
+  // THE QUIET LINE'S OWN DISMISS BUTTON, AS RECTANGLES: inside the note, at
+  // least as large as the sidebar's own icon buttons (Settings/Remote/
+  // theme) -- neither of which happy-dom's zero-layout DOM can answer.
+  // Regenerates `docs/ui/hidden-sessions-note-{dark,light}.png`.
+  // `hidden-sessions-note-shots.mjs`'s own header holds the falsification.
+  'hidden-sessions-note-shots',
+  // THE WORKTREES SIDEBAR: the "Worktrees" sub-list, its create form and its
+  // delete confirmation, in both themes. Stubs `window.api.worktrees` for
+  // the same reason `sidebar-ownership-shots.mjs` stubs the rest of the
+  // bridge -- this feature reads `window.api` directly rather than taking
+  // callback props, so only a real stub (never a mocked prop) exercises the
+  // actual wiring. Regenerates `docs/ui/worktrees-{sidebar,create,
+  // delete-confirm}-{dark,light}.png`. `worktrees-shots.mjs`'s own header
+  // holds the falsification.
+  'worktrees-shots',
+  // DISMISS, THROUGH THE REAL PRELOAD CONTRACT AND A REAL CLICK -- the
+  // operator's own report, "some sessions cannot be closed and report a
+  // failure — they stay there forever." Stubs `window.api` and throws
+  // `stop.ts`'s exact `already-finished` refusal from `closeSession`, then
+  // proves the row's hover-revealed `×` actually removes the row from the
+  // sidebar (never happy-dom's fake hover/opacity), that the status names the
+  // removal rather than a failure, and that the undo control brings it back.
+  // `close-dismiss-shots.mjs`'s own header holds the falsification.
+  'close-dismiss-shots',
+  // THE GETTING-STARTED SCREEN: the detail pane's Response view (and, on a
+  // phone, the list screen's own body) when vam has no session to show
+  // anywhere -- first launch, or every row foreign-hidden. Stubs
+  // `window.api`, and is the first guard to stub `window.api.dialog` too,
+  // so New project reaches a REAL `createSessionIn` through a real click
+  // rather than merely not throwing. Measures what no unit test can: the
+  // mark, two shortcut rows and the primary button all fit inside a real
+  // 1280px pane, the phone's own Show control clears the 44px floor with
+  // its shortcut rows withdrawn, and the browser/phone state (no `dialog`
+  // at all) draws no dead button and no bare-word shortcut list.
+  // `getting-started-shots.mjs`'s own header holds the rest.
+  'getting-started-shots',
+  // THE OPERATOR'S REPORT: "Ctrl+C in the terminal shuts the session down
+  // entirely." Drives no browser at all -- the bug and the fix are both in
+  // MAIN, so there is nothing here for Chromium to add -- and ignores the
+  // `origin`/`outDir` argv every other guard in this list is called with.
+  // Spawns through the REAL `createSessionInDirectory` and `resumeClaudeSession`
+  // against a REAL private tmux, presses Ctrl-C twice through the real
+  // `send-keys` path, and asserts the tmux session survives with the shell
+  // in its pane's foreground -- then falsifies itself by spawning the
+  // identical fixture DIRECTLY, the shape both paths used to have, and
+  // asserts THAT one dies with the agent. `shell-first-ctrlc-survives.mjs`'s
+  // own header holds the measurement and why `codex/resume.ts` is not a
+  // fourth phase.
+  'shell-first-ctrlc-survives',
+  // THE USAGE POPOVER: the account icon that replaced the sidebar's letter
+  // avatar, and the panel it opens, at 1280px and at 390px. Stubs
+  // `window.api` for the same reason `getting-started-shots.mjs` and
+  // `prs-tab-shots.mjs` do -- the demo fixture has no bridge behind it, so it
+  // could never reach real provider data -- and measures what no unit
+  // environment can: the panel's own painted rectangle stays inside the
+  // viewport at both widths, never clipped. `usage-popover-shots.mjs`'s own
+  // header holds the rest.
+  'usage-popover-shots',
+  // THE PHONE CORE LOOP'S OWN TWO SCREENS (docs/design/phone-core-loop.md):
+  // the inline question (one shared scroller, no retired fixed card, every
+  // option clears 44px) and the composer with none open (exactly 4 controls,
+  // and AC-7's height half, real-browser-measured at 75px -- the ≤76px
+  // stretch target, down from 95px, down from the pre-merge 145px).
+  // Held out of this list until that merge shipped, per this file's own
+  // header note on why: unlike every other guard here, a real layout change
+  // was the only way to close it, not a class this list could paper over.
+  // `phone-question-shots.mjs`'s own header holds the measurement.
+  'phone-question-shots',
+  // STREAMING-PATH LATENCY, against the SHIPPED `StreamClient` and a real
+  // tmux control-mode connection -- the operator's own ask, translated:
+  // "the terminal latency/resource measurement scripts are not in the
+  // automatic checks -- fix it." Placed LAST, after every other guard's own
+  // Chromium has already closed: it needs the same real, private-socket
+  // tmux this job already installs for `terminal-echo-scroll-shots.mjs` and
+  // `terminal-typing-latency-shots.mjs` above, and its own p95 bounds carry
+  // headroom for a loaded machine, not a QUIET one -- running it last (never
+  // parallel; this whole list is sequential, this file's own header
+  // explains why) is the cheapest way to give it the quietest tail of the
+  // run rather than adding a second CI job for one guard.
+  // `terminal-stream-latency-shots.mjs`'s own header holds the calibration,
+  // the bounds and their headroom, and the falsification.
+  'terminal-stream-latency-shots',
+  // The streaming resource guard (CPU/memory, `e2e/terminal-stream-
+  // resource-shots.mjs`, `vam/stream-default`): measures the same shipped
+  // `StreamClient` the same way (a private tmux socket, its own throwaway
+  // harness), so it belongs in this same "runs last, alone" slot, not a new
+  // CI job. Only its STRUCTURAL/RATIO properties are hard-asserted (idle
+  // stream cheaper than idle poll; the scrollback cap bounds growth; a
+  // reseed from ground truth always produces a correct screen; `%pause`
+  // recovers correctly) -- each machine-independent, unlike the absolute
+  // CPU/heap/time-to-quiet numbers the script also logs, which stay
+  // informational (no multi-run calibration exists for those yet, unlike
+  // the latency guard's own 11-run p95 bounds above).
+  'terminal-stream-resource-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);
@@ -288,8 +472,48 @@ try {
   preview.kill('SIGTERM');
 }
 
+/** A name is "referenced elsewhere" if `git grep` finds it anywhere in the
+ *  tracked tree outside the two PNG directories themselves (a doc, a source
+ *  comment) -- a screenshot a doc still points at must survive even though
+ *  no guard's assertion happens to write it any more. Exit 1 from `git
+ *  grep -q` means no match; anything else (no repo, no git) is a real error
+ *  this check should not silently swallow into a false "orphaned". */
+function isReferencedElsewhere(name) {
+  try {
+    execFileSync(
+      'git',
+      ['grep', '-q', '-F', '-e', name, '--', '.', ':!docs/ui', ':!docs/images', ':!e2e/test-results'],
+      { stdio: 'ignore' },
+    );
+    return true;
+  } catch (err) {
+    if (err.status === 1) return false;
+    throw err;
+  }
+}
+
+if (process.env.VAM_E2E_CHECK_ORPHANS) {
+  const docsUiPngs = readdirSync('docs/ui').filter((f) => f.endsWith('.png'));
+  const produced = new Set(readdirSync(outDir).filter((f) => f.endsWith('.png')));
+  const notProduced = docsUiPngs.filter((f) => !produced.has(f));
+  const orphans = notProduced.filter((f) => !isReferencedElsewhere(f));
+  if (orphans.length > 0) {
+    console.error(
+      `\ndocs/ui holds ${orphans.length} PNG(s) this run did not write and nothing ` +
+        `references:\n${orphans.map((f) => `  docs/ui/${f}`).join('\n')}`,
+    );
+    failed.push('docs-ui-orphan-check');
+  } else {
+    console.log(
+      `\ndocs/ui orphan check: all ${docsUiPngs.length} committed PNGs are either produced ` +
+        'by this run or referenced elsewhere.',
+    );
+  }
+}
+
 if (failed.length > 0) {
-  console.error(`\nFAILED: ${failed.map((g) => `e2e/${g}.mjs`).join(', ')}`);
+  const label = (g) => (g === 'docs-ui-orphan-check' ? g : `e2e/${g}.mjs`);
+  console.error(`\nFAILED: ${failed.map(label).join(', ')}`);
   process.exit(1);
 }
 console.log(`\nAll ${GUARDS.length} web guards passed. Screenshots in ${outDir}.`);

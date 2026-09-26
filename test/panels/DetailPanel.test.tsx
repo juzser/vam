@@ -16,7 +16,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { useState } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // The real parser, not a hand-picked id -- see "a selected historical turn
 // survives a poll" below for why this crosses from a renderer test into
 // `main/`: `test/canvas/Canvas.new-project.test.tsx` already does the same
@@ -57,6 +57,7 @@ import {
   isAtBottom,
 } from '../../src/renderer/panels/stick-to-bottom.js';
 import { OUT_FONT_SIZE_VAR } from '../../src/renderer/prefs/prefs.js';
+import { setActiveStreamingTerminal } from '../../src/renderer/prefs/streaming-terminal.js';
 import {
   DEFAULT_PROMPT_SUBMIT_KEY,
   setActivePromptSubmitKey,
@@ -95,7 +96,6 @@ const DECISIONS = [
 const SESSION: Session = {
   id: 's1',
   title: 'Sprint board reorder',
-  icon: null,
   epic: 'board',
   branch: null,
   status: 'waiting',
@@ -2094,12 +2094,18 @@ describe('A15.4: the default-provider picker, and why it is not on screen', () =
    * ONE. `DetailPanel.provider-double.test.tsx` is what tells them apart: it
    * mocks a two-row table and every behaviour that used to be asserted here
    * is asserted there, against a picker that has something to pick.
+   *
+   * AND THEN THE TABLE GREW ITS SECOND ROW (`codex`, Stage 2 of
+   * `docs/design/vam-owns-the-session.md`). The paragraph above is kept as
+   * the record of why the control is conditional; what is asserted now is
+   * the other side of the same rule -- over a two-row table the toggle IS
+   * drawn for a two-way caller, with no edit at this call site, exactly as
+   * `providers.ts` promised. The one-way caller's absence above still holds.
    */
-  it('is absent with a two-way caller too, while the table has one row', () => {
+  it('is present with a two-way caller, now that the table has two rows', () => {
     draw({ defaultProvider: 'claude-code', onSetDefaultProvider: () => {} });
-    expect(PROVIDERS).toHaveLength(1);
-    expect(q('[data-provider-picker-toggle]')).toBeNull();
-    expect(q('[data-provider-picker]')).toBeNull();
+    expect(PROVIDERS.length).toBeGreaterThan(1);
+    expect(q('[data-provider-picker-toggle]')).not.toBeNull();
   });
 });
 
@@ -2256,6 +2262,22 @@ describe('a view is reported when it is PICKED, never from a render', () => {
     expect(agents).not.toBeNull();
     fireEvent.click(agents);
     expect(reported).toEqual(['Agents']);
+  });
+
+  /**
+   * THE OPERATOR'S ASK: "change the Agents view icon to a robot." The phone's
+   * own icon row (`PhoneShell.tsx`'s `VIEW_ICON`) already drew `Bot` for this
+   * view; the desktop corner overlay drew `Users` instead, the same
+   * "not-yet-a-robot" placeholder lucide ships for a person icon. Pinned
+   * here so the two shells cannot drift apart again — a class assertion,
+   * not a snapshot, because `lucide-bot`/`lucide-users` is the one thing
+   * `aria-label` ("Agents view") does not tell a sighted operator apart.
+   */
+  it('draws the Agents view as a robot, matching the phone’s own icon', () => {
+    draw({ paneFocused: true });
+    const icon = document.querySelector('[data-view="agents"] svg');
+    expect(icon?.getAttribute('class')).toContain('lucide-bot');
+    expect(icon?.getAttribute('class')).not.toContain('lucide-users');
   });
 
   /**
@@ -4152,8 +4174,21 @@ describe('the Terminal tab costs nothing until it is opened', () => {
     });
   };
 
+  // THIS DESCRIBE BLOCK'S OWN `withBridge` wires `window.api.terminal` alone
+  // -- no `window.api.terminalStream`, which the real Electron preload
+  // always pairs with it (`preload/api.ts`). Streaming defaults ON now
+  // (`prefs/streaming-terminal.ts`), and what these tests are actually about
+  // -- the CLASSIC read/send wiring, `poll` mode, keys reaching
+  // `data-terminal-pane` -- is `TerminalTab`'s own surface, not
+  // `TerminalStreamTab`'s; the explicit opt-out is what puts `TerminalAutoTab`
+  // on the renderer these tests were written against.
+  beforeEach(() => {
+    setActiveStreamingTerminal(false);
+  });
+
   afterEach(() => {
     Reflect.deleteProperty(window, 'api');
+    setActiveStreamingTerminal(true);
   });
 
   it('issues no read at all while another tab is showing', async () => {
@@ -4195,7 +4230,7 @@ describe('the Terminal tab costs nothing until it is opened', () => {
     // are its own -- so the row travels with it and main pairs against the
     // pane that session published. A title was slugged and truncated on the
     // way in and matched nothing that was ever created.
-    expect(read).toHaveBeenCalledWith(PROJECT.id, SESSION.id);
+    expect(read).toHaveBeenCalledWith(PROJECT.id, SESSION.id, 'poll');
     expect(q<HTMLElement>('[data-terminal-pane]')?.textContent).toContain('the pane');
 
     const whileOpen = read.mock.calls.length;
@@ -4252,6 +4287,17 @@ describe('the Terminal tab costs nothing until it is opened', () => {
  * no visible effect, which is worse than no flag.
  */
 describe('the Terminal tab is offered only by a source that has one', () => {
+  // `data-terminal` is `TerminalTab`'s own marker -- see the earlier describe
+  // block's note on why the explicit opt-out is what these tests need now
+  // that streaming defaults ON.
+  beforeEach(() => {
+    setActiveStreamingTerminal(false);
+  });
+
+  afterEach(() => {
+    setActiveStreamingTerminal(true);
+  });
+
   it('drops the tab entirely for a source that says it has no terminal', () => {
     draw({ terminal: false });
     expect(q('[data-view="terminal"]')).toBeNull();
@@ -4300,8 +4346,16 @@ describe('the composer is hidden while the Terminal tab is open', () => {
     });
   };
 
+  // `data-terminal` is `TerminalTab`'s own marker -- see the first Terminal
+  // describe block's note on why the explicit opt-out is what these tests
+  // need now that streaming defaults ON.
+  beforeEach(() => {
+    setActiveStreamingTerminal(false);
+  });
+
   afterEach(() => {
     Reflect.deleteProperty(window, 'api');
+    setActiveStreamingTerminal(true);
   });
 
   const openTerminal = () =>
@@ -4347,22 +4401,32 @@ describe('the composer is hidden while the Terminal tab is open', () => {
     expect(q<HTMLTextAreaElement>('textarea')?.value).toBe('half a sentence');
   });
 
-  it('keeps the composer on Agents, which is still about the answer', () => {
-    // Agents is read alongside a reply being written, and nothing about it
-    // makes the prompt box the wrong place to type.
+  it('withdraws it on Agents and on PRs, and brings it back on Response', () => {
+    // THIS CASE HAS NOW SAID THE OPPOSITE TWICE, and both reversals are the
+    // operator's, a day apart and in the same words. It read "PRs keeps the
+    // composer" until 2026-09-18 ("it does not need the prompt input"), then
+    // "Agents keeps the composer, which is still about the answer" until the
+    // sentence that followed it: "the agents view doesn't need the prompt
+    // input either." Neither view is a conversation with the agent -- one is a
+    // list of pull requests on GitHub, the other a roster of who is running --
+    // so there is nothing on either that a typed sentence is addressed to.
     //
-    // PRs USED TO BE ASSERTED HERE TOO, and the operator's review on
-    // 2026-09-18 said it should not have been: "it does not need the prompt
-    // input." A list of pull requests on GitHub is not a conversation with the
-    // agent, so there is nothing a sentence typed under it is addressed to.
-    // Which views draw a composer is now `drawsComposer`'s (`tabs.ts`) and is
-    // pinned, per name, in `DetailPanel.composer-tabs.test.tsx`.
+    // It is kept as a case rather than deleted into `composer-tabs` because
+    // this suite is where the TERMINAL withdrawal is proved, and the three
+    // belong side by side: the reasons differ (a keyboard of its own, a list,
+    // a roster) and the outcome is the same. Which views draw a composer is
+    // `drawsComposer`'s (`tabs.ts`) and is pinned, per name, in
+    // `DetailPanel.composer-tabs.test.tsx`.
     withBridge();
     draw();
     fireEvent.click(q<HTMLButtonElement>('[data-view="agents"]') as HTMLButtonElement);
-    expect(q('[data-prompt-box]')).not.toBeNull();
+    expect(q('[data-prompt-box]')).toBeNull();
     fireEvent.click(q<HTMLButtonElement>('[data-view="prs"]') as HTMLButtonElement);
     expect(q('[data-prompt-box]')).toBeNull();
+    // And back, so this is a fact about the views and not a composer that was
+    // torn down for good.
+    fireEvent.click(q<HTMLButtonElement>('[data-view="response"]') as HTMLButtonElement);
+    expect(q('[data-prompt-box]')).not.toBeNull();
   });
 });
 

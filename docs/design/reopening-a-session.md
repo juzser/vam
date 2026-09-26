@@ -1,8 +1,52 @@
 # Reopening a session that has ended
 
-Status: **proposed**. Written 2026-09-18 against vam at `32dcb768`, Claude Code
-2.1.276. Every claim below that is a fact about this machine was measured; the
-one that was not is marked as the experiment that has to run first.
+Status: **partly built, 2026-09-21**. Written 2026-09-18 against vam at
+`32dcb768`, Claude Code 2.1.276. Every claim below that is a fact about this
+machine was measured; the one that was not is marked as the experiment that
+has to run first.
+
+> ## What was built, and the one thing this spec got wrong
+>
+> **§3 Reopen is built, for both sources.** `resumeSession` is a capability of
+> its own on the port — not part of `createSession`, because Codex is the case
+> that separates them: vam cannot *start* a Codex thread (that is Stage 2 of
+> `a-second-source.md`) and it can *return* to one. `codex resume <uuid>` and
+> `claude --resume <sessionId>`, both through the existing `createVamSession`
+> spawn, both tagged, and no fork on either.
+>
+> Its rules held, and one of them turned out to be **weaker than it needed to
+> be**. "Never offered for a session that is live" is not enough: a row is not
+> a session id, and `agents.ts` documents the measured state where one session
+> id is listed twice with two pids. A *finished* row can sit beside a *running*
+> one on the same conversation, and reopening the finished row would still put
+> a second process on it. The enforced rule is therefore that nothing is live
+> on that **session id**. `claude-code-resume.test.ts` is mostly about that
+> difference.
+>
+> **§2 went the other way, and the reason is mechanical rather than a matter of
+> taste.** This spec proposed the command palette and called it "the cheaper
+> answer and probably the right one". It is not, *here*, because `Canvas.tsx`
+> hands `CommandPalette` the entries array the sidebar filter has **already
+> narrowed** — so a third palette group for ended sessions would be empty in
+> exactly the state it exists to serve, unless it bypassed the filter, and two
+> controls disagreeing about one set is worse than either alone.
+>
+> What was built instead is the operator's own proposal: a third row in the
+> sidebar's filter popover, **Hide ended sessions**, on by default and carrying
+> the count of what it holds back. Because the palette is downstream of that
+> one array, the toggle serves both surfaces from one line of filtering — the
+> palette shows ended sessions exactly when the sidebar does. That is this
+> spec's "one line of that component and no new surface at all", arrived at
+> from the other end.
+>
+> **§1 is NOT built.** There is still no index of ended Claude Code sessions —
+> a transcript whose process is gone has no row, so there is nothing to reopen
+> from. What Claude Code *can* reopen today is a row that is still in the agent
+> list and has finished: a background agent that ended. Codex has no such gap,
+> because `threads` is itself the index this section asks for.
+>
+> **§The experiment (account switching) has not been run.** §4 remains
+> unproven, and nothing was built on it.
 
 ## The operator's question
 

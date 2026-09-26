@@ -108,6 +108,20 @@ describe('the phone session screen', () => {
     expect(views().map((b) => b.getAttribute('data-phone-view'))).toEqual(['response', 'agents']);
   });
 
+  // B13: the session screen's own top bar, distinct from the list's own
+  // hook -- `styles.css`'s own comment on why the two are not shared.
+  it('marks its own top bar for the B13 safe-area rule, min-height rather than a fixed one', () => {
+    openSession();
+    const bar = document.querySelector('[data-phone-top-bar]');
+    expect(bar).not.toBeNull();
+    expect(bar?.tagName).toBe('HEADER');
+    // `h-12`, not `min-h-12`, is what `styles.css`'s own comment on the rule
+    // warns would squeeze the icons into a box that stayed fixed at 48px
+    // instead of growing under a real inset.
+    expect(bar?.className).toContain('min-h-12');
+    expect(bar?.className).not.toMatch(/(?<!min-)h-12\b/);
+  });
+
   it('says which view is on by more than colour', () => {
     openSession();
     expect(views().map((b) => b.getAttribute('aria-pressed'))).toEqual(['true', 'false']);

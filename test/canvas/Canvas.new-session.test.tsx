@@ -20,7 +20,6 @@ import type { CanvasSource } from '../../src/renderer/sources/source.js';
 const session = (id: string): Session => ({
   id,
   title: id,
-  icon: null,
   epic: null,
   branch: null,
   status: 'done',
@@ -85,6 +84,7 @@ function sourceWith(createSession?: (projectId: string, title: string) => Promis
       pullRequests: false,
       terminal: false,
       agentRoster: false,
+      resumeSession: false,
     },
     declines:
       createSession === undefined ? { createSession: 'this source has no way to start one' } : {},

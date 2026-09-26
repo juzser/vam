@@ -89,7 +89,7 @@ async function start(over: Partial<RemoteServerOptions> = {}): Promise<string> {
     port: 0,
     devices,
     allowWrites: true,
-    source: makeSource(),
+    sources: [makeSource()],
     subscribe: (onChange) => {
       listeners.add(onChange);
       return () => listeners.delete(onChange);
@@ -145,7 +145,7 @@ describe('startRemoteServer', () => {
       port: 0,
       devices,
       allowWrites: false,
-      source: makeSource(),
+      sources: [makeSource()],
       subscribe: () => () => {},
     });
     servers.push(server);
@@ -203,11 +203,13 @@ describe('read routes', () => {
 
   it('forwards a source failure as an envelope rather than a crash', async () => {
     const base = await start({
-      source: makeSource({
-        load: async () => {
-          throw new Error('the transcript directory is gone');
-        },
-      }),
+      sources: [
+        makeSource({
+          load: async () => {
+            throw new Error('the transcript directory is gone');
+          },
+        }),
+      ],
     });
     const response = await get(base, '/api/load');
     expect(response.status).toBe(200);
@@ -239,7 +241,7 @@ describe('read-only mode', () => {
 
   it('never reaches the source, even with a valid identity', async () => {
     const closeSession = vi.fn(async () => null);
-    const base = await start({ allowWrites: false, source: makeSource({ closeSession }) });
+    const base = await start({ allowWrites: false, sources: [makeSource({ closeSession })] });
     await post(base, '/api/close-session', { sessionId: 's1' });
     expect(closeSession).not.toHaveBeenCalled();
   });
@@ -257,7 +259,7 @@ describe('read-only mode', () => {
    */
   it('still serves the history route, which is a read that happens to POST', async () => {
     const readHistory = vi.fn(async () => PAGE);
-    const base = await start({ allowWrites: false, source: makeSource({ readHistory }) });
+    const base = await start({ allowWrites: false, sources: [makeSource({ readHistory })] });
     const response = await post(base, '/api/history', { sessionId: 's1', cursor: null });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, value: PAGE });
@@ -276,7 +278,7 @@ describe('the agent-work route', () => {
 
   it('forwards the row and the agent, and answers the work whole', async () => {
     const readAgentWork = vi.fn(async () => WORK);
-    const base = await start({ source: makeSource({ readAgentWork }) });
+    const base = await start({ sources: [makeSource({ readAgentWork })] });
     const response = await post(base, '/api/agent-work', { sessionId: 's1', agentId: 'agent-a' });
     expect(await response.json()).toEqual({ ok: true, value: WORK });
     expect(readAgentWork).toHaveBeenCalledWith('s1', 'agent-a');
@@ -284,7 +286,7 @@ describe('the agent-work route', () => {
 
   it('refuses a body it does not trust without reaching the source', async () => {
     const readAgentWork = vi.fn(async () => WORK);
-    const base = await start({ source: makeSource({ readAgentWork }) });
+    const base = await start({ sources: [makeSource({ readAgentWork })] });
     for (const body of [{ sessionId: 42, agentId: 'a' }, { sessionId: 's1' }, { agentId: 'a' }]) {
       const response = await post(base, '/api/agent-work', body);
       expect(response.status).toBe(400);
@@ -293,7 +295,7 @@ describe('the agent-work route', () => {
   });
 
   it('answers the type’s own unavailable arm when the source has no agents', async () => {
-    const base = await start({ source: makeSource() });
+    const base = await start({ sources: [makeSource()] });
     const response = await post(base, '/api/agent-work', { sessionId: 's1', agentId: 'a' });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
@@ -311,7 +313,7 @@ describe('the agent-work route', () => {
 
   it('is served by a read-only server, like the history route beside it', async () => {
     const readAgentWork = vi.fn(async () => WORK);
-    const base = await start({ allowWrites: false, source: makeSource({ readAgentWork }) });
+    const base = await start({ allowWrites: false, sources: [makeSource({ readAgentWork })] });
     const response = await post(base, '/api/agent-work', { sessionId: 's1', agentId: 'agent-a' });
     expect(response.status).toBe(200);
     expect(readAgentWork).toHaveBeenCalledWith('s1', 'agent-a');
@@ -321,7 +323,7 @@ describe('the agent-work route', () => {
 describe('the history route', () => {
   it('forwards a cursor and answers the page whole', async () => {
     const readHistory = vi.fn(async () => PAGE);
-    const base = await start({ source: makeSource({ readHistory }) });
+    const base = await start({ sources: [makeSource({ readHistory })] });
     const response = await post(base, '/api/history', { sessionId: 's1', cursor: 's1:@4096' });
     expect(await response.json()).toEqual({ ok: true, value: PAGE });
     expect(readHistory).toHaveBeenCalledWith('s1', 's1:@4096');
@@ -329,14 +331,14 @@ describe('the history route', () => {
 
   it('refuses a body it does not trust without reaching the source', async () => {
     const readHistory = vi.fn(async () => PAGE);
-    const base = await start({ source: makeSource({ readHistory }) });
+    const base = await start({ sources: [makeSource({ readHistory })] });
     const response = await post(base, '/api/history', { sessionId: 42 });
     expect(response.status).toBe(400);
     expect(readHistory).not.toHaveBeenCalled();
   });
 
   it('answers the page type’s own unavailable arm when the source cannot page', async () => {
-    const base = await start({ source: makeSource() });
+    const base = await start({ sources: [makeSource()] });
     const response = await post(base, '/api/history', { sessionId: 's1', cursor: null });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
@@ -357,7 +359,7 @@ describe('write routes', () => {
   it('closes a session and audits the act with the identity that asked', async () => {
     const closeSession = vi.fn(async () => null);
     const audit = vi.fn();
-    const base = await start({ source: makeSource({ closeSession }), audit });
+    const base = await start({ sources: [makeSource({ closeSession })], audit });
     const response = await post(base, '/api/close-session', { sessionId: 'session-1' });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, value: null });
@@ -372,14 +374,14 @@ describe('write routes', () => {
       code: 'session-busy',
       message: 'that one is a terminal you are sitting in',
     };
-    const base = await start({ source: makeSource({ closeSession: async () => refusal }) });
+    const base = await start({ sources: [makeSource({ closeSession: async () => refusal })] });
     const response = await post(base, '/api/close-session', { sessionId: 'session-1' });
     expect(await response.json()).toEqual({ ok: false, error: refusal });
   });
 
   it('refuses a payload of the wrong shape before the source sees it', async () => {
     const closeSession = vi.fn(async () => null);
-    const base = await start({ source: makeSource({ closeSession }) });
+    const base = await start({ sources: [makeSource({ closeSession })] });
     const response = await post(base, '/api/close-session', { sessionId: 42 });
     expect(response.status).toBe(400);
     expect(closeSession).not.toHaveBeenCalled();
@@ -387,7 +389,7 @@ describe('write routes', () => {
 
   it('forwards a confirmed force close', async () => {
     const closeSession = vi.fn(async () => null);
-    const base = await start({ source: makeSource({ closeSession }) });
+    const base = await start({ sources: [makeSource({ closeSession })] });
     const response = await post(base, '/api/close-session', {
       sessionId: 'session-1',
       force: true,
@@ -398,7 +400,7 @@ describe('write routes', () => {
 
   it('refuses a non-boolean force before the source sees it', async () => {
     const closeSession = vi.fn(async () => null);
-    const base = await start({ source: makeSource({ closeSession }) });
+    const base = await start({ sources: [makeSource({ closeSession })] });
     const response = await post(base, '/api/close-session', {
       sessionId: 'session-1',
       force: 'yes',
@@ -419,7 +421,7 @@ describe('write routes', () => {
 
   it('records a prompt', async () => {
     const recordPrompt = vi.fn(async () => null);
-    const base = await start({ source: makeSource({ recordPrompt }) });
+    const base = await start({ sources: [makeSource({ recordPrompt })] });
     const response = await post(base, '/api/record-prompt', {
       sessionId: 'session-1',
       prompt: 'go on then',
@@ -430,14 +432,14 @@ describe('write routes', () => {
   });
 
   it('says so when a member the descriptor advertises is not wired in main', async () => {
-    const base = await start({ source: makeSource({ closeSession: undefined }) });
+    const base = await start({ sources: [makeSource({ closeSession: undefined })] });
     const response = await post(base, '/api/close-session', { sessionId: 'session-1' });
     expect(await response.json()).toMatchObject({ ok: false, error: { code: 'not-implemented' } });
   });
 
   it('starts a session in a project by id, with no canonicalisation and no guard', async () => {
     const createSession = vi.fn(async () => null);
-    const base = await start({ source: makeSource({ createSession }) });
+    const base = await start({ sources: [makeSource({ createSession })] });
     const response = await post(base, '/api/create-session', { projectId: 'p1', title: 'a run' });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, value: null });
@@ -445,9 +447,16 @@ describe('write routes', () => {
     expect(createSession).toHaveBeenCalledWith('p1', 'a run', undefined);
   });
 
+  // `/api/create-session-in`'s guard (`confineToProjectSet`) is covered end to
+  // end in `create-session-in-confinement.test.ts`, including the raw-cwd
+  // vulnerability this route used to have (`createSessionInDirectory` called
+  // with the caller's own path) -- that dedicated file is where a directory
+  // outside the known project set, and a pane-only project inside it, are
+  // proven. This test stays here only for the 400-before-any-guard-work
+  // ordering, which belongs beside the route's other payload-shape cases.
   it("refuses a relative directory, which would resolve against main's own cwd", async () => {
     const createSession = vi.fn(async () => null);
-    const base = await start({ source: makeSource({ createSession }) });
+    const base = await start({ sources: [makeSource({ createSession })] });
     const response = await post(base, '/api/create-session-in', { cwd: 'else', title: 'a run' });
     expect(response.status).toBe(400);
     expect(createSession).not.toHaveBeenCalled();
@@ -455,7 +464,7 @@ describe('write routes', () => {
 
   it('drops a body far larger than any real prompt instead of buffering it', async () => {
     const recordPrompt = vi.fn(async () => null);
-    const base = await start({ source: makeSource({ recordPrompt }) });
+    const base = await start({ sources: [makeSource({ recordPrompt })] });
     const huge = JSON.stringify({ sessionId: 's1', prompt: 'x'.repeat(3_000_000) });
     await fetch(`${base}/api/record-prompt`, {
       method: 'POST',
@@ -484,7 +493,7 @@ describe('the three guardless write routes are unchanged by the guard parameter'
   it('recordPrompt: null, a forwarded refusal, and a shape failure', async () => {
     const ok = vi.fn(async () => null);
     const okResponse = await post(
-      await start({ source: makeSource({ recordPrompt: ok }) }),
+      await start({ sources: [makeSource({ recordPrompt: ok })] }),
       '/api/record-prompt',
       { sessionId: 's1', prompt: 'go on' },
     );
@@ -493,7 +502,7 @@ describe('the three guardless write routes are unchanged by the guard parameter'
 
     const refusal: SourceError = { kind: 'refused', code: 'stub-refused', message: 'no' };
     const refusedResponse = await post(
-      await start({ source: makeSource({ recordPrompt: async () => refusal }) }),
+      await start({ sources: [makeSource({ recordPrompt: async () => refusal })] }),
       '/api/record-prompt',
       { sessionId: 's1', prompt: 'go on' },
     );
@@ -502,7 +511,7 @@ describe('the three guardless write routes are unchanged by the guard parameter'
 
     const shapeSpy = vi.fn(async () => null);
     const invalidResponse = await post(
-      await start({ source: makeSource({ recordPrompt: shapeSpy }) }),
+      await start({ sources: [makeSource({ recordPrompt: shapeSpy })] }),
       '/api/record-prompt',
       { sessionId: 42 },
     );
@@ -515,7 +524,7 @@ describe('the three guardless write routes are unchanged by the guard parameter'
   it('closeSession: null, a forwarded refusal, and a shape failure', async () => {
     const ok = vi.fn(async () => null);
     const okResponse = await post(
-      await start({ source: makeSource({ closeSession: ok }) }),
+      await start({ sources: [makeSource({ closeSession: ok })] }),
       '/api/close-session',
       { sessionId: 's1' },
     );
@@ -524,7 +533,7 @@ describe('the three guardless write routes are unchanged by the guard parameter'
 
     const refusal: SourceError = { kind: 'refused', code: 'stub-refused', message: 'no' };
     const refusedResponse = await post(
-      await start({ source: makeSource({ closeSession: async () => refusal }) }),
+      await start({ sources: [makeSource({ closeSession: async () => refusal })] }),
       '/api/close-session',
       { sessionId: 's1' },
     );
@@ -533,7 +542,7 @@ describe('the three guardless write routes are unchanged by the guard parameter'
 
     const shapeSpy = vi.fn(async () => null);
     const invalidResponse = await post(
-      await start({ source: makeSource({ closeSession: shapeSpy }) }),
+      await start({ sources: [makeSource({ closeSession: shapeSpy })] }),
       '/api/close-session',
       { sessionId: 42 },
     );
@@ -546,7 +555,7 @@ describe('the three guardless write routes are unchanged by the guard parameter'
   it('createSession: null, a forwarded refusal, and a shape failure -- no canonicalisation, no load(), no guard', async () => {
     const ok = vi.fn(async () => null);
     const okResponse = await post(
-      await start({ source: makeSource({ createSession: ok }) }),
+      await start({ sources: [makeSource({ createSession: ok })] }),
       '/api/create-session',
       { projectId: 'p1', title: 'a run' },
     );
@@ -556,7 +565,7 @@ describe('the three guardless write routes are unchanged by the guard parameter'
 
     const refusal: SourceError = { kind: 'refused', code: 'stub-refused', message: 'no' };
     const refusedResponse = await post(
-      await start({ source: makeSource({ createSession: async () => refusal }) }),
+      await start({ sources: [makeSource({ createSession: async () => refusal })] }),
       '/api/create-session',
       { projectId: 'p1', title: 'a run' },
     );
@@ -565,7 +574,7 @@ describe('the three guardless write routes are unchanged by the guard parameter'
 
     const shapeSpy = vi.fn(async () => null);
     const invalidResponse = await post(
-      await start({ source: makeSource({ createSession: shapeSpy }) }),
+      await start({ sources: [makeSource({ createSession: shapeSpy })] }),
       '/api/create-session',
       { projectId: 42 },
     );
@@ -591,11 +600,13 @@ describe('create-session-in: confined to the operator’s existing project set',
     const createSession = vi.fn(async () => null);
     const createSessionInDirectory = vi.fn(async () => null);
     const base = await start({
-      source: makeSource({
-        load: async () => [project],
-        createSession,
-        createSessionInDirectory,
-      }),
+      sources: [
+        makeSource({
+          load: async () => [project],
+          createSession,
+          createSessionInDirectory,
+        }),
+      ],
     });
     const response = await post(base, '/api/create-session-in', {
       cwd: repo,
@@ -621,7 +632,9 @@ describe('create-session-in: confined to the operator’s existing project set',
     const createSession = vi.fn(async () => null);
     const createSessionInDirectory = vi.fn(async () => null);
     const base = await start({
-      source: makeSource({ load: async () => [project], createSession, createSessionInDirectory }),
+      sources: [
+        makeSource({ load: async () => [project], createSession, createSessionInDirectory }),
+      ],
     });
 
     const inResponse = await post(base, '/api/create-session-in', { cwd: linkIn, title: 'a run' });
@@ -646,7 +659,7 @@ describe('create-session-in: confined to the operator’s existing project set',
 
     const createSession = vi.fn(async () => null);
     const base = await start({
-      source: makeSource({ load: async () => [project], createSession }),
+      sources: [makeSource({ load: async () => [project], createSession })],
     });
 
     const response = await post(base, '/api/create-session-in', {
@@ -686,12 +699,14 @@ describe('create-session-in: confined to the operator’s existing project set',
           const createSession = vi.fn(async () => null);
           const createSessionInDirectory = vi.fn(async () => null);
           const base = await start({
-            source: makeSource({
-              load: async () => [project],
-              createSession,
-              createSessionInDirectory,
-              ...over,
-            }),
+            sources: [
+              makeSource({
+                load: async () => [project],
+                createSession,
+                createSessionInDirectory,
+                ...over,
+              }),
+            ],
           });
           const response = await post(base, '/api/create-session-in', { cwd, title: 'a run' });
           expect(response.status, cwd).toBe(403);
@@ -724,7 +739,7 @@ describe('create-session-in: confined to the operator’s existing project set',
   it('audits a refusal with the device identity, and never the path', async () => {
     const strangerRepo = await gitRepo();
     const audit = vi.fn();
-    const base = await start({ source: makeSource({ load: async () => [] }), audit });
+    const base = await start({ sources: [makeSource({ load: async () => [] })], audit });
     const response = await post(base, '/api/create-session-in', {
       cwd: strangerRepo,
       title: 'a run',
@@ -742,7 +757,7 @@ describe('create-session-in: confined to the operator’s existing project set',
     let listed: readonly Project[] = [];
     const createSession = vi.fn(async () => null);
     const base = await start({
-      source: makeSource({ load: async () => listed, createSession }),
+      sources: [makeSource({ load: async () => listed, createSession })],
     });
     const before = await post(base, '/api/create-session-in', { cwd: repo, title: 'a run' });
     expect(before.status).toBe(403);
@@ -764,12 +779,14 @@ describe('create-session-in: confined to the operator’s existing project set',
     const repo = await gitRepo();
     const createSession = vi.fn(async () => null);
     const base = await start({
-      source: makeSource({
-        load: async () => {
-          throw new Error('the project store is gone');
-        },
-        createSession,
-      }),
+      sources: [
+        makeSource({
+          load: async () => {
+            throw new Error('the project store is gone');
+          },
+          createSession,
+        }),
+      ],
     });
     const response = await post(base, '/api/create-session-in', { cwd: repo, title: 'a run' });
     expect(response.status).toBe(403);
@@ -957,12 +974,13 @@ describe('the descriptor the server serves', () => {
       pullRequests: true,
       terminal: true,
       agentRoster: true,
+      resumeSession: true,
     },
     declines: {},
   } as unknown as MainSource['descriptor'];
 
   const served = async (over: Partial<RemoteServerOptions> = {}) => {
-    const base = await start({ source: makeSource({ descriptor: full }), ...over });
+    const base = await start({ sources: [makeSource({ descriptor: full })], ...over });
     const body = (await (await get(base, '/api/describe')).json()) as {
       value: MainSource['descriptor'];
     };

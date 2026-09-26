@@ -207,6 +207,15 @@
   --color-icon-purple: var(--vam-icon-purple);
   --color-icon-pink: var(--vam-icon-pink);
 
+  /* THE TWO PROVIDER BRAND COLOURS, so `text-brand-claude` and
+     `text-brand-openai` exist as utilities. Without these two lines the
+     classes in `provider-marks.tsx` would emit NO RULE AT ALL and the marks
+     would quietly inherit the row's ink -- which looks almost right, which is
+     why `e2e/provider-mark-shots.mjs` measures the paint instead of the
+     stylesheet. The values and their floors are at `--vam-brand-claude`. */
+  --color-brand-claude: var(--vam-brand-claude);
+  --color-brand-openai: var(--vam-brand-openai);
+
   --color-line: var(--vam-line);
   --color-line-strong: var(--vam-line-strong);
   --color-line-loud: var(--vam-line-loud);
@@ -1270,6 +1279,36 @@
   --vam-icon-purple: #c084fc;
   --vam-icon-pink: #f472b6;
 
+  /* THE PROVIDER BRAND COLOURS. Two, one per brand vam draws a mark for
+     (`sources/provider-marks.tsx`). Named after the BRAND and not after vam's
+     source id, because the value is the company's and `codex` is only the id
+     vam stamps on rows that came from OpenAI.
+
+     NOT AN ICON TONE, and they sit beside that family rather than in it on
+     purpose: a tone is chosen by a person and means whatever they decided,
+     while these two mean one thing each and nobody may repoint them. Naming
+     one `--vam-icon-orange` would have offered Claude's colour to a session
+     that merely likes orange.
+
+     THE BRAND'S OWN HEX WHERE IT SURVIVES THE THEME, its own HUE where it does
+     not -- which is the whole reason a brand colour has to be a token at all.
+     Claude's #d97757 clears the floor on every dark surface, so it is carried
+     verbatim here. OpenAI's #412991 measures 1.46:1 on this sidebar, so dark
+     takes the same colour at a higher lightness: H 253.85 and S 55.9% are
+     unchanged from the brand hex and only L moves, 36.5% to 68%.
+
+     A MARK IS A NON-TEXT OBJECT, so the floor is WCAG 1.4.11's 3:1, on the
+     four fills one is really drawn on (`sidebar`, `raised` for a selected row,
+     `pane` for the tab strip, `ground` for an active tab) and across all seven
+     colour templates -- and composited with the `opacity-[0.82]` the sidebar's
+     meta line dims the whole lane with, which is the number that actually
+     reaches an eye. Worst case, composited: Claude 3.51:1, OpenAI 3.40:1.
+     `test/renderer/token-contrast.test.ts` computes every one of those, and
+     `e2e/provider-mark-shots.mjs` is what proves the utility emitted a rule at
+     all -- a Tailwind v4 class naming a missing token emits none, silently. */
+  --vam-brand-claude: #d97757;
+  --vam-brand-openai: #9580db;
+
   --vam-running: #4ade80;
   /* A near-black on dark's bright green: 11.36:1. Taken under its own name
      rather than reaching for `--vam-ground`, the way `--vam-filter-badge` is
@@ -1644,6 +1683,19 @@ html.light {
   --vam-icon-purple: #7e22ce;
   --vam-icon-pink: #be185d;
 
+  /* THE TWO BRAND COLOURS, the other way round from dark -- which is the
+     clearest evidence that one value per brand could never have worked.
+     OpenAI's #412991 is a deep indigo and reads at 9.27:1 on these near-white
+     surfaces, so light carries the brand hex verbatim. Claude's #d97757
+     manages 2.69:1 here and fails 1.4.11 outright, so light takes the same
+     colour darkened: H 14.8 and S 63% are the brand's, L moves 59.6% to 40%.
+
+     Worst case over four fills x seven templates, composited with the meta
+     line's 0.82: Claude 3.75:1, OpenAI 5.89:1. The dark block above carries
+     the full argument and the floors. */
+  --vam-brand-claude: #a64526;
+  --vam-brand-openai: #412991;
+
   --vam-running: #166534;
   /* Light's running green is a DEEP one -- it has to read as text on white --
      so the ink on it inverts with the fill: white, at 7.13:1. This is the
@@ -1724,15 +1776,46 @@ html.light {
   color-scheme: light;
 }
 
+/*
+ * THE OPERATOR'S OWN REPORT ON A PHONE, TRANSLATED: "scrolling exposes a
+ * black background underneath." Two faults, both here.
+ *
+ * `height: 100%` ON THESE THREE tracks the LARGE iOS Safari viewport (the
+ * one with the address bar hidden), while `PhoneShell.tsx`'s own root sizes
+ * itself to `100dvh` -- the CURRENT one, smaller whenever the bar is
+ * showing. A document taller than the shell it holds is a document that can
+ * scroll when nothing on it needs to, which is the "exposes" half of the
+ * report: there is real travel below the app's own content. `100dvh` here
+ * matches the shell exactly instead of exceeding it -- on the desktop,
+ * where nothing ever moves the toolbar, `dvh` and the `%` it replaces are
+ * the same number, so this is not a two-target rule.
+ *
+ * `background` ON `html`, NOT ONLY `body` (below), is the "black" half.
+ * `:root` sets `color-scheme: dark` as vam's default, and a `color-scheme`
+ * with no background of its own to fall back on is what a bare rubber-band
+ * bounce -- or any sliver of `html` peeking past a shorter `body` -- paints
+ * with: the UA's own dark canvas, which is black, not `--color-ground`
+ * (#0d0d0d dark, #ffffff light -- close in the dark theme, wrong everywhere
+ * else). One token, both elements, so the two can never drift apart the way
+ * a hand-picked black or white for each would.
+ *
+ * `overscroll-behavior: none` on both is the belt to `100dvh`'s suspenders:
+ * even if some future element outgrows the shell again, the bounce this
+ * report is ABOUT stops being reachable in the first place, on a page that
+ * has no scrollable content of its own by design (every real scroller in
+ * this app -- `OverlayScroll`, the terminal, the transcript -- is an inner
+ * box, never the document).
+ */
 html,
 body,
 #root {
-  height: 100%;
+  height: 100dvh;
+  background: var(--color-ground);
+  overscroll-behavior: none;
 }
 
 body {
   margin: 0;
-  background: var(--color-ground);
   color: var(--color-ink);
   font-family: var(--font-sans);
   /* 12px is orca's workhorse size; 13px is reserved for titles. A fourth
@@ -2204,6 +2287,58 @@ body {
 }
 .vam-no-scrollbar::-webkit-scrollbar {
   display: none;
+}
+
+/*
+ * THE STREAMING TERMINAL'S OWN SCROLLBAR (`TerminalStreamTab.tsx`), hidden
+ * the same way `.vam-no-scrollbar` hides every other native bar in this
+ * renderer -- scoped to `.xterm-viewport` rather than applied as a class,
+ * because xterm.js builds that element itself (`term.open()`) and this
+ * renderer never gets to put a class name on it directly.
+ *
+ * `TerminalTab.tsx`'s own pane hides its native bar the identical way
+ * (`vam-no-scrollbar` on the scroller `OverlayScroll` owns) and paints a
+ * custom overlay thumb over the content instead; this one does not grow that
+ * same overlay for xterm's own scrollback (a separate, bigger task -- xterm's
+ * scroll model is a `<canvas>` and a viewport `<div>`, not a DOM element
+ * `OverlayScroll` could attach to), but the frame parity task this rule
+ * belongs to is specifically about the PANE'S CHROME, not its scrollbar, and
+ * a native bar cutting a straight edge across the rounded frame
+ * (`rounded-[9px] overflow-hidden` on `[data-terminal-stream]`) is the one
+ * piece of xterm's own chrome that would otherwise visibly disagree with it.
+ */
+[data-terminal-stream] .xterm-viewport {
+  scrollbar-width: none;
+}
+[data-terminal-stream] .xterm-viewport::-webkit-scrollbar {
+  display: none;
+}
+
+/*
+ * NO HARDCODED BLACK BEHIND THE GRID, EITHER -- the other half of the same
+ * "grey bar" report. `@xterm/xterm/css/xterm.css`'s own `.xterm-viewport`
+ * rule paints `background-color: #000` ("required... for the scroll bar to
+ * appear fully opaque" on its own comment, a bar the rule above already
+ * removes). `@xterm/addon-fit` also always reserves
+ * `options.overviewRuler?.width || 14` real px on the right for a bar this
+ * pane never draws -- a reservation this file cannot zero without also
+ * instantiating xterm's OWN overview-ruler canvas (`Terminal`'s own
+ * constructor: `options.overviewRuler.width && new OverviewRulerRenderer(...)`,
+ * a decorations feature this pane does not use and does not want a second
+ * canvas layer for). Between that permanent sliver and ordinary column
+ * rounding (`Math.floor` in `proposeDimensions()`), SOME blank strip past
+ * the last drawn column is unavoidable -- so it is repainted transparent
+ * here instead, letting `[data-terminal-stream]`'s own themed background
+ * (`terminalSchemeStyle`, on the frame this selects inside) show through
+ * rather than xterm's hardcoded black seam against a lighter theme.
+ *
+ * `!important`: `@xterm/xterm/css/xterm.css` is imported by
+ * `TerminalStreamTab.tsx` itself, into its own lazy-loaded chunk -- MEASURED
+ * to land in the DOM after this renderer's own stylesheet, so an equal-
+ * specificity override here would lose the cascade tie purely on load
+ * order, silently, depending on which chunk finished fetching last. */
+[data-terminal-stream] .xterm-viewport {
+  background-color: transparent !important;
 }
 
 /*
@@ -2737,8 +2872,9 @@ html {
   opacity: 1;
 }
 
-/* THE THREE ELEMENTS THAT CAN END A PHONE SCREEN, and there were three all
- * along -- the rule only ever named one.
+/* THE ELEMENTS THAT CAN END A PHONE SCREEN -- FOUR NOW, and there were three
+ * all along before this rule named a fourth -- the rule only ever named one
+ * to begin with.
  *
  * `viewport-fit=cover` is in `index.html`, so this resolves to the real
  * indicator; without it, it resolves to 0 and the last row sits under the bar.
@@ -2753,11 +2889,59 @@ html {
  *    flat 12px that a 34px indicator eats;
  *  - the LIST's status bar, which sat flush at the screen's edge with no
  *    padding at all, and which is where the failures button lives: "the
- *    surface most wanted at the worst moment". */
+ *    surface most wanted at the worst moment";
+ *  - `data-question-bar-inline` (docs/design/phone-core-loop.md §3.2-3.3):
+ *    the Response view's inline question, `sticky bottom-0` inside the
+ *    transcript's own scroller now rather than the fixed `data-question-bar`
+ *    footer -- but it is STILL the bottom of the screen whenever the
+ *    composer stands down, and its own last row is the same option-to-tap
+ *    the fixed card's rule was written for. Missing this selector would have
+ *    been the exact regression the rule above already fixed once, on the
+ *    new mount point. */
 [data-phone-shell] [data-composer-bar],
 [data-phone-shell] [data-question-bar],
+[data-phone-shell] [data-question-bar-inline],
 [data-phone-shell] [data-phone-status-bar] {
   padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
+
+/* B13: THE OTHER THREE EDGES -- only the bottom one, above, had ever been
+ * given the safe-area treatment. A landscape phone with the pill/notch's long
+ * axis on the LEFT or RIGHT draws over the shell's own content with nothing
+ * pushing it in, and the TOP bar sits flush under a status-bar-shaped cutout
+ * the same way the list's own footer used to sit under the home indicator
+ * before the rule above existed.
+ *
+ * LEFT/RIGHT, ONCE, AT THE SHELL'S OWN ROOT: every row inside -- the app bar,
+ * the transcript, the composer, the list's own header and footer -- spans the
+ * shell's full width, and none of them carries its own left/right padding
+ * rule, so one rule here gutters all of them without double-padding any one
+ * of them twice. In portrait both insets resolve to 0 and nothing painted
+ * today moves; a landscape phone is the case this closes. */
+[data-phone-shell] {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* TOP, AT THE ONE ROW THAT TOUCHES IT, not at the root: the transcript below
+ * the app bar must not gain a matching gap of empty space, only the bar
+ * itself sits under a status-bar-shaped cutout. `data-phone-top-bar` marks
+ * the session screen's own `<header>` (`PhoneShell.tsx`), whose height was
+ * `h-12` -- fixed, no padding of its own -- now `min-h-12` so this padding
+ * GROWS the bar rather than squeezing its icons into a shorter box. */
+[data-phone-shell] [data-phone-top-bar] {
+  padding-top: env(safe-area-inset-top);
+}
+
+/* The list screen's own top bar (`SessionList.tsx`'s avatar row) already
+ * carries a flat `p-3` (12px on every side) -- `max()`, not a bare `env()`,
+ * is what keeps that 12px look intact at the 0 inset every ordinary device
+ * reports, and only grows past it under a real one. Marked
+ * `data-phone-list-top-bar`, distinct from the session screen's bar above,
+ * because the two start from different baselines (12px here, 0 there) and a
+ * shared selector could only get one of them right. */
+[data-phone-shell] [data-phone-list-top-bar] {
+  padding-top: max(12px, env(safe-area-inset-top));
 }
 
 /* The rule that stood here hid `[data-view-tabs]` while the soft keyboard was

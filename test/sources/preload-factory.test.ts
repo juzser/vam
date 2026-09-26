@@ -19,6 +19,7 @@ const NO_CAPABILITIES: SourceCapabilities = {
   pullRequests: false,
   terminal: false,
   agentRoster: false,
+  resumeSession: false,
 };
 
 const ALL_CAPABILITIES: SourceCapabilities = {
@@ -34,6 +35,7 @@ const ALL_CAPABILITIES: SourceCapabilities = {
   pullRequests: true,
   terminal: true,
   agentRoster: true,
+  resumeSession: true,
 };
 
 /**
@@ -74,6 +76,7 @@ function makeApi(descriptor: SourceDescriptor): PreloadSourceApi {
   return {
     describe: vi.fn(async () => descriptor),
     load: vi.fn(async () => []),
+    resumeSession: vi.fn(async () => {}),
     subscribe: vi.fn(() => unsubscribe),
     agentWork: vi.fn(async () => ({ kind: 'work' as const, turns: [], brief: null, whole: true })),
     recordPrompt: vi.fn(async () => undefined),
@@ -204,6 +207,25 @@ describe('createSourceFromPreload', () => {
     const stop = source.subscribe(onChange);
     expect(api.subscribe).toHaveBeenCalledWith(onChange);
     stop();
+  });
+
+  /**
+   * `agentWork` IS ANSWER-GATED, NOT CAPABILITY-GATED -- `port.ts`'s own doc
+   * comment says so in the same sentence that names `history`: "OPTIONAL AND
+   * ANSWER-GATED, exactly like `history` above". `history` is assigned
+   * unconditionally two lines above where `agentWork` belongs; this member
+   * must be too, whatever the descriptor's capabilities say, because a source
+   * that cannot look answers through `AgentWork`'s own `unavailable` arm, not
+   * through absence here.
+   */
+  it('assigns agentWork unconditionally, exactly like history', async () => {
+    const api = makeApi(makeDescriptor(NO_CAPABILITIES));
+    const source = await createSourceFromPreload(api);
+
+    expect('agentWork' in source).toBe(true);
+    expect(source.agentWork).toBeDefined();
+    await source.agentWork?.('s1', 'agent-a');
+    expect(api.agentWork).toHaveBeenCalledWith('s1', 'agent-a');
   });
 
   it('forwards every write and governance call to the api', async () => {

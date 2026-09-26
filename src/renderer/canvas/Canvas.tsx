@@ -31,12 +31,14 @@
  * that same id again.
  */
 
-import { Box, Factory, FlaskConical, type LucideIcon, Pencil, Plus } from 'lucide-react';
+import { Pencil, Plus } from 'lucide-react';
 import {
   type ComponentProps,
+  lazy,
   memo,
   type DragEvent as ReactDragEvent,
   type ReactNode,
+  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -45,6 +47,7 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
+import { type ProviderId, resolveProvider } from '../../shared/providers.js';
 import {
   describeUsage,
   POLL_INTERVAL_MS,
@@ -69,20 +72,31 @@ import {
   withPending,
 } from '../domain/optimistic.js';
 import { cycleMatch, searchMatches } from '../domain/search.js';
-import type { SessionEntry } from '../domain/selectors.js';
-import { orderedPaneTabs, orderedSessions } from '../domain/selectors.js';
+import type { SessionEntry, ViewOptions } from '../domain/selectors.js';
+import { applyViewOrder, orderedPaneTabs, orderedSessions } from '../domain/selectors.js';
 import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
-import { isAgentStarted, isHiddenByOriginFilters, isUnprompted } from '../domain/session-filter.js';
+import {
+  countHiddenByForeignFilter,
+  isAgentStarted,
+  isEnded,
+  isForeign,
+  isHiddenByEndedFilter,
+  isHiddenByForeignFilter,
+  isHiddenByIdleFilter,
+  isHiddenByOriginFilters,
+  isIdle,
+  isUnprompted,
+} from '../domain/session-filter.js';
 import { ErrorLogPanel } from '../errors/ErrorLogPanel.js';
 import { loggedEvents, noteFailure, recordRefusal, subscribeEvents } from '../errors/log.js';
 import {
   type Chord,
   type ChordState,
-  chordSymbols,
   chordText,
   EMPTY_CHORD,
   isSelectOnly,
   isSelectOnlyChord,
+  type KeyAction,
   normalizeKey,
   resolveChord,
 } from '../keyboard/chords.js';
@@ -93,16 +107,21 @@ import {
   releaseInsert,
 } from '../keyboard/focus-scope.js';
 import { type CursorMode, MODE_TITLES } from '../keyboard/keysheet.js';
-import { primaryChord, ShortcutTip, TipProvider } from '../keyboard/ShortcutTip.js';
+import { ChordGlyphs, primaryChord, ShortcutTip, TipProvider } from '../keyboard/ShortcutTip.js';
+import { useWaitingNotifications } from '../notify/useWaitingNotifications.js';
 import { buildActions, clampIndex } from '../panels/actions.js';
 import { CommandPalette } from '../panels/CommandPalette.js';
 import { ConfirmForceClose } from '../panels/ConfirmForceClose.js';
 import { ContextMenu } from '../panels/ContextMenu.js';
 import { copyText } from '../panels/clipboard.js';
-import { DetailPanel } from '../panels/DetailPanel.js';
+import {
+  DetailPanel,
+  type Tab as DetailTab,
+  type StartingPaneWait,
+} from '../panels/DetailPanel.js';
 import { GroupPicker, type GroupPickerChoice } from '../panels/GroupPicker.js';
 import { IconPicker } from '../panels/IconPicker.js';
-import { describeIcon, IconMark, parseIcon } from '../panels/icon-value.js';
+import { describeIcon, parseIcon } from '../panels/icon-value.js';
 import { KeySheet } from '../panels/KeySheet.js';
 import { Note } from '../panels/Note.js';
 import { PaneResizer } from '../panels/PaneResizer.js';
@@ -110,7 +129,6 @@ import { type ProjectChoice, ProjectPicker } from '../panels/ProjectPicker.js';
 import type { RemovalPlan } from '../panels/remove-project.js';
 import { NEW_PROJECT_PENDING, rowMenuItems, SessionList } from '../panels/SessionList.js';
 import { SplitResizer } from '../panels/SplitResizer.js';
-import { resolveSessionIcon } from '../panels/session-icon.js';
 import { StatusMark } from '../panels/status-mark.js';
 import { halfPageTarget } from '../panels/stick-to-bottom.js';
 import { TABS, tabForDigit, visibleTabs } from '../panels/tabs.js';
@@ -120,23 +138,26 @@ import { type FocusCandidate, resolveFocusNodeId } from '../prefs/focus.js';
 import { DEFAULT_PANES, PANE_RESIZE_STEP } from '../prefs/panes.js';
 import {
   addProjectToGroup,
-  applyIcons,
+  applyProjectIcons,
   applyRenames,
   browserStorage,
+  countDismissedSessions,
   createGroup,
   deleteGroup,
   isGroupCollapsed,
   isProjectCollapsed,
   isProjectHidden,
+  isSessionDismissed,
   prRepoFor,
   removeProjectFromGroup,
   renameGroup,
+  restoreAllDismissedSessions,
   setDefaultProvider,
+  setFilesMarkdownView,
   setFilesTreeWidth,
   setFocusView,
   setGroupCollapsed,
   setGroupIcon,
-  setIcon,
   setLastFocus,
   setPaneWidth,
   setProjectCollapsed,
@@ -145,13 +166,20 @@ import {
   setProjectPrRepo,
   setProjectRename,
   setRename,
+  setSessionDismissed,
   setSessionFilters,
   setTheme,
+  setViewOptions,
 } from '../prefs/prefs.js';
 import { isTabIndicatorOn, type TabIndicatorId } from '../prefs/tab-indicators.js';
-import { SettingsOverlay } from '../settings/SettingsOverlay.js';
-import { canWriteTo, type SessionSource, type SourceWrites } from '../sources/port.js';
-import { PROVIDER_MARKS } from '../sources/provider-marks.js';
+import { capabilitiesFor } from '../sources/members.js';
+import {
+  canWriteTo,
+  describeFailure,
+  type SessionSource,
+  type SourceWrites,
+} from '../sources/port.js';
+import { markRegisterOf, SourceMark } from '../sources/provider-marks.js';
 import { type CanvasSource, READ_ONLY_SOURCE } from '../sources/source.js';
 import { useCanvasOverlays } from './canvas-overlays.js';
 import { useCanvasPrefs } from './canvas-prefs.js';
@@ -174,6 +202,7 @@ import {
   paneHolding,
   pruneClosedTabs,
   removeTab,
+  renameTab,
   resizeSplit,
   restoreLayout,
   type SplitOrientation,
@@ -184,6 +213,19 @@ import {
   splitSizes,
   stepPane,
 } from './split.js';
+
+// `SettingsOverlay`, in its own lazy chunk -- the same `React.lazy` +
+// `Suspense` split `LazyMarkdown.tsx` already does for the markdown stack,
+// at the boundary this repo's bundle-budget guard measures. It is a window
+// overlay (`SettingsOverlay.tsx`'s own root: `absolute inset-0`, over
+// everything, reflowing nothing beside it) that exists only once `settingsOpen`
+// is true, so a `null` Suspense fallback costs this layout nothing while the
+// chunk is in flight -- the space it would occupy is not shared with any
+// other content, and after the first open the chunk is cached for the rest
+// of the app's life.
+const SettingsOverlay = lazy(() =>
+  import('../settings/SettingsOverlay.js').then((m) => ({ default: m.SettingsOverlay })),
+);
 
 /** `model.groups ?? []` on every render is a fresh reference each keystroke,
  *  defeating `SessionList`'s memo -- a module-level constant keeps this a
@@ -242,6 +284,15 @@ const STATUS_MAX_CHARS = 72;
  * and the refusal says what happened either way.
  */
 const REPEAT_WINDOW_MS = 1_500;
+
+/**
+ * HOW LONG START SESSION / RESUME WAIT BEFORE OFFERING THE TERMINAL VIEW
+ * INSTEAD OF A SPINNER -- `startingPaneByKey`'s own comment. Exported for the
+ * same reason `PAINT_LIFETIME_MS` is: a test that means "past the timeout"
+ * says so in this name rather than restating the number and drifting from it
+ * the day this changes.
+ */
+export const START_PANE_WAIT_TIMEOUT_MS = 30_000;
 
 /**
  * A status message shortened for the bar, never for the log.
@@ -388,19 +439,23 @@ function jumpLabels(ids: readonly string[]): Map<string, string> {
 }
 
 /**
- * What the icon picker is aiming at.
+ * What an in-place session rename is aiming at.
  *
- * The SOURCE is captured when the picker opens, not re-derived when it
- * closes. Re-deriving it meant `allEntries.find(e => e.session.id === id)`,
- * a lookup by session id ACROSS EVERY SOURCE — the exact ambiguity this
- * epic re-keyed storage to remove. With two sources holding a session
- * `D-257`, `.find` returns whichever sorts first, so the glyph could land in
- * the wrong source's bucket and appear on the other session. The title is
- * carried for the same reason: it was a second lookup with the same flaw,
- * and it also cannot go stale if the entry disappears while the picker is
- * open.
+ * The SOURCE is captured when the edit opens, not re-derived when it commits.
+ * Re-deriving it meant `allEntries.find(e => e.session.id === id)`, a lookup
+ * by session id ACROSS EVERY SOURCE — the exact ambiguity this epic re-keyed
+ * storage to remove. With two sources holding a session `D-257`, `.find`
+ * returns whichever sorts first, so the name could land in the wrong source's
+ * bucket and appear on the other session. The title is carried for the same
+ * reason: it was a second lookup with the same flaw, and it also cannot go
+ * stale if the entry disappears while the edit is open.
+ *
+ * IT WAS `IconTarget`, AND THE ICON PICKER IS WHY IT EXISTS: the bug above was
+ * found there first, and the rename flow adopted the fix. The session-icon
+ * picker has since been removed outright, so the name follows the one caller
+ * that is left rather than the one that taught it the lesson.
  */
-type IconTarget = {
+type RenameTarget = {
   readonly source: SourceId;
   readonly sessionId: string;
   readonly title: string;
@@ -408,7 +463,7 @@ type IconTarget = {
 
 /**
  * What the PROJECT icon picker is aiming at — same shape and same reasoning
- * as `IconTarget`, one level up: captured when the picker opens rather than
+ * as `RenameTarget`, one level up: captured when the picker opens rather than
  * re-derived, so a model refresh mid-pick cannot move the write to the wrong
  * project.
  */
@@ -635,6 +690,25 @@ function isForcible(cause: unknown): boolean {
     'forcible' in cause &&
     (cause as { forcible?: unknown }).forcible === true
   );
+}
+
+/**
+ * A refusal that is not a failure at all -- `stop.ts`'s `already-finished`
+ * (an interactive row the source itself already reports `done`/`failed`) and
+ * `session-gone` (the CLI's own "No job matching", a background job that
+ * ended). Both mean Close was asked for a goal that was ALREADY TRUE: there
+ * is no running job left to stop, nothing was lost, the conversation is kept
+ * either way. `closeSession` still has to dismiss the row -- the source keeps
+ * reporting a `done`/`failed` background job for `agents.ts`'s own retention
+ * window regardless of what this call returns, so nothing but a dismissal
+ * makes it leave the sidebar -- but recording that as a `failure` would be a
+ * false alarm in the operator's error log for the one outcome that IS the
+ * success case. See `recordRefusal`, the log's own "no, not an error" entry.
+ */
+function isGracefulCloseRefusal(cause: unknown): boolean {
+  if (typeof cause !== 'object' || cause === null || !('code' in cause)) return false;
+  const code = (cause as { code?: unknown }).code;
+  return code === 'already-finished' || code === 'session-gone';
 }
 
 /** Neither `window.api` nor its `usage` member exists in the browser build. */
@@ -882,6 +956,12 @@ const TAB_STATUS_INK: Readonly<Record<SessionStatus, string>> = {
   running: 'text-running',
   waiting: 'text-waiting',
   idle: 'text-idle',
+  unstarted: 'text-idle',
+  // The pane is alive and a conversation is known -- the same quiet `idle`
+  // and `unstarted` already share, and the tab draws it because, unlike
+  // those two, the operator asked for a mark here (`model.ts`'s own doc on
+  // `terminal`).
+  terminal: 'text-idle',
   done: 'text-done',
   failed: 'text-failed',
 };
@@ -908,29 +988,33 @@ const TAB_STATUS_INK: Readonly<Record<SessionStatus, string>> = {
  * sidebar row's own glyph (`panels/status-mark.tsx`: a spinner, a bell, a
  * triangle, a tick), so the two surfaces say one thing -- and only for a
  * status the indicator list names (`prefs/tab-indicators.ts`). Idle is not a
- * switch: a resting tab with no icon and no draft is its title and nothing
- * else, and no empty lane is reserved for the mark it is not wearing. A quiet
- * tab is narrower than a busy one; that is the point, not a cost.
+ * switch: a resting tab with no draft is its provider glyph and its title and
+ * nothing else, and no empty lane is reserved for the STATUS mark it is not
+ * wearing. A quiet tab is narrower than a busy one; that is the point, not a
+ * cost.
  *
  * THE LANE IS `--text-control`, 12px, the tab label's own size -- and the
  * glyph fills it. The sidebar row centres a 12px glyph in a 14px lane under a
- * 13px title; a tab's title is 12px on a 16px line, and the session icon
- * beside it already draws at exactly 12 (`IconMark size={12}` below, "the
- * tab label's own size, so the two kinds of icon occupy the same height"). A
- * mark at the same 12 sits in the same square as that icon and on the same
- * centre line as the label, which is what makes the two read as one row of
- * things rather than a big thing beside a small one. The two pixels of air
- * the sidebar keeps inside its lane are for a triangle and a circle sitting
- * centred beside each other in a COLUMN; on a tab the mark has no neighbour
- * above or below to be centred against, and the lucide glyphs carry their own
- * pixel of air inside the box (a 24-unit viewBox with 2 units of margin). The
- * 16px line has two pixels above and below the lane; the row is 36 and does
- * not move (measured in `e2e/tab-strip-shots.mjs`).
+ * 13px title; a tab's title is 12px on a 16px line, and the provider glyph
+ * beside the mark takes this same number (`SourceMark lane={TAB_MARK_GLYPH_PX}`
+ * below), so the two things drawn before a title occupy one square each and
+ * sit on the label's own centre line -- which is what makes them read as one
+ * row of things rather than a big thing beside a small one. (The session
+ * icon used to be the glyph making that argument, at exactly 12 for exactly
+ * this reason; the operator removed it and the provider inherited both the
+ * slot and the number.) The two pixels of air the sidebar keeps inside its
+ * lane are for a triangle and a circle sitting centred beside each other in a
+ * COLUMN; on a tab the mark has no neighbour above or below to be centred
+ * against, and the lucide glyphs carry their own pixel of air inside the box
+ * (a 24-unit viewBox with 2 units of margin). The 16px line has two pixels
+ * above and below the lane; the row is 36 and does not move (measured in
+ * `e2e/tab-strip-shots.mjs`).
  *
- * Mark first, then the icon, then the title, then the marks about the
- * OPERATOR's state in this tab -- an unsent draft, a prompt not yet recorded,
- * sub-agents at work -- because reading order on a strip is left to right and
- * what the session is doing outranks what you were doing here.
+ * Mark first, then the PROVIDER glyph, then the title, then the marks about
+ * the OPERATOR's state in this tab -- an unsent draft, a prompt not yet
+ * recorded, sub-agents at work -- because reading order on a strip is left to
+ * right, and what the session is doing outranks who ran it, which outranks
+ * what you were doing here.
  */
 export const TAB_MARK_LANE_PX = 12;
 /** The glyph is the lane: see above for why the tab keeps no air the sidebar
@@ -944,9 +1028,9 @@ type TabStatusMark = Extract<TabIndicatorId, SessionStatus>;
 
 /** Which status mark, if any, this session's tab draws under these switches.
  *  `null` for idle whatever the switches say, and for a status whose switch
- *  is off. */
+ *  is off. `unstarted` is idle's case exactly: a quiet tab, nothing to mark. */
 function tabStatusMark(status: SessionStatus): TabStatusMark | null {
-  if (status === 'idle') return null;
+  if (status === 'idle' || status === 'unstarted') return null;
   return isTabIndicatorOn(status) ? status : null;
 }
 
@@ -969,6 +1053,7 @@ function TabStrip({
   onTabContextMenu,
   onTabDragStart,
   onTabDragEnd,
+  emptyText = 'no sessions open — pick one from the sidebar',
 }: {
   readonly orientation: 'horizontal' | 'vertical';
   readonly tabs: readonly SessionEntry[];
@@ -1030,6 +1115,19 @@ function TabStrip({
     sessionId: string,
   ) => (event: ReactDragEvent<HTMLButtonElement>) => void;
   readonly onTabDragEnd?: () => void;
+  /**
+   * WHAT THE STRIP SAYS WITH NOTHING OPEN, when there is something else on
+   * screen to point at — "no sessions open — pick one from the sidebar" is
+   * only honest while the sidebar actually HAS a row to pick, which is every
+   * caller but one: the getting-started screen's own empty app, where
+   * `Canvas.tsx` overrides this to "no sessions yet" (the sidebar's own
+   * words for the identical fact, `SessionList.tsx`'s empty-state `<li>`) --
+   * pointing the operator at a sidebar that has nothing either would be the
+   * same false lead the detail pane's plain "no session" text was pulled for
+   * (audit F9). Optional and defaulted so every existing caller keeps its
+   * own sentence unchanged.
+   */
+  readonly emptyText?: string;
 }) {
   /** One right-click handler per tab, shared by its two buttons so they cannot
    *  drift, and `undefined` when the caller offered no menu -- which leaves the
@@ -1119,7 +1217,7 @@ function TabStrip({
         data-orientation={orientation}
         className="flex min-w-0 shrink items-center whitespace-nowrap px-1 text-control text-ink-faint"
       >
-        no sessions open — pick one from the sidebar
+        {emptyText}
       </div>
     );
   }
@@ -1154,20 +1252,26 @@ function TabStrip({
     >
       {tabs.map((entry) => {
         const active = entry.session.id === activeId;
-        // The chain (`panels/session-icon.ts`): the session's own choice, else
-        // its project's, else nothing drawn -- deliberately not the module's
-        // own placeholder glyph, which would put a Monitor icon on every tab
-        // nobody has picked one for. Adopting the chain is the point: this
-        // used to read `entry.session.icon` alone, so a tab never fell back
-        // to its project's glyph the way the (now-deleted) canvas root node
-        // already did, and the two surfaces disagreed the moment one carried
-        // a project icon and no session icon of its own.
+        // A SESSION ICON USED TO BE RESOLVED HERE, and the block that drew
+        // it sat just before the title below. It was kept for one release
+        // after "remove the session icon from the tab", switched off but
+        // intact, because `tab-indicators.ts` documented "off but still in
+        // the union" as the way back. There is no way back now: with the tab
+        // gone the picker wrote where nothing read, and the operator removed
+        // the picker too. Rendering that had no value to draw is rendering
+        // nobody can turn on, so it went with the id.
         //
-        // The chain answers with a KIND now (an emoji, or a named glyph in a
-        // tone), not a character, so the tone arrives here without this strip
-        // knowing that colours exist -- see `session-icon.tsx` for why that is
-        // one chain and not two.
-        const icon = isTabIndicatorOn('icon') ? resolveSessionIcon(entry) : null;
+        // WHICH AGENT RAN THIS TAB. The operator: "put the provider glyph
+        // after the indicator, on the tab name." The same two fields the
+        // sidebar row's `rowSource` reads, in the same order, because they
+        // are stamped by different readers and the narrower one wins -- and
+        // `null` when neither answers, which draws NOTHING rather than an
+        // empty lane. The sidebar reserves its lane because it is a column
+        // and a collapsing lane moves every row's branch name; tabs sit side
+        // by side, so there is no alignment to protect and a lane held open
+        // for a mark that is not coming would be the invisible dot the
+        // operator had removed from this very strip.
+        const tabSource = entry.session.source ?? entry.project.source ?? null;
         const mark = tabStatusMark(entry.session.status);
         const draft = isTabIndicatorOn('draft') && hasDraft(drafts[entry.session.id]);
         const queued =
@@ -1224,6 +1328,41 @@ function TabStrip({
                 />
               </span>
             )}
+            {/* THE PROVIDER, BETWEEN THE MARK AND THE TITLE -- the operator's
+                own order: what the session is doing, who ran it, what it is
+                called. A SIBLING of the select button rather than a child,
+                which is the reason the draft pencil is one: the button
+                truncates at 160px, and a glyph inside it goes into the
+                ellipsis on exactly the tabs whose titles are long enough to
+                need telling apart.
+
+                DECORATIVE, on the argument the status mark beside it already
+                makes: every tab of one project carries the same provider, so
+                an announced mark reads the source aloud before each of eight
+                titles. The fact is not lost to a screen reader -- the status
+                bar's `SourceGlyph` names the FOCUSED session's source, once,
+                in a labelled `role="img"` with a tab stop.
+
+                `data-source-mark` records WHICH register answered (brand,
+                vam's own glyph, or the neutral box), so a mark that quietly
+                fell back is an assertable outcome rather than an invisible
+                default -- the hook `SourceGlyph` and the sidebar row both
+                carry, for that reason.
+
+                NO INK OF ITS OWN: it inherits the tab's, so it dims with the
+                tab and lights with it, the way the pending ring's
+                `border-current` does. The status marks are the exception on
+                this strip, and deliberately -- theirs is a status colour. */}
+            {tabSource !== null && (
+              <span
+                data-tab-source={tabSource}
+                data-source-mark={markRegisterOf(tabSource)}
+                aria-hidden="true"
+                className="flex flex-none"
+              >
+                <SourceMark source={tabSource} lane={TAB_MARK_GLYPH_PX} />
+              </span>
+            )}
             <button
               type="button"
               data-tab-select
@@ -1241,25 +1380,6 @@ function TabStrip({
               onContextMenu={tabMenuOf(entry)}
               className={`max-w-[160px] cursor-pointer truncate py-1 ${active ? TAB_STATUS_INK[entry.session.status] : ''}`}
             >
-              {icon !== null && (
-                <>
-                  {/* `inline-flex` so a drawn glyph sits on the label's centre
-                      line rather than on its baseline, which is where an
-                      inline `<svg>` lands by default and is about 3px too low
-                      beside 12px text. An emoji is unaffected: it is the only
-                      thing in the box either way. 12 is `--text-control`, the
-                      tab label's own size, so the two kinds of icon occupy the
-                      same height. */}
-                  <span
-                    data-session-icon={entry.session.id}
-                    data-tab-mark="icon"
-                    aria-hidden="true"
-                    className="inline-flex items-center align-middle"
-                  >
-                    <IconMark value={icon} size={TAB_MARK_GLYPH_PX} fallback={null} />
-                  </span>{' '}
-                </>
-              )}
               {entry.session.title}
             </button>
             {/* THE MARKS ABOUT YOU, after the title. Siblings of the select
@@ -1352,6 +1472,40 @@ function TabStrip({
  * phone shell's app bar, which has no canvas top bar to put it in. The one
  * thing a dashboard must never do is look the same whether or not it is
  * connected, so it is never dropped from either.
+ *
+ * ── THE HEALTHY ARM STOPPED NAMING THE SOURCES ───────────────────────────
+ *
+ * The operator: "status bar -- show only the provider of the session that is
+ * open, not Claude Code + Codex." That string was not a bug, it was this cell
+ * working as written: with two desktop sources registered,
+ * `main/sources/combine.ts` builds the label as
+ * `members.map((m) => m.label).join(' + ')`, so the resting state of the bar
+ * was a list of everything vam is connected to. Two cells along, `SourceGlyph`
+ * draws the mark of the source the FOCUSED session came from -- which is the
+ * question an operator actually has, answered about one session rather than
+ * about the registry.
+ *
+ * SO THE NAMES LEFT THE PAINT AND NOT THE DOM. This cell's job is HEALTH, not
+ * naming -- the paragraph above is what gives it a permanent home -- and the
+ * mark is what says health. The names move to where a name is still
+ * answerable from: `sr-only` text, so a screen reader gets them as the cell's
+ * accessible name, and a `Note`, so a pointer or a keyboard can ask. Nothing
+ * is destroyed; it stops being spent on every frame.
+ *
+ * THE ERROR AND CONNECTING ARMS ARE UNTOUCHED, deliberately. They are the
+ * whole point of the cell -- `● {error}` in red, `○ connecting to the source…`
+ * -- and they were already right.
+ *
+ * A BARE COLOURED DOT WOULD BE A COLOUR-ONLY SIGNAL (WCAG 1.4.1), the rule
+ * `status-mark.tsx` holds for the five session statuses and which this cell
+ * must not become the exception to. Two channels carry "connected" without
+ * hue. The `sr-only` word is read aloud, so nothing reading the DOM depends on
+ * green. And for a sighted reader who cannot use hue, the healthy session arm
+ * is the ONLY arm that paints a mark and NOTHING ELSE: every other state here
+ * puts words beside its glyph -- the error, both connecting messages, the demo
+ * note, even the factory's own healthy `● factory`. A lone mark is the shape
+ * of "connected"; a mark with words after it is the shape of "something to
+ * read".
  */
 function SourceReadout({ source }: { source: CanvasSource }) {
   return (
@@ -1374,7 +1528,19 @@ function SourceReadout({ source }: { source: CanvasSource }) {
         // defect this arm exists to prevent, and the failure badge in the
         // status bar was the only surface saying otherwise.
         source.error === undefined || source.error === null ? (
-          <span className="text-done">● {source.source.label}</span>
+          <Note text={`connected to ${source.source.label}`}>
+            {/* The tab stop is what makes the `Note` worth having, and it is
+                the argument `StatusCell` and `SourceGlyph` both make in this
+                same bar: a tooltip that opens on focus is worth nothing on an
+                element that cannot be focused. The tooltip opening IS the
+                visible response to focus here, as it is on the glyph cell.
+                The suppression sits on the line above the attribute because
+                biome reports it there and suppresses by line. */}
+            {/* biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS how the names stay reachable -- see `StatusCell`. */}
+            <span className="text-done" tabIndex={0}>
+              ●<span className="sr-only"> connected to {source.source.label}</span>
+            </span>
+          </Note>
         ) : (
           <span className="text-failed">● {source.error}</span>
         )
@@ -1637,11 +1803,11 @@ function CanvasInner({
     // source's.
     () =>
       applyRenames(
-        applyIcons(factoryModel, prefs.icons, prefs.projectIcons),
+        applyProjectIcons(factoryModel, prefs.projectIcons),
         prefs.renames,
         prefs.projectNames,
       ),
-    [factoryModel, prefs.icons, prefs.projectIcons, prefs.renames, prefs.projectNames],
+    [factoryModel, prefs.projectIcons, prefs.renames, prefs.projectNames],
   );
 
   /**
@@ -1854,6 +2020,15 @@ function CanvasInner({
    *  the same reason: it must stay a stably-identified callback. */
   const panesRef = useRef<SplitTree>(panes);
   /**
+   * Which vam pane each session was in, as of the LAST model the prune
+   * effect reconciled -- session id to `Session.pane`. Written at the end of
+   * that effect and read at the start of the next, so a row that changed
+   * identity between two models can be matched to its successor by the one
+   * thing the two ids share. Not a render-phase mirror like the refs above:
+   * a mirror would already hold the new model by the time the effect ran.
+   */
+  const lastPaneOfSession = useRef<ReadonlyMap<string, string>>(new Map());
+  /**
    * A15.7 — ONE REMEMBERED LAYOUT PER PROJECT, and which pane in it had the
    * keyboard. Written when the operator leaves a project, read when they come
    * back (`restoreLayout` reconciles it against what is still open). A ref
@@ -2012,7 +2187,31 @@ function CanvasInner({
    * bar has. Read in two places -- the pane is told, and `Mod-<digit>` counts
    * the same list -- and that is the point: the digit must count what is drawn.
    */
-  const terminalTab = source.kind === 'session' && source.source.capabilities.terminal;
+  /**
+   * PER ROW, NOT PER APP, and that is the change a second source forced.
+   *
+   * This used to read `source.source.capabilities.terminal` -- the OR over
+   * everything main serves -- which was right while main served one source and
+   * became wrong the moment it served two. Claude Code types into a pane it
+   * started; Codex queues into a thread vam never saw and withdraws `terminal`
+   * with its own words. The OR would have drawn a Terminal tab over a Codex
+   * row that has no terminal behind it.
+   *
+   * The `source.kind === 'session'` gate stays and is still load-bearing for
+   * the compiler as much as for the UI: `capabilities` only TYPE-EXISTS on a
+   * session source. See `filesTab` below for the flag that deliberately has no
+   * such gate.
+   */
+  const terminalFor = useCallback(
+    (sourceId: string | undefined): boolean =>
+      source.kind === 'session' && capabilitiesFor(source.source, sourceId).capabilities.terminal,
+    [source],
+  );
+  /**
+   * The same fact, for whichever row the KEYBOARD is on -- which is what
+   * `Mod-<digit>` counts, because the digit must count what the focused pane
+   * draws. Defined below `focusedEntry`, not here, for the ordinary reason.
+   */
   /**
    * Whether THIS BUILD can show a file editor at all -- read the same way
    * `dialog.chooseDirectory`'s own presence already is (`window.api?.dialog?.
@@ -2045,6 +2244,29 @@ function CanvasInner({
    */
   const events = useSyncExternalStore(subscribeEvents, loggedEvents, loggedEvents);
   const failureCount = events.filter((event) => event.kind === 'failure').length;
+  /**
+   * How many rows are currently dismissed -- the whole of the undo
+   * affordance this feature ships with (`dismissSession`, `entries`'s own
+   * filter, above). Hidden entirely at zero, like `failureCount`: a
+   * permanent "0 dismissed" is exactly the noise that comment argues against.
+   */
+  const dismissedCount = countDismissedSessions(prefs);
+  /**
+   * Composer state, KEYED BY SESSION — the load-bearing change a tab shell
+   * makes here, and the reason A15.1's split panes cost this file almost
+   * nothing extra for the composer specifically. A draft typed in one tab
+   * must survive switching to another and back rather than bleeding into it
+   * or vanishing, and (A15.1) two SPLIT PANES showing two different
+   * sessions must never share one either — both are the same requirement,
+   * "keyed by session, not by whichever pane happens to be looking", and
+   * this was already keyed that way before a second pane existed. One
+   * `Record` per piece of state, read and written through the
+   * `*For(sessionId, …)` helpers below. `buildDetailProps` (further down)
+   * reads these directly per pane; `setComposing`/`actionIndex` are the two
+   * zero-argument aliases still used by keyboard-only callers that only
+   * ever mean "whichever session the keyboard is in right now" (the chord
+   * switch, `beginComposing`) — see that declaration's own comment.
+   */
   const {
     draftsBySession,
     composingBySession,
@@ -2052,7 +2274,7 @@ function CanvasInner({
     setViewBySession,
     sendFailureBySession,
     setSendFailureFor,
-    setViewFor,
+    setViewFor: setViewForBase,
     setDraftFor,
     setComposingFor,
     actionIndexBySession,
@@ -2061,6 +2283,35 @@ function CanvasInner({
     setWritingFor,
   } = useCanvasSessionUi(prefs, savePrefs);
   const [viewSeed] = useState<string | null>(() => prefs.detailTab);
+  /**
+   * THE ONE WRITER, wrapped once more here on top of the hook's own -- it
+   * writes two places because there are two questions, both answered inside
+   * `useCanvasSessionUi`: the record is what THIS SESSION is showing now, the
+   * preference is what the NEXT RUN opens on.
+   *
+   * LEAVING TERMINAL ALSO ASKS FOR A FRESH READ, for the same reason as every
+   * other write in this file (`source.onWrote()`, six times over): the
+   * operator's report was that the Response view kept showing a question's
+   * options after they had answered it directly in the Terminal pane, by
+   * hand -- out of band from anything vam itself wrote, so nothing here would
+   * otherwise know to look again before the source's own poll got around to
+   * it. `prev` reads the SAME fallback the pane's own `tab` prop does
+   * (`viewBySession[sessionId] ?? viewSeed`), so a session sitting on
+   * Terminal only because that is the seed it opened on is still caught
+   * leaving it, not just one that was switched there explicitly. `source` is
+   * not part of the per-session UI cluster `useCanvasSessionUi` owns, so this
+   * one check stays here rather than moving into the hook.
+   */
+  const setViewFor = useCallback(
+    (sessionId: string, view: DetailTab) => {
+      const prev = viewBySession[sessionId] ?? viewSeed;
+      setViewForBase(sessionId, view);
+      if (prev === 'Terminal' && view !== 'Terminal' && source.kind === 'session') {
+        source.onWrote();
+      }
+    },
+    [viewBySession, viewSeed, source, setViewForBase],
+  );
   /**
    * WHICH CURSOR MODE THE KEYBOARD IS IN — Select or Insert.
    *
@@ -2124,14 +2375,14 @@ function CanvasInner({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   /**
    * WHICH source's session is being renamed, captured when the editor opens
-   * rather than re-derived when it commits -- the same argument `IconTarget`
+   * rather than re-derived when it commits -- the same argument
+   * `RenameTarget`
    * makes above, and the same bug avoided: a lookup by session id across
    * every source returns whichever sorts first, and the name would land in
    * the wrong source's bucket.
    */
-  const [renameTarget, setRenameTarget] = useState<IconTarget | null>(null);
+  const [renameTarget, setRenameTarget] = useState<RenameTarget | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
-  const [pickingIconFor, setPickingIconFor] = useState<IconTarget | null>(null);
   /** The group whose glyph is being picked, captured when the picker opens --
    *  the reasoning `ProjectIconTarget` records, one level up again. */
   const [pickingGroupIconFor, setPickingGroupIconFor] = useState<{
@@ -2196,26 +2447,6 @@ function CanvasInner({
     setRenamingId(entry.session.id);
   }, []);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `setStatus` comes from useCanvasOverlays() and is a useState setter, stable across renders.
-  const openSessionIconPicker = useCallback((entry: SessionEntry) => {
-    // A project with no source cannot store an icon under one: guessing a
-    // fallback here would reintroduce the exact cross-source collision this
-    // epic's storage re-key removed.
-    const projectSource = entry.project.source;
-    if (projectSource === undefined) {
-      setStatus('this project has no source — icon unavailable');
-      return;
-    }
-    setPickingIconFor((current) =>
-      current !== null && current.sessionId === entry.session.id && current.source === projectSource
-        ? null
-        : {
-            source: projectSource,
-            sessionId: entry.session.id,
-            title: entry.session.title,
-          },
-    );
-  }, []);
   /** The sidebar's filter popover — the ONE home for narrowing (SessionList). */
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   /*
@@ -2254,6 +2485,131 @@ function CanvasInner({
     setViewNote(null);
   }, [focusedSessionId]);
   const [revealRequest, setRevealRequest] = useState<{ readonly projectId: string } | null>(null);
+  /** The `newWorktree` action's own one-shot request -- `revealRequest`'s
+   *  own shape, a fresh object per press, read by `SessionList.tsx` to open
+   *  that project's "Worktrees" create form. */
+  const [createWorktreeRequest, setCreateWorktreeRequest] = useState<{
+    readonly projectId: string;
+  } | null>(null);
+  /**
+   * THE WAIT BETWEEN A PRESS AND THE AGENT REGISTERING -- Start session or
+   * Resume, on a pane row (`StartSession`/`TerminalOnlyStart`, `DetailPanel.tsx`).
+   *
+   * Operator: "after clicking Start session on the start screen, there needs
+   * to be a loading state while the session is being created." `writingBySession`
+   * above already covers the write itself, and the write is not the wait:
+   * `typeIntoOwnPane` resolves once the KEYS are typed, seconds before the
+   * agent registers anywhere vam can see it (`startSessionIn`'s own header),
+   * so a guard that cleared with the write would go quiet exactly when the
+   * operator is still watching a shell prompt.
+   *
+   * KEYED BY THE PANE, NOT THE SESSION ID, for the reason `viewBySession`'s
+   * rename effect above exists at all: an `unstarted`/`terminal` row changes
+   * ID the instant the agent registers (`Session.pane`'s own comment,
+   * `domain/model.ts`) -- so a record keyed by `entry.session.id` would name
+   * an id that has already stopped existing at the exact moment its own
+   * write succeeded. `entry.session.pane` is the one fact both rows share.
+   *
+   * STATE, NOT A REF, because `DetailPanel` draws it -- and Canvas state,
+   * not `StartSession`'s own, for the same reason `sendFailureBySession`
+   * above is not local to the composer: ONE `DetailPanel` instance is reused
+   * for every tab a pane holds (`renderLeaf`'s own comment), so a wait held
+   * in that component's local state would follow the pane to whichever OTHER
+   * session the operator switches to next, or vanish switching away and back.
+   */
+  const [startingPaneByKey, setStartingPaneByKey] = useState<
+    Readonly<Record<string, StartingPaneWait>>
+  >({});
+  /**
+   * D12: THE RACE `startingPaneByKey` COULD NOT CLOSE ON ITS OWN.
+   *
+   * Two presses within a few milliseconds -- two rapid clicks, or Enter's own
+   * native activation landing beside a mouse click -- can both call
+   * `startSessionIn`/`resumeInPane` off the SAME closure, from the SAME last
+   * commit, before either has caused a re-render: React state describes the
+   * LAST commit, not "is a call for this pane on the stack right now", so a
+   * guard reading only `startingPaneByKey`/`writingBySession` passes both and
+   * both type into the same pane. Main now refuses the second write at the
+   * source of truth (`start-in-pane.ts`'s own in-flight set) either way, but
+   * the operator's ask was both layers: a `ref` is mutated synchronously and
+   * is visible to the very next call in the same tick, which state is not.
+   */
+  const paneWritesInFlight = useRef(new Set<string>());
+  /**
+   * PAST THIS, NOTHING IS WORTH WAITING FOR SILENTLY -- the operator's own
+   * bound (`START_PANE_WAIT_TIMEOUT_MS` above), and `StartingSession`'s
+   * neighbour rather than its twin: that indicator (new session, a pane that
+   * does not exist yet) deliberately names no duration because vam has
+   * nothing to measure against; THIS wait is for a pane the operator can
+   * already see and can already reach by hand (the Terminal view), so a
+   * bound that hands them that door is honest where a bare "still waiting"
+   * forever would not be.
+   */
+  /** One pending timeout per waiting pane, so `clearStartingPane` can cancel
+   *  the ONE that named this key rather than leaving it to fire later against
+   *  a record that has already moved on to a different wait. */
+  const startingPaneTimeouts = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const beginStartingPane = useCallback((key: string, wait: StartingPaneWait) => {
+    const existing = startingPaneTimeouts.current.get(key);
+    if (existing !== undefined) clearTimeout(existing);
+    setStartingPaneByKey((current) => ({ ...current, [key]: wait }));
+    const handle = setTimeout(() => {
+      startingPaneTimeouts.current.delete(key);
+      setStartingPaneByKey((current) => {
+        const value = current[key];
+        // Superseded by a later `beginStartingPane`/`clearStartingPane`
+        // while this timer was ticking -- nothing here is still true of it.
+        if (value === undefined || value.timedOut) return current;
+        return { ...current, [key]: { ...value, timedOut: true } };
+      });
+    }, START_PANE_WAIT_TIMEOUT_MS);
+    startingPaneTimeouts.current.set(key, handle);
+  }, []);
+  const clearStartingPane = useCallback((key: string) => {
+    const existing = startingPaneTimeouts.current.get(key);
+    if (existing !== undefined) {
+      clearTimeout(existing);
+      startingPaneTimeouts.current.delete(key);
+    }
+    setStartingPaneByKey((current) => {
+      if (!(key in current)) return current;
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+  }, []);
+  // Nothing is left ticking behind a canvas that has already gone -- the same
+  // discipline `paintCount`'s own sweep effect keeps for its interval.
+  useEffect(
+    () => () => {
+      for (const handle of startingPaneTimeouts.current.values()) clearTimeout(handle);
+      startingPaneTimeouts.current.clear();
+    },
+    [],
+  );
+  /**
+   * AND IT ENDS WHEN THE ROW ITSELF SAYS SO -- never when the write resolves
+   * (`beginStartingPane`'s own header), and never on a timer either: the
+   * timeout above only stops the SPINNER, not the wait, because vam still has
+   * no better source of truth than the next poll. A row is still waited on
+   * while it is `unstarted` or `terminal`; anything else -- it went `running`,
+   * it closed, the project it lived in vanished -- ends the wait, the same
+   * "AND IT ENDS WHEN THE ROW ARRIVES" rule the brand-new-session `starting`
+   * indicator follows a few screens up.
+   */
+  useEffect(() => {
+    const keys = Object.keys(startingPaneByKey);
+    if (keys.length === 0) return;
+    for (const key of keys) {
+      const row = allEntries.find(
+        (candidate) => (candidate.session.pane ?? candidate.session.id) === key,
+      );
+      const stillWaiting =
+        row !== undefined &&
+        (row.session.status === 'unstarted' || row.session.status === 'terminal');
+      if (!stillWaiting) clearStartingPane(key);
+    }
+  }, [allEntries, startingPaneByKey, clearStartingPane]);
   /** The same guard for `x`: one keypress must not become two stop attempts. */
   /**
    * THE ONE PENDING FLAG, and it is one on purpose.
@@ -2582,22 +2938,169 @@ function CanvasInner({
     [prefs, savePrefs],
   );
 
+  /**
+   * WHY VAM COULD NOT CONFIRM ITS OWN OWNERSHIP THIS LOAD, or `null` on every
+   * ordinary poll. `Session.vamListingGap`'s own header: a source stamps it
+   * on EVERY row it returns while its own `listVamSessions` call failed, so
+   * finding it on any one entry is finding it on the whole load -- there is
+   * no per-row reading of "some rows are trustworthy and some are not" here,
+   * because the spine either answered or it did not.
+   */
+  const vamListingGap = useMemo(
+    () =>
+      allEntries.find((e) => e.session.vamListingGap !== undefined)?.session.vamListingGap
+        ?.message ?? null,
+    [allEntries],
+  );
+
   const entries = useMemo(() => {
-    // FIRST, and not only in the sidebar. A removed project whose cards stayed
-    // drawn would leave `j` stepping onto a session with no row -- the exact
-    // defect the note below this memo describes, reintroduced by a different
-    // route. The three views agree on the SET.
-    const visible = allEntries.filter((e) => !hiddenProjects.includes(e.project.id));
-    const byText =
-      query.trim() === '' ? visible : visible.filter((e) => matches.includes(e.session.id));
-    const byStatus =
-      statusFilter === 'all' ? byText : byText.filter((e) => e.session.status === statusFilter);
-    // Both origin rules only ever exclude something vam POSITIVELY classified
-    // — see `session-filter.ts`. A session whose timeline has not arrived is
-    // `unknown` and survives both, because hiding what you did not check is
-    // how a filter loses work rather than narrowing it.
-    return byStatus.filter((e) => !isHiddenByOriginFilters(e.session, prefs.filters));
-  }, [allEntries, hiddenProjects, matches, query, statusFilter, prefs.filters]);
+    // THE FILTERED SET, in an IIFE so both of its own early-return branches
+    // (the listing-gap short-circuit below, and the ordinary tail) stay
+    // exactly as they were -- `applyViewOrder` is the one step every path
+    // through this memo now shares, applied ONCE, after the set is decided
+    // rather than threaded through each branch separately. `entries` is what
+    // `j`/`k`/`gt`/`gT`/`f` all step through (`sessionIds`, `stepProject`
+    // below), so the sidebar's Group-by/Sort-by choice has to land HERE, not
+    // as a second, SessionList-local reorder the keyboard would disagree
+    // with -- the same discipline PR 475 already holds for the foreign/
+    // dismissed filter one layer up. `allEntries` (tab membership) is never
+    // touched: a display preference must not change which sessions are tabs.
+    const filtered = ((): SessionEntry[] => {
+      // FIRST, and not only in the sidebar. A removed project whose cards stayed
+      // drawn would leave `j` stepping onto a session with no row -- the exact
+      // defect the note below this memo describes, reintroduced by a different
+      // route. The three views agree on the SET.
+      const visible = allEntries.filter((e) => !hiddenProjects.includes(e.project.id));
+      const byText =
+        query.trim() === '' ? visible : visible.filter((e) => matches.includes(e.session.id));
+      const byStatus =
+        statusFilter === 'all' ? byText : byText.filter((e) => e.session.status === statusFilter);
+      // Both origin rules only ever exclude something vam POSITIVELY classified
+      // — see `session-filter.ts`. A session whose timeline has not arrived is
+      // `unknown` and survives both, because hiding what you did not check is
+      // how a filter loses work rather than narrowing it.
+      const byOrigin = byStatus.filter((e) => !isHiddenByOriginFilters(e.session, prefs.filters));
+      // THIS IS ALSO WHAT THE COMMAND PALETTE SEES. `entries` is what is handed
+      // to `CommandPalette` below, so the palette's groups are drawn from the
+      // list this line has already narrowed — which is why ended sessions are a
+      // filter here and not the third palette group
+      // `docs/design/reopening-a-session.md` proposed. Such a group would be fed
+      // by this array and so would be empty in exactly the state it exists for.
+      //
+      // DISMISSED IS ALWAYS APPLIED, EVEN WHILE `vamListingGap` STANDS THE
+      // OTHER TWO DOWN. Dismissal is not a guess about ownership the way
+      // `isEnded`/`isForeign` are -- it is the operator's own explicit "get
+      // this off my screen", `docs/design/vam-owns-the-session.md` §5's "Dismiss
+      // is the safe fallback" -- so an unreadable tmux listing has no more
+      // reason to stand it down than it does `hiddenProjects` above.
+      // `isSessionDismissed` reads `session.activity` FRESH on every entry,
+      // which is what lifts a dismissal the moment a resumed session shows
+      // activity newer than what vam saw when it was hidden -- never a
+      // snapshot taken once and reused.
+      const byDismissed = byOrigin.filter(
+        (e) =>
+          !isSessionDismissed(
+            prefs,
+            e.session.source ?? e.project.source ?? 'unknown',
+            e.session.id,
+            e.session.activity,
+          ),
+      );
+      // TMUX ITSELF COULD NOT BE READ THIS LOAD: neither rule below can be
+      // trusted, because both proxy a fact only vam's own tmux spine can
+      // answer -- whether a row is currently vam's. `docs/design/vam-owns-the-
+      // session.md`'s own trap: "an unreadable tmux listing must not empty the
+      // sidebar. The fallback is to show everything, with the reason on
+      // screen." Standing BOTH rules down here, rather than one, is what makes
+      // that literally true rather than true for one axis and silently false
+      // for the other.
+      if (vamListingGap !== null) return byDismissed;
+      // AND THE SAME DISCIPLINE FOR ENDINGS AND FOR OWNERSHIP. `isEnded` is a
+      // fact a source has positively reported: the Codex source reads it off a
+      // writer lock it probed, and says `idle` rather than `done` wherever it
+      // could not look. `isForeign` is the same discipline for `vamControlled`
+      // — see `session-filter.ts` for why the two are separate rules rather
+      // than one boolean standing for both claims.
+      //
+      // THE DEMO IS EXEMPT FROM `hideForeign`, AND ONLY FROM THIS ONE RULE.
+      // `?demo=1`'s own fixture was built around the two OLDER origin rules by
+      // never tripping them at all -- no demo session carries `startedBy:
+      // 'agent'` or `ended: true`, so `hideAgentStarted` and `hideEnded` narrow
+      // nothing there and needed no carve-out. `vamControlled: false` cannot
+      // get the same treatment: `fixtures/demo.ts`'s `vam-build-1` row sets it
+      // DELIBERATELY, to demonstrate the UI a session vam did not start draws
+      // (no Submit, no terminal) -- the very thing `docs/design/reopening-a-
+      // session.md` and a dozen guards under `e2e/` read that row for. The same
+      // field now also drives `isForeign`, and there is no way to keep the one
+      // meaning without tripping the other. `demo`'s whole purpose is the
+      // public showcase "vam is public, and every real session on this machine
+      // is somebody's work" (`sidebar-seam-shots.mjs`'s own words) -- showing
+      // the FULL breadth of what a row can be, not one operator's own narrowed
+      // default -- so it is the demo that gives way, the same way
+      // `sendPromptFor` already branches on `source.kind === 'demo'` above.
+      const foreignFilterApplies = source.kind !== 'demo';
+      return byDismissed.filter(
+        (e) =>
+          !isHiddenByEndedFilter(e.session, prefs.filters, statusFilter) &&
+          !isHiddenByIdleFilter(e.session, prefs.filters, statusFilter) &&
+          (!foreignFilterApplies || !isHiddenByForeignFilter(e.session, prefs.filters)),
+      );
+    })();
+    return applyViewOrder(filtered, prefs.viewOptions);
+    // `prefs` ITSELF, not only `prefs.filters`/`prefs.dismissedSessions`
+    // separately: `isSessionDismissed` reads `prefs.dismissedSessions`, and a
+    // dependency array naming a nested field the memo does not otherwise use
+    // is a staleness bug waiting for the next field this filter chain grows.
+    // The same argument covers `prefs.viewOptions` now too.
+  }, [allEntries, hiddenProjects, matches, query, statusFilter, prefs, vamListingGap, source.kind]);
+
+  /**
+   * EVERY SESSION OF THE ACTIVE PROJECT VAM HAS NOT POSITIVELY EXCLUDED --
+   * what a pane may hold and draw as a tab. `drawnPaneTabs`, A11.1's
+   * adoption effect and A15.5's prune effect all read from HERE, never
+   * `allEntries` and never `entries`.
+   *
+   * NOT `allEntries`: the operator's own report -- a new session in a
+   * project whose OTHER sessions were running outside vam showed every one
+   * of them as a tab, though the sidebar (`hideForeign`, on by default) drew
+   * only the one just started. `allEntries` is unfiltered, and A11.1's
+   * "every session of the project is a tab, always" adopted the foreign ones
+   * the moment the project loaded -- before the operator toggled anything.
+   * The same gap applies to a DISMISSED row: an explicit "get this off my
+   * screen" the sidebar honours and the tab strip did not.
+   *
+   * NOT `entries` either -- A15.1's own rule, kept: "a pane the operator
+   * deliberately populated should not vanish because the search box or a
+   * status pill now hides its session." `entries` also narrows by
+   * `hideAgentStarted`, `onlyPrompted` and `hideEnded`, and
+   * `isHiddenByEndedFilter`'s own contract ties `hideEnded` to the LIVE
+   * status pill in a way that only makes sense inside the sidebar's own
+   * pipeline (its own comment: "the status pill wins"). Reusing that logic
+   * here, against a pill this layer deliberately does not read, would either
+   * fight it or silently duplicate a second copy of it. So this layer
+   * answers a narrower question than `entries` does: not vam's, or
+   * dismissed. Nothing here about being busy, being an agent's own session,
+   * or having finished -- those stay exactly the sidebar-only narrowing they
+   * already were.
+   *
+   * Same two predicates `entries` calls (`isSessionDismissed`,
+   * `isHiddenByForeignFilter`), the same listing-gap stand-down and the same
+   * demo exemption -- `foreignHiddenCount` below already pairs them this way
+   * for the quiet line's own count.
+   */
+  const paneEligibleEntries = useMemo(() => {
+    const undismissed = allEntries.filter(
+      (e) =>
+        !isSessionDismissed(
+          prefs,
+          e.session.source ?? e.project.source ?? 'unknown',
+          e.session.id,
+          e.session.activity,
+        ),
+    );
+    if (vamListingGap !== null || source.kind === 'demo') return undismissed;
+    return undismissed.filter((e) => !isHiddenByForeignFilter(e.session, prefs.filters));
+  }, [allEntries, prefs, vamListingGap, source.kind]);
 
   /**
    * What each origin rule takes away, counted over the WHOLE workspace and
@@ -2611,9 +3114,78 @@ function CanvasInner({
     () => ({
       agent: allEntries.filter((e) => isAgentStarted(e.session)).length,
       unprompted: allEntries.filter((e) => isUnprompted(e.session)).length,
+      ended: allEntries.filter((e) => isEnded(e.session)).length,
+      foreign: allEntries.filter((e) => isForeign(e.session)).length,
+      idle: allEntries.filter((e) => isIdle(e.session)).length,
     }),
     [allEntries],
   );
+
+  /**
+   * HOW MANY ROWS `hideForeign` IS ACTUALLY HIDING RIGHT NOW -- unlike
+   * `hiddenCounts.foreign` above, which counts every foreign session
+   * regardless of whether the rule is even on (right for the popover pill,
+   * which states what the rule WOULD take away). This is what the sidebar's
+   * own quiet line reads, and it has to agree with `entries` above about
+   * every exemption that memo makes, or the line would name a session that
+   * memo never actually hid because of THIS rule:
+   *
+   *  - `vamListingGap !== null` stands the foreign rule down entirely
+   *    (`entries`'s own early return) -- the listing-gap banner already
+   *    explains why everything is shown, so this counts nothing while it is
+   *    up rather than naming a second, contradicting reason.
+   *  - `source.kind === 'demo'` is the same carve-out `entries` makes for
+   *    `fixtures/demo.ts`'s own `vam-build-1` row: `?demo=1` never hides a
+   *    foreign session, so nothing is hidden here on it either.
+   *  - A DISMISSED ROW IS EXCLUDED FROM THE CORPUS BEFORE COUNTING. A row
+   *    can be BOTH foreign and dismissed at once, and `entries` hides it
+   *    either way -- but it is hidden for the reason the operator actually
+   *    acted on, and `dismissedCount`/the status bar's own restore control
+   *    already names it. Counting it here too would have the foreign-hidden
+   *    line and the dismissed count both claiming the same row, for two
+   *    different reasons, at the same time.
+   */
+  const foreignHiddenCount = useMemo(() => {
+    if (vamListingGap !== null || source.kind === 'demo') return 0;
+    const undismissed = allEntries.filter(
+      (e) =>
+        !isSessionDismissed(
+          prefs,
+          e.session.source ?? e.project.source ?? 'unknown',
+          e.session.id,
+          e.session.activity,
+        ),
+    );
+    return countHiddenByForeignFilter(
+      undismissed.map((e) => e.session),
+      prefs.filters,
+    );
+  }, [allEntries, prefs, source.kind, vamListingGap]);
+
+  /**
+   * WHETHER VAM HAS A SESSION OF ITS OWN, ANYWHERE -- read off `allEntries`,
+   * the UNFILTERED set, never `entries`. Dismiss, `hiddenProjects`, the
+   * search query, the status pill and every origin filter (`hideForeign`
+   * included) all live in `entries` alone; none of them make a session vam
+   * actually started stop EXISTING, only stop being SHOWN, and the
+   * getting-started screen's whole claim is "you have never used vam" -- a
+   * claim a merely-hidden row makes false. The operator's own words: "if
+   * there are sessions in vam, don't show the getting-started screen
+   * prematurely."
+   *
+   * Read by the getting-started screen's own trigger below, the tab strip's
+   * "no sessions yet" caption, and `SessionList`'s two mirrors of the same
+   * screen (its own empty-list line, and the phone's copy of this one) --
+   * one fact, so the four surfaces can never contradict each other about it.
+   *
+   * CASE (b) FROM PR 467 SURVIVES UNCHANGED: every entry foreign (`isForeign`
+   * true for all of them, or the set is simply empty) still reads `false`
+   * here -- vam really did start nothing, and the getting-started screen's
+   * own hidden-count line is what tells the rest of that story.
+   *  `Canvas.getting-started.test.tsx`'s "shows, with the hidden-count
+   * line, when every session is foreign" pins it.
+   */
+  const hasOwnSession = useMemo(() => allEntries.some((e) => !isForeign(e.session)), [allEntries]);
 
   /** The pill counts are off the UNFILTERED list — a count that moved when you
       clicked it would be a count of your own click. */
@@ -2625,6 +3197,8 @@ function CanvasInner({
       running: of('running'),
       waiting: of('waiting'),
       idle: of('idle'),
+      unstarted: of('unstarted'),
+      terminal: of('terminal'),
       done: of('done'),
       failed: of('failed'),
     };
@@ -2653,20 +3227,27 @@ function CanvasInner({
   );
 
   /**
-   * WHAT AN OPEN ICON PICKER IS LOOKING AT, live, at each of the three levels.
+   * WHAT AN OPEN ICON PICKER IS LOOKING AT, live, at each of the two levels.
    *
    * DELIBERATELY NOT CAPTURED INTO THE TARGET beside the source and the id.
-   * What a target freezes is WHICH thing is being edited -- `IconTarget` argues
+   * What a target freezes is WHICH thing is being edited -- `RenameTarget` argues
    * why, and that is the part that must not move under an open panel. The icon
    * ITSELF is the part that has to move: a glyph and its colour are two
    * presses, and a frozen value would leave the swatches still refusing on the
    * grounds that nothing was chosen, one press after something was.
    *
    * READ OFF THE MODEL RATHER THAN THE PREFS BUCKET, so the picker marks what
-   * the operator can SEE. The two agree for a project and a group -- prefs is
-   * the only writer of either -- but a session's icon can also come from a
-   * source's own fixture (`fixtures/demo.ts`), which never reaches prefs at
-   * all.
+   * the operator can SEE. Today the two always agree -- prefs is the only
+   * writer of either level -- so this reads as a redundant indirection, and it
+   * is kept deliberately: the model is what gets PAINTED, and a source that
+   * ever supplies a project icon of its own would make the bucket disagree
+   * with the column while the picker went on ticking the bucket's answer.
+   * There WAS a third level here, and it is the reason this note names the
+   * distinction: a session's icon could come from a source's own fixture and
+   * never reach prefs at all. Sessions no longer have icons (pull request
+   * 433 took the last surface, and the picker went after it), so the
+   * exception is gone -- but the rule it taught is what keeps the remaining
+   * two honest.
    */
   const projectIcons = useMemo(
     () => new Map(allEntries.map((entry) => [entry.project.id, entry.project.icon ?? null])),
@@ -2706,6 +3287,7 @@ function CanvasInner({
     () => entries.find((e) => e.session.id === focusedSessionId) ?? null,
     [entries, focusedSessionId],
   );
+  const terminalTab = terminalFor(focusedEntry?.session.source ?? focusedEntry?.project.source);
 
   /**
    * Composer state, bound to whichever session is the ACTIVE TAB — kept as
@@ -2814,8 +3396,12 @@ function CanvasInner({
    */
   const focusedPaneTabs = useMemo(
     () =>
-      drawnPaneTabs(allEntries, findLeaf(panes, focusedPaneId)?.sessionIds ?? [], activeProjectId),
-    [allEntries, panes, focusedPaneId, activeProjectId],
+      drawnPaneTabs(
+        paneEligibleEntries,
+        findLeaf(panes, focusedPaneId)?.sessionIds ?? [],
+        activeProjectId,
+      ),
+    [paneEligibleEntries, panes, focusedPaneId, activeProjectId],
   );
   /**
    * EVERY TAB ON SCREEN, IN THE ORDER THE STRIPS PAINT THEM — what
@@ -2835,25 +3421,28 @@ function CanvasInner({
    */
   const drawnTabsAcrossPanes = useMemo(
     () =>
-      leaves(panes).flatMap((leaf) => drawnPaneTabs(allEntries, leaf.sessionIds, activeProjectId)),
-    [allEntries, panes, activeProjectId],
+      leaves(panes).flatMap((leaf) =>
+        drawnPaneTabs(paneEligibleEntries, leaf.sessionIds, activeProjectId),
+      ),
+    [paneEligibleEntries, panes, activeProjectId],
   );
   /**
-   * EVERY session of the active project, filters and all — the list A11.1's
-   * invariant is stated over. Read from `allEntries` rather than the filtered
-   * `entries` for the reason the prune effect gives: a filter narrows what
-   * the SIDEBAR lists, and must not decide which sessions a pane holds, or
-   * turning one on would silently drop tabs and turning it off would silently
-   * add them.
+   * EVERY PANE-ELIGIBLE session of the active project — the list A11.1's
+   * invariant is stated over. Read from `paneEligibleEntries`, not
+   * `allEntries` (that was the bug: every foreign or dismissed session of
+   * the project got auto-adopted as a tab the moment the project loaded) and
+   * not the fully filtered `entries` either (a search query or a status pill
+   * must not decide which sessions a pane holds — see `paneEligibleEntries`'
+   * own comment for why that line is drawn between the two).
    */
   const activeProjectSessionIds = useMemo(
     () =>
       activeProjectId === null
         ? []
-        : allEntries
+        : paneEligibleEntries
             .filter((entry) => entry.project.id === activeProjectId)
             .map((entry) => entry.session.id),
-    [allEntries, activeProjectId],
+    [paneEligibleEntries, activeProjectId],
   );
 
   // The render-phase half of the two mirrors declared beside `panes` above.
@@ -2872,6 +3461,18 @@ function CanvasInner({
    * cannot churn the render, and it never closes the last pane. Skipped
    * entirely while the model is empty — that is the pre-load state, not
    * every session closing at once.
+   *
+   * "OPEN" NOW MEANS PANE-ELIGIBLE, NOT MERELY PRESENT. `open` used to read
+   * `allEntries`, so an already-open tab whose session turned foreign or got
+   * dismissed while a pane held it stayed a tab forever — the sidebar's own
+   * row was gone and the strip's was not. Sourcing `open` from
+   * `paneEligibleEntries` instead means the same session leaving that set
+   * (the operator dismisses it, or turns `hideForeign` on) prunes its tab the
+   * next render, same as a session that actually closed: `pruneClosedTabs`
+   * already picks the next kept tab in the leaf, or draws "no sessions open"
+   * when none are left. `wasPaneOf`/`nowByPane`/`lastPaneOfSession` below
+   * stay on `allEntries` — identity tracking for the rename case a few lines
+   * down, a different question from eligibility.
    *
    * AND THE KEYBOARD GOES WITH THE PANE THAT CLOSED. A pane emptied this way
    * is closed, so this is the one site that can leave `focusedPaneId` naming
@@ -2895,10 +3496,48 @@ function CanvasInner({
     if (allEntries.length === 0) {
       return;
     }
-    const open = new Set(allEntries.map((entry) => entry.session.id));
-    const before = panesRef.current;
+    const open = new Set(paneEligibleEntries.map((entry) => entry.session.id));
+    /**
+     * BEFORE THE PRUNE, THE RENAME. A row can change identity without its
+     * pane changing at all: a vam pane with nothing in it is a row keyed by
+     * its tmux name, and the moment an agent registers there the source keys
+     * the row by the agent (`Session.pane`, `model.ts`; `renameTab`,
+     * `split.ts`). To the prune those are one id closed and one id new, and
+     * the tab the operator just pressed Start in would vanish. So each held
+     * id that is no longer open is looked up in the PREVIOUS model's pane
+     * map -- the last model this effect saw, not the one being read now --
+     * and where an open row now carries that same pane, the tab is renamed
+     * in place and its view goes with it. Nothing is parsed off an id.
+     */
+    const wasPaneOf = lastPaneOfSession.current;
+    const nowByPane = new Map(
+      allEntries.flatMap((entry) =>
+        entry.session.pane === undefined ? [] : [[entry.session.pane, entry.session.id] as const],
+      ),
+    );
+    let before = panesRef.current;
+    for (const leaf of leaves(before)) {
+      for (const held of leaf.sessionIds) {
+        if (open.has(held)) continue;
+        const pane = wasPaneOf.get(held);
+        const successor = pane === undefined ? undefined : nowByPane.get(pane);
+        if (successor === undefined || successor === held) continue;
+        before = renameTab(before, held, successor);
+        setViewBySession((current) => {
+          const view = current[held];
+          if (view === undefined) return current;
+          const { [held]: _dropped, ...rest } = current;
+          return { ...rest, [successor]: view };
+        });
+      }
+    }
+    lastPaneOfSession.current = new Map(
+      allEntries.flatMap((entry) =>
+        entry.session.pane === undefined ? [] : [[entry.session.id, entry.session.pane] as const],
+      ),
+    );
     const pruned = pruneClosedTabs(before, (id) => open.has(id));
-    if (pruned === before) {
+    if (pruned === panesRef.current) {
       return;
     }
     setPanes(pruned);
@@ -2911,7 +3550,7 @@ function CanvasInner({
     if (survivor !== undefined) {
       setFocusedPaneId(survivor.id);
     }
-  }, [allEntries, setFocusedPaneId]);
+  }, [allEntries, paneEligibleEntries, setFocusedPaneId, setViewBySession]);
 
   /**
    * The other half of the per-pane `+`: the session it started, once it
@@ -3062,6 +3701,15 @@ function CanvasInner({
    * The `orphans` read off the rendered tree is an early-out, not the
    * decision: it keeps the common render from touching state at all, while
    * the updater is what actually decides against the freshest tree.
+   *
+   * AMENDED: "every session" now means every PANE-ELIGIBLE session
+   * (`activeProjectSessionIds`, sourced from `paneEligibleEntries`), not
+   * literally every row the project has. "All of them, always" predates
+   * `hideForeign` and dismissal; taken literally against a project with a
+   * session running outside vam, it auto-adopted that row into a tab the
+   * sidebar had already hidden, which is the bug `paneEligibleEntries`'s
+   * comment describes. The operator's "all of them" still holds for every
+   * session that is actually vam's to draw.
    */
   useEffect(() => {
     const orphans = activeProjectSessionIds.filter((id) => paneHolding(panes, id) === null);
@@ -3185,6 +3833,56 @@ function CanvasInner({
     },
     [setFocusedSessionId],
   );
+
+  /**
+   * DESKTOP NOTIFICATIONS: a session crossing into `waiting` while the
+   * operator is not looking at it. HERE, in the one component that holds
+   * both the model as it arrives and where the cursor is -- `notify/waiting.ts`
+   * says why the crossing can only be seen where a previous model is held,
+   * and `prefs/notify.ts` why there is exactly one switch.
+   *
+   * `allEntries`, never the filtered `entries`: a filter hides a row from the
+   * sidebar, it does not make the session stop needing somebody. The titles
+   * carry the operator's renames because `model` has them applied. The
+   * project name rides in the body so a banner about `s1` says which `s1`.
+   */
+  const notifiable = useMemo(
+    () =>
+      allEntries.map((e) => ({
+        sourceId: sourceKeyOf(e),
+        sessionId: e.session.id,
+        status: e.session.status,
+        title: e.session.title,
+        project: e.project.name,
+      })),
+    [allEntries],
+  );
+  // Keyed on the two strings, not the entry: a fresh `focusedEntry` object
+  // arrives with every poll, and the cursor has not moved.
+  const focusedSource = focusedEntry === null ? null : sourceKeyOf(focusedEntry);
+  const notifyFocus = useMemo(
+    () =>
+      focusedSource === null || focusedSessionId === null
+        ? null
+        : { sourceId: focusedSource, sessionId: focusedSessionId },
+    [focusedSource, focusedSessionId],
+  );
+  const onNotificationActivated = useCallback(
+    (target: { readonly sourceId: string; readonly sessionId: string }) => {
+      // Main has already brought the window forward. A banner about a session
+      // that has since ended points at nothing, and moving the cursor to
+      // nothing is the state the focus-landing effect exists to prevent.
+      if (entriesByIdRef.current.has(target.sessionId)) focusSession(target.sessionId);
+    },
+    [focusSession],
+  );
+  useWaitingNotifications({
+    sessions: notifiable,
+    enabled: prefs.notifyWaiting,
+    focused: notifyFocus,
+    api: window.api?.notify,
+    onActivate: onNotificationActivated,
+  });
 
   // Incremental-search focus: move the cursor to the first match, but only
   // for the keystroke that changed the filter query (`filterKeystrokeQuery`
@@ -3771,17 +4469,39 @@ function CanvasInner({
           setStatus(`${sessionSource.label} cannot be written to`);
           return;
         }
-        const painted = beginPaint(sessionSource.capabilities.deliverPrompt);
+        /**
+         * WHAT THIS ROW'S OWN SOURCE CAN DO, not what any source main serves
+         * can do -- the same per-row read `delivers` and `terminal` now make.
+         */
+        const here = capabilitiesFor(
+          sessionSource,
+          entry.session.source ?? entry.project.source,
+        ).capabilities;
+        const painted = beginPaint(here.deliverPrompt);
         try {
           await sessionSource.write.recordPrompt(entry.session.id, text);
           setStatus(
-            // What vam can honestly claim differs by source. A delivering
-            // source (Claude Code) TYPED the prompt into the pane it owns;
-            // there is no echo that the turn landed, so it claims none, and the
-            // turn appears here when the session's transcript records it. A
-            // recording source only appended to a log.
-            sessionSource.capabilities.deliverPrompt
-              ? `typed into the terminal of ${entry.session.title} — it will show here when the session records it`
+            // WHAT VAM CAN HONESTLY CLAIM DIFFERS BY SOURCE, AND NOW IT
+            // DIFFERS THREE WAYS.
+            //
+            // A source that delivers THROUGH A PANE it owns (Claude Code)
+            // typed the prompt; there is no echo that the turn landed, so it
+            // claims none, and the turn appears here when the transcript
+            // records it.
+            //
+            // A source that delivers WITHOUT A PANE (Codex) put the message in
+            // a queue its session polls. `codex queue` answers when the
+            // message is IN the queue, not when a session has read it -- and a
+            // thread whose Codex has exited has nobody polling. So the word is
+            // QUEUED, including for a thread that is in fact drained a second
+            // later: claiming a delivery vam did not observe is the one
+            // failure this route must not have.
+            //
+            // A recording source only appended to a log.
+            here.deliverPrompt
+              ? here.terminal
+                ? `typed into the terminal of ${entry.session.title} — it will show here when the session records it`
+                : `queued for ${entry.session.title} — its session drains the queue; it will show here when the session records it`
               : `recorded in the log of ${entry.session.title} — recorded, not sent to the agent`,
           );
           lastSent.current.set(entry.session.id, { text, at: Date.now() });
@@ -3851,6 +4571,45 @@ function CanvasInner({
    * instead. `removeProject` did exactly that, and told the operator it had
    * ended sessions that were still running.
    */
+  /**
+   * THE SAFE FALLBACK, for a row `closeSession` below could not get rid of
+   * any other way. `docs/design/vam-owns-the-session.md` §5: "Dismiss is the
+   * safe fallback" -- never a kill, never a claim of success, only the row
+   * leaving the sidebar and the palette (`entries`'s own filter, above) while
+   * whatever it names is left exactly where Close found it.
+   *
+   * `reason` is text already produced by the caller (`noteFailure`'s return,
+   * or a decline sentence built by hand) -- this never invents its own
+   * account of what happened, only appends what dismissing means on top of
+   * it, so the operator reads ONE explanation rather than two that might
+   * disagree.
+   *
+   * THE ACTIVITY SNAPSHOT is read off `allEntries` -- the UNFILTERED list,
+   * on purpose: a row already hidden by an origin or status filter can still
+   * be the one just refused a close (the operator reached it through the
+   * command palette, or a tab), and `setSessionDismissed` needs its current
+   * `activity` regardless of whether today's view happens to be showing it.
+   */
+  const dismissSession = useCallback(
+    (sessionId: string, _title: string, reason: string): void => {
+      const entry = allEntries.find((e) => e.session.id === sessionId);
+      const sourceId = entry?.session.source ?? entry?.project.source ?? 'unknown';
+      savePrefs(
+        setSessionDismissed(prefs, sourceId, sessionId, true, entry?.session.activity ?? null),
+      );
+      // `reason` CARRIES ITS OWN TITLE where one matters to a caller's
+      // wording -- see the two call sites -- because `StatusCell` truncates
+      // at 72 characters (`truncateStatus`) and a title appended only HERE,
+      // after an already-long `reason`, would be the one thing this status
+      // reliably cuts off. What is fixed here is never the account of what
+      // happened, only what dismissing means on top of it.
+      setStatus(
+        `${reason} — vam removed it from your list here; it returns if it shows new activity.`,
+      );
+    },
+    [allEntries, prefs, savePrefs, setStatus],
+  );
+
   const closeSession = useCallback(
     async (sessionId: string, title: string, force = false): Promise<boolean> => {
       if (pendingAction !== null) {
@@ -3870,10 +4629,17 @@ function CanvasInner({
       }
       const sessionSource = source.source;
       if (!canWriteTo(sessionSource) || sessionSource.write.closeSession === undefined) {
-        setStatus(
-          `${sessionSource.label} cannot close a session — ${
+        // NOTHING CAN EVER CLOSE THIS ROW THROUGH VAM -- the whole app, not
+        // merely this session, carries no verb for it -- so there is no
+        // "try again in a moment" here the way `pendingAction` above has one.
+        // Dismissed like every other refusal below: the row leaves the list,
+        // never the process.
+        dismissSession(
+          sessionId,
+          title,
+          `${sessionSource.label} cannot close a session ("${title}") — ${
             sessionSource.declines.closeSession ?? 'it advertises no way to'
-          }; "${title}" is still here`,
+          }`,
         );
         return false;
       }
@@ -3889,13 +4655,33 @@ function CanvasInner({
         source.onWrote();
         return true;
       } catch (cause) {
-        setStatus(noteFailure('close session', cause));
         // A SECOND, DELIBERATE STEP -- never offered again on a force call
         // that itself failed, and never on anything but the source's own
         // `forcible: true`: the close key alone must never reach a kill.
+        // Offering to force is not the SAME thing as leaving the row on
+        // screen forever, either: the operator still sees the prompt, and
+        // declining it (`onCancel`, below) dismisses the row with this same
+        // `reason` -- there is nothing else left to try at that point.
         if (!force && isForcible(cause)) {
-          setConfirmForceClose({ sessionId, title });
+          const reason = noteFailure('close session', cause);
+          setStatus(reason);
+          setConfirmForceClose({ sessionId, title, reason });
+          return false;
         }
+        // `already-finished`/`session-gone` ARE NOT FAILURES -- see
+        // `isGracefulCloseRefusal`: the goal Close asked for was already
+        // true, so this is `recordRefusal`'s "no, not an error" rather than
+        // `noteFailure`'s failure count and error-log entry. Every other
+        // refusal, forced or not, has nothing further to offer, so this is
+        // where "never leaves an undismissable row" is actually kept.
+        let reason: string;
+        if (isGracefulCloseRefusal(cause)) {
+          reason = describeFailure(cause);
+          recordRefusal('close session', reason);
+        } else {
+          reason = noteFailure('close session', cause);
+        }
+        dismissSession(sessionId, title, reason);
         return false;
       } finally {
         // EVERY path, and that is the whole of this `finally`. A spinner still
@@ -3904,7 +4690,214 @@ function CanvasInner({
         setPendingAction(null);
       }
     },
-    [source, pendingAction, setStatus, setConfirmForceClose],
+    [source, pendingAction, dismissSession, setStatus, setConfirmForceClose],
+  );
+
+  /**
+   * START AN AGENT IN A PANE THAT HAS NONE.
+   *
+   * `docs/design/vam-owns-the-session.md` Stage 2: "Start types the
+   * provider's command into the pane it already owns." This is the button on
+   * the start screen (`DetailPanel.tsx`, `StartSession`); the Terminal view
+   * and the operator's own hands are the other door to the same pane.
+   *
+   * THROUGH `recordPrompt`, NOT A CHANNEL OF ITS OWN. The row is a pane with
+   * a shell in it, and what a pane with a shell does with text is run it --
+   * so the source's existing write is exactly the right verb, and main proves
+   * the pane is vam's own before typing (`start-in-pane.ts`). NOT through
+   * `sendPromptFor`: that paints the words as a pending TURN, and a command
+   * to a shell is not a turn of any conversation. No paint, no draft, no
+   * repeat guard -- one write and a sentence in the status bar, like
+   * `reopenSession` below. The command is resolved HERE from the id the
+   * screen handed over, so main only ever sees words its own table lists.
+   *
+   * WHAT VAM CAN HONESTLY SAY AFTER: the command was typed. The agent
+   * registers on its own schedule, and the row changes identity when it does
+   * -- the tab follows (`renameTab`); the sentence says "started" of the
+   * typing and "will appear" of the rest, the same split `createSession`
+   * makes.
+   */
+  const startSessionIn = useCallback(
+    async (entry: SessionEntry, providerId: ProviderId): Promise<void> => {
+      const provider = resolveProvider(providerId);
+      const title = entry.session.title;
+      const paneKey = entry.session.pane ?? entry.session.id;
+      if (source.kind !== 'session') {
+        setStatus(`nothing can be started in "${title}" from here — no source is connected`);
+        return;
+      }
+      const sessionSource = source.source;
+      if (!canWriteTo(sessionSource)) {
+        setStatus(`${sessionSource.label} cannot be written to — "${title}" was not started`);
+        return;
+      }
+      if (
+        // D12: checked first and set synchronously, before the state read
+        // beside it -- see `paneWritesInFlight`'s own header for why the
+        // state check alone lets two same-tick presses both through.
+        paneWritesInFlight.current.has(paneKey) ||
+        (writingBySession[entry.session.id] ?? false) ||
+        startingPaneByKey[paneKey] !== undefined
+      ) {
+        return;
+      }
+      paneWritesInFlight.current.add(paneKey);
+      setWritingFor(entry.session.id, true);
+      // THE WAIT BECOMES VISIBLE HERE, before the write is even issued -- the
+      // operator's own "immediately" -- and OUTLIVES it: cleared only by the
+      // row leaving `unstarted`/`terminal` (the effect above) or by this same
+      // press being refused below, never by the write resolving.
+      beginStartingPane(paneKey, { kind: 'start', provider: providerId, timedOut: false });
+      setStatus(`starting ${provider.label} in "${title}"…`);
+      try {
+        await sessionSource.write.recordPrompt(entry.session.id, provider.command.join(' '));
+        setStatus(
+          `started ${provider.label} in "${title}" — its session appears here once it registers`,
+        );
+        source.onWrote();
+      } catch (cause) {
+        // NOTHING IS LEFT SPINNING -- `createSession`'s own discipline, a
+        // screen up: a wait that outlived this failure would say vam is
+        // still trying when vam has stopped.
+        clearStartingPane(paneKey);
+        setStatus(noteFailure(`start ${provider.label}`, cause));
+      } finally {
+        paneWritesInFlight.current.delete(paneKey);
+        setWritingFor(entry.session.id, false);
+      }
+    },
+    [
+      source,
+      writingBySession,
+      setWritingFor,
+      startingPaneByKey,
+      beginStartingPane,
+      clearStartingPane,
+      setStatus,
+    ],
+  );
+
+  /**
+   * RESUME, IN THE SAME PANE -- the secondary action on the `terminal`
+   * getting-started screen (`TerminalOnlyStart`, `DetailPanel.tsx`), and
+   * `startSessionIn`'s own twin in every way but the text it types.
+   *
+   * NOT `reopenSession` BELOW, though the two sound alike. That one calls the
+   * SOURCE's `resumeSession` write, which spawns a brand-new vam session in a
+   * brand-new pane for a conversation that has genuinely ENDED. This pane is
+   * not gone -- it is sitting at a shell prompt, still vam's, still the one
+   * the conversation was in -- so continuing it here is exactly
+   * `startSessionIn`'s act (type a command into a pane vam already owns)
+   * and never a second pane for one conversation.
+   *
+   * `entry.session.resumeCommand` IS THE WHOLE COMMAND, main-built
+   * (`model.ts`'s own doc on the field says why the renderer does not
+   * assemble it): this function's only job is to type it, exactly as
+   * `startSessionIn` types `provider.command.join(' ')`.
+   */
+  const resumeInPane = useCallback(
+    async (entry: SessionEntry): Promise<void> => {
+      const title = entry.session.title;
+      const command = entry.session.resumeCommand;
+      if (command === undefined) return;
+      const paneKey = entry.session.pane ?? entry.session.id;
+      if (source.kind !== 'session') {
+        setStatus(`nothing can be resumed in "${title}" from here — no source is connected`);
+        return;
+      }
+      const sessionSource = source.source;
+      if (!canWriteTo(sessionSource)) {
+        setStatus(`${sessionSource.label} cannot be written to — "${title}" was not resumed`);
+        return;
+      }
+      if (
+        // D12: see `startSessionIn`'s own comment on the same guard -- Start
+        // and Resume share ONE in-flight set, keyed by pane, because only one
+        // write may be in flight against a pane at a time either way.
+        paneWritesInFlight.current.has(paneKey) ||
+        (writingBySession[entry.session.id] ?? false) ||
+        startingPaneByKey[paneKey] !== undefined
+      ) {
+        return;
+      }
+      paneWritesInFlight.current.add(paneKey);
+      setWritingFor(entry.session.id, true);
+      beginStartingPane(paneKey, { kind: 'resume', timedOut: false });
+      setStatus(`resuming "${title}"…`);
+      try {
+        await sessionSource.write.recordPrompt(entry.session.id, command);
+        setStatus(`typed the resume command into "${title}" — it appears here once it registers`);
+        source.onWrote();
+      } catch (cause) {
+        clearStartingPane(paneKey);
+        setStatus(noteFailure('resume', cause));
+      } finally {
+        paneWritesInFlight.current.delete(paneKey);
+        setWritingFor(entry.session.id, false);
+      }
+    },
+    [
+      source,
+      writingBySession,
+      setWritingFor,
+      startingPaneByKey,
+      beginStartingPane,
+      clearStartingPane,
+      setStatus,
+    ],
+  );
+
+  /**
+   * REOPEN A CONVERSATION THAT HAS ENDED.
+   *
+   * `docs/design/reopening-a-session.md` §3, and shaped exactly like
+   * `closeSession` above because it is the same kind of act: one write, one
+   * pending row, one sentence in the status bar whether it worked or not.
+   *
+   * IT DOES NOT CHECK LIVENESS HERE. The row menu declines to offer it for a
+   * session that has not ended, and the SOURCE refuses it outright -- a check
+   * in the middle would be a third copy of a rule, one poll out of date, in
+   * the layer least able to enforce it.
+   */
+  const reopenSession = useCallback(
+    async (sessionId: string, title: string): Promise<void> => {
+      if (pendingAction !== null) {
+        setStatus(
+          `something else is still running — "${title}" was not reopened; try again in a moment`,
+        );
+        return;
+      }
+      if (source.kind !== 'session') {
+        setStatus(`the factory has no reopen command — "${title}" was not reopened`);
+        return;
+      }
+      const sessionSource = source.source;
+      if (!canWriteTo(sessionSource) || sessionSource.write.resumeSession === undefined) {
+        // THE SOURCE'S OWN WORDS, not this component's. Every `false`
+        // capability owes a decline, and this is where one is spent.
+        setStatus(
+          `${sessionSource.label} cannot reopen a session — ${
+            sessionSource.declines.resumeSession ?? 'it advertises no way to'
+          }`,
+        );
+        return;
+      }
+      setPendingAction(sessionId);
+      setStatus(`reopening "${title}"…`);
+      try {
+        await sessionSource.write.resumeSession(sessionId);
+        // "STARTED", not "reopened". What vam did is start a process; the row
+        // appears when the next poll sees it, and claiming it is back before
+        // it is drawn would be the same overclaim `model-command.ts` refuses.
+        setStatus(`started "${title}" again — it will appear when vam next reads the source`);
+        source.onWrote();
+      } catch (cause) {
+        setStatus(noteFailure('reopen session', cause));
+      } finally {
+        setPendingAction(null);
+      }
+    },
+    [source, pendingAction, setStatus],
   );
 
   /**
@@ -4438,248 +5431,27 @@ function CanvasInner({
     [entries, focusedEntry, focusSession, setStatus],
   );
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: setJumping, setStatus, setQuery, setPaletteOpen, setKeySheetOpen, setSettingsOpen, setSettingsSection, setErrorLogOpen and setConfirmForceClose come from useCanvasOverlays() and are each a useState setter, stable across renders; the overlay values this listener reads (jumping, query, overlayOpen) are listed.
-  useEffect(() => {
-    // The chord layer is OFF on a phone, not simulated: `hjkl` moves a cursor
-    // that does not exist, `Mod-<digit>` resolves against panes that are not
-    // drawn, and a soft keyboard fires `keydown` for ordinary typing behind a
-    // focus guard already known to leak. An armed grammar there is how `x`
-    // closes a session nobody meant to close.
-    if (phone) return;
-    function onKeyDown(event: KeyboardEvent) {
-      const target = event.target;
-      const typing = target instanceof HTMLElement && /^(INPUT|TEXTAREA)$/.test(target.tagName);
-      // A Cmd/Ctrl chord is never text entry — no layout produces a character
-      // from one — so a box that is capturing letters has no claim on it. That
-      // matters for exactly the case the digit chords were added for: the
-      // operator is in the prompt box, which is where the reason to look at
-      // another tab comes from, so a shortcut dead there is dead. Unmodified,
-      // everything still belongs to the box: the palette's filtering, the
-      // search line, the prompt's `!` typeahead and its Enter and Escape.
-      if (typing && !(event.metaKey || event.ctrlKey)) {
-        return; // the palette, the search line and the prompt own their own keys
-      }
-
-      /**
-       * AND THE SAME CONCESSION TO A FOCUSED BUTTON, for Enter and Space.
-       *
-       * A button has an activation behaviour of its own, and this listener
-       * cancelled it: `Enter` resolves as the `open` chord, `preventDefault`
-       * follows, and the browser's click never fires. So `ViewIcons`' comment
-       * promised "Enter and Space activate it" while only Space worked (audit
-       * F5), and a tab's `×` closed on Space and did nothing on Enter (audit
-       * F4). Both are the same swallow, and this is the same shape of rule the
-       * `typing` guard above already is: a control that has the focus has
-       * first claim on the keys that operate it.
-       *
-       * Scoped to those two keys and to a real button, so nothing else is
-       * given away — `Enter` anywhere but on a control is still `open`, and
-       * `j` on a focused button is still `move`.
-       */
-      const onButton =
-        target instanceof HTMLElement && target.closest('button, [role="button"]') !== null;
-      if (onButton && (event.key === 'Enter' || event.key === ' ')) {
-        return;
-      }
-
-      /**
-       * A KEY SOMETHING ELSE HAS ALREADY ANSWERED IS NOT THIS GRAMMAR'S.
-       *
-       * The options list of an open question is a real widget with its own
-       * `hjkl`, its own digits and its own Enter, and it calls
-       * `preventDefault` on precisely the keys it handled. React dispatches at
-       * its root container, which is BELOW this window listener, so by the
-       * time a key arrives here the pane has already had its say — and this is
-       * how the two cursor modes stay out of each other's way without either
-       * side enumerating the other's keys.
-       *
-       * It is deliberately not `stopPropagation` on the other side. The list
-       * handles some keys and not others, and the ones it does not handle
-       * (`Escape`, `Mod-Shift-h`, `Mod-0`) are exactly the ways OUT of it:
-       * swallowing everything would strand the keyboard in a list it could
-       * not leave.
-       */
-      if (event.defaultPrevented) {
-        return;
-      }
-
-      // A bare modifier is a hand moving, not a keystroke. Letting it through
-      // would abandon a half-typed chord the moment you reached for Cmd and
-      // thought better of it.
-      const key = normalizeKey(event);
-      if (key === null) {
-        return;
-      }
-
-      /**
-       * One rule for every overlay, rather than one flag per overlay.
-       *
-       * While the palette, the key sheet or the settings overlay is on screen
-       * it owns the keyboard: the canvas hears Escape and nothing else. Only
-       * the palette used to be safe, and only by accident — it contains an
-       * input, and the check above steps aside for inputs. The sheet and the
-       * settings overlay contain none, so `j` moved a cursor nobody could see
-       * and `zc` closed the canvas under the sheet that was describing it. Any
-       * overlay added later inherits this by joining `overlayOpen`, which is
-       * the point of writing it as one condition.
-       *
-       * Escape is the exception because it is the way out: `cancel` below is
-       * what closes all three, and a full-screen overlay whose only exit was
-       * the mouse would be a trap on a keyboard-first tool.
-       *
-       * Deliberately, a chord that OPENS an overlay does nothing while another
-       * is open — `?` over settings leaves settings alone. Overlays are
-       * full-screen, so stacking them hides the one underneath and makes
-       * Escape ambiguous: you could no longer tell what one press would close.
-       * Esc peels one layer at a time, and one layer is all there is.
-       */
-      if (overlayOpen && key !== 'Escape') {
-        return;
-      }
-
-      // Jump mode eats the very next key, so a label can safely reuse a letter
-      // that means something else in normal mode.
-      if (jumping && key !== 'Escape') {
-        event.preventDefault();
-        const hit = [...labels.entries()].find(([, label]) => label === key);
-        setJumping(false);
-        if (hit === undefined) {
-          // A KEY THAT LABELS NOTHING, ANSWERED. Eating the next key whatever
-          // it is is what lets a label reuse a bound letter, and it left a
-          // mistyped label indistinguishable from a dead application: the
-          // labels vanished, the cursor stayed, and nothing said why. The
-          // dismissal itself is right and stays — the labels are off the
-          // screen by the time the key is read, so waiting for a second guess
-          // would be waiting with nothing left to read the guess off.
-          setStatus(`nothing is labelled "${key}" — jump cancelled`);
-          return;
-        }
-        setStatus(null);
-        setFocusedSessionId(hit[0]);
-        return;
-      }
-
-      // WHICH KEYSTROKE THIS WAS, kept because the step is about to forget it.
-      // `resolveChord` clears the one-key memory, so after it runs there is no
-      // way left to tell a bare `0` from the `0` of `z0` — and the stand-down
-      // below turns on exactly that difference (`isSelectOnlyChord`).
-      const typed: Chord = { prefix: chord.current.pending ?? '', key };
-      const step = resolveChord(chord.current, key);
-      chord.current = step.state;
-      const action = step.action;
-      if (action === null) {
-        // Swallow a chord's first key so `g` cannot reach the browser.
-        if (step.state.pending !== null) {
-          event.preventDefault();
-        }
-        /**
-         * A HALF-TYPED CHORD THAT DIED, ANSWERED — and only that.
-         *
-         * `resolveChord` abandons `gx` rather than letting `x` mean what a
-         * bare `x` means, which is the right call and is not what changed:
-         * `gx` closing the focused session would be the expensive mistake.
-         * What changed is that not ACTING was being spelled as not SAYING
-         * ANYTHING, so two keystrokes produced an unchanged screen and no way
-         * to tell an unbound pair from a frozen app.
-         *
-         * The plain `action === null` around it stays silent on purpose. Every
-         * unbound letter, function key and media key on the board arrives
-         * here, and a bar that answered all of them would be a bar nobody is
-         * still reading when a real refusal lands. `abandoned` is the narrow
-         * case: a prefix was typed, so the operator was deliberately spelling
-         * something out.
-         */
-        if (step.abandoned !== null) {
-          setStatus(
-            `"${chordText(step.abandoned)}" is not a chord — the ${step.abandoned.prefix} was dropped`,
-          );
-        }
-        return;
-      }
-      /**
-       * WHICH MODE THIS KEYSTROKE IS IN — asked of the DOM, at the moment it
-       * arrives, and never of React state.
-       *
-       * `keyboard/focus-scope.ts` carries the rule and the four findings that
-       * produced it. What is worth saying HERE is why it is read at the top of
-       * the handler rather than closed over: this listener is registered by an
-       * effect, so a `mode` variable in scope is whatever the last render put
-       * there — and the whole class of bug being removed is a mode that had
-       * stopped being true. `document.activeElement` cannot be stale.
-       *
-       * READ BEFORE `preventDefault`, not after, and that ordering is the
-       * whole of the stand-down below: a chord this grammar declines has to be
-       * declined BEFORE the default is cancelled, or the key is dead in the
-       * text box either way — swallowed silently instead of acted on, which is
-       * the worse of the two.
-       */
+  /**
+   * Every `KeyAction` the grammar can produce, run — the ONE place a
+   * resolved action becomes an effect, reached by the real `keydown`
+   * listener below and by the command palette's action rows
+   * (`CommandPalette.tsx`, `keyboard/palette-actions.ts`) alike, so a row
+   * there runs exactly what its chord would rather than a second
+   * implementation the two could drift apart from.
+   *
+   * `cursorMode` is read here, live, for the same reason `onKeyDown` used
+   * to read it inline: a mode variable closed over from render would be
+   * whatever the last render put there, and `document.activeElement`
+   * cannot be stale. The palette calls this while its own search box has
+   * the DOM focus, which is a real, live answer too — none of the curated
+   * palette actions branch on cursor mode (see `palette-actions.ts`), so
+   * this is unobserved from that caller and exists only for the actions
+   * still reached by keyboard alone.
+   */
+  const runAction = useCallback(
+    (action: KeyAction) => {
       const cursorMode = cursorModeAt(document.activeElement);
-
-      /**
-       * A CHORD THE SURFACE UNDER THE CARET ALREADY OWNS IS NOT THIS
-       * GRAMMAR'S — the typing guard's own argument, one step further on.
-       *
-       * That guard lets `Mod-` chords past a focused INPUT|TEXTAREA because "a
-       * Cmd/Ctrl chord is never text entry — no layout produces a character
-       * from one", which is true OF CHARACTERS and says nothing about editing
-       * commands. `Ctrl-D` is delete-forward in every macOS text view,
-       * `Ctrl-U` deletes to the start of the line, and `Ctrl-D` is EOF in a
-       * shell. Taking those globally would break editing in the composer to
-       * add a scroll gesture (`isSelectOnly`, `keyboard/chords.ts`).
-       *
-       * ASKED OF THE CURSOR MODE, NOT OF THE TAG NAME, which is also what
-       * reaches the TERMINAL PANE: it is a `section` carrying
-       * `data-insert-scope`, invisible to any INPUT|TEXTAREA test, and the one
-       * surface where `Ctrl-D` means most. It already hands every Ctrl chord
-       * back to this listener untouched, so this is the only thing standing
-       * between a terminal and a scroll gesture it never asked for.
-       *
-       * NO REFUSAL IS SPOKEN. The key was not declined, it was never claimed —
-       * a status line here would answer a keystroke the operator aimed at the
-       * box they are typing in.
-       */
-      /**
-       * AND THE SAME STAND-DOWN ASKED OF THE KEYSTROKE, for a binding whose
-       * ACT is welcome under a caret but whose SPELLING is not.
-       *
-       * `pickView` holds two chords and they are not alike. `Ctrl-Alt-3` is a
-       * chord — no layout makes a character out of one — and reaching the
-       * Terminal view from inside the prompt box is deliberate, tested and
-       * captioned. A bare `3` is text: it types a digit into every box on
-       * screen, and it is the question card's own option mark
-       * (`resolveQuestionKey`). One is the grammar's in both modes and the
-       * other in Select alone, which is why this predicate reads the CHORD and
-       * `isSelectOnly` above reads the ACTION. Widening either to cover both
-       * would take a working binding away.
-       *
-       * IT IS WHAT REACHES THE TERMINAL PANE. The typing guard at the top of
-       * this handler reads INPUT|TEXTAREA — which is every text box in the
-       * shell, the composer, the palette filter, the search line, a rename
-       * field, the Files filter, and the terminal's own hidden compose box —
-       * and misses the terminal PANE, a `section` carrying `data-insert-scope`
-       * whose keys go into somebody's running agent. That pane claims its own
-       * printable keys while it has a bridge to send them down and hands them
-       * back when it has none, so without this a bridgeless build would answer
-       * a digit aimed at an agent by switching the view under it.
-       *
-       * AND IT IS THE SECOND GUARD ON EVERY OTHER TEXT SURFACE, not the only
-       * one. The `typing` clause at the top already returns for a focused
-       * INPUT|TEXTAREA — the composer, the palette filter, the session search
-       * line, a rename field, the Files tab's filter and its "new file" box
-       * (`FilesTab.tsx` records that those two are deliberately UNMARKED and
-       * lean on the tag name alone). Those boxes keep their digit whether or
-       * not this line exists; what only this line can reach is an insert scope
-       * that is no text box.
-       *
-       * The silence above applies unchanged: the key was never claimed.
-       */
-      if (cursorMode === 'insert' && (isSelectOnly(action) || isSelectOnlyChord(typed))) {
-        return;
-      }
-
-      event.preventDefault();
       setStatus(null);
-
       switch (action.kind) {
         case 'move': {
           if (
@@ -5146,13 +5918,6 @@ function CanvasInner({
           }
           beginSessionRename(focusedEntry);
           return;
-        case 'icon':
-          if (focusedEntry === null) {
-            setStatus('pick a session first');
-            return;
-          }
-          openSessionIconPicker(focusedEntry);
-          return;
         case 'close':
           if (focusedEntry === null) {
             setStatus('pick a session first');
@@ -5163,10 +5928,21 @@ function CanvasInner({
         case 'newSession':
           // Real now: main starts a detached tmux session running `claude` in
           // the project's own directory. Which project is the focused
-          // session's — with nothing focused there is no directory to use, and
-          // vam will not pick one.
+          // session's — with nothing focused there is no directory to use,
+          // and vam will not pick one BY GUESSING.
+          //
+          // BUT NOT A DEAD END. `focusedEntry === null` used to stop here
+          // with a status line and nothing else -- the one state where this
+          // key can do the LEAST is the one state an operator pressing it is
+          // likeliest to be in (a fresh launch, or every project hidden).
+          // `newProject` is the honest fallback: it owns its own three
+          // refusals (source, picker, cancel) and ends in exactly the row
+          // this key is for, one directory pick later. Same handler the
+          // sidebar foot button and the getting-started screen's own button
+          // call -- one path, not a second "no session, no route" case to
+          // keep in step with it.
           if (focusedEntry === null) {
-            setStatus('pick a session first — a new one is started in its project');
+            void newProject();
             return;
           }
           void createSession(focusedEntry.project.id, focusedEntry.project.name);
@@ -5201,6 +5977,17 @@ function CanvasInner({
             return;
           }
           setRevealRequest({ projectId: focusedEntry.project.id });
+          return;
+        case 'newWorktree':
+          // `revealProject`'s own guard: a worktree is created OF a project,
+          // and there is no directory-picker fallback the way bare
+          // `newProject` has for "nothing focused" -- see the action's own
+          // doc comment in `chords.ts`.
+          if (focusedEntry === null) {
+            setStatus('pick a session first');
+            return;
+          }
+          setCreateWorktreeRequest({ projectId: focusedEntry.project.id });
           return;
         case 'moveToGroup':
           if (focusedEntry === null) {
@@ -5369,7 +6156,6 @@ function CanvasInner({
           setFiltering(false);
           setComposing(false);
           setRenamingId(null);
-          setPickingIconFor(null);
           setConfirmForceClose(null);
           // The last layer Escape peels is the keyboard itself, and peeling it
           // is a blur. Note that an Escape typed INSIDE the composer never
@@ -5389,54 +6175,315 @@ function CanvasInner({
           return;
         }
       }
+    },
+    [
+      phone,
+      focusedEntry,
+      focusedSessionId,
+      focusedPaneId,
+      focusedPaneTabs,
+      drawnTabsAcrossPanes,
+      newTabInPane,
+      projectTabIds,
+      sessionIds,
+      entries,
+      matches,
+      query,
+      copyAllCommands,
+      beginComposing,
+      beginSessionRename,
+      closeSession,
+      createSession,
+      newProject,
+      stepProject,
+      focusSession,
+      // `mode` is deliberately NOT here any more, and its absence is the change:
+      // this listener asks `cursorModeAt(document.activeElement)` when a key
+      // arrives instead of closing over a rendered value. A dependency would
+      // re-register the listener on every focus change for a fact it no longer
+      // reads.
+      actionIndex,
+      setActionIndex,
+      setComposing,
+      actions,
+      prefs,
+      savePrefs,
+      terminalTab,
+      filesTab,
+      splitFocused,
+      closeFocusedSplit,
+      stepFocusedSplit,
+      setFocusedSessionId,
+      setViewFor,
+      setConfirmForceClose,
+      setJumping,
+      setSettingsOpen,
+      setStatus,
+      setQuery,
+      setSettingsSection,
+      setPaletteOpen,
+      setErrorLogOpen,
+      setKeySheetOpen,
+    ],
+  );
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `setJumping` and `setStatus` come from useCanvasOverlays() and are each a useState setter, stable across renders.
+  useEffect(() => {
+    // The chord layer is OFF on a phone, not simulated: `hjkl` moves a cursor
+    // that does not exist, `Mod-<digit>` resolves against panes that are not
+    // drawn, and a soft keyboard fires `keydown` for ordinary typing behind a
+    // focus guard already known to leak. An armed grammar there is how `x`
+    // closes a session nobody meant to close.
+    if (phone) return;
+    function onKeyDown(event: KeyboardEvent) {
+      const target = event.target;
+      const typing = target instanceof HTMLElement && /^(INPUT|TEXTAREA)$/.test(target.tagName);
+      // A Cmd/Ctrl chord is never text entry — no layout produces a character
+      // from one — so a box that is capturing letters has no claim on it. That
+      // matters for exactly the case the digit chords were added for: the
+      // operator is in the prompt box, which is where the reason to look at
+      // another tab comes from, so a shortcut dead there is dead. Unmodified,
+      // everything still belongs to the box: the palette's filtering, the
+      // search line, the prompt's `!` typeahead and its Enter and Escape.
+      if (typing && !(event.metaKey || event.ctrlKey)) {
+        return; // the palette, the search line and the prompt own their own keys
+      }
+
+      /**
+       * AND THE SAME CONCESSION TO A FOCUSED BUTTON, for Enter and Space.
+       *
+       * A button has an activation behaviour of its own, and this listener
+       * cancelled it: `Enter` resolves as the `open` chord, `preventDefault`
+       * follows, and the browser's click never fires. So `ViewIcons`' comment
+       * promised "Enter and Space activate it" while only Space worked (audit
+       * F5), and a tab's `×` closed on Space and did nothing on Enter (audit
+       * F4). Both are the same swallow, and this is the same shape of rule the
+       * `typing` guard above already is: a control that has the focus has
+       * first claim on the keys that operate it.
+       *
+       * Scoped to those two keys and to a real button, so nothing else is
+       * given away — `Enter` anywhere but on a control is still `open`, and
+       * `j` on a focused button is still `move`.
+       */
+      const onButton =
+        target instanceof HTMLElement && target.closest('button, [role="button"]') !== null;
+      if (onButton && (event.key === 'Enter' || event.key === ' ')) {
+        return;
+      }
+
+      /**
+       * A KEY SOMETHING ELSE HAS ALREADY ANSWERED IS NOT THIS GRAMMAR'S.
+       *
+       * The options list of an open question is a real widget with its own
+       * `hjkl`, its own digits and its own Enter, and it calls
+       * `preventDefault` on precisely the keys it handled. React dispatches at
+       * its root container, which is BELOW this window listener, so by the
+       * time a key arrives here the pane has already had its say — and this is
+       * how the two cursor modes stay out of each other's way without either
+       * side enumerating the other's keys.
+       *
+       * It is deliberately not `stopPropagation` on the other side. The list
+       * handles some keys and not others, and the ones it does not handle
+       * (`Escape`, `Mod-Shift-h`, `Mod-0`) are exactly the ways OUT of it:
+       * swallowing everything would strand the keyboard in a list it could
+       * not leave.
+       */
+      if (event.defaultPrevented) {
+        return;
+      }
+
+      // A bare modifier is a hand moving, not a keystroke. Letting it through
+      // would abandon a half-typed chord the moment you reached for Cmd and
+      // thought better of it.
+      const key = normalizeKey(event);
+      if (key === null) {
+        return;
+      }
+
+      /**
+       * One rule for every overlay, rather than one flag per overlay.
+       *
+       * While the palette, the key sheet or the settings overlay is on screen
+       * it owns the keyboard: the canvas hears Escape and nothing else. Only
+       * the palette used to be safe, and only by accident — it contains an
+       * input, and the check above steps aside for inputs. The sheet and the
+       * settings overlay contain none, so `j` moved a cursor nobody could see
+       * and `zc` closed the canvas under the sheet that was describing it. Any
+       * overlay added later inherits this by joining `overlayOpen`, which is
+       * the point of writing it as one condition.
+       *
+       * Escape is the exception because it is the way out: `cancel` below is
+       * what closes all three, and a full-screen overlay whose only exit was
+       * the mouse would be a trap on a keyboard-first tool.
+       *
+       * Deliberately, a chord that OPENS an overlay does nothing while another
+       * is open — `?` over settings leaves settings alone. Overlays are
+       * full-screen, so stacking them hides the one underneath and makes
+       * Escape ambiguous: you could no longer tell what one press would close.
+       * Esc peels one layer at a time, and one layer is all there is.
+       */
+      if (overlayOpen && key !== 'Escape') {
+        return;
+      }
+
+      // Jump mode eats the very next key, so a label can safely reuse a letter
+      // that means something else in normal mode.
+      if (jumping && key !== 'Escape') {
+        event.preventDefault();
+        const hit = [...labels.entries()].find(([, label]) => label === key);
+        setJumping(false);
+        if (hit === undefined) {
+          // A KEY THAT LABELS NOTHING, ANSWERED. Eating the next key whatever
+          // it is is what lets a label reuse a bound letter, and it left a
+          // mistyped label indistinguishable from a dead application: the
+          // labels vanished, the cursor stayed, and nothing said why. The
+          // dismissal itself is right and stays — the labels are off the
+          // screen by the time the key is read, so waiting for a second guess
+          // would be waiting with nothing left to read the guess off.
+          setStatus(`nothing is labelled "${key}" — jump cancelled`);
+          return;
+        }
+        setStatus(null);
+        setFocusedSessionId(hit[0]);
+        return;
+      }
+
+      // WHICH KEYSTROKE THIS WAS, kept because the step is about to forget it.
+      // `resolveChord` clears the one-key memory, so after it runs there is no
+      // way left to tell a bare `0` from the `0` of `z0` — and the stand-down
+      // below turns on exactly that difference (`isSelectOnlyChord`).
+      const typed: Chord = { prefix: chord.current.pending ?? '', key };
+      const step = resolveChord(chord.current, key);
+      chord.current = step.state;
+      const action = step.action;
+      if (action === null) {
+        // Swallow a chord's first key so `g` cannot reach the browser.
+        if (step.state.pending !== null) {
+          event.preventDefault();
+        }
+        /**
+         * A HALF-TYPED CHORD THAT DIED, ANSWERED — and only that.
+         *
+         * `resolveChord` abandons `gx` rather than letting `x` mean what a
+         * bare `x` means, which is the right call and is not what changed:
+         * `gx` closing the focused session would be the expensive mistake.
+         * What changed is that not ACTING was being spelled as not SAYING
+         * ANYTHING, so two keystrokes produced an unchanged screen and no way
+         * to tell an unbound pair from a frozen app.
+         *
+         * The plain `action === null` around it stays silent on purpose. Every
+         * unbound letter, function key and media key on the board arrives
+         * here, and a bar that answered all of them would be a bar nobody is
+         * still reading when a real refusal lands. `abandoned` is the narrow
+         * case: a prefix was typed, so the operator was deliberately spelling
+         * something out.
+         */
+        if (step.abandoned !== null) {
+          setStatus(
+            `"${chordText(step.abandoned)}" is not a chord — the ${step.abandoned.prefix} was dropped`,
+          );
+        }
+        return;
+      }
+      /**
+       * WHICH MODE THIS KEYSTROKE IS IN — asked of the DOM, at the moment it
+       * arrives, and never of React state.
+       *
+       * `keyboard/focus-scope.ts` carries the rule and the four findings that
+       * produced it. What is worth saying HERE is why it is read at the top of
+       * the handler rather than closed over: this listener is registered by an
+       * effect, so a `mode` variable in scope is whatever the last render put
+       * there — and the whole class of bug being removed is a mode that had
+       * stopped being true. `document.activeElement` cannot be stale.
+       *
+       * READ BEFORE `preventDefault`, not after, and that ordering is the
+       * whole of the stand-down below: a chord this grammar declines has to be
+       * declined BEFORE the default is cancelled, or the key is dead in the
+       * text box either way — swallowed silently instead of acted on, which is
+       * the worse of the two.
+       */
+      const cursorMode = cursorModeAt(document.activeElement);
+
+      /**
+       * A CHORD THE SURFACE UNDER THE CARET ALREADY OWNS IS NOT THIS
+       * GRAMMAR'S — the typing guard's own argument, one step further on.
+       *
+       * That guard lets `Mod-` chords past a focused INPUT|TEXTAREA because "a
+       * Cmd/Ctrl chord is never text entry — no layout produces a character
+       * from one", which is true OF CHARACTERS and says nothing about editing
+       * commands. `Ctrl-D` is delete-forward in every macOS text view,
+       * `Ctrl-U` deletes to the start of the line, and `Ctrl-D` is EOF in a
+       * shell. Taking those globally would break editing in the composer to
+       * add a scroll gesture (`isSelectOnly`, `keyboard/chords.ts`).
+       *
+       * ASKED OF THE CURSOR MODE, NOT OF THE TAG NAME, which is also what
+       * reaches the TERMINAL PANE: it is a `section` carrying
+       * `data-insert-scope`, invisible to any INPUT|TEXTAREA test, and the one
+       * surface where `Ctrl-D` means most. It already hands every Ctrl chord
+       * back to this listener untouched, so this is the only thing standing
+       * between a terminal and a scroll gesture it never asked for.
+       *
+       * NO REFUSAL IS SPOKEN. The key was not declined, it was never claimed —
+       * a status line here would answer a keystroke the operator aimed at the
+       * box they are typing in.
+       */
+      /**
+       * AND THE SAME STAND-DOWN ASKED OF THE KEYSTROKE, for a binding whose
+       * ACT is welcome under a caret but whose SPELLING is not.
+       *
+       * `pickView` holds two chords and they are not alike. `Ctrl-Alt-3` is a
+       * chord — no layout makes a character out of one — and reaching the
+       * Terminal view from inside the prompt box is deliberate, tested and
+       * captioned. A bare `3` is text: it types a digit into every box on
+       * screen, and it is the question card's own option mark
+       * (`resolveQuestionKey`). One is the grammar's in both modes and the
+       * other in Select alone, which is why this predicate reads the CHORD and
+       * `isSelectOnly` above reads the ACTION. Widening either to cover both
+       * would take a working binding away.
+       *
+       * IT IS WHAT REACHES THE TERMINAL PANE. The typing guard at the top of
+       * this handler reads INPUT|TEXTAREA — which is every text box in the
+       * shell, the composer, the palette filter, the search line, a rename
+       * field, the Files filter, and the terminal's own hidden compose box —
+       * and misses the terminal PANE, a `section` carrying `data-insert-scope`
+       * whose keys go into somebody's running agent. That pane claims its own
+       * printable keys while it has a bridge to send them down and hands them
+       * back when it has none, so without this a bridgeless build would answer
+       * a digit aimed at an agent by switching the view under it.
+       *
+       * AND IT IS THE SECOND GUARD ON EVERY OTHER TEXT SURFACE, not the only
+       * one. The `typing` clause at the top already returns for a focused
+       * INPUT|TEXTAREA — the composer, the palette filter, the session search
+       * line, a rename field, the Files tab's filter and its "new file" box
+       * (`FilesTab.tsx` records that those two are deliberately UNMARKED and
+       * lean on the tag name alone). Those boxes keep their digit whether or
+       * not this line exists; what only this line can reach is an insert scope
+       * that is no text box.
+       *
+       * The silence above applies unchanged: the key was never claimed.
+       */
+      if (cursorMode === 'insert' && (isSelectOnly(action) || isSelectOnlyChord(typed))) {
+        return;
+      }
+
+      event.preventDefault();
+
+      runAction(action);
     }
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [
-    phone,
-    focusedEntry,
-    focusedSessionId,
-    focusedPaneId,
-    focusedPaneTabs,
-    drawnTabsAcrossPanes,
-    newTabInPane,
-    projectTabIds,
-    sessionIds,
-    entries,
-    jumping,
-    labels,
-    matches,
-    query,
-    copyAllCommands,
-    beginComposing,
-    beginSessionRename,
-    closeSession,
-    createSession,
-    newProject,
-    stepProject,
-    focusSession,
-    // `mode` is deliberately NOT here any more, and its absence is the change:
-    // this listener asks `cursorModeAt(document.activeElement)` when a key
-    // arrives instead of closing over a rendered value. A dependency would
-    // re-register the listener on every focus change for a fact it no longer
-    // reads.
-    actionIndex,
-    setActionIndex,
-    setComposing,
-    actions,
-    prefs,
-    savePrefs,
-    terminalTab,
-    filesTab,
-    overlayOpen,
-    openSessionIconPicker,
-    splitFocused,
-    closeFocusedSplit,
-    stepFocusedSplit,
-    setFocusedSessionId,
-    setViewFor,
-  ]);
+    // A SHORT LIST NOW, and deliberately so: everything the switch itself used
+    // to close over moved to `runAction` along with it, so this effect's own
+    // body only reads `phone` (the guard at its top), `jumping`/`labels` (the
+    // jump-mode branch), `overlayOpen` (the overlay guard) and
+    // `setFocusedSessionId` (the jump-hit branch) directly — plus `runAction`
+    // itself, since calling a stale one would run last render's closures.
+    // `mode` is deliberately NOT here, and never was: this listener asks
+    // `cursorModeAt(document.activeElement)` when a key arrives instead of
+    // closing over a rendered value, so a dependency would re-register the
+    // listener on every focus change for a fact it no longer reads.
+  }, [runAction, phone, jumping, labels, overlayOpen, setFocusedSessionId]);
 
   // `sidebarProps` feeds a `React.memo`-wrapped `SessionList`; a fresh
   // inline arrow on any one of its 40+ props defeats the whole shallow
@@ -5460,6 +6507,12 @@ function CanvasInner({
 
   const onSidebarOriginFilters = useCallback(
     (next: SessionFilters) => savePrefs(setSessionFilters(prefs, next)),
+    [savePrefs, prefs],
+  );
+
+  /** Written by the workspace-options popover's Group-by/Sort-by controls. */
+  const onSidebarViewOptions = useCallback(
+    (next: ViewOptions) => savePrefs(setViewOptions(prefs, next)),
     [savePrefs, prefs],
   );
 
@@ -5495,15 +6548,6 @@ function CanvasInner({
     [entries, beginSessionRename],
   );
 
-  const onSidebarPickSessionIcon = useCallback(
-    (sessionId: string) => {
-      const found = entries.find((candidate) => candidate.session.id === sessionId);
-      if (found === undefined) return;
-      openSessionIconPicker(found);
-    },
-    [entries, openSessionIconPicker],
-  );
-
   const onSidebarPick = useCallback(
     (sessionId: string) => {
       focusSession(sessionId);
@@ -5529,12 +6573,21 @@ function CanvasInner({
   const onSidebarAdd = useCallback(() => {
     // The footer strip names no project, so it uses the focused
     // session's, exactly as `o` does — the two controls are one path.
+    //
+    // NEVER A DEAD END. With nothing focused there is no project for this
+    // button to add TO, so it falls back to `newProject` -- the same
+    // handler the Projects header's `+` and `Mod-Shift-p` already call, and
+    // the same one `case 'newSession'` above falls back to for the `o`
+    // chord. `SessionList`'s own `addWillCreateProject` prop is computed
+    // from the identical condition, which is what keeps the footer's LABEL
+    // ("New project" instead of "New session") from disagreeing with what a
+    // click on it is about to do.
     if (focusedEntry === null) {
-      setStatus('pick a session first — a new one is started in its project');
+      void newProject();
       return;
     }
     void createSession(focusedEntry.project.id, focusedEntry.project.name);
-  }, [focusedEntry, createSession, setStatus]);
+  }, [focusedEntry, createSession, newProject]);
 
   const onSidebarAddInProject = useCallback(
     (project: Project) => void createSession(project.id, project.name),
@@ -5566,6 +6619,20 @@ function CanvasInner({
   const onSidebarRemoveProject = useCallback(
     (project: Project, plan: RemovalPlan) => void removeProject(project, plan),
     [removeProject],
+  );
+
+  /**
+   * `allEntries`, deliberately — never the narrowed `entries`. A reopenable
+   * row is by definition one the ended filter is hiding whenever that filter
+   * is on, and looking it up in the filtered list would make the control work
+   * only in the state where it is least needed.
+   */
+  const onSidebarReopen = useCallback(
+    (sessionId: string) => {
+      const entry = allEntries.find((e) => e.session.id === sessionId);
+      void reopenSession(sessionId, entry?.session.title ?? sessionId);
+    },
+    [allEntries, reopenSession],
   );
 
   const onSidebarNewProject = useCallback(() => void newProject(), [newProject]);
@@ -5659,6 +6726,19 @@ function CanvasInner({
           ? source.status === 'loading'
           : false;
 
+  /**
+   * Whether THIS BUILD can open a native directory picker at all --
+   * `window.api?.dialog?.chooseDirectory`, the same bridge `newProject` and
+   * `buildDetailProps`'s own `prRepo` read at their call sites rather than
+   * inside a component. Hoisted here because it is now read from THREE
+   * places (`newProject`'s own body still checks it again at click time,
+   * which is the actual refusal; this is only what the getting-started
+   * screen says BEFORE a click) and a fourth copy of `window.api?.dialog?.
+   * chooseDirectory !== undefined` is exactly the drift this rule exists to
+   * avoid.
+   */
+  const hasDirectoryPicker = globalThis.window?.api?.dialog?.chooseDirectory !== undefined;
+
   const sidebarProps: ComponentProps<typeof SessionList> = {
     // The line at this column's top edge, off the SAME `mode` the status
     // bar's word reads. Select is the sidebar's mode and only the
@@ -5666,6 +6746,10 @@ function CanvasInner({
     // no other column takes this.
     entries: entries,
     loading: sidebarLoading,
+    // See `hasOwnSession`'s own header: the WHOLE-APP fact, off the
+    // unfiltered model, that keeps the phone's own getting-started screen
+    // and its "No sessions yet" line from contradicting the desktop's.
+    hasOwnSession,
     /* WHICH PROJECT VAM IS STARTING A SESSION IN, or null. The project id and
        name -- the id alone used to be enough, because every existing project
        already carries its own name in the section the sidebar matches it
@@ -5707,7 +6791,16 @@ function CanvasInner({
     onFilterMenuToggle: setFilterMenuOpen,
     originFilters: prefs.filters,
     onOriginFilters: onSidebarOriginFilters,
+    viewOptions: prefs.viewOptions,
+    onViewOptions: onSidebarViewOptions,
     hiddenCounts: hiddenCounts,
+    foreignHiddenCount: foreignHiddenCount,
+    vamListingGap: vamListingGap,
+    onReopen: onSidebarReopen,
+    canReopen:
+      source.kind === 'session' &&
+      canWriteTo(source.source) &&
+      source.source.write.resumeSession !== undefined,
     onFilterCommit: onSidebarFilterCommit,
     onFilterCancel: onSidebarFilterCancel,
     renamingId: renamingId,
@@ -5718,8 +6811,11 @@ function CanvasInner({
     onPick: onSidebarPick,
     onClose: onSidebarClose,
     onRenameSession: onSidebarRenameSession,
-    onPickSessionIcon: onSidebarPickSessionIcon,
     onAdd: onSidebarAdd,
+    // See `onSidebarAdd`'s own comment: the SAME condition that decides
+    // what a click on the footer button DOES also decides what it is
+    // LABELLED, so the two can never disagree about what pressing it means.
+    addWillCreateProject: focusedEntry === null,
     onAddInProject: onSidebarAddInProject,
     pendingAction: pendingAction,
     // The project fold, stored -- the pair whose absence was the defect. Both
@@ -5747,8 +6843,15 @@ function CanvasInner({
     onHideProject: setProjectRemoved,
     onRemoveProject: onSidebarRemoveProject,
     revealRequest: revealRequest,
+    createWorktreeRequest: createWorktreeRequest,
     onNewProject: onSidebarNewProject,
     newSessionDecline: newSessionDecline,
+    // The phone's own getting-started screen (`GettingStarted.tsx`, drawn by
+    // `SessionList` itself there -- see its own comment) needs this same
+    // capability fact `buildDetailProps`'s `gettingStarted` hands the
+    // desktop's copy, and for the same reason: absent, not disabled, is the
+    // rule for the button it withdraws.
+    hasDirectoryPicker: hasDirectoryPicker,
     onPickIcon: onSidebarPickIcon,
     onRenameProject: renameOneProject,
     onSettings: onSidebarSettings,
@@ -5840,7 +6943,17 @@ function CanvasInner({
         // See `detailProps`'s own long-standing comment on this prop, still
         // true per pane: it is "which session THIS pane's cursor sits on".
         focusNodeId: sessionId,
-        delivers: source.kind === 'session' && source.source.capabilities.deliverPrompt,
+        /**
+         * PER ROW, like `terminal` below it: whether THIS pane's session can
+         * be reached, not whether any source main serves can reach anything.
+         * Claude Code and Codex both deliver, so this reads the same for both
+         * today -- and it is read per row anyway, because the next source that
+         * cannot is one the canvas must not promise for.
+         */
+        delivers:
+          source.kind === 'session' &&
+          capabilitiesFor(source.source, entry?.session.source ?? entry?.project.source)
+            .capabilities.deliverPrompt,
         pickImageAttachment:
           source.kind === 'session' ? source.source.write?.pickImageAttachment : undefined,
         answer: globalThis.window?.api?.terminal?.answer,
@@ -5869,7 +6982,12 @@ function CanvasInner({
             ? async (_projectId: string, rowId?: string) =>
                 (await import('../fixtures/demo.js')).demoSessionModel(rowId)
             : globalThis.window?.api?.terminal?.model,
-        terminal: terminalTab,
+        // THIS PANE'S ROW, not the focused one: two panes can show two
+        // sessions from two sources, and a background pane handed the focused
+        // row's terminal fact would draw a tab its own session has no pane
+        // for. `terminalTab` above stays the FOCUSED row's answer because that
+        // is what `Mod-<digit>` counts.
+        terminal: terminalFor(entry?.session.source ?? entry?.project.source),
         files: filesTab,
         // A15.4 — the GLOBAL "what a new session starts with"
         // preference, identical for every pane (it names nothing about
@@ -5878,6 +6996,60 @@ function CanvasInner({
         // every pane rather than per-session.
         defaultProvider: prefs.defaultProvider,
         onSetDefaultProvider: (id) => savePrefs(setDefaultProvider(prefs, id)),
+        // THIS PANE'S ROW, when it is a pane with nothing in it: the start
+        // screen's one act. Withdrawn (absent) where there is no session to
+        // start in, so the screen says "use the Terminal view" instead of
+        // drawing a button that cannot type.
+        onStartSession: entry === null ? undefined : (id) => void startSessionIn(entry, id),
+        // THIS PANE'S ROW, on the `terminal` getting-started screen's
+        // secondary act -- see `resumeInPane`'s own comment for why this is
+        // not `reopenSession`. Withdrawn on the same "no session, no control"
+        // rule `onStartSession` follows; `DetailPanel` further withholds the
+        // button unless the row itself carries a `resumeCommand`.
+        onResumeInPane: entry === null ? undefined : () => void resumeInPane(entry),
+        // THIS PANE'S ROW's own wait, if it has one -- see `startingPaneByKey`'s
+        // own comment. Looked up by the SAME key `startSessionIn`/`resumeInPane`
+        // write it under, `entry.session.pane`, not `entry.session.id`: a row
+        // whose agent just registered carries a NEW id but the SAME pane, and
+        // this is what lets the wait still find it for the one poll where the
+        // two disagree.
+        startingPane:
+          entry === null
+            ? null
+            : (startingPaneByKey[entry.session.pane ?? entry.session.id] ?? null),
+        // THE GETTING-STARTED SCREEN (`GettingStarted.tsx`) -- present only
+        // when THIS pane holds nothing, vam has no session to show ANYWHERE
+        // (`entries`, the same filtered set the sidebar and the tab strip
+        // already agree is "what's visible right now" -- unchanged from
+        // before: a sibling pane or another project with something visible
+        // still counts), AND the app truly owns none, `entries.length === 0`
+        // alone -- `hasOwnSession`'s own header explains why a session vam
+        // started that is merely hidden by dismiss/filters must not reach
+        // this screen. NOR BEFORE THE FIRST LOAD HAS ANSWERED: `sidebarLoading`
+        // reads `EMPTY: CanvasModel` the exact same shape as a genuinely
+        // empty workspace, and without this guard the screen flashed on at
+        // every launch before `useSourceModel`'s first answer landed. Unlike
+        // `onStartSession`/`onResumeInPane` above, whose absence follows
+        // THIS pane's own `entry`, this is an APP-WIDE fact -- a pane can
+        // hold nothing while a sibling pane, or another project, still has a
+        // real session, and only the truly-empty state gets this screen.
+        gettingStarted:
+          entry !== null || entries.length > 0 || hasOwnSession || sidebarLoading
+            ? undefined
+            : {
+                onNewProject: () => void newProject(),
+                newProjectDecline: newSessionDecline,
+                hasDirectoryPicker,
+                foreignHiddenCount,
+                onShowForeign: () =>
+                  onSidebarOriginFilters({ ...prefs.filters, hideForeign: false }),
+                // THE SAME WAIT the sidebar's own New project button already
+                // shows (`pending(NEW_PROJECT_PENDING, …)`, `SessionList.tsx`)
+                // -- this screen's button is the identical act and owes the
+                // operator the identical visible "this is running" it was
+                // missing (item 4 of the brief).
+                pending: pendingAction === NEW_PROJECT_PENDING,
+              },
         // The Files tab's tree width, and the way back. GLOBAL for the same
         // reason `defaultProvider` above it is passed identically to every
         // pane: one `FilesTab` per split leaf, and an arrangement the
@@ -5887,6 +7059,17 @@ function CanvasInner({
         // `prefs/files-tree-width.ts` exists to hold.
         filesTreeWidth: prefs.filesTreeWidth,
         onFilesTreeWidth: (width: number) => savePrefs(setFilesTreeWidth(prefs, width)),
+        // The Files tab's raw/preview choice, written back but never read
+        // FORWARD as a prop -- unlike `filesTreeWidth` above it, `FilesTab`
+        // reads its own device default once, at mount, off
+        // `activeFilesMarkdownView()` (`prefs/files-markdown-view.ts`), the
+        // module `activatePrefs` below already puts `prefs.filesMarkdownView`
+        // into force on every read AND every write. This is only the way
+        // BACK out: the one call that persists a toggle for the NEXT tab
+        // that mounts, which is what makes `prefs.filesMarkdownView` a field
+        // some module outside this store actually writes.
+        onFilesMarkdownView: (view: 'preview' | 'raw') =>
+          savePrefs(setFilesMarkdownView(prefs, view)),
         sending: paneWriting,
         // The refusal is the focused pane's too, and for the same reason:
         // a background pane cannot have answered the key it would be
@@ -5957,10 +7140,11 @@ function CanvasInner({
       // NOT listed here: each one is replaced whole on any pane's keystroke,
       // and listing them would take this callback's identity with it.
       sendFailureBySession,
+      startingPaneByKey,
       viewBySession,
       viewSeed,
       source,
-      terminalTab,
+      terminalFor,
       filesTab,
       viewNote,
       prefs,
@@ -5969,8 +7153,19 @@ function CanvasInner({
       setDraftFor,
       setComposingFor,
       sendPromptFor,
+      startSessionIn,
+      resumeInPane,
       setViewFor,
       mode,
+      entries,
+      newProject,
+      newSessionDecline,
+      hasDirectoryPicker,
+      foreignHiddenCount,
+      onSidebarOriginFilters,
+      hasOwnSession,
+      sidebarLoading,
+      pendingAction,
     ],
   );
 
@@ -6029,7 +7224,7 @@ function CanvasInner({
         : leaf.sessionId === null
           ? null
           : (entriesById.get(leaf.sessionId) ?? null);
-      const paneTabs = drawnPaneTabs(allEntries, leaf.sessionIds, activeProjectId);
+      const paneTabs = drawnPaneTabs(paneEligibleEntries, leaf.sessionIds, activeProjectId);
       return (
         // Not a control and not a keyboard stop of its own -- the real
         // interactive content is the `DetailPanel` instance inside it,
@@ -6066,6 +7261,20 @@ function CanvasInner({
               paneFocused={isFocused}
               drafts={draftsBySession}
               pending={pending}
+              // See `emptyText`'s own comment: "pick one from the sidebar" is
+              // only true while the sidebar has a row to pick. `entries` and
+              // `hasOwnSession` are the SAME two facts `gettingStarted`'s own
+              // condition reads a few hundred lines below -- the operator's
+              // own finding, reading the first screenshot, was this line
+              // contradicting that screen's "no sessions yet" 40px below it;
+              // `hasOwnSession` is what keeps it from making the SAME claim
+              // early, before the first load answers, or over a session vam
+              // started that is merely dismissed or filtered out of view.
+              emptyText={
+                entries.length === 0 && !hasOwnSession && !sidebarLoading
+                  ? 'no sessions yet'
+                  : undefined
+              }
               onSelect={(sessionId, viaPointer) => {
                 // The pane whose strip was clicked is the pane the keyboard
                 // moves to FIRST: `setFocusedPaneId` writes its ref
@@ -6149,7 +7358,8 @@ function CanvasInner({
       starting,
       focusedPaneId,
       focusedEntry,
-      allEntries,
+      paneEligibleEntries,
+      entries,
       entriesById,
       activeProjectId,
       buildDetailProps,
@@ -6185,6 +7395,10 @@ function CanvasInner({
       writingBySession,
       actionIndexBySession,
       pending,
+      // The tab strip's own `emptyText` guard -- see `hasOwnSession`'s own
+      // header for why `entries.length === 0` alone is not enough.
+      hasOwnSession,
+      sidebarLoading,
     ],
   );
 
@@ -6193,10 +7407,10 @@ function CanvasInner({
   //
   // AND RENDERED HERE, because this cell paints the chord itself rather than
   // going through `InlineChord` (it carries `data-keysheet-hint`, which the
-  // chip component has no slot for). `chordSymbols` is what every other chord
-  // in the chrome now passes through: ⌘ on a Mac, `Ctrl` off one.
+  // chip component has no slot for). `ChordGlyphs` is what every other chord
+  // in the chrome now passes through: ⌘ on a Mac, `Ctrl` off one, its
+  // modifiers a size bigger than the key beside them.
   const bound = primaryChord({ kind: 'help' });
-  const helpChord = bound === null ? null : chordSymbols(bound);
 
   return (
     // `vam-phone` is the hook the OVERLAYS hang off: they are siblings of the
@@ -6232,6 +7446,7 @@ function CanvasInner({
         <PhoneShell
           sidebar={sidebarProps}
           detail={detailProps}
+          paneEligibleEntries={paneEligibleEntries}
           sourceReadout={<SourceReadout source={source} />}
           // A read-only server registers no write routes at all, so the box is
           // withdrawn rather than drawn and refused. Only a `session` source
@@ -6262,23 +7477,29 @@ function CanvasInner({
       {errorLogOpen && <ErrorLogPanel onClose={() => setErrorLogOpen(false)} />}
 
       {/* Same reason again: settings is a window overlay, so it sits with the
-          palette and the sheet rather than inside the canvas column. */}
+          palette and the sheet rather than inside the canvas column.
+          `Suspense` with a `null` fallback: `SettingsOverlay` is its own lazy
+          chunk (see its declaration above), and it is a window overlay that
+          exists only while this branch is true, so nothing else on screen is
+          sharing the space a fallback would need to hold. */}
       {settingsOpen && (
-        <SettingsOverlay
-          prefs={prefs}
-          theme={effective}
-          onChange={savePrefs}
-          onClose={() => setSettingsOpen(false)}
-          initialSection={settingsSection}
-          /* WHAT THIS CONNECTION CANNOT DO, in the source's own words. It used
-             to be a band above the transcript on the phone's session screen,
-             where it cost 45px of every session on every real phone; it is a
-             standing fact about the CONNECTION, so it belongs in the one
-             section whose subject is the desktop rather than the device
-             holding it. `{}` for a source that is not a session source: there
-             is nothing to decline. */
-          declines={source.kind === 'session' ? source.source.declines : {}}
-        />
+        <Suspense fallback={null}>
+          <SettingsOverlay
+            prefs={prefs}
+            theme={effective}
+            onChange={savePrefs}
+            onClose={() => setSettingsOpen(false)}
+            initialSection={settingsSection}
+            /* WHAT THIS CONNECTION CANNOT DO, in the source's own words. It used
+               to be a band above the transcript on the phone's session screen,
+               where it cost 45px of every session on every real phone; it is a
+               standing fact about the CONNECTION, so it belongs in the one
+               section whose subject is the desktop rather than the device
+               holding it. `{}` for a source that is not a session source: there
+               is nothing to decline. */
+            declines={source.kind === 'session' ? source.source.declines : {}}
+          />
+        </Suspense>
       )}
 
       {paletteOpen && (
@@ -6288,6 +7509,15 @@ function CanvasInner({
             focusSession(sessionId);
             setPaletteOpen(false);
           }}
+          // ONE DISPATCH, not a second one: a row runs `runAction` — the same
+          // function `Ctrl-K`'s own keydown listener calls once it has
+          // resolved a chord — so an action picked here can never come to
+          // mean something different from its bound key.
+          onRunAction={(action) => {
+            runAction(action);
+            setPaletteOpen(false);
+          }}
+          hasFocusedSession={focusedEntry !== null}
           onClose={() => setPaletteOpen(false)}
         />
       )}
@@ -6300,33 +7530,16 @@ function CanvasInner({
             setConfirmForceClose(null);
             void closeSession(target.sessionId, target.title, true);
           }}
-          onCancel={() => setConfirmForceClose(null)}
-        />
-      )}
-
-      {pickingIconFor !== null && (
-        <IconPicker
-          title={pickingIconFor.title}
-          value={entriesById.get(pickingIconFor.sessionId)?.session.icon ?? null}
-          onPick={(icon) => {
-            // Both the source and the session come from the target captured
-            // when the picker opened, so there is nothing to look up and
-            // nothing to guess: AC-1's collision cannot reach this path.
-            savePrefs(
-              setIcon(prefs, pickingIconFor.source, pickingIconFor.sessionId, icon, new Date()),
-            );
-            setStatus(
-              icon === ''
-                ? 'icon cleared — kept on this machine, never in the event log'
-                : // `describeIcon`, not the stored string: `lucide:rocket:teal`
-                  // in this sentence is vam reading its own storage format
-                  // aloud. An emoji still reports as itself.
-                  `${describeIcon(icon)} — kept on this machine, never in the event log`,
-            );
-            if (keepPickerOpen(icon)) return;
-            setPickingIconFor(null);
+          // DECLINING TO FORCE IS NOT "DO NOTHING": vam already showed the
+          // operator everything it can offer for this row (verify, or force),
+          // and they chose neither. There is no third path left to try, so
+          // this is the same dismissal `closeSession`'s own catch falls back
+          // to -- see `dismissSession`.
+          onCancel={() => {
+            const target = confirmForceClose;
+            setConfirmForceClose(null);
+            dismissSession(target.sessionId, target.title, target.reason);
           }}
-          onClose={() => setPickingIconFor(null)}
         />
       )}
 
@@ -6567,6 +7780,30 @@ function CanvasInner({
             </ShortcutTip>
           )}
 
+          {/* THE WHOLE OF DISMISS'S UNDO -- `docs/design/vam-owns-the-
+              session.md` §5: a row Close removed from the list rather than
+              killed is always reversible. One click brings EVERY dismissed
+              row back at once (`restoreAllDismissedSessions`) rather than a
+              picker over which ones -- see that function's own doc for why
+              a single-step "undo all" is the whole answer this control needs
+              to give. Hidden entirely at zero, exactly like the failure
+              badge beside it. */}
+          {dismissedCount > 0 && (
+            <button
+              type="button"
+              data-restore-dismissed
+              onClick={() => {
+                savePrefs(restoreAllDismissedSessions(prefs));
+                setStatus(
+                  `restored ${dismissedCount} dismissed ${dismissedCount === 1 ? 'session' : 'sessions'} — back on the list`,
+                );
+              }}
+              className="rounded-[4px] border border-line-strong px-1.5 py-px text-ink-dim"
+            >
+              {dismissedCount} dismissed — restore
+            </button>
+          )}
+
           <span className="flex-1" />
           {/* The right-hand end is one cell wide, again at the operator's
               request: "Phan ben phai status bar, chi de `?` keyboard shortcut
@@ -6584,12 +7821,12 @@ function CanvasInner({
                 `primaryChord` rather than `InlineChord` for one reason: this
                 cell carries `data-keysheet-hint`, which the status-bar tests
                 query, and the chip component takes no marker. */}
-            {helpChord !== null && (
+            {bound !== null && (
               <span
                 data-keysheet-hint
                 className="rounded-[4px] border border-line-strong px-1.5 py-px text-ink-dim"
               >
-                {helpChord}
+                <ChordGlyphs chord={bound} />
               </span>
             )}
             Keyboard shortcut
@@ -6612,8 +7849,16 @@ function CanvasInner({
             // "what can I do to this session", and they would drift.
             closing: pendingAction === tabMenu.entry.session.id,
             onRenameSession: onSidebarRenameSession,
-            onPickSessionIcon: onSidebarPickSessionIcon,
             onClose: (sessionId) => void closeSession(sessionId, tabMenu.entry.session.title),
+            // Same builder, same session, so the same fourth item. The entry
+            // is right here, so `ended` is read off it rather than captured:
+            // a tab menu closes on the poll that would change it.
+            onReopen: (sessionId) => void reopenSession(sessionId, tabMenu.entry.session.title),
+            ended: tabMenu.entry.session.ended === true,
+            canReopen:
+              source.kind === 'session' &&
+              canWriteTo(source.source) &&
+              source.source.write.resumeSession !== undefined,
           })}
         />
       )}
@@ -6694,11 +7939,6 @@ function sourceKeyOf(entry: SessionEntry): string {
   return entry.session.source ?? entry.project.source ?? '';
 }
 
-const SOURCE_ICON: Readonly<Record<string, LucideIcon>> = {
-  factory: Factory,
-  'bundled-sample': FlaskConical,
-};
-
 function SourceGlyph({ source }: { readonly source: SourceId | null }) {
   if (source === null || source === undefined || source === '') {
     return null;
@@ -6709,10 +7949,11 @@ function SourceGlyph({ source }: { readonly source: SourceId | null }) {
   // a shape that claims nothing, never another provider's logo and never a
   // blank. `data-source-mark` records WHICH register answered, so the fallback
   // is an assertable outcome rather than an invisible default.
-  const mark = PROVIDER_MARKS[source];
-  const Native = SOURCE_ICON[source];
-  const register = mark !== undefined ? 'brand' : Native !== undefined ? 'native' : 'neutral';
-  const Icon = Native ?? Box;
+  //
+  // THE TABLE AND THE ORDER LEFT THIS FILE and live in `provider-marks.tsx`,
+  // because the sidebar row now draws the same mark and a module-private copy
+  // here is how one source comes to have two glyphs in one application.
+  const register = markRegisterOf(source);
   return (
     <Note text={`this session comes from ${source}`}>
       {/* `role="img"` is load-bearing: `aria-label` on a roleless span is
@@ -6733,11 +7974,11 @@ function SourceGlyph({ source }: { readonly source: SourceId | null }) {
         tabIndex={0}
         className="flex items-center text-ink-dim"
       >
-        {mark === undefined ? (
-          <Icon size={11} strokeWidth={1.6} aria-hidden="true" />
-        ) : (
-          <mark.Glyph size={11} />
-        )}
+        {/* 12 is the LANE, not the ink: `SourceMark` takes a pixel off a
+            brand path, which fills its viewBox, so the two registers paint
+            the same amount of it. The status bar's line is 12px
+            (`text-meta`), so the lane is the line. */}
+        <SourceMark source={source} lane={12} />
       </span>
     </Note>
   );

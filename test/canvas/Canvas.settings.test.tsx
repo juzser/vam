@@ -9,7 +9,7 @@
  * assertion here as covering containment.
  */
 
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
@@ -20,7 +20,6 @@ function session(id: string): Session {
   return {
     id,
     title: id,
-    icon: null,
     epic: null,
     branch: null,
     status: 'done',
@@ -51,6 +50,18 @@ function press(key: string, modifiers: KeyboardEventInit = {}) {
   });
 }
 
+/** `,` plus a wait for the overlay's own DOM: `SettingsOverlay` is its own
+ *  lazy chunk now (`Canvas.tsx`'s own `React.lazy` + `Suspense`), so it does
+ *  not exist the instant the keystroke lands. `waitFor` (real timers, its
+ *  default) rather than a fixed `Promise.resolve()` count, the same reason
+ *  `DetailPanel.file-ref.test.tsx`'s own lazy-chunk wait gives. */
+async function openSettings() {
+  press(',');
+  await waitFor(() => {
+    if (!overlay()) throw new Error('still pending');
+  });
+}
+
 beforeAll(() => {
   Object.defineProperty(window, 'localStorage', {
     configurable: true,
@@ -76,16 +87,16 @@ afterEach(() => {
 });
 
 describe(', opens the settings overlay', () => {
-  it('is closed until , is pressed, and Escape closes it again', () => {
+  it('is closed until , is pressed, and Escape closes it again', async () => {
     render(<Canvas model={MODEL} />);
     expect(overlay()).toBeNull();
-    press(',');
+    await openSettings();
     expect(overlay()).not.toBeNull();
     press('Escape');
     expect(overlay()).toBeNull();
   });
 
-  it('hands the keyboard back to where the operator was', () => {
+  it('hands the keyboard back to where the operator was', async () => {
     render(<Canvas model={MODEL} />);
     const row =
       document.querySelector<HTMLElement>('[data-session-row] button') ??
@@ -95,36 +106,42 @@ describe(', opens the settings overlay', () => {
     act(() => row?.focus());
 
     press(',');
-    expect(overlay()?.contains(document.activeElement)).toBe(true);
+    // The overlay takes focus itself once its lazy chunk resolves and it
+    // mounts -- both the DOM and the focus move land on the same wait.
+    await waitFor(() => {
+      expect(overlay()?.contains(document.activeElement)).toBe(true);
+    });
     press('Escape');
     expect(document.activeElement).toBe(row);
   });
 });
 
 describe('the settings overlay is reachable and drawable', () => {
-  it('opens from the sidebar gear too, not only from the chord', () => {
+  it('opens from the sidebar gear too, not only from the chord', async () => {
     render(<Canvas model={MODEL} />);
     fireEvent.click(screen.getByLabelText('settings'));
-    expect(overlay()).not.toBeNull();
+    await waitFor(() => {
+      expect(overlay()).not.toBeNull();
+    });
   });
 
-  it('does not collide with the gear button on the name "settings"', () => {
+  it('does not collide with the gear button on the name "settings"', async () => {
     // Two elements sharing one accessible name is a getByLabelText that throws
     // "found multiple" — and the gear is exactly what a test reaches for to
     // open the thing it then wants to inspect.
     render(<Canvas model={MODEL} />);
-    press(',');
+    await openSettings();
     expect(overlay()).not.toBeNull();
     expect(() => screen.getByLabelText('settings')).not.toThrow();
     expect(screen.getByLabelText('settings').closest('[data-settings-overlay]')).toBeNull();
   });
 
-  it('closes on Escape typed inside one of its own inputs', () => {
+  it('closes on Escape typed inside one of its own inputs', async () => {
     // The trap CommandPalette's comment names: the window key listener ignores
     // keys typed in an input, so an overlay that only listens on the window has
     // no keyboard way out the moment focus lands in a field.
     render(<Canvas model={MODEL} />);
-    press(',');
+    await openSettings();
     const input = overlay()?.querySelector('input');
     expect(input, 'the overlay has no input to be trapped in').toBeTruthy();
     act(() => (input as HTMLInputElement).focus());
@@ -134,17 +151,17 @@ describe('the settings overlay is reachable and drawable', () => {
 });
 
 describe('the theme section is the same state as the sidebar toggle', () => {
-  it('writes the pick to prefs and moves the document', () => {
+  it('writes the pick to prefs and moves the document', async () => {
     render(<Canvas model={MODEL} />);
-    press(',');
+    await openSettings();
     fireEvent.click(option('light'));
     expect(stored().theme).toBe('light');
     expect(document.documentElement.classList.contains('light')).toBe(true);
   });
 
-  it('offers system beside light and dark, and stores it as its own choice', () => {
+  it('offers system beside light and dark, and stores it as its own choice', async () => {
     render(<Canvas model={MODEL} />);
-    press(',');
+    await openSettings();
     fireEvent.click(option('system'));
     // Stored as `system`, not resolved to a colour: the store has to be able to
     // tell "follow the OS" from "I picked dark and the OS happens to agree".

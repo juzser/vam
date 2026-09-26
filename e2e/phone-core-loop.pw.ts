@@ -78,6 +78,7 @@ const STUB = {
     pullRequests: true,
     terminal: false,
     agentRoster: true,
+    resumeSession: true,
   },
   declines: {
     promptAttachments: 'the remote endpoint takes no attachments',
@@ -300,11 +301,24 @@ async function toolsRowFits(page: Page, where: string): Promise<void> {
 
 type Band = { readonly top: number; readonly bottom: number; readonly h: number };
 
-/** Where the four bands of the session screen actually are. */
+/**
+ * Where the bands of the session screen actually are.
+ *
+ * `card` reads the FIXED footer block (`data-question-bar`) — still real on
+ * phone's Agents view (docs/design/phone-core-loop.md §3.2: only the
+ * Response view moved the question inline), and on the Agents view is where
+ * the 140px keyboard cap (`styles.css`) still bites. `column` reads the
+ * Response view's own scroller (`data-detail-column`), which now holds BOTH
+ * the transcript and — when a question is open — the inline question as its
+ * newest item (`data-question-bar-inline`, `sticky bottom-0`, no cap of its
+ * own): AC-3's "one continuous scroll region" means there is no longer a
+ * SEPARATE capped sub-scroll to measure there, only the one shared scroller.
+ */
 async function bands(page: Page): Promise<{
   readonly header: Band | null;
   readonly answer: (Band & { readonly scrollH: number; readonly clientH: number }) | null;
   readonly card: (Band & { readonly scrollH: number; readonly clientH: number }) | null;
+  readonly column: (Band & { readonly scrollH: number; readonly clientH: number }) | null;
   readonly composer: Band | null;
   readonly typing: string | null;
 }> {
@@ -324,6 +338,7 @@ async function bands(page: Page): Promise<{
       header: box(document.querySelector('[data-phone-shell] > header')),
       answer: scroller('[data-phone-shell] [data-detail-body]'),
       card: scroller('[data-phone-shell] [data-question-bar]'),
+      column: scroller('[data-phone-shell] [data-detail-column]'),
       composer: box(document.querySelector('[data-phone-shell] [data-composer-bar]')),
       typing: document.querySelector('[data-phone-shell]')?.getAttribute('data-phone-keyboard') ?? null,
     };
@@ -358,7 +373,18 @@ test.describe('the answer survives the keyboard', () => {
       const b = await bands(page);
       expect(b.answer, 'the transcript body').not.toBeNull();
       expect(b.composer, 'the composer').not.toBeNull();
-      expect(b.card, 'the question card').not.toBeNull();
+      // THE FIXED CARD IS GONE ON THE RESPONSE VIEW (docs/design/
+      // phone-core-loop.md §3.2-3.3): the question moved INLINE, into the
+      // same scroller the transcript already is, so there is no longer a
+      // separate `data-question-bar` to find here -- `data-detail-column`
+      // is that shared scroller now, and it is what the rest of this test
+      // measures.
+      expect(b.card, 'the fixed question card no longer exists on the Response view').toBeNull();
+      expect(b.column, 'the shared transcript+question scroller').not.toBeNull();
+      expect(
+        await page.locator('[data-phone-shell] [data-question-bar-inline]').count(),
+        'the inline question really is mounted, or this test measures nothing',
+      ).toBe(1);
 
       // NOTHING MAY LEAVE THE SCREEN. The failure this guard was written for
       // put the app bar at y=-121 and the answer band entirely above the top
@@ -379,20 +405,23 @@ test.describe('the answer survives the keyboard', () => {
         visible,
         `pixels of the agent's answer on screen with a ${keyboard}px keyboard up ` +
           `(header ${JSON.stringify(b.header)}, answer ${JSON.stringify(b.answer)}, ` +
-          `card ${JSON.stringify(b.card)}, composer ${JSON.stringify(b.composer)})`,
+          `column ${JSON.stringify(b.column)}, composer ${JSON.stringify(b.composer)})`,
       ).toBeGreaterThanOrEqual(ANSWER_MIN_PX);
 
-      // THE CARD IS CAPPED AND SCROLLS WITHIN ITSELF, rather than being cut
-      // off. Asked as `scrollHeight` vs `clientHeight` and not by looking:
-      // `vam-no-scrollbar` hides scrollbars in this app, so appearance says
-      // nothing at all about whether there is anything left to reach.
+      // THE SHARED SCROLLER REACHES EVERYTHING, rather than the question
+      // being cut off below the fold with no way back to it. AC-3's whole
+      // point is that this is now ONE region rather than a transcript above
+      // a separately-capped card: `data-detail-column` carries the
+      // `overflow-y-auto` Tailwind class unconditionally (never a phone-only
+      // CSS cap the way the retired `data-question-bar` rule was), and its
+      // content is taller than what a shrunk keyboard viewport can show.
       expect(
-        await page.locator('[data-phone-shell] [data-question-bar]').evaluate((el) => getComputedStyle(el).overflowY),
-        'the capped card must be able to scroll to the options it no longer shows',
+        await page.locator('[data-phone-shell] [data-detail-column]').evaluate((el) => getComputedStyle(el).overflowY),
+        'the shared scroller must be able to reach content a shrunk viewport cannot all show at once',
       ).toBe('auto');
       expect(
-        (b.card?.scrollH ?? 0) > (b.card?.clientH ?? 0),
-        `the card really is taller than the band it was given (scrollHeight ${b.card?.scrollH}, clientHeight ${b.card?.clientH})`,
+        (b.column?.scrollH ?? 0) > (b.column?.clientH ?? 0),
+        `the shared scroller really is taller than the band it was given (scrollHeight ${b.column?.scrollH}, clientHeight ${b.column?.clientH})`,
       ).toBe(true);
     });
 
@@ -755,21 +784,33 @@ test.describe('every control a finger meets, in every state', () => {
     await intoTheBox(page);
     await record('session screen, box open');
 
-    // THE POPOVERS, which no census in this repo has ever opened. Each is
-    // skipped only when the control it hangs off is genuinely not drawable --
-    // and the skip is reported, so an empty sweep cannot pass as a clean one.
-    const popovers = 0;
+    // THE "+" OVERFLOW SHEET (docs/design/phone-core-loop.md §3.4): the
+    // composer diet moved the provider/model/mode toggles OUT of the
+    // resident tools row and into this sheet, reached by one extra tap. The
+    // sheet itself is a census state -- it draws its own attach/provider/
+    // model/mode rows -- and each row's OWN popover (opened via
+    // `setOpenPopover`, unchanged) is still a census state after it, the
+    // same as it always was for the desktop's resident toggles.
+    const overflow = page.locator('[data-phone-shell] [data-composer-overflow]').first();
+    await expect(overflow, 'the "+" overflow, which the composer diet moved these controls behind').toHaveCount(1);
+    await overflow.click();
+    await record('session screen, "+" overflow open');
+
     for (const [name, toggle] of [
-      ['provider', '[data-provider-picker-toggle]'],
-      ['model', '[data-model-picker]:not([disabled])'],
+      ['provider', '[data-composer-overflow-provider]'],
+      ['model', '[data-composer-overflow-model]:not([disabled])'],
     ] as const) {
       const control = page.locator(`[data-phone-shell] ${toggle}`).first();
       if ((await control.count()) === 0) continue;
       await control.click();
       await record(`session screen, ${name} popover open`);
       await page.keyboard.press('Escape');
+      // Escape closes the popover the row opened, not the sheet itself --
+      // this loop's next iteration re-opens the "+" fresh, matching how an
+      // operator actually reaches a second control from the composer.
+      await overflow.click();
     }
-    void popovers;
+    await page.keyboard.press('Escape');
 
     // WAS `['agents', 'prs']`, with a `continue` for an icon that was not
     // drawn. `prs` is off the phone now (`panels/tabs.ts`), so leaving it in
@@ -789,8 +830,23 @@ test.describe('every control a finger meets, in every state', () => {
     // The hooks the five live defects wore, asserted PRESENT before the
     // filter: a census that stopped reaching them would otherwise report a
     // clean screen.
+    //
+    // `data-composer-overflow`/`-provider`, NOT `data-model-picker`: STUB's
+    // own capabilities declare `terminal: false`, so `modelControlState`
+    // lands on `'disabled'` for this fixture -- a plain informational `div`
+    // on phone now (docs/design/phone-core-loop.md §3.4's composer diet
+    // moved even the disabled state off the resident tools row and into the
+    // "+" sheet), which is correctly NOT a touch target this census counts.
+    // `data-composer-overflow` (the "+" itself) and `-provider` (the one
+    // sheet row this fixture's capabilities keep live) are what proves the
+    // census actually reached the new mechanism.
     const hooks = seen.map((b) => b.hooks).join(' ');
-    for (const hook of ['data-agents-toggle', 'data-model-picker', 'data-prompt-suggestion']) {
+    for (const hook of [
+      'data-agents-toggle',
+      'data-composer-overflow',
+      'data-composer-overflow-provider',
+      'data-prompt-suggestion',
+    ]) {
       expect(hooks, `the census reached ${hook}`).toContain(hook);
     }
     expect(undersized, 'controls under 44x44 across every phone state').toEqual([]);
@@ -932,22 +988,84 @@ test.describe('what the session screen no longer spends room on', () => {
     );
   });
 
-  test('the composer draws no provider picker while there is one provider', async ({ page }) => {
+  /**
+   * THE PROVIDER PICKER IS BACK, AND WHAT IS MEASURED IS WHAT IT NOW HOLDS.
+   * While `PROVIDERS` had one row this test held the control absent; the
+   * `codex` row returned it (Stage 2 of `docs/design/vam-owns-the-session.md`).
+   * Of the two things measured wrong with it at 390px before the withdrawal,
+   * the hit box is fixed (`vam-tap` was added while it was dormant) and is
+   * proven here: 44 on the toggle, 44 on each row.
+   *
+   * THE TOGGLE MOVED (docs/design/phone-core-loop.md §3.4): the composer
+   * diet pulled it off the resident tools row, reachable now through the
+   * "+" overflow sheet's own "Provider" row -- one extra tap, the SAME
+   * `setOpenPopover('provider')` state and the SAME popover this test
+   * always measured, unwidened.
+   *
+   * THE OTHER ONE IS NOT FIXED AND IS NOT CLAIMED. The popover still opens
+   * `bottom-full` off the tools row, which on a phone puts it over the
+   * textarea -- measured here at 50px below the textarea's top. That is the
+   * SAME placement the model and mode popovers beside it have had all along,
+   * unguarded; a fix is a composer-layout decision for all three, not this
+   * control's alone, and a guard that asserted the property for one of the
+   * three would be asserting something its neighbours fail. What is held is
+   * that the popover is on screen whole, not clipped by the shell.
+   */
+  test('the composer draws the provider picker, 44px to the touch, with its popover on screen', async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 390, height: SHELL_H });
     await stubRemote(page);
     await openWaiting(page);
     await intoTheBox(page);
-    await expect(
-      page.locator('[data-provider-picker-toggle]'),
-      'a control whose list has one row cannot act, so it is not drawn as one',
-    ).toHaveCount(0);
-    await expect(page.locator('[data-provider-picker]')).toHaveCount(0);
+    const overflow = page.locator('[data-phone-shell] [data-composer-overflow]');
+    await expect(overflow, 'the "+" that now reaches it').toHaveCount(1);
+    const overflowHit = await overflow.boundingBox();
+    expect(Math.round(overflowHit?.width ?? 0), 'the "+" is itself a touch target').toBeGreaterThanOrEqual(
+      TOUCH_MIN,
+    );
+    expect(Math.round(overflowHit?.height ?? 0)).toBeGreaterThanOrEqual(TOUCH_MIN);
+    await overflow.click();
+    const toggle = page.locator('[data-phone-shell] [data-composer-overflow-provider]');
+    await expect(toggle, 'a two-row table is a choice, so the row is drawn').toHaveCount(1);
+    const hit = await toggle.boundingBox();
+    expect(Math.round(hit?.width ?? 0), 'the hit box, not the skin').toBeGreaterThanOrEqual(
+      TOUCH_MIN,
+    );
+    expect(Math.round(hit?.height ?? 0)).toBeGreaterThanOrEqual(TOUCH_MIN);
+    await toggle.click();
+    const layer = page.locator('[data-phone-shell] [data-provider-picker]');
+    await expect(layer).toBeVisible();
+    const popover = await layer.boundingBox();
+    const shell = await page.locator('[data-phone-shell]').boundingBox();
+    expect(Math.round(popover?.x ?? -1), 'the popover is inside the shell').toBeGreaterThanOrEqual(
+      Math.round(shell?.x ?? 0),
+    );
+    expect(Math.round(popover?.y ?? -1)).toBeGreaterThanOrEqual(Math.round(shell?.y ?? 0));
+    expect(
+      Math.round((popover?.x ?? 0) + (popover?.width ?? 0)),
+      'and not clipped on the right',
+    ).toBeLessThanOrEqual(Math.round((shell?.x ?? 0) + (shell?.width ?? 0)));
+    const options = layer.locator('[data-provider-option]');
+    await expect(options).toHaveCount(2);
+    for (const option of await options.all()) {
+      const r = await option.boundingBox();
+      expect(Math.round(r?.height ?? 0), 'each row is a touch target').toBeGreaterThanOrEqual(
+        TOUCH_MIN,
+      );
+    }
   });
 
   test('the session strip is tabs and nothing else, and every tab fits', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: SHELL_H });
     await stubRemote(page);
-    await openWaiting(page);
+    // `s2` (`alpha-running`), NOT `openWaiting`'s `s1` (docs/design/
+    // phone-core-loop.md §3.2): `s1` carries an open question, and the
+    // strip now collapses exactly then -- correctly, and covered by its own
+    // describe below. This test is about the strip's own content once it IS
+    // drawn, so it opens a session with nothing open to answer.
+    await page.locator('[data-phone-shell] [data-session-row="s2"]').click();
+    await expect(page.locator('[data-phone-shell]')).toHaveAttribute('data-phone-shell', 'session');
     const strip = page.locator('[data-phone-session-tabs]');
     await expect(strip).toBeVisible();
     await expect(page.locator('[data-phone-session-add]'), 'the pinned +').toHaveCount(0);

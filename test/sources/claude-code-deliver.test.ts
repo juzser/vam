@@ -46,6 +46,7 @@ describe('registerSourceIpc, once a source can actually write', () => {
       pullRequests: false,
       terminal: false,
       agentRoster: false,
+      resumeSession: false,
     },
     declines: recordPrompt ? {} : { recordPrompt: 'no' },
     viewerScope: { kind: 'connection' as const, note: 'test' },
@@ -53,7 +54,7 @@ describe('registerSourceIpc, once a source can actually write', () => {
 
   const wire = (source: MainSource) => {
     const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
-    registerSourceIpc({ handle: (c, l) => void handlers.set(c, l) }, source);
+    registerSourceIpc({ handle: (c, l) => void handlers.set(c, l) }, [source]);
     return (...args: unknown[]) => handlers.get(CHANNELS.recordPrompt)?.({}, ...args);
   };
 

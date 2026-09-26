@@ -57,13 +57,21 @@ import type { HistoryCursor, TranscriptPage } from '../../../shared/history.js';
 import type { SourceDescriptor } from '../../../shared/preload-api.js';
 import type { SourceError } from '../../ipc/channels.js';
 import type { MainSource } from '../source.js';
-import { createTmuxRunner, listVamSessions, type TmuxSession } from '../tmux/spawn.js';
+import { tagVamSessionArgv } from '../tmux/argv.js';
+import {
+  createTmuxRunner,
+  listVamSessions,
+  type TmuxRun,
+  type TmuxSession,
+} from '../tmux/spawn.js';
 import { type AgentRoster, readAgentRoster, subagentsDirOf } from './agent-roster.js';
 import { readAgentWork } from './agent-work.js';
 import { type AgentsResult, type LiveAgent, listLiveAgents } from './agents.js';
 import { type BuiltinCommandList, createBuiltinCommandReader } from './builtin-commands.js';
+import { mapWithConcurrencyLimit } from './concurrency-limit.js';
 import { createSessionInDirectory, createSessionInProject } from './create-session.js';
 import { readTranscriptHistory } from './history.js';
+import { paneNameOf, paneRow, terminalRow, unclaimedPanes } from './pane-row.js';
 import { prRepoOverride } from './pr-repos.js';
 import { projectIdOf } from './project-id.js';
 import {
@@ -71,8 +79,15 @@ import {
   type ReadPullRequests,
   readPullRequestsViaCli,
 } from './pull-requests.js';
+import {
+  createQuestionIndex,
+  mergeOpenQuestion,
+  type QuestionIndex,
+  readOpenQuestion,
+} from './question-index.js';
 import { paneForRow, replyToSession } from './reply.js';
 import { createBranchLookup } from './repo-branch.js';
+import { claudeResumeCommand, resumeClaudeSession } from './resume.js';
 import { readPublishedPanes, readPublishedPanesAndProcessFacts } from './session-pane.js';
 import { defaultSessionsRoot } from './session-status.js';
 import {
@@ -80,6 +95,7 @@ import {
   mergeSlashCommands,
   readUserSlashCommands,
 } from './slash-commands.js';
+import { killOwnPane, typeIntoOwnPane } from './start-in-pane.js';
 import {
   killPidViaSignal,
   pidHasClaudeSessionFile,
@@ -159,6 +175,18 @@ type TranscriptRead = {
   readonly mtimeMs: number | null;
 };
 
+/**
+ * The most transcript reads `loadClaudeCodeProjects` runs at once (S3, a
+ * review finding on the fix that made them concurrent at all -- see
+ * `concurrency-limit.ts`'s own header for the mechanism). Not independently
+ * measured the way `SOURCE_POLL_INTERVAL_MS` was: the reviewer's own number,
+ * picked as a small, deliberately conservative bound rather than the largest
+ * value that still helps -- a handful of sessions (the common case) still
+ * reads every one of them in the same wave this always ran as below this
+ * count.
+ */
+const TRANSCRIPT_READ_CONCURRENCY = 8;
+
 const NO_TRANSCRIPT: TranscriptRead = {
   facts: EMPTY_FACTS,
   // Empty, not absent: a session vam READ and found no agents under is a
@@ -167,10 +195,25 @@ const NO_TRANSCRIPT: TranscriptRead = {
   mtimeMs: null,
 };
 
-async function readTranscript(
+/**
+ * ONE PROCESS'S MEMORY OF EVERY LIVE TRANSCRIPT'S OPEN QUESTION, for the life
+ * of the app -- the same pattern `PR_READER` and `BUILTIN_COMMANDS` below are:
+ * a cache that pays off only if it survives longer than one `load()`.
+ * `question-index.ts` says why a per-poll cache is the whole point of that
+ * module rather than an optimisation on top of it.
+ */
+const QUESTION_INDEX: QuestionIndex = createQuestionIndex();
+
+/**
+ * EXPORTED FOR THE TEST THAT PROVES THE CACHE ACTUALLY PERSISTS ACROSS POLLS
+ * (`claude-code-question-window.test.ts`) -- every other caller keeps using
+ * this exactly as before, through the default parameter.
+ */
+export async function readTranscript(
   path: string,
   sessionId: string,
   nowMs: number,
+  questionIndex: QuestionIndex = QUESTION_INDEX,
 ): Promise<TranscriptRead> {
   try {
     const info = await stat(path);
@@ -181,15 +224,22 @@ async function readTranscript(
     // The size is the one this `stat` already answered rather than a second
     // one of its own: the file cannot be stat'd twice per poll just to learn a
     // number that is sitting here.
-    const { facts } = await readLiveTail(
-      {
-        size: async () => info.size,
-        read: (from, to) => readTranscriptWindow(path, from, to),
-      },
+    const source = {
+      size: async () => info.size,
+      read: (from: number, to: number) => readTranscriptWindow(path, from, to),
+    };
+    const { facts: windowFacts } = await readLiveTail(
+      source,
       sessionId,
       TAIL_WINDOW_BYTES,
       MAX_TAIL_READ_BYTES,
     );
+    // KEEPS AN OPEN `AskUserQuestion` IN VIEW PAST WHERE THE TAIL WINDOW
+    // STOPPED -- `question-index.ts`'s whole reason to exist. Cheap on every
+    // poll after the first: an append-only file only ever hands this the
+    // bytes written since the last look, typically one line.
+    const open = await readOpenQuestion(questionIndex, path, info.size, info.mtimeMs, source);
+    const facts = { ...windowFacts, questions: mergeOpenQuestion(windowFacts.questions, open) };
     // The roster's walk is what names the live agents, and it has already been
     // paid for the `●N` badge -- so a session with none costs nothing new here
     // and reads no file it did not read before (`subagent.ts`).
@@ -204,6 +254,50 @@ async function readTranscript(
     // session is live and the operator should still see it.
     return NO_TRANSCRIPT;
   }
+}
+
+/**
+ * The row for a vam pane no LIVE row is paired to -- `terminalRow` when
+ * `@vam-session` names a conversation vam can still find, `paneRow` (the
+ * plain anonymous shell) otherwise. `docs/design/vam-terminal-only.md`.
+ *
+ * THE FALLBACK IS THE WHOLE OF THE SAFETY ARGUMENT, on the same rule every
+ * other reader of an unset or unusable tag follows: a pane tagged with an id
+ * vam cannot find a transcript for is not evidence of an identity, it is
+ * evidence of NOTHING -- a transcript deleted from disk, a tag left over from
+ * a conversation Claude Code itself lost track of. Falling through to the
+ * anonymous row is what `paneRow` already draws for a pane nobody ever tagged
+ * at all, so this never invents a THIRD shape for "vam is not sure".
+ *
+ * `reads` IS SHARED WITH THE LIVE-AGENT LOOP ABOVE, deliberately: the common
+ * case is that nothing here was already read this poll (a terminal-only
+ * pane's conversation has no live process, or it would not be terminal-only),
+ * but sharing the cache costs nothing and means a session id that happens to
+ * coincide is read once rather than twice.
+ */
+async function rowForEmptyPane(
+  empty: TmuxSession,
+  index: ReadonlyMap<string, string>,
+  reads: Map<string, TranscriptRead>,
+  nowMs: number,
+): Promise<Session> {
+  const sessionId = empty.vamSessionId;
+  const path = sessionId === undefined || sessionId === '' ? undefined : index.get(sessionId);
+  if (sessionId === undefined || path === undefined) return paneRow(empty);
+  const read = reads.get(sessionId) ?? (await readTranscript(path, sessionId, nowMs));
+  reads.set(sessionId, read);
+  const resumeCommand = claudeResumeCommand(sessionId);
+  return terminalRow(empty, {
+    sessionId,
+    // THE SAME FALLBACK CHAIN A LIVE ROW'S TITLE USES (below): the operator's
+    // own name is never available here (there is no `LiveAgent` for a pane
+    // with no process in it), so this starts one rung down, at the
+    // transcript's own generated title.
+    title: read.facts.aiTitle ?? sessionId,
+    decisions: read.facts.decisions,
+    branch: read.facts.branch,
+    resumeCommand: resumeCommand === null ? null : resumeCommand.join(' '),
+  });
 }
 
 /**
@@ -313,6 +407,21 @@ export async function loadClaudeCodeProjects(
   // means vam asked the CLI and could not be told, which the session carries
   // as `slashCommandGap` so the short list says why it is short.
   builtinCommands: BuiltinCommandList | null = null,
+  // WHY `listVamSessions` RETURNED `tmuxSessions: null`, so the same trap
+  // `codex/source.ts`'s `vamListingGap` closes is closed here too --
+  // `docs/design/vam-owns-the-session.md`: "an unreadable tmux listing must
+  // not empty the sidebar." NULL means either nobody asked or the ask
+  // succeeded; `CLAUDE_CODE_SOURCE` passes the real error alongside the real
+  // `null` it hands `tmuxSessions` above, never one without the other.
+  vamListingGap: { readonly code: string; readonly message: string } | null = null,
+  // WRITE `@vam-session` WHILE THE PAIRING IS STILL PROVEN, for the row whose
+  // agent has not exited yet -- `docs/design/vam-terminal-only.md`, and the
+  // one write `load()` makes on purpose. NULL BY DEFAULT, on the same rule
+  // every other injected dependency here follows: a caller that has not
+  // handed over a runner gets the pure read this function has always been,
+  // and every test in this suite that predates this parameter keeps behaving
+  // exactly as it did. `CLAUDE_CODE_SOURCE` passes the real runner.
+  tagVamSession: TmuxRun | null = null,
   // Injectable for the same reason as `branchOf`: a test controls when each
   // session's transcript read resolves, to prove the reads below run
   // concurrently rather than one after another. Defaults to the real reader.
@@ -331,29 +440,55 @@ export async function loadClaudeCodeProjects(
   // project.
   const { panes, facts: processFacts } = await readPublishedPanesAndProcessFacts(sessionsRoot);
 
-  // Read each transcript once, however many processes resumed it -- and all
-  // of them AT ONCE: one session's read never waits on another's. Each
-  // mapper iteration keeps its own try/catch, so one session's rejection
-  // lands that session's NO_TRANSCRIPT sentinel and never fails the batch.
+  // Read each transcript once, however many processes resumed it -- and up
+  // to TRANSCRIPT_READ_CONCURRENCY of them AT ONCE: one session's read never
+  // waits behind another's unless the set is large enough to hit the bound
+  // (S3). Each mapper iteration keeps its own try/catch, so one session's
+  // rejection lands that session's NO_TRANSCRIPT sentinel and never fails
+  // the batch.
   const reads = new Map<string, TranscriptRead>(
-    await Promise.all(
-      [...new Set(agents.map((a) => a.sessionId))].map(
-        async (sessionId): Promise<[string, TranscriptRead]> => {
-          const path = index.get(sessionId);
-          if (path === undefined) return [sessionId, NO_TRANSCRIPT];
-          try {
-            return [sessionId, await readTranscriptOf(path, sessionId, nowMs)];
-          } catch {
-            return [sessionId, NO_TRANSCRIPT];
-          }
-        },
-      ),
+    await mapWithConcurrencyLimit(
+      [...new Set(agents.map((a) => a.sessionId))],
+      TRANSCRIPT_READ_CONCURRENCY,
+      async (sessionId): Promise<[string, TranscriptRead]> => {
+        const path = index.get(sessionId);
+        if (path === undefined) return [sessionId, NO_TRANSCRIPT];
+        try {
+          return [sessionId, await readTranscriptOf(path, sessionId, nowMs)];
+        } catch {
+          return [sessionId, NO_TRANSCRIPT];
+        }
+      },
     ),
   );
 
   const grouped = new Map<string, { cwd: string; sessions: Session[] }>();
+  // Every pane a LIVE row was proven to be in this load -- the set the empty
+  // panes are subtracted from below. Filled as the rows are built, so the
+  // pairing is computed once per row and read twice.
+  const claimed = new Set<string>();
   for (const agent of agents) {
     const read = reads.get(agent.sessionId) ?? NO_TRANSCRIPT;
+    const pane = tmuxSessions === null ? null : paneForRow(tmuxSessions, agents, agent, panes);
+    if (pane !== null) claimed.add(pane);
+    // GUESS ONCE, THEN WRITE IT DOWN -- except this is not a guess.
+    // `paneForRow` above already PROVED this row's pane (most often through
+    // the published-pane tier: Claude Code's own `~/.claude/sessions/<pid>
+    // .json`), and that file is gone the moment the process exits cleanly
+    // (measured on a private tmux socket, 2.1.280: `/exit` deletes it). The
+    // tmux session survives its agent exiting -- Stage 2 made the pane a
+    // shell first -- so writing the id onto the SESSION, while a live row can
+    // still prove it, is what lets `terminalRow` below recover the same
+    // identity after the file that proved it today is gone. Skipped once the
+    // tag already agrees: this fires exactly once per pane's whole life, not
+    // once a poll, and `tagVamSessionArgv`'s own doc explains why a bare
+    // `set-option -t <name>` stays safe to run again regardless.
+    if (pane !== null && tagVamSession !== null && tmuxSessions !== null) {
+      const tagged = tmuxSessions.find((session) => session.name === pane);
+      if (tagged !== undefined && tagged.vamSessionId !== agent.sessionId) {
+        await tagVamSession(tagVamSessionArgv(pane, agent.sessionId));
+      }
+    }
     // Per row, because a row is a process: the age below and the waiting
     // state come out of the same file and are read together. Looked up
     // rather than re-read -- `readPublishedPanesAndProcessFacts` above
@@ -405,7 +540,6 @@ export async function loadClaudeCodeProjects(
       // The CLI's name is the operator's own; the generated title is only a
       // fallback, and the session id a fallback for that.
       title: agent.name ?? read.facts.aiTitle ?? agent.sessionId,
-      icon: null,
       // The branch is the second label: it is what actually distinguishes two
       // sessions on the same project at a glance.
       epic: read.facts.branch,
@@ -490,14 +624,48 @@ export async function loadClaudeCodeProjects(
       // reads one answer: one tagged tmux session for this project, one live
       // row in it. Anything ambiguous is `false` -- vam asked and cannot prove
       // this row is that pane, which is exactly the case where acting on it
-      // would act on the wrong one.
-      ...(tmuxSessions === null
-        ? {}
-        : { vamControlled: paneForRow(tmuxSessions, agents, agent, panes) !== null }),
+      // would act on the wrong one. The pane itself rides along as `pane`
+      // when there is one (`model.ts` says what the renderer does with it),
+      // and is what `claimed` below subtracts.
+      ...(pane === null ? {} : { pane }),
+      ...(tmuxSessions === null ? {} : { vamControlled: pane !== null }),
+      ...(vamListingGap === null ? {} : { vamListingGap }),
     };
     const group = grouped.get(agent.cwd) ?? { cwd: agent.cwd, sessions: [] };
     group.sessions.push(session);
     grouped.set(agent.cwd, group);
+  }
+
+  // SOURCE ROWS, PLUS EVERY VAM PANE NO SOURCE ROW IS PAIRED TO (`pane-row.ts`
+  // carries the argument). Filed under the project whose digest the pane
+  // recorded, when it has one; a TAGGED pane with no live row for its digest
+  // still has nowhere to go, because a digest cannot be turned back into a
+  // directory. An UNTAGGED pane -- `unclaimedPanes` now lets one through when
+  // tmux told us its real cwd -- gets a brand-new project bucket instead,
+  // built from that cwd exactly as a live agent row's own project is: this is
+  // the only way a bare `tmux new-session -s vam-x`, never handed to
+  // `createVamSession` at all, still becomes a row.
+  if (tmuxSessions !== null) {
+    const byProjectId = new Map(
+      [...grouped.entries()].map(([cwd, group]) => [projectIdOf(cwd), group] as const),
+    );
+    for (const empty of unclaimedPanes(tmuxSessions, claimed)) {
+      const cwd = empty.cwd !== undefined && empty.cwd !== '' ? empty.cwd : null;
+      const projectId =
+        empty.project !== '' ? empty.project : cwd !== null ? projectIdOf(cwd) : null;
+      if (projectId === null) continue;
+      let bucket = byProjectId.get(projectId);
+      if (bucket === undefined) {
+        // Only reachable via the cwd fallback: a TAGGED project with no live
+        // row still has no cwd to build a section from, and is skipped below
+        // exactly as before this change.
+        if (cwd === null) continue;
+        bucket = { cwd, sessions: [] };
+        grouped.set(cwd, bucket);
+        byProjectId.set(projectId, bucket);
+      }
+      bucket.sessions.push(await rowForEmptyPane(empty, index, reads, nowMs));
+    }
   }
 
   return [...grouped.values()].map((group) => ({
@@ -587,6 +755,12 @@ const DESCRIPTOR: SourceDescriptor = {
     // transcript for whether it is running, and the `meta.json` beside it for
     // what it is. See `agent-roster.ts`.
     agentRoster: true,
+    // `claude --resume <sessionId>` -- `docs/design/reopening-a-session.md`
+    // §3, built in `./resume.ts`. It is offered only for a row whose whole
+    // conversation has finished; that rule is enforced at the spawn, not
+    // here, because a capability is a fact about the SOURCE and this one is
+    // a fact about a row.
+    resumeSession: true,
   },
   declines: {
     // No watch is implemented, so no live badge is claimed: flipping this on
@@ -659,6 +833,16 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
     if (agentsResult.kind === 'unavailable') {
       throw new Error(agentsResult.message);
     }
+    // ONE tmux call per load, read ONCE into both `tmuxSessions` and
+    // `vamListingGap` -- Codex's `createCodexSource` does the same split from
+    // its own single `listVamSessions` call, and the two must never disagree
+    // about whether the listing failed: `tmuxSessions` stays NULL on a
+    // failure exactly when `vamListingGap` is non-null for it, never one
+    // without the other (`loadClaudeCodeProjects`'s own contract above).
+    const listed = await listVamSessions(createTmuxRunner());
+    const tmuxSessions = listed.kind === 'ok' ? listed.sessions : null;
+    const vamListingGap =
+      listed.kind === 'ok' ? null : { code: listed.error.code, message: listed.error.message };
     return loadClaudeCodeProjects(
       defaultTranscriptRoot(),
       agentsResult.agents,
@@ -674,10 +858,7 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
       // answerable. `unavailable` stays NULL rather than becoming an empty
       // list: vam could not ask, and must not report that as "vam started
       // none of these".
-      await (async () => {
-        const listed = await listVamSessions(createTmuxRunner());
-        return listed.kind === 'ok' ? listed.sessions : null;
-      })(),
+      tmuxSessions,
       await readUserSlashCommands(),
       // One lookup per `load()`, so the sessions of one project read their
       // `.claude/commands` once between them.
@@ -686,6 +867,16 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
       // installed CLI does not change under a running app, so this spawn
       // happens once rather than on every ten-second poll.
       await BUILTIN_COMMANDS(),
+      // WHY `tmuxSessions` IS NULL, when it is -- the operator's primary
+      // source, so a GUI-launched vam's non-UTF-8 `LC_CTYPE`
+      // (`listing-unreadable`) reaches the sidebar's reason banner from here,
+      // not only from Codex.
+      vamListingGap,
+      // THE ONE WRITE THIS READ PATH MAKES, and why it is safe to: see the
+      // per-agent loop's own comment above. Re-uses the same runner
+      // `listVamSessions` just called through, rather than a second one, for
+      // no reason beyond there being no reason to mint two.
+      createTmuxRunner(),
     );
   },
   /**
@@ -696,6 +887,15 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
    * a session that is already gone.
    */
   recordPrompt: async (sessionId, prompt) => {
+    // A PANE ROW has no agent to pair, so the agent list is not asked at
+    // all: the row names its tmux session, and `start-in-pane.ts` re-proves
+    // that name against vam's own listing before typing. This is Start
+    // session's route -- the renderer sends the provider's command as the
+    // "prompt" -- and it is also what the composer would do here, which is
+    // right: a pane holding a shell IS a terminal, and text sent to it runs.
+    const pane = paneNameOf(sessionId);
+    if (pane !== null)
+      return typeIntoOwnPane({ run: createTmuxRunner(), name: pane, text: prompt });
     const agentsResult = await listLiveAgents();
     if (agentsResult.kind === 'unavailable') return agentsUnavailableError(agentsResult);
     return replyToSession({
@@ -715,6 +915,11 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
    * process now.
    */
   closeSession: async (sessionId, force = false) => {
+    // A PANE ROW: §5's "Close the session" for a pane with nothing in it.
+    // `force` is not read -- there is no unverifiable process to signal; the
+    // pane is either provably vam's own and killed, or refused by name.
+    const pane = paneNameOf(sessionId);
+    if (pane !== null) return killOwnPane({ run: createTmuxRunner(), name: pane });
     const agentsResult = await listLiveAgents();
     if (agentsResult.kind === 'unavailable') return agentsUnavailableError(agentsResult);
     return stopSession(
@@ -744,21 +949,46 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
    * is the only thing that maps a project id back to a directory, and a
    * canvas drawn minutes ago may name a project whose last session has since
    * exited.
+   *
+   * THE TMUX LISTING IS ALSO RE-ASKED, and only ever consulted as
+   * `createSessionInProject`'s own fallback: a project right after Start is
+   * all pane rows and no live agent yet (D2), so the live list alone answers
+   * `unknown-project` for a directory vam's own Terminal tab is drawing that
+   * moment. A listing vam could not obtain degrades to no panes offered,
+   * never to a thrown error -- exactly the project's live-agent path already
+   * did before this fallback existed, and exactly what `unknown-project`
+   * already says honestly for a project neither can place.
    */
   createSession: async (projectId, title, provider) => {
     const agentsResult = await listLiveAgents();
     if (agentsResult.kind === 'unavailable') return agentsUnavailableError(agentsResult);
+    const listed = await listVamSessions(createTmuxRunner());
     return createSessionInProject({
       provider,
       agents: agentsResult.agents,
       projectId,
       title,
       run: createTmuxRunner(),
+      panes: listed.kind === 'ok' ? listed.sessions : [],
     });
   },
   /** No agent list to consult: the operator named the directory themselves. */
   createSessionInDirectory: async (cwd, title, provider) =>
     createSessionInDirectory({ cwd, title, provider, run: createTmuxRunner() }),
+  /**
+   * `docs/design/reopening-a-session.md` §3.
+   *
+   * The agent list is asked for INSIDE `resumeClaudeSession` rather than
+   * gathered here, for the reason that module documents: what has to be true
+   * is that nothing is live on that SESSION ID -- not merely that this row has
+   * finished -- and the canvas's idea of either is one poll old.
+   */
+  resumeSession: async (sessionId) =>
+    resumeClaudeSession({
+      rowId: sessionId,
+      agents: listLiveAgents,
+      run: createTmuxRunner(),
+    }),
   /**
    * NO agent list is asked for here, unlike every write above, and that is the
    * point of the difference: this reads a FILE, and a transcript outlives the

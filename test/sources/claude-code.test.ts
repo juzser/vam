@@ -31,6 +31,7 @@ import {
   loadClaudeCodeProjects,
 } from '../../src/main/sources/claude-code/source.js';
 import { compactAge, summarizeTranscript } from '../../src/main/sources/claude-code/transcript.js';
+import { listVamSessions, type TmuxRun } from '../../src/main/sources/tmux/spawn.js';
 
 const NOW = Date.parse('2026-09-03T09:05:00.000Z');
 
@@ -967,6 +968,52 @@ describe('loadClaudeCodeProjects', () => {
     });
   });
 
+  /**
+   * `docs/design/vam-owns-the-session.md`'s own trap, the Claude Code half:
+   * "an unreadable tmux listing must not empty the sidebar." The Codex source
+   * already stamps `vamListingGap` on every row when its own `listVamSessions`
+   * call fails; this source must too, since it is the operator's primary one
+   * and a GUI-launched vam's non-UTF-8 `LC_CTYPE` is the common case the trap
+   * names. A REAL failing runner is injected into the REAL `listVamSessions`,
+   * exactly the shape `CLAUDE_CODE_SOURCE.load` hands it, so the error this
+   * asserts on is the one tmux itself would produce, not an invented one.
+   */
+  describe('vamListingGap', () => {
+    const only = agent({ cwd: '/w/alpha' });
+
+    it('is stamped on every session when tmux itself could not be read', async () => {
+      const failing: TmuxRun = async () => ({
+        failure: { message: 'ENOENT', code: 'ENOENT' },
+        stdout: '',
+        stderr: '',
+      });
+      const listed = await listVamSessions(failing);
+      if (listed.kind !== 'unavailable') throw new Error('expected the listing to fail');
+      const [project] = await loadClaudeCodeProjects(
+        root,
+        [only],
+        NOW,
+        undefined,
+        sessionsRoot,
+        null,
+        // tmuxSessions: null -- vam could not ask, same as `vamControlled`'s
+        // own "absent" case above.
+        null,
+        undefined,
+        undefined,
+        undefined,
+        { code: listed.error.code, message: listed.error.message },
+      );
+      expect(project?.sessions[0]).not.toHaveProperty('vamControlled');
+      expect(project?.sessions[0]?.vamListingGap).toMatchObject({ code: 'tmux-missing' });
+    });
+
+    it('says nothing about a gap when nobody asked at all', async () => {
+      const [project] = await loadClaudeCodeProjects(root, [only], NOW);
+      expect('vamListingGap' in (project?.sessions[0] ?? {})).toBe(false);
+    });
+  });
+
   it('takes the session list from the live agents, not from the transcript directory', async () => {
     writeTranscript('slug-a', 'stale-and-dead', jsonl(reply('old')));
     const projects = await loadClaudeCodeProjects(root, [agent()], NOW);
@@ -1552,11 +1599,83 @@ describe('loadClaudeCodeProjects', () => {
         [],
         undefined,
         null,
+        null,
+        null,
         readTranscriptOf,
       );
 
       expect(starts.length).toBe(5);
       expect(project?.sessions.map((s) => s.epic).sort()).toEqual([...sessionIds].sort());
+    });
+
+    /**
+     * S3 (review finding): unbounded concurrency was correct for a handful
+     * of sessions but would spawn one `claude` read per session for a very
+     * large project set. Twelve sessions, none released, must start no more
+     * than 8 reads -- `mapWithConcurrencyLimit`'s own unit test
+     * (`claude-code-concurrency-limit.test.ts`) pins the limiter in
+     * isolation; this pins that `loadClaudeCodeProjects` actually wires it
+     * in rather than still calling the bare `Promise.all` it used to.
+     */
+    it('never starts more than the concurrency bound at once, with a large session set', async () => {
+      const sessionIds = Array.from({ length: 12 }, (_, i) => `sess-${i}`);
+      for (const id of sessionIds) writeTranscript('proj', id, jsonl(reply('x')));
+      const agents = sessionIds.map((id) => agent({ key: `${id}#1`, sessionId: id }));
+
+      const starts: string[] = [];
+      const releases = new Map<string, () => void>();
+      let releaseEighthWave: () => void = () => {};
+      const eighthWaveStarted = new Promise<void>((resolve) => {
+        releaseEighthWave = resolve;
+      });
+
+      const readTranscriptOf = async (_path: string, sessionId: string) => {
+        starts.push(sessionId);
+        if (starts.length === 8) releaseEighthWave();
+        await new Promise<void>((resolve) => releases.set(sessionId, resolve));
+        return emptyRead(sessionId);
+      };
+
+      const loadPromise = loadClaudeCodeProjects(
+        root,
+        agents,
+        NOW,
+        undefined,
+        sessionsRoot,
+        null,
+        null,
+        [],
+        undefined,
+        null,
+        null,
+        null,
+        readTranscriptOf,
+      );
+
+      // Give every read that WILL start without another resolving first the
+      // chance to -- bounded, so an unbounded regression (all 12 start, this
+      // never resolves waiting for a ninth-that-never-comes) fails fast
+      // rather than hanging the suite.
+      await boundedWait(eighthWaveStarted, 500, 'did not observe exactly 8 reads start');
+      // Give a would-be regression one more turn of the loop to prove a
+      // ninth does NOT also start on its own.
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      expect(starts.length).toBe(8);
+
+      // Drain in waves: releasing the first 8 frees their slots, which lets
+      // the next few start -- but only as each wave's OWN releases resolve
+      // and the worker loop picks up the next item, a few of which need
+      // their own wave after that. Keep releasing whatever is currently
+      // waiting until all 12 have started.
+      while (starts.length < sessionIds.length) {
+        const waiting = [...releases.values()];
+        releases.clear();
+        for (const release of waiting) release();
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
+      for (const release of releases.values()) release();
+      await loadPromise;
+      expect(starts.length).toBe(12);
     });
 
     it('lets the other sessions land data when one session read rejects', async () => {
@@ -1579,6 +1698,8 @@ describe('loadClaudeCodeProjects', () => {
         null,
         [],
         undefined,
+        null,
+        null,
         null,
         readTranscriptOf,
       );
@@ -1612,6 +1733,8 @@ describe('loadClaudeCodeProjects', () => {
         [],
         undefined,
         null,
+        null,
+        null,
         readTranscriptOf,
       );
       expect(projects).toEqual([]);
@@ -1643,6 +1766,8 @@ describe('loadClaudeCodeProjects', () => {
         null,
         [],
         undefined,
+        null,
+        null,
         null,
         readTranscriptOf,
       );

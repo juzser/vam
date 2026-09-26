@@ -26,7 +26,6 @@ import type { AnswerRequest, PromptView } from '../../src/shared/answer.js';
 const SESSION: Session = {
   id: 's1',
   title: 'Provider survey',
-  icon: null,
   epic: null,
   branch: null,
   status: 'waiting',

@@ -107,7 +107,7 @@ export const DEMO_PROMPT: PromptView = {
  */
 export function demoSessionModel(rowId?: string): SessionModel {
   const running: Record<string, SessionModel> = {
-    'notes-1': { kind: 'model', name: 'Opus 5' },
+    'notes-1': { kind: 'model', name: 'Opus 5.5' },
     'notes-2': { kind: 'model', name: 'Sonnet 5' },
     // THE LONGEST REAL NAME THERE IS, and the first reason it is in the
     // fixture: this is what the status line reads on a session started on a
@@ -143,7 +143,6 @@ export const DEMO_MODEL: CanvasModel = {
           vamControlled: true,
           id: 'factory-sse-1',
           title: 'factory-sse-1',
-          icon: '🔨',
           epic: 'ui-server-sse',
           branch: null,
           status: 'waiting',
@@ -333,7 +332,6 @@ export const DEMO_MODEL: CanvasModel = {
         {
           id: 'crosscheck-2',
           title: 'crosscheck-2',
-          icon: '🧪',
           epic: 'cross-provider',
           branch: null,
           status: 'running',
@@ -375,7 +373,6 @@ export const DEMO_MODEL: CanvasModel = {
         {
           id: 'dogfood-4',
           title: 'dogfood-4',
-          icon: '📦',
           epic: 'd257-verdict',
           branch: null,
           status: 'done',
@@ -451,7 +448,6 @@ export const DEMO_MODEL: CanvasModel = {
           vamControlled: false,
           id: 'vam-build-1',
           title: 'vam-build-1',
-          icon: '📐',
           epic: 'canvas-epic-1',
           branch: null,
           status: 'waiting',
@@ -493,7 +489,7 @@ export const DEMO_MODEL: CanvasModel = {
               label: 'icon',
               input: 'Rename sessions and pick an icon for them, like orca does.',
               output:
-                'Orca uses emoji-picker-react (class .repo-icon-emoji-picker), not a fixed list. Switched the picker to one with search. Press s on a row to try it.',
+                'Orca uses emoji-picker-react (class .repo-icon-emoji-picker), not a fixed list. Switched the picker to one with search. Open a project heading’s icon to try it.',
               commands: [],
             },
             {
@@ -562,7 +558,6 @@ export const DEMO_MODEL: CanvasModel = {
           },
           id: 'notes-1',
           title: 'notes-1',
-          icon: '🌙',
           epic: 'd257-verdict',
           branch: 'smith/d257/verdict-notes',
           status: 'idle',
@@ -588,7 +583,6 @@ export const DEMO_MODEL: CanvasModel = {
           vamControlled: true,
           id: 'notes-2',
           title: 'notes-2',
-          icon: '📝',
           epic: 'd257-verdict',
           branch: 'smith/d257/ledger-sweep',
           status: 'waiting',
@@ -630,7 +624,6 @@ export const DEMO_MODEL: CanvasModel = {
           vamControlled: true,
           id: 'notes-3',
           title: 'notes-3',
-          icon: '🧯',
           epic: 'd257-verdict',
           branch: 'smith/d257/projection-backfill',
           status: 'failed',
@@ -661,18 +654,24 @@ export const DEMO_MODEL: CanvasModel = {
           // not be taken, and `e2e/tab-strip-shots.mjs` could not measure a
           // bare tab's width against a spinning one's on the same row.
           //
-          // NO ICON, deliberately, and the only session in this project
-          // without one: with the icon switch on by default, a tab with an
-          // icon always draws SOMETHING before its title, and the guard needs
-          // one tab whose only mark is its status -- so that "the spinner is
-          // the mark" is measured on a tab where nothing else could be.
+          // THE REASON THIS ROW HAD NO ICON IS GONE, and the row is not.
+          // It read: with the icon switch on by default a tab with an icon
+          // always draws SOMETHING before its title, so the guard needed one
+          // tab whose only mark was its status, and "the spinner is the mark"
+          // could be measured where nothing else could interfere. Sessions
+          // have no icons now (pull request 433 took the tab's, and the
+          // picker went after it) and every tab carries its provider glyph
+          // regardless, so no tab is bare and no fixture row can make one.
+          // What the guard measures instead is the DIFFERENCE between this
+          // running tab and an idle one on the same strip, which is what the
+          // operator's rule was always about; the row stays because that
+          // comparison still needs two tabs.
           //
           // `factory` still holds exactly three; the split-pane guards are
           // written around that and this row does not touch it.
           vamControlled: true,
           id: 'notes-4',
           title: 'notes-4',
-          icon: null,
           epic: 'd257-verdict',
           branch: 'smith/d257/ledger-diff',
           status: 'running',
@@ -690,6 +689,130 @@ export const DEMO_MODEL: CanvasModel = {
               errorCount: 0,
             },
           ],
+        },
+        {
+          // UNSTARTED: a pane vam opened with nothing in it yet -- the sixth
+          // status (`model.ts`), and the row the operator's own words are
+          // about: "the Response view needs a provider picker and a Start
+          // session button". Without this row the start screen
+          // (`DetailPanel.tsx`, `StartSession`) and the hollow status dot
+          // (`status-mark.tsx`) were outside the reach of every non-unit gate
+          // in the repo, which is the fourth rule above playing out a fifth
+          // time. `e2e/start-screen-shots.mjs` measures both, and
+          // `docs/ui/start-screen-*.png` are its pictures.
+          //
+          // SHAPED EXACTLY AS `pane-row.ts` REPORTS ONE. The id is the tmux
+          // name under the pane prefix, the title IS the tmux name (vam knows
+          // nothing else about it yet), `pane` names the same session, there
+          // are no turns, no branch and no age, and `vamControlled` is true
+          // by the only proof there is -- it is in vam's own listing. Beside
+          // `notes-1..4` on purpose, so the mark is measured in a column of
+          // the other five.
+          vamControlled: true,
+          id: 'pane:vam-notes-k3f9zq',
+          title: 'vam-notes-k3f9zq',
+          pane: 'vam-notes-k3f9zq',
+          epic: null,
+          branch: null,
+          status: 'unstarted',
+          runningAgents: 0,
+          activity: null,
+          age: null,
+          decisions: [],
+          source: 'claude-code',
+        },
+        {
+          // A SESSION DEDICATED TO THE PREVIEW PANEL -- not another question
+          // tacked onto `vam-build-1` (`vam` project, above). Two guards
+          // depend on the exact session count of the project a demo row
+          // lives in -- `split-panes-shots.mjs` needs `vam` holding exactly
+          // one tab to empty a pane with, `factory`'s own count is pinned in
+          // its own comment. `notes` has grown from two sessions to six
+          // already ("A PROJECT OF QUIET SESSIONS", above) without needing a
+          // guard's assertion rewritten, which is the whole reason it is the
+          // safe place to grow it again.
+          //
+          // ALSO WHY `e2e/prompt-suggest-shots.mjs` OPENS THIS ONE, PINNED.
+          // A card showing this panel is taller than one that is not, which
+          // moves the composer -- and the `/` popover anchored to its top --
+          // further down a short window than that guard's plain `vam-build-1`
+          // check ever measured. It found the regression this way once
+          // (`popoverTop: -18` at 480px); `slashCommands` below is what gives
+          // that pinned check something to open, the same twelve-deep list
+          // `vam-build-1` carries, so the popover clamp (`SUGGEST_BOX`,
+          // `DetailPanel.tsx`) is proven against the tallest card the panel
+          // can actually produce, not the shortest.
+          //
+          // THE MIX A REAL CALL HAS: `AskUserQuestion`'s `preview` is
+          // free-form, and the operator's own transcripts hold ASCII diagrams
+          // several rows deep (31 of the operator's own session files carry
+          // one, `grep -l '"preview"' ~/.claude/projects/*/*.jsonl`). This is
+          // a NEUTRAL mockup of that shape -- box-drawing, ~8 rows, no real
+          // project text, path or session id -- beside a short one-line
+          // preview and an option with none, because a panel that only ever
+          // had one shape to draw would not be much of a guard.
+          id: 'vam-preview-1',
+          title: 'vam-preview-1',
+          epic: null,
+          branch: null,
+          status: 'waiting',
+          runningAgents: 0,
+          activity: null,
+          age: '5m',
+          vamControlled: true,
+          slashCommands: [
+            { id: 'builtin:burrow', name: 'burrow', description: 'dig in and summarise' },
+            { id: 'builtin:clearing', name: 'clearing', description: 'start the context over' },
+            { id: 'builtin:compass', name: 'compass', description: 'say where the session is' },
+            { id: 'builtin:driftwood', name: 'driftwood', description: null },
+            { id: 'builtin:ember', name: 'ember', description: 'keep the last answer warm' },
+            { id: 'builtin:fathom', name: 'fathom', description: 'measure how deep this goes' },
+            { id: 'builtin:gale', name: 'gale', description: 'blow the caches away' },
+            { id: 'builtin:harbour', name: 'harbour', description: 'park the work safely' },
+            { id: 'builtin:inlet', name: 'inlet', description: 'open a narrower channel' },
+            { id: 'user:otter', name: 'otter', description: 'the operator’s own file' },
+            { id: 'project:quarry', name: 'quarry', description: 'this project’s own file' },
+            { id: 'builtin:rename', name: 'rename', description: 'give the session a name' },
+          ],
+          questions: [
+            {
+              id: 'toolu_demo_preview:0',
+              header: 'Transport',
+              question: 'How should the canvas receive updates while a run is live?',
+              multiSelect: false,
+              options: [
+                {
+                  label: 'Server-sent events',
+                  description: 'one long-lived GET, the server pushes',
+                  preview: 'GET /events  →  text/event-stream',
+                },
+                {
+                  label: 'Long poll',
+                  description: 'a request per change, simplest to serve',
+                  preview:
+                    '┌─ browser ─────────────┐                 ┌─ server ────────────────────────┐\n' +
+                    '│ GET /changes?since=41  │──held up to 30s─▶│ holds the request open           │\n' +
+                    '│  fetch() awaits it     │◀──────────────── │  replies the moment something    │\n' +
+                    '└────────────────────────┘                  │  changes, or after 30s with none │\n' +
+                    '                                             └───────────────────────────────────┘\n' +
+                    '\n' +
+                    'Every reply -- empty or not -- starts the NEXT request straight away, so the\n' +
+                    'client is blocked on a GET almost the whole time, one request at a time.',
+                },
+                {
+                  label: 'Web socket',
+                  description: 'two-way, and vam needs one way',
+                  // NO PREVIEW, on purpose: the panel's own fallback line
+                  // ("no preview for this option") needs a real option here
+                  // to be driven against, the same way the phone fixture
+                  // (`e2e/phone-core-loop.pw.ts`) already carries one.
+                  preview: null,
+                },
+              ],
+              answer: null,
+            },
+          ],
+          decisions: [],
         },
       ],
     },

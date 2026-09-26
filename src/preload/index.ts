@@ -19,14 +19,17 @@ import {
   createIssueApi,
   createLinkApi,
   createMainErrorsApi,
+  createNotifyApi,
   createPrefsBridge,
   createPreloadApi,
   createPrsApi,
   createRemoteApi,
   createStreamSubscribe,
   createTerminalApi,
+  createTerminalStreamApi,
   createUpdateApi,
   createUsageApi,
+  createWorktreesApi,
 } from './api.js';
 
 contextBridge.exposeInMainWorld('api', {
@@ -54,6 +57,9 @@ contextBridge.exposeInMainWorld('api', {
   // `src/main/pr/ipc.ts`.
   prs: createPrsApi(ipcRenderer),
   terminal: createTerminalApi(ipcRenderer),
+  // The Terminal tab's streaming half, behind the `streamingTerminal` pref
+  // and currently drawn by nothing -- see `src/preload/api.ts`'s own header.
+  terminalStream: createTerminalStreamApi(ipcRenderer),
   dialog: createDialogApi(ipcRenderer),
   // The file-editor tab's read and write, authorised against every live
   // session's own working directory in main before a byte moves either way.
@@ -66,8 +72,17 @@ contextBridge.exposeInMainWorld('api', {
   // Main's own failure buffer (`src/main/errors/log.ts`), read side. See
   // `src/renderer/errors/main-errors-bridge.ts` for the one caller.
   mainErrors: createMainErrorsApi(ipcRenderer),
+  // Desktop notifications: the renderer decides when, main makes the OS
+  // call, and what the OS answered lands in `mainErrors` above -- see
+  // `src/main/notify/notify.ts` for why that is the whole point.
+  notify: createNotifyApi(ipcRenderer),
   // Preferences main needs a copy of. Exactly one today: where to ask GitHub
   // from, per project. Desktop-only by construction -- it is not a member of
   // the source API a phone implements over HTTP.
   prefs: createPrefsBridge(ipcRenderer),
+  // list/create/remove a linked git worktree of a project vam already
+  // knows. Desktop-only, the same standing as `files` above -- see
+  // `CHANNELS.worktreeList`'s own comment for why a paired phone has no
+  // route to any of the three.
+  worktrees: createWorktreesApi(ipcRenderer),
 });

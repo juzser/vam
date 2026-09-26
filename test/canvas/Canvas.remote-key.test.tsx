@@ -14,7 +14,7 @@
  * device.
  */
 
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RemoteApi, RemoteState } from '../../src/preload/api.js';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
@@ -30,7 +30,6 @@ const MODEL: CanvasModel = {
         {
           id: 'a1',
           title: 'a1',
-          icon: null,
           epic: null,
           branch: null,
           status: 'done',
@@ -84,18 +83,25 @@ afterEach(() => {
 });
 
 describe('the Remote surface is reachable by keystroke', () => {
-  it('opens Settings directly on the Remote section on `.`', () => {
+  it('opens Settings directly on the Remote section on `.`', async () => {
     render(<Canvas model={MODEL} />);
     expect(document.querySelector('[data-settings-overlay]')).toBeNull();
     press('.');
-    expect(document.querySelector('[data-settings-overlay]')).not.toBeNull();
+    // `SettingsOverlay` is its own lazy chunk now (`Canvas.tsx`'s own
+    // `React.lazy` + `Suspense`), so its DOM resolves a render tick or two
+    // after the keystroke, not on it.
+    await waitFor(() => {
+      expect(document.querySelector('[data-settings-overlay]')).not.toBeNull();
+    });
     expect(activePanel()).toBe('remote');
   });
 
-  it('`,` still opens Settings on Appearance — the two keys stay distinct', () => {
+  it('`,` still opens Settings on Appearance — the two keys stay distinct', async () => {
     render(<Canvas model={MODEL} />);
     press(',');
-    expect(activePanel()).toBe('appearance');
+    await waitFor(() => {
+      expect(activePanel()).toBe('appearance');
+    });
   });
 
   it('lists `.` in the generated shortcut sheet, labelled', async () => {

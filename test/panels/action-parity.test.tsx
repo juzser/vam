@@ -50,7 +50,6 @@ function entry(commands: readonly Command[]): SessionEntry {
   const session: Session = {
     id: 's1',
     title: 'Sprint board reorder',
-    icon: null,
     epic: 'board',
     branch: null,
     status: 'waiting',

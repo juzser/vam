@@ -47,6 +47,11 @@
  *     check) -- "a conflict still shows the operator's own edit" reddens.
  *   - delete the `beforeunload` effect in `FilesTab.tsx` -- "closing warns
  *     while a buffer is dirty" reddens.
+ *   - in the dirty dot's `className` (`FilesTab.tsx`), swap `bg-waiting` back
+ *     for `bg-ink-dim` and drop `mr-1.5` -- section 1.5's "paints the real
+ *     --vam-waiting value" and "a visible gap separates them" both redden,
+ *     the first because the dot's paint no longer matches the probe and the
+ *     second because the gap falls to 2px (this row's bare `gap-0.5`).
  *
  * Run by hand, or by `e2e/run-web-guards.mjs`:
  *   node e2e/files-tab-keyboard-shots.mjs http://localhost:5520 docs/ui
@@ -75,6 +80,24 @@ function check(label, ok, detail) {
   console.error(`FAIL  ${label}${detail === undefined ? '' : ` — ${detail}`}`);
   failures.push(label);
 }
+
+/**
+ * PRESSES THE SAVE CHORD — there is no Save button any more (the operator's
+ * own instruction: an indicator, not a button; `FilesTab.tsx`'s own
+ * dirty-indicator comment carries why), so every save below is `Mod-s` on
+ * whatever already has the keyboard, exactly like `Meta+KeyZ` a few sections
+ * down for undo. `data-files-save-state`, the save machine's own idle/saving/
+ * conflict/error report, moved with it: it is `[data-files-header]`'s
+ * attribute now rather than a button's, since a button was the only DOM node
+ * that carried it before.
+ */
+const saveChord = () => page.keyboard.press('Meta+KeyS');
+const waitForSaveIdle = () =>
+  page.waitForFunction(
+    () => document.querySelector('[data-files-header]')?.getAttribute('data-files-save-state') === 'idle',
+    null,
+    { timeout: 5_000 },
+  );
 
 /**
  * A COMPLETE `PreloadSourceApi` stub -- one project, one session, every
@@ -136,6 +159,7 @@ await page.addInitScript(() => {
         // 22-50px short everywhere else. Nothing here opens the Terminal tab.
         terminal: true,
         agentRoster: false,
+        resumeSession: false,
       },
       declines: {},
       viewerScope: 'operator',
@@ -458,13 +482,17 @@ await page.evaluate(() => document.activeElement?.blur());
  *
  * This is where the reservation was nearly lost. The tree's clearance is the
  * height of the header row above it, and that row holds the open file's path
- * and its Save button: WITH a file open it comes to 26px, WITHOUT one it
- * comes to 16px, and the pill reaches 30px into this tab either way. So a
- * check that only ever measured the tab with a file open would pass on an
- * accidental 2px while the state a pane actually LANDS in -- nothing open --
- * had its first tree row 8px under the icons. Measured, both, with the
- * reservation deliberately removed. `cornerReserveHeight` is what makes the
- * row 34px in both states, and this is the half of the guard that says so.
+ * and its own toolbar controls (a Save button, when this measurement was
+ * first taken -- since replaced by the dirty indicator, this file's own
+ * `saveChord` comment carries why): WITH a file open the row's NATURAL
+ * height came to 26px, WITHOUT one it came to 16px, and the pill reaches
+ * 30px into this tab either way. So a check that only ever measured the tab
+ * with a file open would pass on an accidental 2px while the state a pane
+ * actually LANDS in -- nothing open -- had its first tree row 8px under the
+ * icons. Measured, both, with the reservation deliberately removed.
+ * `cornerReserveHeight` is what makes the row 34px in both states regardless
+ * of which controls it holds, and this is the half of the guard that says
+ * so.
  */
 const emptyCorner = await page.evaluate(() => {
   const r = (sel) => {
@@ -506,7 +534,12 @@ const pillBox = await page.evaluate(() => {
   };
   return {
     overlay: r('[data-view-overlay]'),
-    save: r('[data-files-save]'),
+    // Save is gone (the operator's own instruction: an indicator, not a
+    // button — `FilesTab.tsx`'s dirty-indicator comment carries why). Format
+    // is this row's trailing control now, and this is the same rectangle
+    // question the Save button's own 18px bug (this section's own header)
+    // was written to catch, asked of its replacement.
+    format: r('[data-files-format]'),
     path: r('[data-files-path]'),
     tree: r('[data-files-tree]'),
     editorColumn: r('[data-files-editor-column]'),
@@ -519,9 +552,11 @@ check(
   `it carries ${pillBox.icons}`,
 );
 check(
-  'the Save button clears the view pill entirely, not just at its centre',
-  pillBox.save !== null && pillBox.overlay !== null && pillBox.save.right <= pillBox.overlay.left,
-  `save ends at ${pillBox.save?.right}, pill starts at ${pillBox.overlay?.left}`,
+  'the Format button clears the view pill entirely, not just at its centre',
+  pillBox.format !== null &&
+    pillBox.overlay !== null &&
+    pillBox.format.right <= pillBox.overlay.left,
+  `format ends at ${pillBox.format?.right}, pill starts at ${pillBox.overlay?.left}`,
 );
 check(
   'and so does the file path beside it',
@@ -593,6 +628,104 @@ check(
   afterBareKey === 'A=1\nj',
   `editor reads ${JSON.stringify(afterBareKey)}`,
 );
+
+// ---------------------------------------------------------------------------
+// 1.5 THE DIRTY DOT'S OWN COLOUR, AND ITS GAP FROM FORMAT — the operator's
+// report on the toolbar's unsaved indicator: a distinct colour from the
+// toolbar's own icons (not the failed/error red either), and visible
+// separation from the prettier (Format) button beside it.
+//
+// ASSERTED AS PAINT AND AS A RECTANGLE, NEVER AS A CLASS NAME. A Tailwind v4
+// class naming a missing token emits NO rule at all — a class-name read would
+// have passed the whole time `bg-waiting` compiled to nothing — and the gap
+// lives partly in a container-query fold (`data-files-header`'s
+// `gap-0.5 @min-[380px]:gap-1.5`) a stylesheet read cannot see either. This
+// is the SAME `.env` the corner rectangle above measured, made dirty by the
+// bare-letter check just above, and it has no preview toggle (not markdown)
+// — so Format trails the dot directly, exactly the adjacency the operator's
+// report is about.
+
+check(
+  'the dirty dot is actually drawn — the buffer above really is dirty',
+  (await page.locator('[data-files-dirty]').count()) > 0,
+);
+
+const dotGap = await page.evaluate(() => {
+  const r = (sel) => {
+    const e = document.querySelector(sel);
+    if (e === null) return null;
+    const b = e.getBoundingClientRect();
+    return { left: b.left, right: b.right };
+  };
+  return { dot: r('[data-files-dirty]'), format: r('[data-files-format]') };
+});
+check(
+  'Format really does trail the dot directly for a .env — nothing else sits between them',
+  dotGap.dot !== null && dotGap.format !== null && dotGap.format.left >= dotGap.dot.right,
+  JSON.stringify(dotGap),
+);
+const dotFormatGap = (dotGap.format?.left ?? 0) - (dotGap.dot?.right ?? 0);
+check(
+  'and a visible gap separates them — at least one toolbar gap unit (the row’s own gap-1.5, 6px)',
+  dotFormatGap >= 6,
+  `measured ${dotFormatGap}px between the dot and Format`,
+);
+
+/** The real paint of a CSS custom property, off a throwaway probe node — the
+ *  same technique `tree-icon-shots.mjs` uses for the icon tones: a class name
+ *  naming a token proves nothing about what the cascade actually resolved. */
+const probeVar = (name) =>
+  page.evaluate((n) => {
+    const el = document.createElement('span');
+    el.style.backgroundColor = `var(${n})`;
+    document.body.appendChild(el);
+    const colour = getComputedStyle(el).backgroundColor;
+    el.remove();
+    return colour;
+  }, name);
+
+const dotPaint = {};
+for (const theme of ['dark', 'light']) {
+  await page.evaluate((t) => {
+    document.documentElement.classList.toggle('light', t === 'light');
+  }, theme);
+  await page.waitForTimeout(120);
+  const dot = await page.evaluate(() => {
+    const e = document.querySelector('[data-files-dirty]');
+    return e === null ? null : getComputedStyle(e).backgroundColor;
+  });
+  const icon = await page.evaluate(() => {
+    const e = document.querySelector('[data-files-format] svg');
+    return e === null ? null : getComputedStyle(e).color;
+  });
+  dotPaint[theme] = { dot, icon, waiting: await probeVar('--vam-waiting'), failed: await probeVar('--vam-failed') };
+  // THE OPERATOR'S OWN ASK, LOOKED AT — not just measured. Clipped to the
+  // header row alone (dot, gap, Format) rather than the whole pane: this is
+  // the one control the report is about, and a full-page shot would bury it.
+  await page.locator('[data-files-header]').screenshot({ path: `${outDir}/files-dirty-${theme}.png` });
+  console.log(`${outDir}/files-dirty-${theme}.png`);
+}
+// Restored before anything below relies on the file's own dark default.
+await page.evaluate(() => document.documentElement.classList.remove('light'));
+
+for (const theme of ['dark', 'light']) {
+  const p = dotPaint[theme];
+  check(
+    `${theme}: the dot paints the real --vam-waiting value — the token exists and a rule actually matched it`,
+    p.dot !== null && p.dot === p.waiting,
+    JSON.stringify(p),
+  );
+  check(
+    `${theme}: the dot is NOT painted in the toolbar icons' own ink`,
+    p.dot !== null && p.icon !== null && p.dot !== p.icon,
+    JSON.stringify(p),
+  );
+  check(
+    `${theme}: and it is not the failed/error red either`,
+    p.dot !== null && p.dot !== p.failed,
+    JSON.stringify(p),
+  );
+}
 
 /**
  * `Mod-d` IS THE ONE `isSelectOnly` CHORD IN THE WHOLE TABLE
@@ -682,6 +815,97 @@ check(
   )) === 'src',
 );
 
+/**
+ * THE WAY OUT OF THE FILTER — the operator's own report, and the one claim in
+ * this section that only a real browser can settle.
+ *
+ * TRANSLATED: "when the file filter is focused, I can't press Cmd-0 to get
+ * back to select mode -- so should the file filter be insert mode?" Measured
+ * here before anything was changed, with the keyboard really in the box:
+ * `Meta+0` was CLAIMED (`defaultPrevented: true`) and moved nothing at all,
+ * the chip read Select, and the status bar printed "the keyboard is already on
+ * the session list" -- false twice over, because the keyboard was in the
+ * filter and had not moved. The filter was deliberately unmarked on an
+ * argument about not STEALING chords, which never asked how to get OUT; the
+ * mark is what `releaseInsert` reads, so an unmarked box is one `focusList`
+ * cannot reach into.
+ *
+ * WHY IT IS HERE AND NOT ONLY IN HAPPY-DOM: what is claimed is that a real
+ * `<input>` really loses the keyboard, and `document.activeElement` in a unit
+ * environment is not the browser's answer to who owns it -- happy-dom will
+ * even focus a `display: none` element. The chip is the same live-DOM signal
+ * `mode-truth-shots.mjs` reads, and it is the status bar's own truth about
+ * where the keyboard is.
+ *
+ * MUTATION: take `insertScopeMark` off the filter's `<input>` in
+ * `FilesTab.tsx` and the first two checks redden -- the chip goes back to
+ * Select and `Meta+0` leaves the caret sitting in the box.
+ */
+const modeInFilter = await page.evaluate(
+  () => document.querySelector('[data-mode]')?.textContent ?? '',
+);
+check(
+  'the mode chip reads Insert while the FILTER holds the keyboard',
+  modeInFilter === 'Insert',
+  `it reads ${modeInFilter}`,
+);
+await page.keyboard.press('Meta+0');
+await page
+  .waitForFunction(
+    () => !(document.activeElement?.matches('[data-files-filter]') ?? false),
+    null,
+    { timeout: 3_000 },
+  )
+  .catch(() => {});
+check(
+  'Mod-0 takes the keyboard OUT of the filter — the documented way back',
+  (await page.evaluate(() => document.activeElement?.matches('[data-files-filter]') ?? false)) ===
+    false,
+  `focus is on ${await focusedTag()}`,
+);
+const modeAfterZero = await page.evaluate(
+  () => document.querySelector('[data-mode]')?.textContent ?? '',
+);
+check(
+  'and the chip follows it back to Select',
+  modeAfterZero === 'Select',
+  `it reads ${modeAfterZero}`,
+);
+/**
+ * AND THE SENTENCE THAT USED TO FOLLOW IT. `focusList` refuses aloud when
+ * there was nowhere to come back FROM, reading the cursor mode captured at the
+ * top of the handler -- so while the filter was unmarked this exact keystroke
+ * produced that refusal at an operator whose keyboard was in a text box. It is
+ * asserted as the STRING rather than as an empty bar: the bar is legitimately
+ * cleared by `setStatus(null)` on any claimed chord, so "it is empty" would be
+ * green for reasons that have nothing to do with this.
+ */
+const statusAfterZero = await page.evaluate(
+  () => document.querySelector('[data-status]')?.textContent ?? '',
+);
+check(
+  'and never claims the keyboard was already on the list while it was in the box',
+  statusAfterZero !== 'the keyboard is already on the session list',
+  `the bar reads ${JSON.stringify(statusAfterZero)}`,
+);
+
+// AND ESCAPE IS THE SECOND ROUTE, which already worked and must keep working:
+// `onBoxKeyDown` blurs explicitly. Two ways out, measured, not one.
+await page.keyboard.press('Meta+p');
+await page
+  .waitForFunction(() => document.activeElement?.matches('[data-files-filter]') ?? false, null, {
+    timeout: 3_000,
+  })
+  .catch(() => {});
+await page.keyboard.press('Escape');
+await page.waitForTimeout(150);
+check(
+  'and Escape still leaves the filter too — the other route, unchanged',
+  (await page.evaluate(() => document.activeElement?.matches('[data-files-filter]') ?? false)) ===
+    false,
+  `focus is on ${await focusedTag()}`,
+);
+
 // Back to where the rest of this file expects the keyboard: clear the filter,
 // and put the caret in the editor again.
 await page.keyboard.press('Meta+p');
@@ -715,12 +939,8 @@ check(
 
 await editor.click();
 await editor.fill('A=1\nj');
-await page.locator('[data-files-save]').click();
-await page.waitForFunction(
-  () => document.querySelector('[data-files-save]')?.getAttribute('data-files-save-state') === 'idle',
-  null,
-  { timeout: 5_000 },
-);
+await saveChord();
+await waitForSaveIdle();
 
 // An agent writes the file between this save and the operator's next one.
 await page.evaluate(() => {
@@ -728,14 +948,17 @@ await page.evaluate(() => {
 });
 await editor.click();
 await editor.fill('A=OPERATORS-OWN-EDIT');
-await page.locator('[data-files-save]').click();
+await saveChord();
 await page.waitForSelector('[data-files-conflict]', { timeout: 5_000 });
 const conflictText = await page.locator('[data-files-conflict]').innerText();
 check('a changed-on-disk save shows the conflict banner', conflictText.includes('changed on disk'), conflictText);
 const editorDuringConflict = await editor.inputValue();
 check(
+  // The trailing `\n` is the save-time normaliser (`files-save-normalize.ts`)
+  // adding the one final newline every save attempt gets, whether or not the
+  // write itself lands — the operator's own text is still exactly there.
   'and the operator\'s own edit is still in the box — never silently overwritten or reverted',
-  editorDuringConflict === 'A=OPERATORS-OWN-EDIT',
+  editorDuringConflict === 'A=OPERATORS-OWN-EDIT\n',
   `editor reads ${JSON.stringify(editorDuringConflict)}`,
 );
 check(
@@ -779,12 +1002,8 @@ await editor.fill('A=UNSAVED-ON-CLOSE');
 const armedWhileDirty = await beforeUnloadPrevented();
 check('closing warns the moment a buffer is dirty', armedWhileDirty === true, `defaultPrevented was ${armedWhileDirty}`);
 
-await page.locator('[data-files-save]').click();
-await page.waitForFunction(
-  () => document.querySelector('[data-files-save]')?.getAttribute('data-files-save-state') === 'idle',
-  null,
-  { timeout: 5_000 },
-).catch(() => {});
+await saveChord();
+await waitForSaveIdle().catch(() => {});
 const disarmedAfterSave = await beforeUnloadPrevented();
 check('and the warning stands down once the save actually lands', disarmedAfterSave === false);
 
@@ -1154,7 +1373,7 @@ check(
 // missing note rather than a renamed one. Derived from the page's own platform
 // rather than imported — a guard shares no module with the bundle it measures.
 const undoChord = await page.evaluate(() =>
-  /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? '⌘Z' : 'Ctrl+Z',
+  /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? '⌘ Z' : 'Ctrl+Z',
 );
 check(
   'and says so, with the way back out of it on screen',
@@ -1432,14 +1651,9 @@ await page.setViewportSize({ width: 1100, height: 800 });
 await page.waitForTimeout(200);
 
 // Leave the buffer clean so nothing is pending when the browser closes.
-await page.locator('[data-files-save]').click();
-await page
-  .waitForFunction(
-    () => document.querySelector('[data-files-save]')?.getAttribute('data-files-save-state') === 'idle',
-    null,
-    { timeout: 5_000 },
-  )
-  .catch(() => {});
+await editor.click();
+await saveChord();
+await waitForSaveIdle().catch(() => {});
 
 // ---------------------------------------------------------------------------
 // 7. THE PICTURE THE README USES.
@@ -1452,14 +1666,8 @@ await page
 // now is.
 await editor.click();
 await editor.fill('API_URL=http://localhost:8787\nLOG_LEVEL=debug\n');
-await page.locator('[data-files-save]').click();
-await page
-  .waitForFunction(
-    () => document.querySelector('[data-files-save]')?.getAttribute('data-files-save-state') === 'idle',
-    null,
-    { timeout: 5_000 },
-  )
-  .catch(() => {});
+await saveChord();
+await waitForSaveIdle().catch(() => {});
 await treeRow('/work/demo/src').click();
 await page.waitForFunction(
   () => document.querySelectorAll('[data-files-row]').length > 2,

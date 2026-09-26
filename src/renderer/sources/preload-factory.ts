@@ -44,6 +44,16 @@ function buildWrites(api: PreloadSourceApi, descriptor: SourceDescriptor): Sourc
     // and one in a directory that is about to become a project.
     writes.createSessionIn = (cwd, title) => api.createSessionIn(cwd, title, activeProviderId());
   }
+  // Its own flag for the same reason `promptAttachments` has one, and the
+  // asymmetry is real rather than defensive: the Codex source answers false
+  // to `createSession` and true to this.
+  if (capabilities.resumeSession) {
+    // No provider is read here, unlike `createSession` above. A reopened
+    // session continues a conversation that was started by a particular
+    // agent, and running it under whatever the operator has selected TODAY
+    // would hand one agent's history to another.
+    writes.resumeSession = (sessionId) => api.resumeSession(sessionId);
+  }
   // Its own flag, not folded into `createSession`'s: a source can deliver
   // text without being able to scope a picker to a directory.
   if (capabilities.promptAttachments) {
@@ -81,7 +91,31 @@ export async function createSourceFromPreload(api: PreloadSourceApi): Promise<Se
     // being absent, so leaving it off here would hide a working surface behind
     // a check no descriptor makes.
     history: (sessionId, cursor) => api.history(sessionId, cursor),
+    // ASSIGNED UNCONDITIONALLY, exactly like `history` immediately above --
+    // `port.ts`'s own doc comment says so verbatim ("OPTIONAL AND
+    // ANSWER-GATED, exactly like `history` above"). A source that cannot look
+    // inside an agent answers through `AgentWork`'s own `unavailable` arm, not
+    // through this member's absence; leaving it off here (as this factory
+    // used to) stranded `AgentWorkReaderProvider` on `null` for every source,
+    // so `useAgentWork`'s poll never started at all.
+    agentWork: (sessionId, agentId) => api.agentWork(sessionId, agentId),
   };
+
+  // THE CONSTITUENTS, when main is serving more than one source. Copied
+  // across rather than derived, and ASSIGNED ONLY WHEN PRESENT, on this
+  // module's own rule: `members: undefined` would make `'members' in source`
+  // true, and `capabilitiesFor` reads absence as "this source is the only
+  // one", which is a different thing from "this source has no constituents".
+  if (descriptor.members !== undefined) {
+    (source as { members?: SessionSource['members'] }).members = descriptor.members.map(
+      (member) => ({
+        id: member.id,
+        label: member.label,
+        capabilities: member.capabilities,
+        declines: member.declines,
+      }),
+    );
+  }
 
   // A mutable view of the same object: the port declares the optional members
   // `readonly`, which is the right contract for consumers and the wrong one

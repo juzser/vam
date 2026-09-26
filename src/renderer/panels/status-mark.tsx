@@ -8,13 +8,19 @@
  * so. So each status takes a SHAPE, and the hue becomes the second channel
  * rather than the only one.
  *
- * A module of its own, like `session-icon.tsx` beside it and for the same
- * reason: "which mark stands for a status" is a rule about the session model,
- * not a detail of the sidebar. The sidebar was the first caller; the tab
- * strip is the second (`Canvas.tsx`, `TabStrip`), and it adopted this table
- * rather than keeping its own dot, which is what this paragraph asked of it.
- * The phone list still draws its own. The argument that outlives the caller
- * count is that the rule is statable and testable on its own.
+ * A module of its own, on the argument that "which mark stands for a status"
+ * is a rule about the session model, not a detail of the sidebar. The sidebar
+ * was the first caller; the tab strip is the second (`Canvas.tsx`,
+ * `TabStrip`), and it adopted this table rather than keeping its own dot,
+ * which is what this paragraph asked of it. The phone list still draws its
+ * own. The argument that outlives the caller count is that the rule is
+ * statable and testable on its own.
+ *
+ * `session-icon.tsx` used to sit beside this file making the same argument for
+ * "which glyph stands for a session". That question has no answer now -- the
+ * operator removed session icons outright -- so this module is the last of the
+ * pair, and the reasoning above stands on its own merits rather than on a
+ * neighbour's.
  *
  * THE LANE IS FIXED, AND THAT IS HALF THE POINT. A status changes under the
  * operator's eyes -- `running` becomes `waiting` the moment an agent asks a
@@ -29,7 +35,7 @@
  * its box.
  */
 
-import { Bell, Check, Circle, LoaderCircle, TriangleAlert } from 'lucide-react';
+import { Bell, Check, Circle, LoaderCircle, SquareTerminal, TriangleAlert } from 'lucide-react';
 import { type ReactElement, useRef } from 'react';
 import type { SessionStatus } from '../domain/model.js';
 
@@ -142,6 +148,32 @@ const GLYPH: Readonly<Record<SessionStatus, (phase: number, size: number) => Rea
   /** The mark for "nothing is happening": the dot the row always had, at the
    *  size it always was, alone in a lane the others fill. */
   idle: () => <span className="h-[7px] w-[7px] flex-none rounded-full bg-idle" />,
+  /**
+   * An open pane with nothing started in it (`model.ts`): idle's dot, HOLLOW.
+   * Same size, same lane, same neutral ink -- it is the same quiet -- and the
+   * ring rather than the fill is what says "nothing is in here yet" to an eye
+   * that has learnt idle's dot means "an agent, resting". A distinct shape
+   * for a distinct status, as every other row of this table is; the outline
+   * is drawn with the token as a border so the row's ink and this mark cannot
+   * disagree about the colour.
+   */
+  unstarted: () => (
+    <span className="h-[7px] w-[7px] flex-none rounded-full border border-idle bg-transparent" />
+  ),
+  /**
+   * A pane vam started, whose agent has exited but whose conversation vam
+   * still knows -- `docs/design/vam-terminal-only.md`. `unstarted`'s hollow
+   * dot, at the same size and the same neutral ink, says "a pane and nothing
+   * else"; this glyph is what tells the operator there IS something else --
+   * a conversation, paused at the shell -- without borrowing `idle`'s filled
+   * dot, which means an AGENT resting between turns and would be a lie here.
+   * The literal terminal glyph reads as "this pane's shell is what is live
+   * right now" on sight, which a shape variation on the same small dot could
+   * not have said as plainly.
+   */
+  terminal: (_phase, size) => (
+    <SquareTerminal className="text-idle" size={size} strokeWidth={1.8} />
+  ),
   /** A tick, not a circled one: the circled check draws a second ring into a
    *  column that already has one turning in it. A hair more stroke than its
    *  neighbours because a tick is two strokes and nothing else, and at 12px it

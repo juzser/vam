@@ -18,6 +18,8 @@
  * regression in.
  */
 import fs from 'node:fs';
+import { createServer } from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { _electron as electron, expect, test } from '@playwright/test';
@@ -72,8 +74,47 @@ function resolveExecutablePath(): string {
   throw new Error(`no ${unpackedSuffix}/${binaryName} found under ${distAppDir}`);
 }
 
+/**
+ * A genuinely free loopback port, never the operator's own remote-serve port
+ * (58217, `DEFAULT_REMOTE_PORT` in `src/main/remote/launch.ts`) -- main starts
+ * a remote transport unconditionally on `whenReady`, defaulting to that port
+ * when `VAM_REMOTE_PORT` is unset. A bind against an already-taken port is
+ * caught and non-fatal by design (`startRemoteTransport`'s own comment), but
+ * this spec does not even attempt it: the packaged app under test is handed
+ * its own dynamically allocated port instead.
+ */
+async function allocatePort(): Promise<number> {
+  return await new Promise((resolve, reject) => {
+    const server = createServer();
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      const port = address !== null && typeof address === 'object' ? address.port : null;
+      server.close((error) => {
+        if (error) reject(error);
+        else if (port === null) reject(new Error('no port assigned'));
+        else resolve(port);
+      });
+    });
+    server.on('error', reject);
+  });
+}
+
 test('the packaged app launches, is packaged, and stays locked down', async () => {
-  const electronApp = await electron.launch({ executablePath: resolveExecutablePath() });
+  // A throwaway `userData` for this one launch, never the operator's real
+  // profile -- see `src/main/index.ts`'s `VAM_USER_DATA_DIR` handling. This
+  // is the packaged app itself (`app.isPackaged` is asserted below), so the
+  // same override that isolates `test/electron/launch.test.ts` isolates this
+  // spec too.
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vam-electron-et-userdata-'));
+  const remotePort = await allocatePort();
+  const electronApp = await electron.launch({
+    executablePath: resolveExecutablePath(),
+    env: {
+      ...process.env,
+      VAM_USER_DATA_DIR: userDataDir,
+      VAM_REMOTE_PORT: String(remotePort),
+    },
+  });
 
   try {
     const window = await electronApp.firstWindow();
@@ -116,5 +157,6 @@ test('the packaged app launches, is packaged, and stays locked down', async () =
     expect(window.url()).toBe(urlBeforeNavigate);
   } finally {
     await electronApp.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
   }
 });

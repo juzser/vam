@@ -168,10 +168,11 @@ export function applePlatform(): boolean {
  *   Alt-<digit>        bound to nothing, since the view row left it
  *
  * `Mod-` KEEPS ITS SPELLING, deliberately. `Mod-0`..`Mod-9` and `Mod-[` are
- * written into README rows, into `panels/files-tree.ts`'s key lists and into
- * `DetailPanel`'s own `onKeyDown`, and none of those readers has any business
- * learning a new token because one row's MEANING narrowed. What changed here
- * is which physical key produces it, not what the string is called.
+ * written into `docs/keyboard.md` rows, into `panels/files-tree.ts`'s key
+ * lists and into `DetailPanel`'s own `onKeyDown`, and none of those readers
+ * has any business learning a new token because one row's MEANING narrowed.
+ * What changed here is which physical key produces it, not what the string
+ * is called.
  *
  * ONE RULE, COVERING EVERY PLATFORM vam SHIPS (`electron-builder.config.cjs`
  * builds dmg/zip, AppImage and nsis/zip): CONTROL SPELLS `Ctrl-` WHEN IT IS
@@ -204,8 +205,8 @@ export function applePlatform(): boolean {
  * THE BRACKET PAIR IS NOT HERE, AND STAYS FOLDED. It sits in `POSITION_CODES`
  * for the same reason the digits do — a modifier changes the character it
  * produces — but Ctrl and Cmd still mean one intent on it, and `Ctrl-[` is
- * vim's own way out of insert mode, promised by name in the README and
- * answered by `DetailPanel` and `FilesTab`. The fold is lifted exactly where
+ * vim's own way out of insert mode, promised by name in `docs/keyboard.md`
+ * and answered by `DetailPanel` and `FilesTab`. The fold is lifted exactly where
  * the two modifiers stopped agreeing, and nowhere else.
  */
 /**
@@ -283,7 +284,7 @@ function digitChord(event: KeyEventLike, position: string, mac: boolean): string
  *   transcript rather than commands.
  *
  * WHAT IS STILL FOLDED IS THE BRACKET PAIR, and only it: `Ctrl-[` is vim's own
- * way out of insert mode, the README promises it by name, and the bracket
+ * way out of insert mode, `docs/keyboard.md` promises it by name, and the bracket
  * chords mean one intent under either modifier. So `Mod-[`, `Mod-Shift-[` and
  * `Mod-Alt-[` answer Ctrl and Cmd alike, everywhere.
  *
@@ -483,8 +484,6 @@ export type KeyAction =
   | { readonly kind: 'focusList' }
   /** `r` — rename the focused session in place. */
   | { readonly kind: 'rename' }
-  /** `s` — pick the focused session's icon. */
-  | { readonly kind: 'icon' }
   /** `x` — close the focused session. */
   | { readonly kind: 'close' }
   /** `o` / `Mod-n` — start a new session IN THE FOCUSED SESSION'S PROJECT.
@@ -669,6 +668,15 @@ export type KeyAction =
   /** `p` — reveal the focused session's project in the sidebar and put the
       keyboard on its fold. */
   | { readonly kind: 'revealProject' }
+  /** Command-palette only (no default chord — see the bindings table below):
+      "New worktree…". Requires a focused session, the same guard
+      `revealProject` applies, because a worktree is created OF a project and
+      there is no sensible directory-picker fallback the way bare `newProject`
+      has for "no session focused". `Canvas.tsx`'s own case sets a
+      `createWorktreeRequest` prop `SessionList.tsx` reads, opening that
+      project's "Worktrees" sub-list create form — the same one-shot,
+      fresh-object-per-press shape `revealRequest` already uses. */
+  | { readonly kind: 'newWorktree' }
   /** `gm` — move the focused session's project into a folder, or out of one.
       Under `g` rather than a single key: the single-key space is thin, and
       this is a project-level act the way `gt`/`gT` already are, not a
@@ -771,11 +779,20 @@ const MOVES: Readonly<Record<string, KeyAction>> = {
  * Chosen so a vim user does not have to learn them so much as guess them:
  * `i` stops moving and starts saying something, `I` is its stronger form and
  * moves the whole caret into the pane where saying things happens, `o` opens
- * a new one, `r` replaces a name, `x` deletes. Only `s` (icon) and `,`
- * (settings) are conventions borrowed from elsewhere, and both are
- * conventions rather than inventions. (Bare `H`/`L` used to sit here too, as
- * "far left"/"far right"; `H` moved to `Mod-Shift-h` at the operator's
- * request and `L` is unbound — neither is a single-key guess any more.)
+ * a new one, `r` replaces a name, `x` deletes. Only `,` (settings) is a
+ * convention borrowed from elsewhere, and it is a convention rather than an
+ * invention. (Bare `H`/`L` used to sit here too, as "far left"/"far right";
+ * `H` moved to `Mod-Shift-h` at the operator's request and `L` is unbound —
+ * neither is a single-key guess any more.)
+ *
+ * `s` IS FREE, AND IS LEFT FREE. It held `icon`, the session-icon picker,
+ * until the operator removed that feature outright ("remove the picker", once
+ * pull request 433 had taken the last surface that drew a session icon off
+ * the tab). A
+ * freed key is worth more empty than spent: handing `s` to something else
+ * would make an operator's muscle memory do a NEW thing silently, which is a
+ * worse trade than the one keystroke it saves. Whoever wants it should want it
+ * on its own merits, not because it happened to be lying there.
  *
  * Orca's sidebar has the same capabilities under Cmd-chords — `workspace.rename`,
  * `workspace.delete`, `sidebar.search.toggle`, `sidebar.focusWorktreeList` — so
@@ -785,7 +802,6 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   i: { kind: 'prompt' },
   I: { kind: 'focusAction' },
   r: { kind: 'rename' },
-  s: { kind: 'icon' },
   x: { kind: 'close' },
   o: { kind: 'newSession' },
   ',': { kind: 'settings' },
@@ -915,7 +931,7 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   // either Ctrl or Cmd, on every platform, because the operator separated the
   // two modifiers on the DIGITS and nowhere else. `digitChord` argues where
   // that line falls; the short of it is that `Ctrl-[` is vim's own way out of
-  // insert mode and the README promises it by name.
+  // insert mode and `docs/keyboard.md` promises it by name.
   'Mod-Alt-[': { kind: 'stepSplit', delta: -1 },
   'Mod-Alt-]': { kind: 'stepSplit', delta: 1 },
   // The response pane's four views, by name. The same digit row under a
@@ -1017,6 +1033,16 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   // taken: nothing in any table held `Mod-Shift-p`, and bare `p`
   // (`revealProject`) keeps its own spelling.
   'Mod-Shift-p': { kind: 'newProject' },
+  // THE PALETTE-ONLY ACTION'S OWN CHORD -- `newWorktree`'s doc comment above
+  // says why one is required at all (an unbound action never reaches
+  // `buildPaletteActions`). `Mod-Shift-w` for the same reason `Mod-Shift-p`
+  // reads as "create, of the thing `p`/`w` already names": bare `w` is
+  // `stepSplit` and `Mod-w` is `close`, so the modified-Shift spelling is the
+  // one free member of the family. Free when it was taken: nothing in any
+  // table held `Mod-Shift-w` (`test/keyboard/pick-view-binding.test.ts`
+  // re-derives that no two actions share a chord, over the generated
+  // bindings rather than over this line).
+  'Mod-Shift-w': { kind: 'newWorktree' },
   // HALF A SCREEN OF TRANSCRIPT, vim's own `Ctrl-D` / `Ctrl-U`, which is the
   // gesture the operator asked for by name.
   //
@@ -1510,12 +1536,20 @@ const OTHER_KEYS: Readonly<Record<string, string>> = {
  * holding the letter, where ⇧ carries the shift and every Mac menu prints the
  * letter capital.
  */
-function keyLabel(key: string, mac: boolean, modified: boolean): string {
+/**
+ * `glyph` alongside the text: true only for a key this table draws as an
+ * Apple pictogram (⏎ ⎋ ⇥ ⌫ an arrow, …) — never for a plain letter or digit,
+ * and never off a Mac, where the same named key is a WORD (`Esc`, `Up`), not
+ * a symbol. `chordSegments` reads this to decide which segments need the
+ * body sans treatment `ChordGlyphs` gives a symbol; see its own doc comment.
+ */
+function keyLabel(key: string, mac: boolean, modified: boolean): { text: string; glyph: boolean } {
   const named = (mac ? APPLE_KEYS : OTHER_KEYS)[key];
   if (named !== undefined) {
-    return named;
+    return { text: named, glyph: mac };
   }
-  return modified && /^[a-z]$/.test(key) ? key.toUpperCase() : key;
+  const text = modified && /^[a-z]$/.test(key) ? key.toUpperCase() : key;
+  return { text, glyph: false };
 }
 
 /**
@@ -1537,7 +1571,42 @@ function keyLabel(key: string, mac: boolean, modified: boolean): string {
  * with no key at all. A trailing token with nothing behind it (`Mod-`) is not
  * a chord and is handed back untouched rather than painted as a naked glyph.
  */
-export function chordSymbols(chord: string, mac: boolean = applePlatform()): string {
+/**
+ * ONE GLYPH OR WORD OUT OF A CHORD, TAGGED with what it is: `modifier` for a
+ * held key (⇧⌘⌥⌃ on a Mac, a word off one) or `key` for the letter/named key
+ * it holds. `chordSegments` is `chordSymbols`' own computation, stopped one
+ * step short of the join -- the operator's own finding, reading a `⇧⌘P`
+ * chip: painted at one font-size, the modifiers and the letter they modify
+ * read as one dense glyph, the modifiers smaller than the capital beside
+ * them. A caller that wants to draw the two at different sizes (`ShortcutTip.
+ * tsx`'s `InlineChord`/`Chip`, `KeySheet.tsx`, the status bar's own hint)
+ * needs the tag; `chordSymbols` below still exists for every caller that
+ * only ever wanted a sentence — a tooltip's `sr-only` twin, a line in
+ * `FilesTab.tsx`, `keysheet.ts`'s own search haystack — and is now defined
+ * IN TERMS OF this, so the two can never compute the modifier set two ways.
+ *
+ * `glyph` IS A SECOND TAG, orthogonal to `modifier`: whether this segment is
+ * one of Apple's own pictograms (⇧⌘⌥⌃⏎⎋⇥⌫ an arrow, …) rather than a letter,
+ * digit or word. Measured against the operator's own reference — the Send
+ * Key option under Settings → Sessions — every one of these painted small
+ * and thin next to it everywhere else in the app: `font-mono` (Geist Mono)
+ * draws a noticeably narrower ⌘ than `font-sans` (Geist) does at the same
+ * size, and most chips are mono. `ChordGlyphs` reaches for the sans stack on
+ * exactly the segments tagged `glyph: true`; a bare letter or digit (`P`,
+ * `1`) is not a pictogram and keeps the chip's own font, and off a Mac
+ * nothing is tagged a glyph at all — the same key there is already a WORD
+ * (`Esc`, `Ctrl`), the family the operator's ask never touched.
+ */
+export type ChordSegment = {
+  readonly text: string;
+  readonly modifier: boolean;
+  readonly glyph: boolean;
+};
+
+export function chordSegments(
+  chord: string,
+  mac: boolean = applePlatform(),
+): readonly ChordSegment[] {
   const held = new Set<string>();
   let rest = chord;
   for (;;) {
@@ -1566,7 +1635,24 @@ export function chordSymbols(chord: string, mac: boolean = applePlatform()): str
     ),
   ];
   const key = keyLabel(rest, mac, held.size > 0);
-  return [...modifiers, key].join(mac ? '' : '+');
+  return [
+    ...modifiers.map((text) => ({ text, modifier: true, glyph: mac })),
+    { text: key.text, modifier: false, glyph: key.glyph },
+  ];
+}
+
+/**
+ * THE JOIN, AND WHY IT NOW HOLDS A SPACE ON A MAC. The operator, translated:
+ * "increase the size of the Shift and Command symbols, and put one space
+ * between them and the letter" — read together with the worked example
+ * (`⇧ ⌘ P`, not `⇧⌘P`), that is a space between EVERY glyph, modifiers
+ * included, not only before the key. Off a Mac the words already read apart
+ * (`Ctrl+Shift+E`); `+` is untouched.
+ */
+export function chordSymbols(chord: string, mac: boolean = applePlatform()): string {
+  return chordSegments(chord, mac)
+    .map((segment) => segment.text)
+    .join(mac ? ' ' : '+');
 }
 
 /** The inverse. Only a two-character string opening with a prefix is a chord:
@@ -1731,8 +1817,8 @@ export function bindingClashes(overrides: KeyBindings): readonly BindingClash[] 
  *
  * The difference is taken over WHO IS SHADOWED, not over which chord is
  * contested. "That chord was contested already" is too coarse by exactly the
- * case that matters: over a map where `icon` has taken `rename`'s `r`, giving
- * `r` to a third action would newly kill `icon` too, and the chord was
+ * case that matters: over a map where `close` has taken `rename`'s `r`, giving
+ * `r` to a third action would newly kill `close` too, and the chord was
  * contested before and after. What comes back is each clash narrowed to the
  * bindings this write would newly leave dead, so a refusal can name them.
  */
@@ -1778,7 +1864,9 @@ function buildTables(overrides: KeyBindings): Tables {
   // button checked nothing, so `rename` onto `b`, `icon` onto the freed `r`,
   // then reset `rename` put a second claim on `r` through the ordinary
   // editor — after which `r` invoked `icon` while the sheet went on
-  // advertising it for `rename`. Both write paths now judge the whole
+  // advertising it for `rename`. (`icon` was the session-icon picker, removed
+  // outright since; the finding is kept in its own terms because retelling it
+  // with a different action would be inventing a defect nobody found.) Both write paths now judge the whole
   // resulting map (`newClashes`), so the editor cannot mint one.
   //
   // Two doors stay open and this precedence is what they land on: a payload

@@ -28,22 +28,20 @@
  * model popover left open from an earlier route, `provider -> mode` put three
  * layers on screen at once. A bug reported in one direction is a sample.
  *
- * TWO OF THE THREE ARE LEFT HERE, AND THE THIRD IS NOT GONE FROM COVERAGE. The
- * provider picker is withdrawn while `PROVIDERS` (`src/shared/providers.ts`)
- * has one row -- a popover over a single already-selected item is a control
- * that cannot act -- so at 1280px against the shipped bundle there is no third
- * control to collide with. Its four pairs and its click-outside live in
+ * ALL THREE ARE HELD HERE AGAIN. For a while the provider picker was withdrawn
+ * -- `PROVIDERS` (`src/shared/providers.ts`) had one row, and a popover over
+ * a single already-selected item is a control that cannot act -- so this file
+ * held two of the three and left the provider's four pairs to
  * `test/panels/DetailPanel.popover-dismiss.test.tsx`, which mocks a two-row
- * table and keeps the whole family of six.
+ * table. The `codex` row (Stage 2 of `docs/design/vam-owns-the-session.md`)
+ * brought the control back with no edit at its call site, exactly as the
+ * withdrawal promised, and with it the shipped bundle draws all three at
+ * 1280px: so the whole family of six pairs and three click-outsides is
+ * measured here with a real pointer, and the unit file keeps its own copy.
  *
- * WHY NOT PATCH THE TABLE THE WAY THE CAPABILITIES ARE PATCHED BELOW. Those
- * two are member expressions that survive minification verbatim and are
- * asserted present before anything is forced. `PROVIDERS.length > 1` is folded
- * to a constant by the minifier and there is no stable string to find -- a
- * patch on it would be a guess that silently stops matching, which is the
- * failure this file's own `patched === 0` throw exists to prevent. What the
- * browser adds over the unit test is the POINTER, and the pointer is exercised
- * on every popover the shipped app actually has.
+ * ITS PRESENCE IS ASSERTED, not merely used: if the table ever shrank back to
+ * one row the control would withdraw again and the pairs below would
+ * silently stop being the whole family this row can produce.
  *
  * WHAT THIS HARNESS FORCES, AND WHY. The demo source reports no terminal and
  * does not deliver (`Canvas.tsx` reads both off `source.source.capabilities`),
@@ -86,26 +84,48 @@ page.on('console', (msg) => {
   if (msg.type() === 'error') console.error('CONSOLE ERROR:', msg.text());
 });
 
-const TERMINAL = 't.kind===`session`&&t.source.capabilities.terminal';
-const DELIVERS = 't.kind===`session`&&t.source.capabilities.deliverPrompt';
+/**
+ * THE EXPRESSIONS ARE MATCHED AS PATTERNS NOW, NOT AS LITERALS, and the reason
+ * is the second source.
+ *
+ * These used to be the exact minified strings
+ * `t.kind===\`session\`&&t.source.capabilities.terminal` and its
+ * `deliverPrompt` twin. Both stopped existing when the canvas started reading
+ * a capability PER ROW instead of per app: it calls
+ * `capabilitiesFor(source.source, <the row's source id>)`, whose helper name
+ * and argument names are whatever the minifier chose on the day. A literal
+ * could only ever match one build.
+ *
+ * What is stable is the SHAPE -- the `kind===\`session\`` guard, a call, and
+ * the capability being read off it -- so that is what these match. The throw
+ * below is unchanged and is still what keeps this honest: if the pattern ever
+ * stops matching, the script fails rather than quietly photographing a pane
+ * with no control in it.
+ */
+const TERMINAL = /[\w$]+\.kind===`session`&&[\w$]+\([^()]*\)\.capabilities\.terminal/g;
+const DELIVERS = /[\w$]+\.kind===`session`&&[\w$]+\([^()]*\)\.capabilities\.deliverPrompt/g;
+const has = (body, pattern) => {
+  pattern.lastIndex = 0;
+  return pattern.test(body);
+};
 let patched = 0;
 await page.route('**/assets/*.js', async (route) => {
   const response = await route.fetch();
   const body = await response.text();
-  if (!body.includes(TERMINAL) && !body.includes(DELIVERS)) {
+  if (!has(body, TERMINAL) && !has(body, DELIVERS)) {
     await route.fulfill({ response, body });
     return;
   }
-  if (!body.includes(TERMINAL) || !body.includes(DELIVERS)) {
+  if (!has(body, TERMINAL) || !has(body, DELIVERS)) {
     throw new Error(
       `the bundle carries only one of the two capability expressions this harness forces ` +
-        `(terminal: ${body.includes(TERMINAL)}, deliverPrompt: ${body.includes(DELIVERS)})`,
+        `(terminal: ${has(body, TERMINAL)}, deliverPrompt: ${has(body, DELIVERS)})`,
     );
   }
   patched += 1;
   await route.fulfill({
     response,
-    body: body.split(TERMINAL).join('!0').split(DELIVERS).join('!0'),
+    body: body.replace(TERMINAL, '!0').replace(DELIVERS, '!0'),
   });
 });
 
@@ -131,13 +151,11 @@ await page.waitForSelector('[data-prompt-tools]');
 
 /** Each popover: the toggle that opens it, and the layer it opens. */
 const POPOVERS = {
+  provider: { toggle: '[data-provider-picker-toggle]', layer: '[data-provider-picker]' },
   model: { toggle: '[data-model-picker]', layer: '[data-model-picker-menu]' },
   mode: { toggle: '[data-mode-toggle]', layer: '[data-mode-picker]' },
 };
-const NAMES = ['model', 'mode'];
-
-/** Withdrawn while the provider table has one row -- see the header. */
-const PROVIDER_TOGGLE = '[data-provider-picker-toggle]';
+const NAMES = ['provider', 'model', 'mode'];
 
 /** Which layers have a node on screen right now, by name -- the property itself. */
 const openNow = () =>
@@ -214,25 +232,16 @@ const present = await page.evaluate(
 );
 console.log('controls on the row:', JSON.stringify(present));
 check(
-  'both popover controls are drawn, so the collision is reachable here',
+  'all three popover controls are drawn, so every collision is reachable here',
   NAMES.every((name) => present[name] === true),
   JSON.stringify(present),
-);
-// AND THE THIRD IS ABSENT ON PURPOSE, asserted rather than left to be noticed:
-// if it came back without its condition, the pairs below would silently stop
-// being the whole family this row can produce.
-check(
-  'and the provider control is withdrawn, so two really is the whole row',
-  (await page.locator(PROVIDER_TOGGLE).count()) === 0,
-  `${await page.locator(PROVIDER_TOGGLE).count()} provider toggles on the row`,
 );
 check('and nothing is open at rest', (await openNow()).length === 0);
 
 // ------------------------------------------------- 1. EVERY ORDERED PAIR CLOSES
-// The reported route is `mode -> model`; the other four were measured to be
-// broken in exactly the same way. Both of the pairs this row can still produce
-// are held here with a real pointer; the other four are held against a two-row
-// provider table in the unit file named in the header.
+// The reported route is `mode -> model`; the other five were measured to be
+// broken in exactly the same way. All six pairs are held here with a real
+// pointer, and again in the unit file named in the header.
 for (const first of NAMES) {
   for (const second of NAMES) {
     if (first === second) continue;

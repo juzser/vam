@@ -36,6 +36,7 @@ const DESCRIPTOR: SourceDescriptor = {
     pullRequests: false,
     terminal: false,
     agentRoster: false,
+    resumeSession: false,
   },
   declines: {
     liveUpdates: 'the bundled sample never changes, and nothing pushes at it',
@@ -50,6 +51,7 @@ const DESCRIPTOR: SourceDescriptor = {
     pullRequests: NO_BACKEND,
     terminal: 'the desktop shell holds no PTY',
     agentRoster: NO_BACKEND,
+    resumeSession: NO_BACKEND,
   },
   viewerScope: {
     kind: 'connection',
@@ -66,7 +68,6 @@ const PROJECTS: readonly Project[] = [
       {
         id: 'vam-electron-shell/task-4',
         title: 'task-4-load-ipc',
-        icon: null,
         epic: 'vam-electron-shell',
         status: 'waiting',
         runningAgents: 0,
@@ -89,7 +90,6 @@ const PROJECTS: readonly Project[] = [
       {
         id: 'vam-electron-shell/task-5',
         title: 'task-5-push',
-        icon: '○',
         epic: 'vam-electron-shell',
         status: 'running',
         runningAgents: 1,

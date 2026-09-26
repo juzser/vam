@@ -50,16 +50,38 @@ page.on('console', (msg) => {
  * honest: if the patch ever stops matching, the script fails rather than
  * quietly photographing a pane with no control in it.
  */
-const CAPABILITY = 't.kind===`session`&&t.source.capabilities.terminal';
+/**
+ * THE EXPRESSIONS ARE MATCHED AS PATTERNS NOW, NOT AS LITERALS, and the reason
+ * is the second source.
+ *
+ * These used to be the exact minified strings
+ * `t.kind===\`session\`&&t.source.capabilities.terminal` and its
+ * `deliverPrompt` twin. Both stopped existing when the canvas started reading
+ * a capability PER ROW instead of per app: it calls
+ * `capabilitiesFor(source.source, <the row's source id>)`, whose helper name
+ * and argument names are whatever the minifier chose on the day. A literal
+ * could only ever match one build.
+ *
+ * What is stable is the SHAPE -- the `kind===\`session\`` guard, a call, and
+ * the capability being read off it -- so that is what these match. The throw
+ * below is unchanged and is still what keeps this honest: if the pattern ever
+ * stops matching, the script fails rather than quietly photographing a pane
+ * with no control in it.
+ */
+const CAPABILITY = /[\w$]+\.kind===`session`&&[\w$]+\([^()]*\)\.capabilities\.terminal/g;
+const has = (body, pattern) => {
+  pattern.lastIndex = 0;
+  return pattern.test(body);
+};
 await page.route('**/assets/*.js', async (route) => {
   const response = await route.fetch();
   const body = await response.text();
-  if (!body.includes(CAPABILITY)) {
+  if (!has(body, CAPABILITY)) {
     await route.fulfill({ response, body });
     return;
   }
   console.log('forced the terminal capability in', route.request().url());
-  await route.fulfill({ response, body: body.split(CAPABILITY).join('!0') });
+  await route.fulfill({ response, body: body.replace(CAPABILITY, '!0') });
 });
 
 await page.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
@@ -138,7 +160,9 @@ if (!/decides its own next step|a hand on each step|writes the list before/.test
 // pair of mechanisms -- the line this control writes into the prompt, and the
 // chord that presses the session's own -- because an operator who knows only
 // one is left believing the other is broken.
-if (!/prompt/.test(tip) || !/⇧Tab|Shift\+Tab/.test(tip)) {
+// `chordSymbols('Shift-Tab')` now paints this, not a hand-typed literal --
+// `⇧ ⇥` on a Mac (space-joined, `Tab`'s own glyph), `Shift+Tab` off one.
+if (!/prompt/.test(tip) || !/⇧ ⇥|Shift\+Tab/.test(tip)) {
   throw new Error(
     `the mode tooltip lost one of its two mechanisms: ${JSON.stringify(tip)} — it must still ` +
       'say that picking here goes into the prompt AND that a chord cycles the session’s own.',

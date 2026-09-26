@@ -13,6 +13,7 @@
  */
 const path = require('node:path');
 const { app, BrowserWindow, Menu, clipboard } = require('electron');
+const { ensureHarnessRemotePort } = require('./free-port.cjs');
 
 const MAIN = path.join(__dirname, '..', '..', 'out', 'main', 'index.cjs');
 const OFF_ORIGIN = 'https://example.invalid/';
@@ -53,7 +54,14 @@ async function waitForWindow() {
   throw new Error('probe: no BrowserWindow finished loading within 10s');
 }
 
+
 async function main() {
+  // MUST RUN BEFORE `require(MAIN)`: `startRemoteTransport()` reads
+  // `VAM_REMOTE_PORT` at `whenReady`, and `VAM_USER_DATA_DIR` above isolates
+  // storage only -- see `free-port.cjs`'s own header for why a probe run
+  // directly, with no caller to pass a port, must never fall through to the
+  // operator's own live `DEFAULT_REMOTE_PORT`.
+  await ensureHarnessRemotePort();
   require(MAIN);
   await app.whenReady();
   const win = await waitForWindow();
@@ -384,16 +392,21 @@ async function main() {
 
   // (d) a zoom level PERSISTED from an earlier session. Chromium stores it
   // per origin and re-applies it on navigation, so it survives a reload -- and
-  // a relaunch, which is how it was found: the harness left 2.5 behind and the
-  // next launch came up at zoom factor 1.577.
+  // used to survive a relaunch too, which is how it was found: the harness
+  // left 2.5 behind and the next launch came up at zoom factor 1.577. Now
+  // moot for the NEXT launch specifically -- `launch.test.ts` hands every
+  // launch its own fresh `userData` dir (`VAM_USER_DATA_DIR`, see
+  // `src/main/index.ts`), so there is no "next launch" left to inherit
+  // anything from this one -- but the reset that used to follow this
+  // assertion is not restored: nothing after this line in THIS process reads
+  // the zoom level again, so leaving it at 2.5 for the remainder of this run
+  // changes nothing this harness checks.
   contents.setZoomLevel(2.5);
   await contents.reload();
   await new Promise((resolve) => contents.once('did-finish-load', resolve));
   await sleep(300);
   result.zoomLevelAfterReload = contents.getZoomLevel();
   result.zoomFactorAfterReload = contents.getZoomFactor();
-  // Leave nothing behind for the next launch to inherit.
-  contents.setZoomLevel(0);
 
   process.stdout.write(`VAM_SMOKE_RESULT ${JSON.stringify(result)}\n`);
   app.exit(0);

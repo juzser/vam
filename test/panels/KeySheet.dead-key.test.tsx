@@ -29,7 +29,7 @@ import { KeySheet } from '../../src/renderer/panels/KeySheet.js';
 
 /** F3's three editor steps, as the map they leave behind. */
 const CONTESTED = clearBindings(
-  bindKey(bindKey(NO_BINDINGS, 'rename', 0, 'b'), 'icon', 0, 'r'),
+  bindKey(bindKey(NO_BINDINGS, 'rename', 0, 'b'), 'close', 0, 'r'),
   'rename',
 );
 
@@ -60,12 +60,12 @@ describe('the sheet over a contested key', () => {
 
     const shadowed = onR.filter((row) => row.dead !== null);
     expect(shadowed.length, 'exactly one of the two rows is dead').toBe(1);
-    // The dead row is the one whose caption is rename's, and it names icon.
+    // The dead row is the one whose caption is rename's, and it names close.
     expect(shadowed[0]?.text).toContain(labelOf('rename'));
-    expect(shadowed[0]?.dead).toContain(labelOf('icon'));
+    expect(shadowed[0]?.dead).toContain(labelOf('close'));
 
     const live = onR.find((row) => row.dead === null);
-    expect(live?.text).toContain(labelOf('icon'));
+    expect(live?.text).toContain(labelOf('close'));
   });
 
   it('marks nothing when no key is contested', () => {

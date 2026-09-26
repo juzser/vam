@@ -523,14 +523,32 @@ describe('SessionList avatar bar', () => {
     expect(bar).not.toBeNull();
     expect(theme.closest('[data-avatar-bar]')).toBe(bar);
 
-    // The avatar survives as a glyph; the workspace NAME does not come back.
-    expect(bar?.textContent).toContain('V');
+    // The workspace NAME does not come back.
     expect(bar?.textContent).not.toContain('vam');
 
     for (const button of [settings, theme]) {
       expect(button.className).toContain('h-[26px]');
       expect(button.className).toContain('w-[26px]');
     }
+  });
+
+  it('replaces the letter avatar with an account icon that opens the usage popover', () => {
+    // The operator's own request: an account icon in the letter avatar's
+    // place, same corner, opening usage rather than naming the workspace.
+    mount(entriesOf([]));
+
+    const usage = screen.getByLabelText('usage');
+    const bar = usage.closest('[data-avatar-bar]');
+    expect(bar).not.toBeNull();
+    expect(usage.tagName).toBe('BUTTON');
+    // No initial letter left anywhere in the bar's text.
+    expect(bar?.textContent?.trim()).toBe('');
+
+    expect(document.querySelector('[data-usage-panel]')).toBeNull();
+    act(() => {
+      usage.click();
+    });
+    expect(document.querySelector('[data-usage-panel]')).not.toBeNull();
   });
 });
 
@@ -753,14 +771,26 @@ describe('SessionList projects header', () => {
     // the status choice is theirs, so the badge reads 1.
     const { container: two } = mountWith(twoProjects(), {
       statusFilter: 'waiting',
-      originFilters: { hideAgentStarted: true, onlyPrompted: false },
+      originFilters: {
+        hideAgentStarted: true,
+        onlyPrompted: false,
+        hideEnded: false,
+        hideForeign: true,
+        hideIdle: false,
+      },
     });
     expect(two.querySelector('[data-filter-badge]')?.textContent).toBe('1');
     cleanup();
 
     const { container: three } = mountWith(twoProjects(), {
       statusFilter: 'done',
-      originFilters: { hideAgentStarted: true, onlyPrompted: true },
+      originFilters: {
+        hideAgentStarted: true,
+        onlyPrompted: true,
+        hideEnded: false,
+        hideForeign: true,
+        hideIdle: false,
+      },
     });
     expect(three.querySelector('[data-filter-badge]')?.textContent).toBe('2');
   });
@@ -773,29 +803,88 @@ describe('SessionList projects header', () => {
 describe('SessionList filter popover', () => {
   const menu = (root: ParentNode) => root.querySelector('[data-filter-menu]') as HTMLElement;
 
-  it('opens at its roomy width, and never wider than the sidebar holding it', () => {
-    // The popover is anchored inside `data-projects-header`, whose padding box
-    // is the sidebar minus `px-3` on each side, so a 12px gutter on the free
-    // side bounds it at `width - 24`.
-    const { container } = mountWith(twoProjects(), { filterMenuOpen: true, width: 480 });
-    expect(menu(container).style.width).toBe(`${FILTER_POPOVER_WIDTH}px`);
-    cleanup();
+  /** Swaps `window.innerWidth` for the body of `run`, always restoring it --
+   *  the shape `Canvas.keyboard.test.tsx`'s own resize-from-the-keyboard
+   *  suite already uses for the same reason: `useViewportWidth` reads the
+   *  real global, so a deterministic assertion needs a real, restored one. */
+  const withInnerWidth = (value: number, run: () => void) => {
+    const real = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+    Object.defineProperty(window, 'innerWidth', { value, configurable: true });
+    try {
+      run();
+    } finally {
+      if (real) Object.defineProperty(window, 'innerWidth', real);
+    }
+  };
 
-    const { container: narrow } = mountWith(twoProjects(), {
-      filterMenuOpen: true,
-      width: SIDEBAR_MIN,
+  it('opens at its roomy width, clamped to the WINDOW rather than the sidebar', () => {
+    // A wide viewport: the popover opens at its full ceiling regardless of
+    // how wide the sidebar itself is -- it floats past the column now,
+    // orca's own shape (`FILTER_POPOVER_WIDTH`'s own header), rather than
+    // clamping to `sidebar - 24` the way the first draft did.
+    withInnerWidth(1600, () => {
+      const { container } = mountWith(twoProjects(), { filterMenuOpen: true, width: 480 });
+      expect(menu(container).style.width).toBe(`${FILTER_POPOVER_WIDTH}px`);
+      cleanup();
+
+      // A NARROW SIDEBAR no longer narrows the popover at all.
+      const { container: narrowSidebar } = mountWith(twoProjects(), {
+        filterMenuOpen: true,
+        width: SIDEBAR_MIN,
+      });
+      expect(menu(narrowSidebar).style.width).toBe(`${FILTER_POPOVER_WIDTH}px`);
+      cleanup();
     });
-    const drawn = Number.parseInt(menu(narrow).style.width, 10);
-    expect(drawn).toBe(SIDEBAR_MIN - 24);
-    // Inside the sidebar, therefore inside the window: the sidebar starts at
-    // the window's left edge.
-    expect(drawn + 24).toBeLessThanOrEqual(SIDEBAR_MIN);
-    expect(drawn).toBeLessThan(FILTER_POPOVER_WIDTH);
-    cleanup();
 
-    // Roomier than the 212px it replaced, at the default sidebar width.
-    const { container: normal } = mountWith(twoProjects(), { filterMenuOpen: true, width: 264 });
-    expect(Number.parseInt(menu(normal).style.width, 10)).toBeGreaterThan(212);
+    // A NARROW WINDOW is what clamps it now, at `viewportWidth - 24` --
+    // still inside the browser viewport, which is the one edge this popover
+    // must never hang off (`FILTER_POPOVER_GUTTER`'s own header).
+    withInnerWidth(300, () => {
+      const { container } = mountWith(twoProjects(), { filterMenuOpen: true, width: 480 });
+      const drawn = Number.parseInt(menu(container).style.width, 10);
+      expect(drawn).toBe(300 - 24);
+      expect(drawn + 24).toBeLessThanOrEqual(300);
+      expect(drawn).toBeLessThan(FILTER_POPOVER_WIDTH);
+    });
+  });
+
+  /**
+   * THE THIRD ROW, which is the operator's own proposal: "the filter should
+   * get a toggle to show/hide those recent sessions". It ships ON, so the
+   * count beside it is the whole of what keeps a hidden session from being
+   * indistinguishable from one that does not exist.
+   */
+  it('offers a row for ended sessions, on by default and saying how many it holds back', () => {
+    const { container } = mountWith(twoProjects(), {
+      filterMenuOpen: true,
+      originFilters: DEFAULT_SESSION_FILTERS,
+      hiddenCounts: { agent: 0, unprompted: 0, ended: 11, foreign: 0, idle: 0 },
+    });
+    const row = container.querySelector('[data-origin-toggle="ended"]') as HTMLElement;
+    expect(row).not.toBeNull();
+    expect(row.getAttribute('aria-checked')).toBe('true');
+    expect(row.textContent).toContain('11 hidden');
+  });
+
+  it('turns the ended rule off without disturbing the other two', () => {
+    const seen: SessionFilters[] = [];
+    const { container } = mountWith(twoProjects(), {
+      filterMenuOpen: true,
+      originFilters: DEFAULT_SESSION_FILTERS,
+      onOriginFilters: (next) => seen.push(next),
+    });
+    act(() => {
+      fireEvent.click(container.querySelector('[data-origin-toggle="ended"]') as Element);
+    });
+    expect(seen).toEqual([
+      {
+        hideAgentStarted: true,
+        onlyPrompted: false,
+        hideEnded: false,
+        hideForeign: true,
+        hideIdle: false,
+      },
+    ]);
   });
 
   it('draws the badge in the filter badge yellow, not in a status colour', () => {
@@ -810,7 +899,7 @@ describe('SessionList filter popover', () => {
     // rules the badge counts -- even though it does narrow the list.
     const { container } = mountWith(twoProjects(), {
       originFilters: DEFAULT_SESSION_FILTERS,
-      hiddenCounts: { agent: 3, unprompted: 0 },
+      hiddenCounts: { agent: 3, unprompted: 0, ended: 0, foreign: 0, idle: 0 },
     });
     expect(container.querySelector('[data-filter-badge]')).toBeNull();
     cleanup();
@@ -825,23 +914,31 @@ describe('SessionList filter popover', () => {
 
     const { container: two } = mountWith(twoProjects(), {
       statusFilter: 'waiting',
-      originFilters: { hideAgentStarted: true, onlyPrompted: true },
+      originFilters: {
+        hideAgentStarted: true,
+        onlyPrompted: true,
+        hideEnded: false,
+        hideForeign: true,
+        hideIdle: false,
+      },
     });
     expect(two.querySelector('[data-filter-badge]')?.textContent).toBe('2');
   });
 
-  it('says in the popover that the default is in force, with what it hides', () => {
+  it('shows what a default rule hides, inline after its label', () => {
     // Uncounted must not mean invisible: a hidden session that is neither
     // shown nor counted is indistinguishable from one that does not exist.
+    // There is no "default" badge to say the rule is one anybody chose --
+    // that is gone with the two-line layout it shared a row with -- but the
+    // count itself is still there, quietly, after the label.
     const { container } = mountWith(twoProjects(), {
       filterMenuOpen: true,
       originFilters: DEFAULT_SESSION_FILTERS,
-      hiddenCounts: { agent: 3, unprompted: 0 },
+      hiddenCounts: { agent: 3, unprompted: 0, ended: 0, foreign: 0, idle: 0 },
     });
     const row = container.querySelector('[data-origin-toggle="agent"]') as HTMLElement;
-    expect(row.getAttribute('aria-pressed')).toBe('true');
-    expect(row.querySelector('[data-filter-default]')?.textContent).toBe('default');
-    expect(row.textContent).toContain('3');
+    expect(row.getAttribute('aria-checked')).toBe('true');
+    expect(row.textContent).toContain('3 hidden');
     // And it is still the control that turns the default off.
     const seen: SessionFilters[] = [];
     cleanup();
@@ -853,16 +950,228 @@ describe('SessionList filter popover', () => {
     act(() => {
       fireEvent.click(live.querySelector('[data-origin-toggle="agent"]') as Element);
     });
-    expect(seen).toEqual([{ hideAgentStarted: false, onlyPrompted: false }]);
+    expect(seen).toEqual([
+      {
+        hideAgentStarted: false,
+        onlyPrompted: false,
+        hideEnded: true,
+        hideForeign: true,
+        hideIdle: false,
+      },
+    ]);
   });
 
-  it('drops the default tag from a rule the operator applied', () => {
+  /**
+   * THE FOURTH ROW -- `docs/design/vam-owns-the-session.md`'s own Stage 1
+   * acceptance line, the popover half of it.
+   */
+  it('offers a row for foreign sessions, on by default and saying how many it holds back', () => {
     const { container } = mountWith(twoProjects(), {
       filterMenuOpen: true,
-      originFilters: { hideAgentStarted: true, onlyPrompted: true },
+      originFilters: DEFAULT_SESSION_FILTERS,
+      hiddenCounts: { agent: 0, unprompted: 0, ended: 0, foreign: 11, idle: 0 },
     });
-    const prompted = container.querySelector('[data-origin-toggle="prompted"]') as HTMLElement;
-    expect(prompted.querySelector('[data-filter-default]')).toBeNull();
+    const row = container.querySelector('[data-origin-toggle="foreign"]') as HTMLElement;
+    expect(row).not.toBeNull();
+    expect(row.getAttribute('aria-checked')).toBe('true');
+    expect(row.textContent).toContain('11 hidden');
+  });
+
+  it('turns the foreign rule off without disturbing the other three', () => {
+    const seen: SessionFilters[] = [];
+    const { container } = mountWith(twoProjects(), {
+      filterMenuOpen: true,
+      originFilters: DEFAULT_SESSION_FILTERS,
+      onOriginFilters: (next) => seen.push(next),
+    });
+    act(() => {
+      fireEvent.click(container.querySelector('[data-origin-toggle="foreign"]') as Element);
+    });
+    expect(seen).toEqual([
+      {
+        hideAgentStarted: true,
+        onlyPrompted: false,
+        hideEnded: true,
+        hideForeign: false,
+        hideIdle: false,
+      },
+    ]);
+  });
+
+  /**
+   * THE REASON, ON SCREEN -- `docs/design/vam-owns-the-session.md`'s own
+   * trap: "an unreadable tmux listing must not empty the sidebar." The
+   * popover is where an operator would otherwise read a toggle that stopped
+   * narrowing as simply broken.
+   */
+  it('says nothing extra when there is no listing gap', () => {
+    const { container } = mountWith(twoProjects(), { filterMenuOpen: true });
+    expect(container.querySelector('[data-vam-listing-gap]')).toBeNull();
+  });
+
+  it('shows the reason on screen while vam cannot read its own tmux spine', () => {
+    const { container } = mountWith(twoProjects(), {
+      filterMenuOpen: true,
+      vamListingGap: 'no tmux server is running, so there is nothing to reach',
+    });
+    const gap = container.querySelector('[data-vam-listing-gap]');
+    expect(gap?.textContent).toContain('no tmux server is running');
+  });
+});
+
+/**
+ * THE SIDEBAR'S OWN QUIET LINE, distinct from `vamListingGap` above: that one
+ * covers a listing vam could not READ, this one covers a listing vam read
+ * perfectly and found nothing of its own in -- `listVamSessions` answering
+ * `ok, []`, the ordinary state after every reboot before vam starts its
+ * first session. Not a failure, so `vamListingGap` stays null and ownership
+ * really is zero -- but `hideForeign` (on by default) can still take every
+ * Claude Code row with it, leaving a wordless empty sidebar an operator
+ * cannot tell apart from "vam is broken".
+ *
+ * `foreignHiddenCount` ARRIVES AS A PROP, computed by `Canvas.tsx` off
+ * `countHiddenByForeignFilter` (`session-filter.foreign.test.ts` proves that
+ * function). This pane never recomputes it from `allEntries` itself: the
+ * count has to agree with `entries`'s own `vamListingGap`/`?demo=1`
+ * exemptions, which only `Canvas.tsx` knows about, so these tests exercise
+ * the RENDERING of a given count and the `Show` route, not the arithmetic.
+ */
+describe('the foreign-hidden quiet line', () => {
+  it('says nothing when the count is zero', () => {
+    const { container } = mountWith(twoProjects(), { foreignHiddenCount: 0 });
+    expect(container.querySelector('[data-foreign-hidden]')).toBeNull();
+  });
+
+  /**
+   * THE BUG ITSELF: `hideForeign` takes every row, `vamListingGap` is null
+   * (the listing succeeded), and the plain "No sessions yet" empty state
+   * would say nothing true but misleading in its silence. This is the state
+   * the coordinator's own report named: no tmux server yet, so every Claude
+   * Code row reads `vamControlled: false`.
+   */
+  it('replaces the silent empty state when the count is not zero', () => {
+    const { container } = mountWith([], { foreignHiddenCount: 3 });
+    const notice = container.querySelector('[data-foreign-hidden-count]');
+    expect(notice?.textContent).toContain('3 sessions hidden');
+    expect(notice?.textContent).toContain('vam did not start them');
+    // Not BOTH messages -- the strip already says why the list is empty, and
+    // "No sessions yet" beside it would read as contradicting it.
+    expect(container.textContent).not.toContain('No sessions yet');
+  });
+
+  it('says ONE session, singular, when the count is exactly one', () => {
+    const { container } = mountWith([], { foreignHiddenCount: 1 });
+    const notice = container.querySelector('[data-foreign-hidden-count]');
+    expect(notice?.textContent).toContain('1 session hidden');
+    expect(notice?.textContent).toContain('vam did not start it');
+  });
+
+  /**
+   * THE NON-EMPTY CASE: a small count so a hidden row is never
+   * invisible-and-unmentioned just because it was not the ONLY row.
+   */
+  it('still names a hidden session when the rest of the list is not empty', () => {
+    const { container } = mountWith(entriesOf([makeSession({ id: 's1' })]), {
+      foreignHiddenCount: 2,
+    });
+    expect(container.querySelector('[data-session-row="s1"]')).not.toBeNull();
+    expect(container.querySelector('[data-foreign-hidden-count]')?.textContent).toContain(
+      '2 sessions hidden',
+    );
+  });
+
+  it('Show flips the same pref the popover row does, without opening the popover', () => {
+    const seen: SessionFilters[] = [];
+    const { container } = mountWith([], {
+      foreignHiddenCount: 2,
+      originFilters: { ...DEFAULT_SESSION_FILTERS, hideForeign: true },
+      onOriginFilters: (next) => seen.push(next),
+    });
+    act(() => {
+      fireEvent.click(container.querySelector('[data-foreign-hidden-show]') as Element);
+    });
+    expect(seen).toEqual([{ ...DEFAULT_SESSION_FILTERS, hideForeign: false }]);
+    expect(container.querySelector('[data-filter-menu]')).toBeNull();
+  });
+
+  /**
+   * ONE COPY OF THE SENTENCE ON A PHONE, NOT TWO. `GettingStarted.tsx`
+   * (drawn below the list when `phone && entries.length === 0`, see the
+   * getting-started describe block) carries its OWN copy of this exact
+   * line, fed the identical `foreignHiddenCount`. Drawing both put "1
+   * session hidden — vam did not start it · Show" on the 390px screen
+   * twice -- once above an otherwise-empty list, once inside the screen
+   * that replaced it. The desktop never withdraws this strip: its own
+   * getting-started screen lives in the detail pane, a different piece of
+   * chrome the sidebar never draws.
+   */
+  it('withdraws on a phone once the getting-started screen owns this line', () => {
+    const { container } = mountWith([], { foreignHiddenCount: 1, phone: true });
+    expect(container.querySelector('[data-foreign-hidden]')).toBeNull();
+    expect(container.querySelector('[data-getting-started-hidden]')).not.toBeNull();
+  });
+
+  it('stays on the desktop, where the getting-started screen is a different pane entirely', () => {
+    const { container } = mountWith([], { foreignHiddenCount: 1, phone: false });
+    expect(container.querySelector('[data-foreign-hidden]')).not.toBeNull();
+  });
+});
+
+/**
+ * TWO THINGS A PHONE'S OWN GETTING-STARTED SCREEN GETS WRONG IF IT JUST
+ * COPIES THE DESKTOP'S: a shortcut list naming keys nothing on a touch
+ * screen can press, and a "the browser build has no picker" sentence that
+ * is true of EVERY phone (a phone is a browser build, always) and points
+ * nowhere an operator holding one can act. Both were caught by eye on the
+ * committed screenshot (`docs/ui/getting-started-phone.png`) before being
+ * pinned here.
+ */
+describe('the phone’s own getting-started screen', () => {
+  it('withdraws the shortcut rows -- a touch screen cannot press a chord', () => {
+    const { container } = mountWith([], { phone: true, hasDirectoryPicker: true });
+    expect(container.querySelector('[data-getting-started]')).not.toBeNull();
+    expect(container.querySelector('[data-getting-started-shortcuts]')).toBeNull();
+  });
+
+  it('says the phone-accurate sentence when there is no picker, not the desktop’s "browser build" one', () => {
+    const { container } = mountWith([], { phone: true, hasDirectoryPicker: false });
+    const decline = container.querySelector('[data-getting-started-decline]');
+    expect(decline?.textContent).toContain('desktop app');
+    expect(decline?.textContent).not.toContain('browser build');
+  });
+
+  /**
+   * ITEM 1 OF "start-polish": `entries` empty is not the whole story on a
+   * phone either -- `hasOwnSession` (`Canvas.tsx`'s own fact, off the
+   * UNFILTERED model) is what tells this list a session vam started is
+   * merely hidden by dismiss or a filter, not gone. Without this the phone
+   * showed the exact "you have never used vam" screen the desktop no longer
+   * does in the identical state.
+   */
+  it('withdraws once vam has a session of its own, even though entries is empty', () => {
+    const { container } = mountWith([], { phone: true, hasOwnSession: true });
+    expect(container.querySelector('[data-getting-started]')).toBeNull();
+  });
+
+  it('shows once entries is empty and vam truly owns nothing, the default', () => {
+    const { container } = mountWith([], { phone: true, hasOwnSession: false });
+    expect(container.querySelector('[data-getting-started]')).not.toBeNull();
+  });
+});
+
+/**
+ * THE PLAIN "No sessions yet" LINE gets the identical guard, for the
+ * identical reason -- see `hasOwnSession`'s own header on `SessionList.tsx`.
+ */
+describe('the plain "No sessions yet" line', () => {
+  it('stays off once vam has a session of its own, even though entries is empty', () => {
+    const { container } = mountWith([], { hasOwnSession: true });
+    expect(container.textContent).not.toContain('No sessions yet');
+  });
+
+  it('shows once entries is empty and vam truly owns nothing, the default', () => {
+    const { container } = mountWith([], { hasOwnSession: false });
+    expect(container.textContent).toContain('No sessions yet');
   });
 });
 
@@ -1102,6 +1411,10 @@ describe('SessionList project menu', () => {
       'new-session',
       'collapse',
       'icon',
+      // The entry point for a project's FIRST worktree: `WorktreesSection`
+      // stays hidden with none, so this is the only route to it until one
+      // exists (see `docs/design/worktrees.md`).
+      'new-worktree',
       'remove',
     ]);
     expect(container.textContent).not.toContain('Project settings');
@@ -1318,7 +1631,16 @@ describe('SessionList reveals the focused row', () => {
     const original = Object.getOwnPropertyDescriptor(window, 'matchMedia');
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
-      value: (query: string) => ({ matches: query.includes('reduced-motion') }),
+      // `addEventListener`/`removeEventListener`, unlike the narrower stub
+      // this used to be: `usePhoneViewport` (`SessionList.tsx` now imports
+      // it, for the filter popover's own keyboard-safe cap) calls both on
+      // whatever `matchMedia` returns, the same shape every other test file
+      // that stubs `matchMedia` already provides (`Canvas.demo-foreign.test.tsx`).
+      value: (query: string) => ({
+        matches: query.includes('reduced-motion'),
+        addEventListener() {},
+        removeEventListener() {},
+      }),
     });
     try {
       const entries = twoProjects();

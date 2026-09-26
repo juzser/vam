@@ -84,12 +84,94 @@ export type PaneView =
        * `row` is an index into THAT text, scrollback and all; see `PaneCursor`.
        */
       readonly cursor: PaneCursor;
+      /**
+       * WHETHER THE PROGRAM IN THE PANE ASKED THE TERMINAL FOR THE MOUSE
+       * (`#{mouse_any_flag}`), because that decides where a wheel over the
+       * pane goes. Claude Code's fullscreen renderer draws in the alternate
+       * screen -- for which tmux keeps NO scrollback, so the window read is
+       * the screen and the DOM has nothing to scroll -- and asks for mouse
+       * reports so that it can scroll its own viewport. A terminal that has
+       * been asked delivers the wheel to the program; one that has not spends
+       * it on its own history. ABSENT when tmux did not say (an older tmux, a
+       * stubbed runner, every producer written before the field existed):
+       * not knowing is drawn as the old behaviour, never as a program that
+       * declined -- which is why this is the one field of `ok` that is
+       * optional rather than spelled out like `cursor`.
+       */
+      readonly mouse?: boolean;
     }
   | { readonly kind: 'not-vam' }
   | { readonly kind: 'gone' }
   | { readonly kind: 'ambiguous'; readonly names: readonly string[] }
   | { readonly kind: 'mispaired'; readonly published: string }
   | { readonly kind: 'unavailable'; readonly error: SourceError };
+
+/**
+ * WHY THE TAB IS ASKING -- which is what decides how much work main does for
+ * one screen. Here rather than in main because the renderer is what knows the
+ * answer, and the preload carries the word across.
+ *
+ * FOUR ANSWERS, not four optimisation levels, and the difference between them
+ * is measured. On a 200x50 pane with 1600 lines of coloured scrollback,
+ * private `-L` socket, n=30, load ~8 (the numbers `echo` and `echo-scrollback`
+ * were first argued from): a capture with `-S -500` is 86,260 bytes and
+ * 10.30ms median, the same capture of the screen alone is 7,760 bytes and
+ * 5.55ms, and the `list-sessions` in front of it is another ~5ms. Those figures
+ * predate the control-mode runner (`sources/tmux/control.ts`), which removed
+ * the `execFile` spawn under both; re-measured through it, on a 137x41 pane
+ * with 600 lines of coloured scrollback (tmux 3.7b, private socket, n=60): a
+ * window read is 35,068 bytes at a 1.88ms median, the screen alone is 2,608
+ * bytes at 0.33ms. The ratio is the same story on a cheaper connection --
+ * roughly 13x the bytes for roughly 6x the time -- which is what `poll-live`
+ * below exists to stop paying four times a second for a tab nobody has
+ * scrolled.
+ *
+ * `poll` -- the tab's own interval (`panels/TerminalTab.tsx`, `REFRESH_MS`),
+ * asked while the operator has scrolled away from the live end, or on the
+ * very first tick of a tab (nothing drawn yet, so nothing to splice a screen
+ * onto). It PROVES the pairing between the row and the tmux session vam
+ * started for it, and it asks for the whole window: the scrollback has to be
+ * in the DOM for the operator to be able to scroll into it at all.
+ *
+ * `poll-live` -- THE SAME TICK, asked instead once the operator IS at the
+ * live end and something has already been drawn. It proves the pairing
+ * exactly as `poll` does -- this is still the interval read, so it may never
+ * ride an aim someone else proved -- but it asks for the screen alone and
+ * relies on the same splice `echo` does (`panels/TerminalTab.tsx`,
+ * `composeScreen`) to keep the scrollback already drawn in the DOM rather
+ * than re-fetching it every quarter of a second for nobody to look at.
+ *
+ * `echo` -- the read right after a keystroke landed, with the view stuck to
+ * the live end. It rides the pairing the last `poll`/`poll-live` proved
+ * (`main/terminal/ipc.ts`, `AIM_TTL_MS`) and asks for the screen only, because
+ * a view at the bottom is showing no scrollback: nobody is looking at the 500
+ * lines it would cost ~5ms and 78KB to fetch. The renderer keeps those lines
+ * in the DOM all the same -- it splices the screen onto the history it already
+ * has (`panels/TerminalTab.tsx`, `composeScreen`), because a pane holding one
+ * screen has nothing to scroll, and an operator who cannot leave the live end
+ * can never be asked the mode below. This is the one mode allowed to prove
+ * nothing, and the poll's own proof is what bounds it.
+ *
+ * `echo-scrollback` -- the same read with the operator SCROLLED UP. It rides
+ * the aim too, but it asks for the whole window: serving the screen alone
+ * would empty the region under their cursor.
+ *
+ * Absent means `poll`. A caller that does not say which situation it is in
+ * gets the one that assumes nothing.
+ */
+export type PaneReadMode = 'poll' | 'poll-live' | 'echo' | 'echo-scrollback';
+
+/**
+ * Checked rather than trusted, for the reason `isPaneKey` and `isPaneSize` are
+ * checked: this value arrives from the least trusted process in the app and it
+ * decides how much main re-proves before it aims a read at a tmux session.
+ * Anything unrecognised is a malformed ask, never a default.
+ */
+export function isPaneReadMode(value: unknown): value is PaneReadMode {
+  return (
+    value === 'poll' || value === 'poll-live' || value === 'echo' || value === 'echo-scrollback'
+  );
+}
 
 /**
  * WHICH MODEL A SESSION IS RUNNING, or vam's inability to say so.
@@ -285,6 +367,29 @@ export function isPaneSize(size: PaneSize): boolean {
  * a terminal that eats it is not a terminal. It was vam's way out of the
  * surface until they said it should be the pane's, and they were right.
  *
+ * `enter` CARRIES `shift`, AND IT IS A REQUIRED FIELD RATHER THAN A SIXTH
+ * KIND, for the reason `wheel`'s fields are checked rather than trusted: the
+ * renderer is the least trusted process in the app, and a field `isPaneKey`
+ * can leave unchecked is a field a malformed ask can omit and have answered
+ * as `false` by default. THE OPERATOR'S REPORT was that Shift+Enter submits
+ * in the Terminal tab instead of inserting a newline -- Claude Code's own
+ * TUI does the latter, in the pty it is actually driving, and vam's pane
+ * dropped the modifier on the floor. MEASURED on a private `-L` socket
+ * against Claude Code 2.1.278 and Codex 0.153.2, both started the way vam
+ * starts them: a single literal LF byte (`send-keys -l -- '\n'`, `tmux/argv.ts`'s
+ * `sendNewlineArgv`) inserts a line in the composer and submits nothing, in
+ * both REPLs, from a raw keystroke indistinguishable from the one every
+ * keyboard sends for Ctrl+J -- which is almost certainly what each REPL is
+ * actually binding, this being far more portable than a Shift+Enter chord
+ * itself is. The Kitty-protocol form (`ESC[13;2u`) and the Option/Alt-Enter
+ * form (`ESC` then CR) both did the same in both REPLs, so either would have
+ * worked too; LF was chosen for needing no escape-sequence parser on either
+ * end and no tmux `extended-keys` negotiation, which a bare byte send
+ * (`-l`, exactly as `text` already sends one) sidesteps entirely. The xterm
+ * `modifyOtherKeys` form (`ESC[27;2;13~`) was tried and dropped: Codex read
+ * it as nothing rather than a newline, so it is not the cross-agent answer
+ * the other three are. See `sendNewlineArgv` for the full note.
+ *
  * `control` IS THE THIRD, AND IT IS THE LARGEST ONE THIS TYPE WILL EVER TAKE.
  * The operator's report was that Ctrl+U would not kill the line "or any other
  * terminal shortcut", and they were exactly right: `TerminalTab.tsx` returned
@@ -311,17 +416,85 @@ export function isPaneSize(size: PaneSize): boolean {
  * A discriminated pair rather than a string with a flag: the renderer is the
  * least trusted process in the app, and "was this literal?" must not be a
  * boolean that a missing field can make false.
+ *
+ * `nav` IS THE FOURTH, AND THE LIST BEING SHORT NEVER MEANT CLOSED -- `control`
+ * already grew it once. The operator's report, translated: "in the terminal,
+ * the arrow keys can't be used to select options." `TerminalTab.tsx` read
+ * `ArrowUp`/`ArrowDown`/`PageUp`/`PageDown`/`Home`/`End` as VAM'S OWN scroll
+ * keys, before a keystroke ever reached `strokeFor` -- so Claude Code's own
+ * option pickers (`AskUserQuestion`, a permission prompt, `/model`, `/config`,
+ * plan approval), every one of them walked with the arrows, could not be
+ * driven from inside vam's pane at all. `ArrowLeft`/`ArrowRight` were not even
+ * that lucky: `strokeFor` declined them outright (a named key is never one
+ * printable character) and they reached neither the pane nor vam's own
+ * grammar. `nav` is the eight keys a terminal is navigated with -- the four
+ * arrows and Home/End/PageUp/PageDown -- PRESSED rather than typed, for the
+ * same reason `control` is: `send-keys -l -- 'Up'` would type the two letters
+ * into the operator's own prompt. `sources/tmux/argv.ts`'s `sendNavArgv`
+ * carries the measurement of what a real pane receives for each.
+ *
+ * A KIND CARRYING A CLOSED VALUE, NOT EIGHT KINDS, matching `control`'s own
+ * shape rather than `enter`/`escape`/`backspace`/`back-tab`'s: `nav` is one
+ * FAMILY of the pane's own keys, exactly as `control` is one family of Ctrl
+ * chords, and `isNavKey` checks it against a frozen eight-member set the same
+ * way `isControlLetter` does its twenty-six.
  */
 export type PaneKey =
   | { readonly kind: 'text'; readonly text: string }
-  | { readonly kind: 'enter' }
+  /**
+   * Return, plain or Shift-held -- `shift: false` presses the interpreted
+   * Enter (`sendEnterArgv`, tmux's own `Enter`, CR); `shift: true` sends a
+   * literal LF (`sendNewlineArgv`), which Claude Code and Codex both read as
+   * an inserted line rather than a submit. See the type doc above for the
+   * measurement.
+   */
+  | { readonly kind: 'enter'; readonly shift: boolean }
   | { readonly kind: 'backspace' }
   /** Shift-Tab, `BTab` to tmux -- the session's own cycle-the-mode chord. */
   | { readonly kind: 'back-tab' }
   /** Escape, `Escape` to tmux -- the key every TUI cancels on. */
   | { readonly kind: 'escape' }
   /** One Ctrl chord -- `C-u` to tmux, and its twenty-five siblings. */
-  | { readonly kind: 'control'; readonly letter: ControlLetter };
+  | { readonly kind: 'control'; readonly letter: ControlLetter }
+  /**
+   * One of the terminal's own navigation keys -- an arrow, Home, End,
+   * PageUp or PageDown -- pressed in the pane rather than scrolled in vam's
+   * own view. See the type doc above for the report this answers and
+   * `sendNavArgv` for the measured escape sequence each one delivers.
+   */
+  | { readonly kind: 'nav'; readonly nav: NavKey }
+  /**
+   * The wheel, for a pane whose program asked for the mouse (`PaneView.mouse`).
+   * Delivered as `ticks` SGR mouse reports at the cell under the pointer,
+   * 1-based as the protocol counts (`tmux/argv.ts`, `sendWheelArgv`). Main
+   * spells the report; the renderer only says which way and where.
+   */
+  | {
+      readonly kind: 'wheel';
+      readonly direction: 'up' | 'down';
+      readonly ticks: number;
+      readonly column: number;
+      readonly row: number;
+    }
+  /**
+   * A REAL PASTE -- the operator's clipboard, delivered by a `paste` event
+   * the browser handed over unprompted, never a keystroke. It is its own
+   * kind rather than a longer `text` for the reason `MAX_KEY_TEXT` exists at
+   * all: `text` is bounded to what one keydown could ever produce, and a
+   * paste routinely carries a whole file. `sources/tmux/argv.ts`'s
+   * `sendPasteArgv` delivers it through tmux's OWN paste buffer
+   * (`set-buffer`/`paste-buffer -p`) rather than one `send-keys -l` per
+   * chunk, so tmux -- not this bridge -- decides whether the pane's own
+   * program asked for bracketed paste.
+   */
+  | { readonly kind: 'paste'; readonly text: string };
+
+/**
+ * The most notches one wheel key may carry. A trackpad fling accumulates
+ * many rows between two frames; a bound keeps one bridge call from turning
+ * into an unbounded run of reports into a program vam does not control.
+ */
+export const MAX_WHEEL_TICKS = 40;
 
 /**
  * THE WHOLE ALLOWLIST OF CHORDS, written out rather than derived.
@@ -397,12 +570,68 @@ export function isControlLetter(value: unknown): value is ControlLetter {
 }
 
 /**
+ * THE WHOLE ALLOWLIST OF NAVIGATION KEYS -- the four arrows and Home, End,
+ * PageUp, PageDown, written out exactly as `CONTROL_LETTERS` is.
+ *
+ * EIGHT, AND CLOSED FOR THE SAME REASON THAT LIST IS: these are the keys a
+ * terminal is navigated with (`PaneKey`'s own `nav` doc has the report), and
+ * anything else a keyboard sends is either a character `strokeFor` already
+ * carries or a browser/vam chord this file has no business claiming.
+ * `Insert` and `Delete` are deliberately NOT here -- the operator's report was
+ * about the arrows and the pickers they walk, `Delete` already means
+ * something to a browser (and nothing measured yet to a pane), and a list
+ * grown on a guess is a list this file would have to defend twice.
+ *
+ * SPELLED AS LITERALS, so a `string` narrowed by a regular expression can
+ * never stand in for it -- the same defence `CONTROL_LETTERS` makes.
+ */
+export const NAV_KEYS = [
+  'up',
+  'down',
+  'left',
+  'right',
+  'home',
+  'end',
+  'page-up',
+  'page-down',
+] as const;
+
+/** One of the eight above, and nothing else is assignable to it. */
+export type NavKey = (typeof NAV_KEYS)[number];
+
+const NAV_KEY_SET: ReadonlySet<string> = new Set<string>(NAV_KEYS);
+
+/**
+ * Whether a value off the bridge names one of the eight navigation keys --
+ * `isControlLetter`'s own reasoning, unchanged: a `Set` built FROM the list
+ * so membership of the array IS the definition, and exported because the
+ * renderer decides with it too (`TerminalTab.tsx`).
+ */
+export function isNavKey(value: unknown): value is NavKey {
+  return typeof value === 'string' && NAV_KEY_SET.has(value);
+}
+
+/**
  * The longest text one keystroke may carry. A `KeyboardEvent.key` for a
  * printable key is one character, and a composed one (an IME, a dead key) is
  * a very few. The bound is what keeps this channel from becoming an unbounded
  * paste into a running agent by a renderer that is no longer vam's.
  */
 export const MAX_KEY_TEXT = 16;
+
+/**
+ * The longest a REAL paste may carry, in code points -- deliberately far
+ * above `MAX_KEY_TEXT`, because a `paste` key is not a keystroke and is not
+ * bounded by what one keydown could ever produce.
+ *
+ * SAME MAGNITUDE AS `MAX_CLIPBOARD_LENGTH` (`main/clipboard/ipc.ts`), and for
+ * the identical reason: this is not a guess at how big a real paste is, it is
+ * a backstop against a renderer that is no longer vam's handing main an
+ * unbounded string. `renderer/panels/terminal-paste.ts`'s `preparePastedText`
+ * truncates to exactly this bound before a `paste` key is ever built, so a
+ * legitimate paste never reaches `isPaneKey` only to be refused as malformed.
+ */
+export const MAX_PASTE_TEXT = 1_000_000;
 
 /**
  * What became of one keystroke. FIVE ANSWERS, and the split exists because a
@@ -431,19 +660,48 @@ export type PaneSendResult = 'sent' | 'unaimed' | 'unavailable' | 'mispaired' | 
 /** Whether a value off the bridge is a keystroke vam will send. */
 export function isPaneKey(value: unknown): value is PaneKey {
   if (typeof value !== 'object' || value === null) return false;
-  const key = value as { kind?: unknown; text?: unknown; letter?: unknown };
-  if (
-    key.kind === 'enter' ||
-    key.kind === 'backspace' ||
-    key.kind === 'back-tab' ||
-    key.kind === 'escape'
-  ) {
+  const key = value as {
+    kind?: unknown;
+    text?: unknown;
+    letter?: unknown;
+    nav?: unknown;
+    direction?: unknown;
+    ticks?: unknown;
+    column?: unknown;
+    row?: unknown;
+    shift?: unknown;
+  };
+  if (key.kind === 'backspace' || key.kind === 'back-tab' || key.kind === 'escape') {
     return true;
   }
-  // The only kind that carries a field main turns into a tmux KEY, and so the
-  // only one whose field is checked against a closed list rather than bounded
-  // in length: `letter` is looked up, never spliced.
+  // `shift` REQUIRED AND CHECKED, not read with a `?? false`: a malformed ask
+  // that left it out must be refused rather than answered as a plain Return,
+  // for the same reason `wheel`'s numbers are bounded here rather than
+  // trusted -- the renderer is the least trusted process in the app.
+  if (key.kind === 'enter') return key.shift === true || key.shift === false;
+  // The only two kinds that carry a field main turns into a tmux KEY, and so
+  // the only two whose field is checked against a closed list rather than
+  // bounded in length: `letter` and `nav` are looked up, never spliced.
   if (key.kind === 'control') return isControlLetter(key.letter);
+  if (key.kind === 'nav') return isNavKey(key.nav);
+  // A paste is bounded by its OWN, much larger constant -- never `MAX_KEY_TEXT`,
+  // which exists to bound a keystroke, not a clipboard.
+  if (key.kind === 'paste') {
+    return typeof key.text === 'string' && key.text.length > 0 && key.text.length <= MAX_PASTE_TEXT;
+  }
+  // Every number a report carries is bounded here and only here, so main can
+  // format them without a clamp of its own: a clamp is a value invented for
+  // a caller that sent one main would not have.
+  if (key.kind === 'wheel') {
+    const within = (value: unknown, min: number, max: number): boolean =>
+      typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max;
+    return (
+      (key.direction === 'up' || key.direction === 'down') &&
+      within(key.ticks, 1, MAX_WHEEL_TICKS) &&
+      within(key.column, 1, MAX_COLUMNS) &&
+      within(key.row, 1, MAX_ROWS)
+    );
+  }
   return (
     key.kind === 'text' &&
     typeof key.text === 'string' &&

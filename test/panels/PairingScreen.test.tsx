@@ -82,6 +82,35 @@ describe('the screen a phone lands on', () => {
     fireEvent.click(submit());
     expect(pair).not.toHaveBeenCalled();
   });
+
+  /**
+   * THE DESKTOP SHOWS THE CODE GROUPED, `XXXX-XXXX` (`PairingPanel.tsx`'s own
+   * `grouped`) -- "a group of four is what a person holds while looking
+   * away." An operator copying that grouping by eye onto the phone's keyboard
+   * types the hyphen too, and `maxLength={8}` used to let it steal one of the
+   * eight real characters: typed in full, `ABCD-2345` arrived at the server
+   * as `ABCD-234` -- seven real characters and a dash, never a valid code, on
+   * a route the operator's own report says is rate-limited.
+   */
+  it('drops a hyphen typed the way the desktop groups the code, keeping every real character', () => {
+    draw();
+    fireEvent.change(code(), { target: { value: 'ABCD-2345' } });
+    expect(code().value).toBe('ABCD2345');
+  });
+
+  /**
+   * 16px OR IOS ZOOMS THE PAGE ON FOCUS AND DOES NOT CLEANLY UNDO IT --
+   * `styles.css`'s own rule for `[data-phone-shell] input`. This screen
+   * mounts BEFORE any shell exists (there is nothing paired yet to host one),
+   * so that rule's selector never reaches it, and `text-body` (13px) fell
+   * through the gap. Reachable from a desktop browser too, so this checks the
+   * class rather than the device: the floor is unconditional, not a media
+   * query.
+   */
+  it('keeps the device-name field at the 16px iOS will not zoom for', () => {
+    draw();
+    expect(name().className).toContain('text-[16px]');
+  });
 });
 
 describe('when the server says no', () => {

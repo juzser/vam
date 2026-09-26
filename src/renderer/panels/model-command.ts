@@ -98,14 +98,14 @@ export function modelControlState(input: {
  * something derived, because the CLI is the authority and this is a COPY of
  * what it printed.
  *
- * THIS COPY IS FROM CLAUDE CODE 2.1.276, TAKEN 2026-09-18 -- `claude` in an
+ * THIS COPY IS FROM CLAUDE CODE 2.1.280, TAKEN 2026-09-23 -- `claude` in an
  * empty directory over a private tmux socket, a bare `/model`, `capture-pane`:
  *
- *     ❯ 1. Default (recommended) ✔  Sonnet 5 · Efficient for routine tasks
- *       2. Sonnet                   Sonnet 5 · Efficient for routine tasks
- *       3. Fable                    Fable 5.1 · Most capable for your hardest…
- *       4. Opus                     Opus 5 · Best for everyday, complex tasks
- *       5. Haiku                    Haiku 4.5 · Fastest for quick answers
+ *     ❯ 1. Default (recommended)     Sonnet 5 · Efficient for routine tasks
+ *       2. Sonnet                    Sonnet 5 · Efficient for routine tasks
+ *       3. Fable                     Fable 5.1 · Most capable for your ...
+ *   ❯   4. Opus ✔                    Opus 5.5 · Best for everyday, complex ...
+ *       5. Haiku                     Haiku 4.5 · Fastest for quick answers
  *
  * AND THESE STRINGS GO STALE BY DESIGN. Every one of them is a fact about the
  * CLI on the day above, and vam has no way to check any of them: it never
@@ -115,11 +115,15 @@ export function modelControlState(input: {
  * the next Opus. The date and the version above are the whole remedy: whoever
  * next finds a number here that disagrees with the CLI should re-capture all
  * five and move the date, not patch the one that was noticed. The labels have
- * carried this habit since 2.1.274; the versions join it.
+ * carried this habit since 2.1.274; the versions joined it at 2.1.276, and the
+ * 2.1.280 re-capture found exactly one of the five had moved: OPUS, 5 to 5.5,
+ * matching the changelog's own "Added Claude Opus 5.5 ... now the default
+ * Opus model". Sonnet, Fable and Haiku printed identically to the capture two
+ * rounds before.
  *
  * THE MEASUREMENT OVERRULED THE REQUEST, which is why it was taken. The ask
- * arrived as "for example Opus has version 5.1"; the menu says Opus is 5 and
- * FABLE is 5.1. The capture is the authority here, not the recollection.
+ * arrived as "for example Opus has version 5.1"; the menu says Opus is 5.5
+ * and FABLE is 5.1. The capture is the authority here, not the recollection.
  *
  * `default` CARRIES A NAME AND NOT A BARE NUMBER because it has no version of
  * its own -- it is whichever model the CLI currently recommends, and its own
@@ -134,7 +138,7 @@ export const MODEL_CHOICES: readonly {
   { id: 'default', label: 'Default', version: 'Sonnet 5' },
   { id: 'sonnet', label: 'Sonnet', version: '5' },
   { id: 'fable', label: 'Fable', version: '5.1' },
-  { id: 'opus', label: 'Opus', version: '5' },
+  { id: 'opus', label: 'Opus', version: '5.5' },
   { id: 'haiku', label: 'Haiku', version: '4.5' },
 ];
 

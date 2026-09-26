@@ -20,6 +20,7 @@ import {
   capturePaneArgv,
   hasSessionArgv,
   killSessionArgv,
+  listClientsArgv,
   listSessionsArgv,
   newSessionArgv,
   promptKeystrokes,
@@ -27,11 +28,16 @@ import {
   sendBackTabArgv,
   sendEnterArgv,
   sendEscapeArgv,
+  sendNavArgv,
+  sendNewlineArgv,
+  sendPasteArgv,
   sendTextArgv,
   tagPidArgv,
   tagSessionArgv,
+  tagVamSessionArgv,
   VAM_PID_OPTION,
   VAM_PROJECT_OPTION,
+  VAM_SESSION_OPTION,
   VAM_SESSION_PREFIX,
   vamSessionName,
 } from '../../src/main/sources/tmux/argv.js';
@@ -131,7 +137,7 @@ describe('tmux argv', () => {
       '-t',
       '=vam-a1b2c3:',
       '-F',
-      '@vam-cursor #{cursor_flag} #{cursor_x} #{cursor_y} #{history_size}',
+      '@vam-cursor #{cursor_flag} #{cursor_x} #{cursor_y} #{history_size} #{mouse_any_flag}',
       ';',
       'capture-pane',
       '-p',
@@ -173,6 +179,103 @@ describe('tmux argv', () => {
     expect(sendBackTabArgv('vam-a1b2c3')).not.toContain('Tab');
   });
 
+  it('presses each of the eight navigation keys, interpreted, never typed', () => {
+    // vam/terminal-arrows. MEASURED on tmux 3.7b over a private `-L` socket,
+    // against `e2e/fixtures/key-echo.cjs` in a real pane, plain cursor-key
+    // mode: `send-keys Up/Down/Left/Right` delivered `1b 5b 41/42/44/43`,
+    // `Home`/`End` delivered `1b 5b 31/34 7e`, and `PageUp`/`PageDown`
+    // (tmux's own aliases for `PPage`/`NPage`, confirmed to deliver the
+    // identical bytes) delivered `1b 5b 35/36 7e` -- exactly the sequences a
+    // real terminal sends. `--`, the same terminator `sendControlArgv` takes,
+    // because the key NAME is selected by a value off the bridge.
+    expect(sendNavArgv('vam-a1b2c3', 'up')).toEqual([
+      'send-keys',
+      '-t',
+      '=vam-a1b2c3:',
+      '--',
+      'Up',
+    ]);
+    expect(sendNavArgv('vam-a1b2c3', 'down')).toEqual([
+      'send-keys',
+      '-t',
+      '=vam-a1b2c3:',
+      '--',
+      'Down',
+    ]);
+    expect(sendNavArgv('vam-a1b2c3', 'left')).toEqual([
+      'send-keys',
+      '-t',
+      '=vam-a1b2c3:',
+      '--',
+      'Left',
+    ]);
+    expect(sendNavArgv('vam-a1b2c3', 'right')).toEqual([
+      'send-keys',
+      '-t',
+      '=vam-a1b2c3:',
+      '--',
+      'Right',
+    ]);
+    expect(sendNavArgv('vam-a1b2c3', 'home')).toEqual([
+      'send-keys',
+      '-t',
+      '=vam-a1b2c3:',
+      '--',
+      'Home',
+    ]);
+    expect(sendNavArgv('vam-a1b2c3', 'end')).toEqual([
+      'send-keys',
+      '-t',
+      '=vam-a1b2c3:',
+      '--',
+      'End',
+    ]);
+    expect(sendNavArgv('vam-a1b2c3', 'page-up')).toEqual([
+      'send-keys',
+      '-t',
+      '=vam-a1b2c3:',
+      '--',
+      'PageUp',
+    ]);
+    expect(sendNavArgv('vam-a1b2c3', 'page-down')).toEqual([
+      'send-keys',
+      '-t',
+      '=vam-a1b2c3:',
+      '--',
+      'PageDown',
+    ]);
+    for (const nav of [
+      'up',
+      'down',
+      'left',
+      'right',
+      'home',
+      'end',
+      'page-up',
+      'page-down',
+    ] as const) {
+      expect(sendNavArgv('vam-a1b2c3', nav)).not.toContain('-l');
+    }
+  });
+
+  it('sends Shift+Enter as a literal LF, never the interpreted Return', () => {
+    // vam/shift-enter. MEASURED on a private `-L` socket, tmux 3.7b: a single
+    // `\n` typed with `-l` (never a tmux key name -- `-l` is what makes this
+    // a byte, not a lookup) lands as an inserted line rather than a submit in
+    // BOTH Claude Code 2.1.278 and Codex 0.153.2. This is `sendTextArgv`'s own
+    // shape, spelled out under its own name (`sendNewlineArgv`) so
+    // `sendToPane`'s switch reads as a table of keys.
+    expect(sendNewlineArgv('vam-a1b2c3')).toEqual([
+      'send-keys',
+      '-t',
+      '=vam-a1b2c3:',
+      '-l',
+      '--',
+      '\n',
+    ]);
+    expect(sendNewlineArgv('vam-a1b2c3')).not.toEqual(sendEnterArgv('vam-a1b2c3'));
+  });
+
   it('types text tmux would otherwise read as a key or as an option', () => {
     // Measured on tmux 3.7b over a private `-L` socket: without `-l` the pane
     // received `^[` for this text, and with it the six characters. A reply of
@@ -188,14 +291,20 @@ describe('tmux argv', () => {
     ]);
   });
 
-  it('asks the listing for the recorded project id and pid beside each name', () => {
+  it('asks the listing for the recorded project id and pid beside each name, then the foreground command', () => {
     // Without the options in the format there is nothing to pair on, and the
     // matcher is back to guessing from a truncated slug (project) or counting
-    // live rows (pid).
+    // live rows (pid). The command is what tells an empty shell pane from one
+    // with an agent in it (`tmux/shell.ts`, `isShellCommand`), and it comes
+    // right after the three fields every older stub in this suite answers
+    // with, so their positions do not move. `@vam-session` and the pane's
+    // real cwd come LAST, in that order -- see `listVamSessions` for why each
+    // is optional and why the order lets an older, shorter listing still
+    // parse.
     expect(listSessionsArgv()).toEqual([
       'list-sessions',
       '-F',
-      `#{${VAM_PROJECT_OPTION}}\t#{${VAM_PID_OPTION}}\t#{session_name}`,
+      `#{${VAM_PROJECT_OPTION}}\t#{${VAM_PID_OPTION}}\t#{session_name}\t#{pane_current_command}\t#{${VAM_SESSION_OPTION}}\t#{pane_current_path}`,
     ]);
   });
 
@@ -214,6 +323,7 @@ describe('tmux argv', () => {
       ['newSessionArgv', newSessionArgv({ name: 'vam-a1b2c3', cwd: '/w', command: ['claude'] })],
       ['capturePaneArgv', capturePaneArgv('vam-a1b2c3')],
       ['listSessionsArgv', listSessionsArgv()],
+      ['listClientsArgv', listClientsArgv('vamctl')],
     ] as const) {
       const at = argv.indexOf('-F');
       expect(at, `${name} carries a -F`).toBeGreaterThan(-1);
@@ -284,6 +394,27 @@ describe('killSessionArgv', () => {
   });
 });
 
+describe('listClientsArgv', () => {
+  /**
+   * Same target-SESSION shape as `killSessionArgv` -- `=<name>`, no pane
+   * colon -- and the format asks for exactly one field, the attached
+   * client's own pid, one per line.
+   */
+  it('is exactly `list-clients -t =<name> -F #{client_pid}`', () => {
+    expect(listClientsArgv('vamctl')).toEqual([
+      'list-clients',
+      '-t',
+      '=vamctl',
+      '-F',
+      '#{client_pid}',
+    ]);
+  });
+
+  it('never builds a bare target tmux could resolve by prefix', () => {
+    expect(listClientsArgv('vam-a1')).not.toContain('vam-a1');
+  });
+});
+
 /**
  * THE VOCABULARY BOUNDARY, frozen by value.
  *
@@ -342,6 +473,31 @@ describe('the @vam-pid boundary', () => {
       'vam-a1b2c3',
       '@vam-pid',
       '14709',
+    ]);
+  });
+});
+
+/**
+ * THE THIRD BOUNDARY, frozen the same way as the two above and for the same
+ * reason: `docs/design/vam-owns-the-session.md` §2. Written once, on resume,
+ * while vam already holds the native id in its hand; never guessed, never
+ * re-derived from a name.
+ */
+describe('the @vam-session boundary', () => {
+  it('is the literal `@vam-session`', () => {
+    expect(VAM_SESSION_OPTION).toBe('@vam-session');
+  });
+
+  it('tags a session with exactly that option and nothing else, the same bare-target shape', () => {
+    // Same reasoning as `tagSessionArgv`/`tagPidArgv`: this only ever runs
+    // immediately after the `new-session` that just created the exact name,
+    // so a bare `-t` has nothing else to resolve onto by prefix or fnmatch.
+    expect(tagVamSessionArgv('vam-a1b2c3', 'a1b2c3d4-e5f6-4789-a012-3456789abcde')).toEqual([
+      'set-option',
+      '-t',
+      'vam-a1b2c3',
+      '@vam-session',
+      'a1b2c3d4-e5f6-4789-a012-3456789abcde',
     ]);
   });
 });
@@ -461,5 +617,112 @@ describe('promptKeystrokes', () => {
     for (const step of promptKeystrokes('vam-a1b2c3', 'a\nb')) {
       expect(step).toContain(PANE);
     }
+  });
+});
+
+/**
+ * A REAL PASTE, delivered through tmux's OWN paste buffer rather than
+ * `send-keys -l` -- unlike `promptKeystrokes`, which types a reply itself and
+ * so must escape its own newlines by hand, a paste is handed to `paste-buffer
+ * -p` so TMUX decides whether the pane's own program asked for bracketed
+ * paste, exactly as it would for any other paste into that pane.
+ */
+describe('sendPasteArgv', () => {
+  const setBufferSteps = (steps: readonly (readonly string[])[]) =>
+    steps.filter((step) => step[0] === 'set-buffer');
+  const pasteBufferStep = (steps: readonly (readonly string[])[]) =>
+    steps.find((step) => step[0] === 'paste-buffer');
+  const bufferNameOf = (step: readonly string[]): string | undefined => {
+    const at = step.indexOf('-b');
+    return at === -1 ? undefined : step[at + 1];
+  };
+
+  it('sets one buffer and pastes it into the pane, deleting it after', () => {
+    const steps = sendPasteArgv('vam-a1b2c3', 'hello');
+    const sets = setBufferSteps(steps);
+    expect(sets).toHaveLength(1);
+    const buffer = bufferNameOf(sets[0] ?? []);
+    expect(buffer).toBeDefined();
+    expect(sets[0]).toEqual(['set-buffer', '-b', buffer, '--', 'hello']);
+
+    const paste = pasteBufferStep(steps);
+    expect(paste).toBeDefined();
+    // `-p`: tmux itself decides whether to wrap in bracketed-paste codes,
+    // based on whether the PANE's own program asked for them -- this bridge
+    // never guesses. `-r`: no substitution of tmux's own, since the text
+    // handed in has already had its own newlines normalised
+    // (`terminal-paste.ts`). `-S`: raw bytes, not `vis(3)`-escaped -- a real
+    // terminal paste delivers control characters, it does not print their
+    // escaped spelling. `-d`: the private buffer is deleted once used, so it
+    // never lingers as something the operator could paste again by hand.
+    expect(paste).toEqual(['paste-buffer', '-d', '-p', '-r', '-S', '-b', buffer, '-t', PANE]);
+  });
+
+  it('names a buffer under vam’s own prefix, never the operator’s default buffer', () => {
+    const steps = sendPasteArgv('vam-a1b2c3', 'hello');
+    const buffer = bufferNameOf(setBufferSteps(steps)[0] ?? []);
+    // Random-suffixed like `vamSessionName`: two pastes issued around the
+    // same moment -- two open Terminal tabs, say -- must never write into the
+    // SAME buffer, which `set-buffer -a` would otherwise concatenate.
+    expect(buffer).toMatch(/^vam-paste-[a-z0-9]+$/);
+  });
+
+  it('every set-buffer chunk carries -- before the payload, so a chunk starting with "-" is data', () => {
+    const steps = sendPasteArgv('vam-a1b2c3', '-rf everything');
+    for (const step of setBufferSteps(steps)) {
+      const dashDash = step.indexOf('--');
+      expect(dashDash).toBeGreaterThan(-1);
+      expect(step[step.length - 1]).toBe('-rf everything');
+    }
+  });
+
+  it('chunks a paste too large for one set-buffer call, appending every piece after the first', () => {
+    const text = 'abcdefghij'; // 10 bytes
+    const steps = sendPasteArgv('vam-a1b2c3', text, 4);
+    const sets = setBufferSteps(steps);
+    expect(sets.length).toBeGreaterThan(1);
+    sets.forEach((step, index) => {
+      if (index === 0) {
+        expect(step).not.toContain('-a');
+      } else {
+        expect(step).toContain('-a');
+      }
+    });
+    // Every chunk names the SAME buffer, and the pieces reassemble the whole
+    // paste in order.
+    const buffers = new Set(sets.map((step) => bufferNameOf(step)));
+    expect(buffers.size).toBe(1);
+    expect(sets.map((step) => step[step.length - 1]).join('')).toBe(text);
+  });
+
+  it('chunks by UTF-8 byte length, not by JS string length', () => {
+    // Three-byte-each characters: a chunk bound of 4 bytes must hold at most
+    // one per piece, or an execFile argv element could carry more raw bytes
+    // than the bound promises.
+    const text = '零一二三';
+    const steps = sendPasteArgv('vam-a1b2c3', text, 4);
+    const sets = setBufferSteps(steps);
+    expect(sets).toHaveLength(4);
+    for (const step of sets) {
+      const chunk = step[step.length - 1] ?? '';
+      expect(Buffer.byteLength(chunk, 'utf8')).toBeLessThanOrEqual(4);
+    }
+    expect(sets.map((step) => step[step.length - 1]).join('')).toBe(text);
+  });
+
+  it('never splits a surrogate pair across two chunks', () => {
+    const emoji = '🙂🙂🙂'; // 4 bytes each in UTF-8
+    const steps = sendPasteArgv('vam-a1b2c3', emoji, 4);
+    const sets = setBufferSteps(steps);
+    for (const step of sets) {
+      const chunk = step[step.length - 1] ?? '';
+      expect([...chunk].join('')).toBe(chunk);
+    }
+    expect(sets.map((step) => step[step.length - 1]).join('')).toBe(emoji);
+  });
+
+  it('addresses the pane exactly, with the `=`…`:` target every send-keys/paste-buffer uses', () => {
+    const steps = sendPasteArgv('vam-a1b2c3', 'hi');
+    expect(pasteBufferStep(steps)).toContain(PANE);
   });
 });

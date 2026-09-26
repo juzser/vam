@@ -42,14 +42,19 @@ describe('useFileBuffers', () => {
       await result.current.saveFile('/w/atlas/.env');
     });
 
+    // Save-time normalisation (`files-save-normalize.ts`, folded into this
+    // hook alongside `FilesTab.tsx`'s own `onNormalizedBeforeSave`) adds the
+    // one trailing newline a line with none did not have -- `'after'` has no
+    // final newline, so both the buffer's own content and what `write`
+    // receives are `'after\n'`, never the untrimmed `'after'`.
     const savedBuffer = result.current.buffers['/w/atlas/.env'];
     expect(savedBuffer).toMatchObject({
       kind: 'editable',
-      content: 'after',
-      savedContent: 'after',
+      content: 'after\n',
+      savedContent: 'after\n',
       save: { kind: 'idle' },
     });
-    expect(write).toHaveBeenCalledWith('/w/atlas/.env', 'after', signature(6));
+    expect(write).toHaveBeenCalledWith('/w/atlas/.env', 'after\n', signature(6));
   });
 
   it('turns a changed-on-disk refusal into the conflict outcome, never an overwrite', async () => {
@@ -81,8 +86,10 @@ describe('useFileBuffers', () => {
     expect(buffer).toMatchObject({
       kind: 'editable',
       // The typed text survives — a conflict refuses to overwrite disk, and
-      // it must not overwrite the operator's own buffer either.
-      content: 'typed while stale',
+      // it must not overwrite the operator's own buffer either. Normalised
+      // first (save-time normalisation runs before `write` is even called,
+      // whether or not it resolves), so the trailing newline is here too.
+      content: 'typed while stale\n',
       savedContent: 'before',
       save: { kind: 'conflict' },
     });
@@ -206,7 +213,8 @@ describe('useFileBuffers', () => {
 
     expect(result.current.buffers['/w/atlas/big.log']).toMatchObject({
       kind: 'editable',
-      content: 'still typing',
+      // Normalised before `write` was ever called, same as the conflict case.
+      content: 'still typing\n',
       savedContent: 'before',
       save: { kind: 'error', error: ioError },
     });

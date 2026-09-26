@@ -51,10 +51,10 @@ const PLATFORMS = [
     name: 'mac',
     platform: 'MacIntel',
     /** `palette` holds `Mod-k`; `newProject` holds `Mod-Shift-p`. */
-    palette: '⌘K',
-    newProject: '⇧⌘P',
+    palette: '⌘ K',
+    newProject: '⇧ ⌘ P',
     /** `pickView:1`, a real Control chord on every platform. */
-    pickView: '⌃⌥1',
+    pickView: '⌃ ⌥ 1',
     /** Apple's own set, plus the named keys this sheet draws. */
     glyphs: ['⌘', '⇧', '⌥', '⌃', '⏎', '⎋', '⇥'],
     native: process.platform === 'darwin',
@@ -373,6 +373,189 @@ for (const each of PLATFORMS) {
     );
     await page.screenshot({ path: `${outDir}/chord-symbols-settings-${each.name}.png` });
     console.log(`${outDir}/chord-symbols-settings-${each.name}.png`);
+  }
+
+  /* ── THE SEND KEY OPTION'S ⇧, AGAINST A CHIP THAT SHARES IT ─────────────
+   *
+   * The operator's ask: the Shift/Command/Option/Control symbols must look
+   * like the Send Key option EVERYWHERE, and a real Chromium measurement
+   * (`docs/design/ref/send-key-reference.png` beside it) found why they did
+   * not — `font-mono` (every other chip) draws a noticeably narrower ⌘/⇧
+   * than `font-sans` (the Send key option's own ambient font) at the same
+   * size. `ChordGlyphs` now wraps a Mac glyph segment in the sans stack
+   * (`chords.ts`'s `chordSegments`, tagged `glyph: true`); this pins that a
+   * ⇧ painted through it elsewhere is pixel-identical to the reference.
+   *
+   * NO SHIPPED TOOLTIP CARRIES A SHIFT-BOUND CHORD TO HOVER — every
+   * `ShortcutTip` wired to a live action reaches for `o`, `Mod-n`,
+   * `Ctrl-Alt-<digit>`, a bare letter or `Mod-w`, never a `Shift-` token, so
+   * there is no `[data-tip-keys]` chip holding a ⇧ to measure. The key
+   * sheet's own `⇧ ⌘ P` row (`newProject`) is the next best thing: the SAME
+   * `ChordGlyphs` paints it, at the SAME `text-control` (12px) size the Send
+   * key option uses, so the comparison needs no size-driven tolerance beyond
+   * sub-pixel rounding.
+   */
+  if (each.name === 'mac') {
+    // Settings is still open from the section above (still on "keyboard"),
+    // and `?` typed into a modal does not reach the global listener.
+    await page.keyboard.press('Escape');
+    await settle(
+      page,
+      () => document.querySelector('[data-settings-overlay]') === null,
+      `${each.name}: settings closes before the ⇧ comparison`,
+    );
+    await page.keyboard.press('?');
+    const sheetForShift = await settle(
+      page,
+      () => document.querySelector('[data-key-sheet]') !== null,
+      `${each.name}: the key sheet reopens for the ⇧ comparison`,
+    );
+    const sheetGlyph = sheetForShift
+      ? await page.evaluate(() => {
+          const glyphRect = (root, glyph) => {
+            const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+            for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+              const idx = node.textContent.indexOf(glyph);
+              if (idx !== -1) {
+                const range = document.createRange();
+                range.setStart(node, idx);
+                range.setEnd(node, idx + 1);
+                const rect = range.getBoundingClientRect();
+                return {
+                  fontFamily: getComputedStyle(node.parentElement).fontFamily,
+                  height: rect.height,
+                };
+              }
+            }
+            return null;
+          };
+          const row = [...document.querySelectorAll('[data-key-sheet-keys]')].find((el) =>
+            (el.textContent ?? '').includes('⇧'),
+          );
+          return row === undefined ? null : glyphRect(row, '⇧');
+        })
+      : null;
+    await page.keyboard.press('Escape');
+    await settle(
+      page,
+      () => document.querySelector('[data-key-sheet]') === null,
+      `${each.name}: the sheet closes again`,
+    );
+
+    await page.keyboard.press(',');
+    await settle(
+      page,
+      () => document.querySelector('[data-settings-overlay]') !== null,
+      `${each.name}: settings reopens for the Send key comparison`,
+    );
+    await page.locator('[data-settings-nav-item="sessions"]').click();
+    await page.waitForSelector('[data-submit-key-option="shift-enter"]', { timeout: 5_000 });
+    const sendKeyGlyph = await page.evaluate(() => {
+      const root = document.querySelector('[data-submit-key-option="shift-enter"]');
+      if (root === null) return null;
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+        const idx = node.textContent.indexOf('⇧');
+        if (idx !== -1) {
+          const range = document.createRange();
+          range.setStart(node, idx);
+          range.setEnd(node, idx + 1);
+          const rect = range.getBoundingClientRect();
+          return { fontFamily: getComputedStyle(node.parentElement).fontFamily, height: rect.height };
+        }
+      }
+      return null;
+    });
+
+    check(
+      `${each.name}: a chip’s ⇧ (key sheet) shares the Send key option’s computed font-family`,
+      sheetGlyph !== null &&
+        sendKeyGlyph !== null &&
+        sheetGlyph.fontFamily === sendKeyGlyph.fontFamily,
+      JSON.stringify({ sheetGlyph, sendKeyGlyph }),
+    );
+    check(
+      `${each.name}: and paints within 1px of the Send key option’s own ⇧ height`,
+      sheetGlyph !== null &&
+        sendKeyGlyph !== null &&
+        Math.abs(sheetGlyph.height - sendKeyGlyph.height) <= 1,
+      JSON.stringify({ sheetGlyph, sendKeyGlyph }),
+    );
+  }
+
+  /* ── TWO MORE TIGHT SITES, NOW THAT `ChordGlyphs` PAINTS FLAT ────────── */
+  //
+  // The Send key option's look replaced #468's enlarged-modifier one
+  // (`ShortcutTip.tsx`'s `ChordGlyphs`), and a shrink is the direction that
+  // never clips — but "never" is a claim, not a measurement, and the sidebar
+  // footer and a command-palette row are both a control sharing its line
+  // with a label rather than a box with room to spare (`ShortcutTip.tsx`'s
+  // own distinction). A zero-size box here is a chord painted nowhere; a box
+  // wider than its row is one running into the label beside it.
+  await page.keyboard.press('Escape');
+  await settle(
+    page,
+    () => document.querySelector('[data-settings-overlay]') === null,
+    `${each.name}: settings closes again`,
+  );
+
+  const footer = await page.evaluate(() => {
+    const button = document.querySelector('[data-sidebar-add]');
+    const chip = button?.querySelector('[data-inline-chord]');
+    if (button === null || chip === null || button === undefined || chip === undefined) {
+      return null;
+    }
+    const buttonBox = button.getBoundingClientRect();
+    const chipBox = chip.getBoundingClientRect();
+    return {
+      text: chip.textContent,
+      painted: chipBox.width > 0 && chipBox.height > 0,
+      // The chip has to be INSIDE the button it shares a line with, not
+      // spilling past its right edge into whatever sits beside the strip.
+      insideButton: chipBox.right <= buttonBox.right + 0.5,
+    };
+  });
+  check(
+    `${each.name}: the sidebar footer's chord chip paints and fits its row`,
+    footer !== null && footer.painted && footer.insideButton,
+    JSON.stringify(footer),
+  );
+
+  await page.keyboard.press('Meta+k');
+  const paletteOpen = await settle(
+    page,
+    () => document.querySelector('[data-command-palette]') !== null,
+    `${each.name}: the command palette opens`,
+  );
+  if (paletteOpen) {
+    // Sessions is the default half of VS Code's own split (the operator's
+    // ask: "searching sessions has no prefix; searching actions starts with
+    // `/`") -- the settings row with its bound chord lives in the OTHER
+    // half.
+    await page.keyboard.type('/');
+    await page.waitForSelector('[data-command-palette][data-palette-mode="actions"]', {
+      timeout: 5_000,
+    });
+    await page.waitForSelector('[cmdk-item]', { timeout: 5_000 });
+    const row = await page.evaluate(() => {
+      const items = [...document.querySelectorAll('[data-command-palette] [cmdk-item]')];
+      const settingsItem = items.find((item) => /^settings/i.test(item.textContent ?? ''));
+      const chip = settingsItem?.querySelector('span:last-child') ?? null;
+      if (settingsItem === undefined || chip === null) return null;
+      const rowBox = settingsItem.getBoundingClientRect();
+      const chipBox = chip.getBoundingClientRect();
+      return {
+        text: chip.textContent,
+        painted: chipBox.width > 0 && chipBox.height > 0,
+        insideRow: chipBox.right <= rowBox.right + 0.5 && chipBox.bottom <= rowBox.bottom + 0.5,
+      };
+    });
+    check(
+      `${each.name}: the palette's settings row prints its chord and fits the row`,
+      row !== null && row.painted && row.insideRow,
+      JSON.stringify(row),
+    );
+    await page.keyboard.press('Escape');
   }
 
   await page.close();

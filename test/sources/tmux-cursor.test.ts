@@ -104,9 +104,10 @@ describe('readPane, on what tmux actually answers', () => {
     // `1 7 2 9` IS NO LONGER IN THIS LIST, and that is the SHAPE changing
     // rather than this check relaxing: the format asks for four fields now,
     // the fourth being `#{history_size}` (`argv.ts`), so four is the ordinary
-    // answer and `tmux-history.test.ts` is where it is read. Five is still not
-    // something this format can produce.
-    for (const body of ['1 7', '1 x 2', '2 7 2', '1 -1 2', '1 7 2 9 9', '1 7.5 2', '']) {
+    // answer and `tmux-history.test.ts` is where it is read. Nor is `1 7 2 9
+    // 9`, since the mouse flag became the fifth (`mouse-wheel.test.ts`). Six
+    // is still not something this format can produce.
+    for (const body of ['1 7', '1 x 2', '2 7 2', '1 -1 2', '1 7 2 9 9 9', '1 7.5 2', '']) {
       const run = fakeTmux(`${cursorLine(body)}screen\n`);
       const pane = await readPane(run, 'vam-a1b2c3');
       expect(pane, `for ${JSON.stringify(body)}`).toEqual({

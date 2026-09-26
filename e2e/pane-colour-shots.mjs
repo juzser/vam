@@ -824,6 +824,48 @@ const fenceClass = await page.evaluate(() => {
 });
 console.log(`  fence in this fixture: ${fenceClass ?? 'none drawn (demo writes no fenced code)'}`);
 
+// A NO-LANGUAGE FENCE'S INK, AGAINST THE REAL CASCADE -- not a class-name
+// check. Claude Code 2.1.280: "code blocks that don't name a language are now
+// coloured like inline code". `out-markdown.tsx`'s `pre` rule carries the fix
+// as a CONDITIONAL ancestor class (`[&_code]:text-chip` in place of
+// `[&_code]:text-ink-dim`), and a tag selector beats a plain utility class in
+// the real cascade -- so the thing worth measuring is the COMPUTED colour a
+// `<code>` ends up with under each ancestor, not whether the string
+// "text-chip" appears somewhere in the markup (`InlineCode` always writes
+// that class on its own `<code>`; the ancestor is what decides whether it
+// survives). Both real Tailwind classes, both already used by `out-markdown`,
+// so the build has generated real rules for them.
+const fenceInk = await page.evaluate(() => {
+  const paint = (preClass) => {
+    const pre = document.createElement('pre');
+    pre.className = preClass;
+    const code = document.createElement('code');
+    code.className = 'text-chip';
+    code.textContent = 'x';
+    pre.append(code);
+    document.body.append(pre);
+    const colour = getComputedStyle(code).color;
+    pre.remove();
+    return colour;
+  };
+  return {
+    noLanguage: paint('[&_code]:text-chip'),
+    namedUnsupported: paint('[&_code]:text-ink-dim'),
+    chipUnopposed: paint(''),
+  };
+});
+console.log(`  fence ink under each ancestor: ${JSON.stringify(fenceInk)}`);
+check(
+  'a no-language fence keeps the inline-code ink the child already asked for',
+  fenceInk.noLanguage === fenceInk.chipUnopposed,
+  JSON.stringify(fenceInk),
+);
+check(
+  'a named-but-unhandled language fence still reads as plain body ink, a different colour',
+  fenceInk.namedUnsupported !== fenceInk.noLanguage,
+  JSON.stringify(fenceInk),
+);
+
 // ------------------------------------- THE LIST MARKERS, AS PAINTED GLYPHS
 //
 // Operator: "the bullets and numbers in the response lists are too faint."

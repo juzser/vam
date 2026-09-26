@@ -27,6 +27,10 @@ export function useCanvasOverlays() {
   const [confirmForceClose, setConfirmForceClose] = useState<{
     sessionId: string;
     title: string;
+    /** The refusal that opened this prompt, carried along so declining it
+     *  (`onCancel`) can dismiss the row with the SAME reason rather than a
+     *  second, disconnected one -- see `closeSession`'s own dismissal path. */
+    reason: string;
   } | null>(null);
 
   return {

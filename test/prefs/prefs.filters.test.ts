@@ -32,14 +32,39 @@ describe('the session-origin filters, persisted', () => {
     // Toggle A on: an agent-made session is noise by default. Toggle B off:
     // it would hide `dogfood-mcp-1` (379 events, no `user_prompt`), which is
     // real work — so it is a choice, never a default.
-    expect(DEFAULT_SESSION_FILTERS).toEqual({ hideAgentStarted: true, onlyPrompted: false });
+    expect(DEFAULT_SESSION_FILTERS).toEqual({
+      hideAgentStarted: true,
+      onlyPrompted: false,
+      // The live list holds live sessions: see `session-filter.ts`.
+      hideEnded: true,
+      // Only vam's own sessions, by default: see `session-filter.ts`.
+      hideForeign: true,
+      // A fresh toggle must change nothing for an operator who never touched
+      // it -- see `session-filter.ts`'s own header for `hideIdle`.
+      hideIdle: false,
+    });
     expect(EMPTY_PREFS.filters).toEqual(DEFAULT_SESSION_FILTERS);
   });
 
   it('survives a write/read round trip', () => {
     const s = store();
-    writePrefs(s, setSessionFilters(EMPTY_PREFS, { hideAgentStarted: false, onlyPrompted: true }));
-    expect(readPrefs(s).filters).toEqual({ hideAgentStarted: false, onlyPrompted: true });
+    writePrefs(
+      s,
+      setSessionFilters(EMPTY_PREFS, {
+        hideAgentStarted: false,
+        onlyPrompted: true,
+        hideEnded: false,
+        hideForeign: false,
+        hideIdle: true,
+      }),
+    );
+    expect(readPrefs(s).filters).toEqual({
+      hideAgentStarted: false,
+      onlyPrompted: true,
+      hideEnded: false,
+      hideForeign: false,
+      hideIdle: true,
+    });
   });
 
   it('falls back to the defaults for a payload written before the field existed', () => {
@@ -70,11 +95,51 @@ describe('the session-origin filters, persisted', () => {
     expect(readPrefs(store(raw)).filters).toEqual({
       hideAgentStarted: false,
       onlyPrompted: true,
+      // Per FIELD, which is this reader's whole rule: the two stored choices
+      // are kept, and the keys this payload predates take the shipped default.
+      hideEnded: true,
+      hideForeign: true,
+      hideIdle: false,
     });
   });
 
   it('takes only real booleans — garbage falls back per field, not wholesale', () => {
     const raw = '{"filters":{"hideAgentStarted":false,"onlyPrompted":"yes"}}';
-    expect(readPrefs(store(raw)).filters).toEqual({ hideAgentStarted: false, onlyPrompted: false });
+    expect(readPrefs(store(raw)).filters).toEqual({
+      hideAgentStarted: false,
+      onlyPrompted: false,
+      // Absent, not garbage -- and an absent key is every store that
+      // predates this rule, which must read back as the shipped default.
+      hideEnded: true,
+      hideForeign: true,
+      hideIdle: false,
+    });
+  });
+
+  it('keeps a stored choice to SHOW foreign sessions, per field like every other rule', () => {
+    const raw = '{"filters":{"hideForeign":false}}';
+    expect(readPrefs(store(raw)).filters).toEqual({
+      hideAgentStarted: true,
+      onlyPrompted: false,
+      hideEnded: true,
+      hideForeign: false,
+      hideIdle: false,
+    });
+  });
+
+  it('keeps a stored choice to hide sleeping sessions, per field like every other rule', () => {
+    const raw = '{"filters":{"hideIdle":true}}';
+    expect(readPrefs(store(raw)).filters).toEqual({
+      hideAgentStarted: true,
+      onlyPrompted: false,
+      hideEnded: true,
+      hideForeign: true,
+      hideIdle: true,
+    });
+  });
+
+  it('takes only a real boolean for hideIdle -- garbage falls back to the default', () => {
+    const raw = '{"filters":{"hideIdle":"yes"}}';
+    expect(readPrefs(store(raw)).filters.hideIdle).toBe(false);
   });
 });

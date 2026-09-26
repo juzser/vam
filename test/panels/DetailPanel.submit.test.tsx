@@ -4,13 +4,15 @@
  * The Submit at the bottom of the question card -- the control that answers
  * the agent, and the wording that has to stay true either side of it.
  *
- * A pick was only ever a MARK, and the card said so in words. That sentence is
- * still true of picking: Submit is the thing that sends, so the note now says
- * the mark stands until Submit rather than that nothing can ever go back.
+ * A pick was only ever a MARK, and the card used to say so in words wherever
+ * Submit was drawn: "a pick is only a mark until you press Submit…". That
+ * sentence is gone now that Submit carries its own chord chip and a picked
+ * option its own Check -- both say the same fact without a caption reciting
+ * it back.
  *
- * WHERE DELIVERY IS NOT REAL THERE IS NO BUTTON. A Submit drawn over a source
- * vam cannot write to is a control that lies about what it will do, and the
- * old sentence is exactly right for that case -- so it stays, unchanged.
+ * WHERE DELIVERY IS NOT REAL THERE IS STILL NO BUTTON, and the sentence for
+ * THAT case is unchanged: "vam cannot answer this for you…" is still exactly
+ * right where nothing can ever go back, so it stays.
  *
  * Nothing here talks to tmux: the bridge is a fake, and what the card claims
  * afterwards is asserted against what that fake answered.
@@ -41,7 +43,6 @@ const SESSION: Session = {
   vamControlled: true,
   id: 's1',
   title: 'Colour study',
-  icon: null,
   epic: null,
   branch: null,
   status: 'waiting',
@@ -132,9 +133,10 @@ describe('Submit is offered only where delivery is real', () => {
   it('draws Submit at the bottom of the card when delivery is real', () => {
     draw(QUESTION, { answer: answering({ kind: 'sent', answer: 'Crimson' }) });
     expect(submit()).not.toBeNull();
-    // The mark-only sentence is kept true rather than dropped: picking still
-    // sends nothing, and Submit is what does.
-    expect(text()).toContain('a pick is only a mark until you press Submit');
+    // The mark-only SENTENCE is gone where delivery is real -- Submit's own
+    // chord chip carries what it used to say in words -- but the other
+    // branch's sentence (no delivery route at all) is still absent here.
+    expect(text()).not.toContain('a pick is only a mark until you press Submit');
     expect(text()).not.toContain('vam cannot answer this for you');
   });
 

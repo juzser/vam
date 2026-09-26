@@ -32,7 +32,6 @@ function session(id: string, vamControlled?: boolean): Session {
   return {
     id,
     title: id,
-    icon: null,
     epic: null,
     branch: 'work',
     status: 'running',

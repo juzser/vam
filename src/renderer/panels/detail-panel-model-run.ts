@@ -1,5 +1,6 @@
-import { type MutableRefObject, useEffect, useRef, useState } from 'react';
+import { type MutableRefObject, useCallback, useEffect, useRef, useState } from 'react';
 import type { SessionModel } from '../../shared/terminal.js';
+import { useVisibilityInterval } from '../useVisibilityInterval.js';
 import { type ModelControlState, type RunningModel, runningModelRows } from './model-command.js';
 
 /**
@@ -65,6 +66,15 @@ export type DetailPanelModelRun = {
  * running and takes it back when it stops, so nothing outside can ask a read
  * of a row that is no longer being polled -- and the effect keeps the
  * dependencies it actually reads.
+ *
+ * PAUSED OUTRIGHT WHILE THE WINDOW IS HIDDEN (`useVisibilityInterval`,
+ * `hidden: 'pause'`), same as the pane-prompt poll beside it in
+ * `DetailPanel.tsx`: nothing downstream of this button depends on it the way
+ * `notify/waiting.ts` depends on `useSourceModel`, and it resumes with one
+ * immediate tick the moment the window is visible again. A raw
+ * `setInterval` here -- this hook's first cut -- kept polling behind a
+ * hidden window and cost the tmux reads `useVisibilityInterval` exists to
+ * avoid; `DetailPanel.poll-visibility.test.tsx` is what caught it.
  */
 export function useDetailPanelModelRun(props: DetailPanelModelRunProps): DetailPanelModelRun {
   const { modelControl, model, projectId, rowId } = props;
@@ -72,49 +82,63 @@ export function useDetailPanelModelRun(props: DetailPanelModelRunProps): DetailP
   /** Published only while the poll below is live; see `sendModel`. */
   const lookForModel = useRef<(() => void) | null>(null);
   const modelReadable = modelControl === 'picker' && model !== undefined;
+  /** True while THIS effect's own previous run was already polling -- see
+   *  its use below for why an "already polling, just a different row"
+   *  transition needs its own immediate ask instead of
+   *  `useVisibilityInterval`'s (which only fires on OFF -> ON). */
+  const wasModelReadable = useRef(false);
+  /**
+   * WHICH READ'S ANSWER IS STILL WANTED. Bumped on every call, so two reads
+   * in flight at once -- a hidden window's throttled interval releases a
+   * burst when it comes back -- can never have an older one answering last
+   * paint a model the session had seconds ago. `TerminalTab`'s own poll
+   * makes exactly this argument; only the most recently ISSUED read may
+   * write. Also bumped by the reset effect's own cleanup below, so a read
+   * left over from the PREVIOUS row cannot land under this one's title
+   * either.
+   */
+  const modelGeneration = useRef(0);
+  const lookModel = useCallback(async () => {
+    if (!modelReadable || model === undefined) return;
+    modelGeneration.current += 1;
+    const mine = modelGeneration.current;
+    const view = await model(projectId, rowId);
+    if (mine !== modelGeneration.current) return;
+    // `unknown` IS THE FALLBACK AND NOT A HOLD. Every reason vam could not
+    // tell -- a question over the status line, a cut pane, a pairing it
+    // refused, AND a transcript with no answered turn in it -- lands on the
+    // word the button wore before, because the one thing worse than an
+    // unlabelled button is a label that has quietly stopped being true.
+    //
+    // AND THE ARM IS KEPT, not flattened to the name. `model` came off the
+    // CLI's painted footer and `last-turn` out of the session's transcript;
+    // both put the same word on the button, and only one of them can be
+    // called "running" in the words around it (`modelRunningClause`).
+    setRunning(view.kind === 'unknown' ? null : view);
+  }, [modelReadable, model, projectId, rowId]);
   useEffect(() => {
     if (!modelReadable || model === undefined) {
       // A row change lands here first, and this line is what stops the last
       // session's model being drawn under this one's title for one frame.
       setRunning(null);
+      lookForModel.current = null;
+      wasModelReadable.current = false;
       return;
     }
-    let live = true;
-    /**
-     * WHICH READ'S ANSWER IS STILL WANTED. `live` alone covers unmount, but
-     * two reads can be in flight at once -- a hidden window's throttled
-     * interval releases a burst when it comes back -- and an older one
-     * answering last would paint a model the session had seconds ago.
-     * `TerminalTab`'s own poll makes exactly this argument; only the most
-     * recently ISSUED read may write.
-     */
-    let issued = 0;
-    const look = async () => {
-      issued += 1;
-      const mine = issued;
-      const view = await model(projectId, rowId);
-      if (!live || mine !== issued) return;
-      // `unknown` IS THE FALLBACK AND NOT A HOLD. Every reason vam could not
-      // tell -- a question over the status line, a cut pane, a pairing it
-      // refused, AND a transcript with no answered turn in it -- lands on the
-      // word the button wore before, because the one thing worse than an
-      // unlabelled button is a label that has quietly stopped being true.
-      //
-      // AND THE ARM IS KEPT, not flattened to the name. `model` came off the
-      // CLI's painted footer and `last-turn` out of the session's transcript;
-      // both put the same word on the button, and only one of them can be
-      // called "running" in the words around it (`modelRunningClause`).
-      setRunning(view.kind === 'unknown' ? null : view);
-    };
-    lookForModel.current = () => void look();
-    void look();
-    const timer = setInterval(() => void look(), MODEL_POLL_MS);
+    lookForModel.current = () => void lookModel();
+    // SKIPPED on the very first tick this becomes readable at all --
+    // `useVisibilityInterval`'s own OFF -> ON immediate call already covers
+    // that edge; asking twice would be a second, needless tmux read.
+    if (wasModelReadable.current) void lookModel();
+    wasModelReadable.current = true;
     return () => {
-      live = false;
       lookForModel.current = null;
-      clearInterval(timer);
+      modelGeneration.current += 1;
     };
-  }, [modelReadable, model, projectId, rowId]);
+    // `projectId`/`rowId` are not read directly here -- `lookModel` already
+    // carries them, and its own identity is what re-runs this effect.
+  }, [modelReadable, model, lookModel]);
+  useVisibilityInterval(modelReadable, MODEL_POLL_MS, 'pause', () => void lookModel());
   /**
    * The rows the answer marks; two when the name cannot separate them.
    *

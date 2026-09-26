@@ -42,20 +42,29 @@ import type { Project } from '../renderer/domain/model.js';
 import type { SourceError } from '../renderer/sources/port.js';
 import type { AgentWork } from '../shared/agent-work.js';
 import type { AnswerRequest, AnswerResult, PromptView } from '../shared/answer.js';
+import type { CodexUsageSnapshot } from '../shared/codex-usage.js';
 import type { HistoryCursor, TranscriptPage } from '../shared/history.js';
 import type { LinkOutcome } from '../shared/link.js';
+import type { NotifyVerdict } from '../shared/notify.js';
 import type { PrAction, PrActionOutcome } from '../shared/pr-action.js';
 import type { PrLinkOutcome } from '../shared/pr-link.js';
 import type { PreloadSourceApi, SourceDescriptor } from '../shared/preload-api.js';
 import type {
   ModelSwitchResult,
   PaneKey,
+  PaneReadMode,
   PaneSendResult,
   PaneView,
   SessionModel,
 } from '../shared/terminal.js';
 import type { UpdateStatus } from '../shared/update.js';
 import type { UsageSnapshot } from '../shared/usage.js';
+import type {
+  CreateWorktreeInput,
+  RemoveWorktreeInput,
+  RemoveWorktreeOutcome,
+  WorktreeInfo,
+} from '../shared/worktree.js';
 
 /** The slice of `ipcRenderer` used here, so this module is testable without electron. */
 export type InvokerLike = { invoke(channel: string, ...args: unknown[]): Promise<unknown> };
@@ -173,6 +182,7 @@ export function createPreloadApi(ipc: InvokerLike): DesktopSourceApi {
   } satisfies Pick<PreloadSourceApi, 'describe' | 'load'>;
 
   const writes = {
+    resumeSession: (sessionId) => unwrap<void>(ipc.invoke(CHANNELS.resumeSession, sessionId)),
     recordPrompt: (sessionId, prompt) =>
       unwrap<void>(ipc.invoke(CHANNELS.recordPrompt, sessionId, prompt)),
     renameSession: (sessionId, title) =>
@@ -208,6 +218,7 @@ export function createPreloadApi(ipc: InvokerLike): DesktopSourceApi {
     | 'closeSession'
     | 'createSession'
     | 'createSessionIn'
+    | 'resumeSession'
     | 'pickImageAttachment'
   >;
 
@@ -232,22 +243,29 @@ export function createPreloadApi(ipc: InvokerLike): DesktopSourceApi {
   return { ...reads, ...writes, ...history, ...governance };
 }
 
-/** The bridge's usage member: one read, no write, no argument. */
+/** The bridge's usage member: two reads (Claude, Codex), no write, no argument. */
 export type UsageApi = {
   get(): Promise<UsageSnapshot>;
+  /** Codex's own reading -- `getCodex` rather than a `provider` argument on
+   *  `get`, because the two snapshots are different shapes (`UsageSnapshot`
+   *  vs `CodexUsageSnapshot`) read by different main-process modules, and one
+   *  overloaded method would have to union them for no caller that actually
+   *  wants both back in one shape. */
+  getCodex(): Promise<CodexUsageSnapshot>;
 };
 
 /**
- * `usage.get` forwards straight to `vam:usage:get` -- no `unwrap`, because
- * that channel answers with a bare `UsageSnapshot`, never an `IpcResult`
- * (see `src/main/usage/ipc.ts`). The cast is the one place this file trusts
- * main: `ipcRenderer.invoke`'s return type is `unknown` by construction, and
- * `UsageSnapshot`'s own two-branch shape is what a caller can safely narrow
- * on regardless of what actually arrived.
+ * `usage.get`/`usage.getCodex` forward straight to `vam:usage:get`/`vam:usage
+ * :codex:get` -- no `unwrap`, because both channels answer with a bare
+ * snapshot, never an `IpcResult` (see `src/main/usage/ipc.ts`). The cast is
+ * the one place this file trusts main: `ipcRenderer.invoke`'s return type is
+ * `unknown` by construction, and each snapshot's own two-branch shape is what
+ * a caller can safely narrow on regardless of what actually arrived.
  */
 export function createUsageApi(ipc: InvokerLike): UsageApi {
   return {
     get: () => ipc.invoke(CHANNELS.usageGet) as Promise<UsageSnapshot>,
+    getCodex: () => ipc.invoke(CHANNELS.usageCodexGet) as Promise<CodexUsageSnapshot>,
   };
 }
 
@@ -396,8 +414,13 @@ export type TerminalApi = {
    * `rowId` is optional and is what makes the answer per SESSION: a project
    * vam started two sessions in has two panes, and only the session itself
    * knows which one it is in (`main/sources/claude-code/session-pane.ts`).
+   *
+   * `mode` is optional too, and absent means the careful one: main proves the
+   * pairing again and captures the whole window. The Terminal tab names its
+   * situation instead, because it is the only process that knows where the
+   * operator has scrolled to (`shared/terminal.ts`, `PaneReadMode`).
    */
-  read(projectId: string, rowId?: string): Promise<PaneView>;
+  read(projectId: string, rowId?: string, mode?: PaneReadMode): Promise<PaneView>;
   /**
    * How big the pane can draw, in cells. tmux composes the screen at the
    * session's own size, so this is the only thing that makes a captured screen
@@ -478,10 +501,17 @@ export type TerminalApi = {
  */
 export function createTerminalApi(ipc: InvokerLike): TerminalApi {
   return {
-    read: (projectId, rowId) =>
+    // THE TRAILING ARGUMENTS ARE OMITTED RATHER THAN PASSED AS `undefined`,
+    // exactly as every other member here omits an absent `rowId`: main counts
+    // `args.length` to tell "not given" from "given as nothing", and a mode
+    // cannot be asked for without a row to ask it about anyway -- the tab
+    // always has one.
+    read: (projectId, rowId, mode) =>
       (rowId === undefined
         ? ipc.invoke(CHANNELS.terminalRead, projectId)
-        : ipc.invoke(CHANNELS.terminalRead, projectId, rowId)) as Promise<PaneView>,
+        : mode === undefined
+          ? ipc.invoke(CHANNELS.terminalRead, projectId, rowId)
+          : ipc.invoke(CHANNELS.terminalRead, projectId, rowId, mode)) as Promise<PaneView>,
     resize: (projectId, columns, rows, rowId) =>
       (rowId === undefined
         ? ipc.invoke(CHANNELS.terminalResize, projectId, columns, rows)
@@ -511,6 +541,146 @@ export function createTerminalApi(ipc: InvokerLike): TerminalApi {
             choice,
             rowId,
           )) as Promise<ModelSwitchResult>,
+  };
+}
+
+/**
+ * The Terminal tab's STREAMING bridge member -- the preload half of
+ * `terminalStreamOpen`/`Close`/`Write` and the three pushes main sends
+ * unprompted (`CHANNELS.terminalStreamData`/`Seed`/`Down`). Separate from
+ * `TerminalApi` above rather than folded into it: every member there is a
+ * one-shot `invoke`, and these three pushes need `createStreamSubscribe`'s
+ * own listener-identity discipline instead.
+ */
+export type TerminalStreamApi = {
+  /**
+   * See `CHANNELS.terminalStreamOpen`'s own header for the full refusal set.
+   * Written out here rather than imported from `main/terminal/stream-ipc.js`
+   * (whose own `StreamOpenResult` names the same shape): that module reaches
+   * `node:crypto`/`Buffer` for its OWN runtime, and this file is typechecked
+   * under `tsconfig.web.json` too (`src/renderer/App.tsx` imports it for
+   * types), which carries no `node` types at all -- the same trap
+   * `./files/types.js`'s own header names for `FileListResult` and friends.
+   */
+  open(
+    projectId: string,
+    rowId?: string,
+  ): Promise<
+    | {
+        readonly ok: true;
+        readonly streamId: string;
+        readonly seed: string;
+        /** The resolved tmux session name -- see `StreamOpenResult`'s own
+         *  comment in `main/terminal/stream-ipc.ts`. */
+        readonly name: string;
+      }
+    | {
+        readonly ok: false;
+        readonly reason: 'bad-request' | 'unavailable' | 'unresolved-session' | 'unsupported-tmux';
+      }
+  >;
+  /**
+   * Fire-and-forget, like `FilesApi.reportUnsaved` -- there is no answer the
+   * renderer could act on, and `terminalStreamClose` is idempotent on main's
+   * side, so a dropped rejection costs nothing more than a logged line.
+   */
+  close(streamId: string): void;
+  /** Fire-and-forget for the same reason `close` is -- what tmux did with the
+   *  bytes arrives on `onData` regardless. */
+  write(streamId: string, bytes: Uint8Array): void;
+  /**
+   * `CHANNELS.terminalStreamData` is SHARED across every currently-open
+   * stream -- main pushes `(streamId, chunk)` on one channel, not one
+   * channel per stream -- so the returned listener here filters by
+   * `streamId` before ever calling the caller's own `listener`. Returns an
+   * idempotent unsubscribe, same shape `createStreamSubscribe` returns.
+   */
+  onData(streamId: string, listener: (chunk: string) => void): () => void;
+  /** Same shared-channel filtering as `onData`, over `terminalStreamSeed`. */
+  onSeed(streamId: string, listener: (seed: string) => void): () => void;
+  /** Same shared-channel filtering as `onData`, over `terminalStreamDown`. */
+  onDown(streamId: string, listener: (event: TerminalStreamDownEvent) => void): () => void;
+};
+
+/**
+ * `StreamClient`'s own `StreamDownEvent` (`main/terminal/stream/client.ts`),
+ * written out here for the same reason `open`'s result union is (see that
+ * member's own comment) rather than imported: `reconnecting` while a
+ * backed-off retry is still pending, a TERMINAL `gave-up` once `StreamClient`
+ * has stopped trying for good and nothing further will arrive on this
+ * `streamId`.
+ */
+export type TerminalStreamDownEvent =
+  | { readonly kind: 'reconnecting'; readonly attempt: number }
+  | { readonly kind: 'gave-up'; readonly reason: 'max-attempts' | 'session-gone' };
+
+/**
+ * Builds one filtered listener over a channel SHARED by every open stream:
+ * registers a stable closure with `ipc.on`, discards any push whose first
+ * argument is not this `streamId`, and returns an idempotent unsubscribe
+ * that removes the SAME closure reference -- `createStreamSubscribe`'s own
+ * AC-19 discipline, generalised to a channel with a per-event discriminator.
+ */
+function createFilteredStreamListener<TRest extends readonly unknown[]>(
+  ipc: ListenerLike,
+  channel: string,
+  streamId: string,
+  onMatch: (...rest: TRest) => void,
+): () => void {
+  const listener = (_event: unknown, ...args: unknown[]) => {
+    if (args[0] !== streamId) return;
+    onMatch(...(args.slice(1) as unknown as TRest));
+  };
+  ipc.on(channel, listener);
+  let stopped = false;
+  return () => {
+    if (stopped) return;
+    stopped = true;
+    ipc.removeListener(channel, listener);
+  };
+}
+
+/**
+ * `open` forwards straight to `terminalStreamOpen` -- no `unwrap`, because
+ * that channel answers bare (`StreamOpenResult` names its own refusals, see
+ * `main/terminal/stream-ipc.ts`). `close`/`write` take `reportUnsaved`'s own
+ * fire-and-forget posture. `onData`/`onSeed`/`onDown` are built with
+ * `createFilteredStreamListener` rather than `createStreamSubscribe`, since
+ * each push carries a `streamId` a plain tick has no room for.
+ */
+export function createTerminalStreamApi(ipc: InvokerLike & ListenerLike): TerminalStreamApi {
+  return {
+    open: (projectId, rowId) =>
+      (rowId === undefined
+        ? ipc.invoke(CHANNELS.terminalStreamOpen, projectId)
+        : ipc.invoke(CHANNELS.terminalStreamOpen, projectId, rowId)) as ReturnType<
+        TerminalStreamApi['open']
+      >,
+    close: (streamId) => {
+      ipc.invoke(CHANNELS.terminalStreamClose, streamId).catch((error: unknown) => {
+        console.error('vam: terminal stream close failed:', error);
+      });
+    },
+    write: (streamId, bytes) => {
+      ipc.invoke(CHANNELS.terminalStreamWrite, streamId, bytes).catch((error: unknown) => {
+        console.error('vam: terminal stream write failed:', error);
+      });
+    },
+    onData: (streamId, listener) =>
+      createFilteredStreamListener<[string]>(ipc, CHANNELS.terminalStreamData, streamId, (chunk) =>
+        listener(chunk),
+      ),
+    onSeed: (streamId, listener) =>
+      createFilteredStreamListener<[string]>(ipc, CHANNELS.terminalStreamSeed, streamId, (seed) =>
+        listener(seed),
+      ),
+    onDown: (streamId, listener) =>
+      createFilteredStreamListener<[TerminalStreamDownEvent]>(
+        ipc,
+        CHANNELS.terminalStreamDown,
+        streamId,
+        (event) => listener(event),
+      ),
   };
 }
 
@@ -695,6 +865,51 @@ export function createMainErrorsApi(ipc: InvokerLike & ListenerLike): MainErrors
   };
 }
 
+/** Which session a banner is about. Mirrors `src/main/notify/notify.ts`'s target. */
+export type NotifyTarget = {
+  readonly sourceId: string;
+  readonly sessionId: string;
+};
+
+/**
+ * The bridge's notification member: raise a banner, take one down, and hear
+ * which one was clicked. Desktop-only by construction -- these channels are
+ * not on the remote server's route table (`CHANNELS.notifyShow`'s header).
+ */
+export type NotifyApi = {
+  /** `true` when main handed the banner to the OS. What the OS did with it is
+   *  reported through `mainErrors`, never here. */
+  show(request: NotifyTarget & { readonly title: string; readonly body: string }): Promise<boolean>;
+  close(target: NotifyTarget): Promise<void>;
+  /** The settings button: raise vam's own test banner and hear what the OS
+   *  said -- the one call here whose verdict comes back inline. It resolves
+   *  when the OS answers, or after main's 10 s verdict timeout. */
+  test(): Promise<NotifyVerdict>;
+  /** A click on a banner: focus has already been brought to vam by main. */
+  onActivated(listener: (target: NotifyTarget) => void): () => void;
+};
+
+/**
+ * `show` and `close` forward bare, like `clipboard.writeText` -- there is no
+ * envelope to unwrap (`src/main/notify/ipc.ts`). `onActivated` keeps the
+ * closure-identity rule `createMainErrorsApi.subscribe` keeps: the reference
+ * given to `on` is the one given to `removeListener`.
+ */
+export function createNotifyApi(ipc: InvokerLike & ListenerLike): NotifyApi {
+  return {
+    show: (request) => ipc.invoke(CHANNELS.notifyShow, request) as Promise<boolean>,
+    close: (target) => ipc.invoke(CHANNELS.notifyClose, target) as Promise<void>,
+    test: () => ipc.invoke(CHANNELS.notifyTest) as Promise<NotifyVerdict>,
+    onActivated: (listener) => {
+      const wrapped = (_event: unknown, target: unknown) => listener(target as NotifyTarget);
+      ipc.on(CHANNELS.notifyActivated, wrapped);
+      return () => {
+        ipc.removeListener(CHANNELS.notifyActivated, wrapped);
+      };
+    },
+  };
+}
+
 /**
  * The bridge's pairing member: the desktop half of remote access.
  *
@@ -762,3 +977,29 @@ export function createRemoteApi(ipc: InvokerLike): RemoteApi {
 }
 
 export type { RemoteState };
+
+/**
+ * The worktrees feature's own member -- desktop-only, like `files` above,
+ * and for the same reason `CHANNELS.worktreeList/Create/Remove`'s own
+ * comment gives: not part of `DesktopSourceApi`/`PreloadSourceApi`, so a
+ * paired phone has no route to any of the three. `list`/`create`/`remove`
+ * all forward through `unwrap`, exactly like `files.read`/`files.write`:
+ * there IS a refusal behind each in `worktrees.ts`'s own words (unknown
+ * project, dirty tree, locked, a branch that already exists), and the
+ * renderer draws that sentence rather than a rejected promise electron has
+ * rewritten.
+ */
+export type WorktreesApi = {
+  list(projectId: string): Promise<readonly WorktreeInfo[]>;
+  create(input: CreateWorktreeInput): Promise<WorktreeInfo>;
+  remove(input: RemoveWorktreeInput): Promise<RemoveWorktreeOutcome>;
+};
+
+export function createWorktreesApi(ipc: InvokerLike): WorktreesApi {
+  return {
+    list: (projectId) =>
+      unwrap<readonly WorktreeInfo[]>(ipc.invoke(CHANNELS.worktreeList, projectId)),
+    create: (input) => unwrap<WorktreeInfo>(ipc.invoke(CHANNELS.worktreeCreate, input)),
+    remove: (input) => unwrap<RemoveWorktreeOutcome>(ipc.invoke(CHANNELS.worktreeRemove, input)),
+  };
+}

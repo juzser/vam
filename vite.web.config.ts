@@ -20,6 +20,10 @@ export default defineConfig({
   build: {
     outDir: '../../dist-web',
     emptyOutDir: true,
+    // Report-only (see `electron.vite.config.ts`'s matching note): a build
+    // SPEED toggle, not a bundle-size one -- the gzip size this build's own
+    // CLI output would have printed is not read by anything here.
+    reportCompressedSize: false,
     rollupOptions: { input: 'src/renderer/index.html' },
   },
   plugins: [react(), tailwindcss()],

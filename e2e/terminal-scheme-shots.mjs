@@ -206,6 +206,7 @@ await page.addInitScript(
           pullRequests: false,
           terminal: true,
           agentRoster: false,
+          resumeSession: false,
         },
         declines: {},
         viewerScope: 'operator',
@@ -268,8 +269,21 @@ await page.addInitScript(
  * order, so the last one registered is the payload in force.
  */
 async function openTerminal(prefs) {
+  // `streamingTerminal: false`, FOLDED IN HERE rather than left to each
+  // caller: STREAMING DEFAULTS ON NOW (`prefs/streaming-terminal.ts`), and
+  // this whole file measures the CLASSIC `[data-terminal-pane]` renderer's
+  // own span-per-run ANSI colouring (`terminal-ansi.ts`) -- the streaming
+  // renderer paints the SAME scheme through a wholly different path (xterm's
+  // own canvas, `terminal-stream-frame-shots.mjs`'s own subject instead).
+  // `streamingTerminalMigrated: true` too -- omitting it hits `prefs.ts`'s
+  // own one-time migration ratchet, which treats an UN-migrated payload's
+  // `streamingTerminal` as unwritten and forces it back to the new default
+  // regardless of what this sets.
   await page.addInitScript((payload) => {
-    globalThis.localStorage.setItem('vam.prefs.v1', JSON.stringify(payload));
+    globalThis.localStorage.setItem(
+      'vam.prefs.v1',
+      JSON.stringify({ ...payload, streamingTerminal: false, streamingTerminalMigrated: true }),
+    );
   }, prefs);
   await page.goto(`${origin}?demo=1`, { waitUntil: 'networkidle' });
   await page.waitForSelector('[data-tab-strip]');

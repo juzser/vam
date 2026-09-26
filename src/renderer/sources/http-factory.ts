@@ -170,6 +170,7 @@ export function createHttpSourceApi(options: HttpSourceOptions = {}): PreloadSou
       return () => stream.close();
     },
     recordPrompt: (sessionId, prompt) => post('/api/record-prompt', { sessionId, prompt }),
+    resumeSession: (sessionId) => post('/api/resume-session', { sessionId }),
     renameSession: (sessionId, title) => post('/api/rename-session', { sessionId, title }),
     closeSession: (sessionId, force) => post('/api/close-session', { sessionId, force }),
     createSession: (projectId, title, provider) =>
