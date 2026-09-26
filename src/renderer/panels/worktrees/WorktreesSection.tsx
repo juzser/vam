@@ -52,14 +52,16 @@
  * or needs to know what is inside that function.
  */
 
-import { Play } from 'lucide-react';
+import { ArrowDown, ArrowUp, Play } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
+import { hasAgentWorktreeSegment, isAgentWorktreeBranch } from '../../../shared/agent-worktree.js';
 import type { WorktreeInfo } from '../../../shared/worktree.js';
 import type { Project } from '../../domain/model.js';
 import type { SessionEntry } from '../../domain/selectors.js';
 import { ShortcutTip } from '../../keyboard/ShortcutTip.js';
 import { ConfirmDeleteWorktree } from './ConfirmDeleteWorktree.js';
+import { useWorktreeStatuses } from './useWorktreeStatuses.js';
 import { useWorktrees } from './useWorktrees.js';
 
 /**
@@ -93,6 +95,21 @@ function displayName(path: string): string {
   return slash === -1 ? trimmed : trimmed.slice(slash + 1);
 }
 
+/**
+ * Is this row a Claude Code AGENT worktree -- `<repo>/.claude/worktrees/
+ * agent-<id>`, the Claude Agent SDK's own `isolation: "worktree"` mechanism,
+ * unrelated to this feature -- rather than one an operator (or a CLI, or
+ * Orca) actually asked vam to manage? The identical two-signal rule a
+ * SESSION is already filtered by (`shared/agent-worktree.ts`'s own header),
+ * applied here to a worktree ROW instead: `worktree.path` is already a
+ * realpath (main mints it that way, `worktrees.ts`'s own `WorktreeInfo`
+ * header), so no second `realpath` call is needed the way a session's own
+ * check pays for one.
+ */
+function isAgentWorktreeRow(worktree: WorktreeInfo): boolean {
+  return hasAgentWorktreeSegment(worktree.path) || isAgentWorktreeBranch(worktree.branch);
+}
+
 export type WorktreesSectionProps = {
   readonly project: Project;
   readonly allEntries: readonly SessionEntry[];
@@ -104,6 +121,17 @@ export type WorktreesSectionProps = {
    * through this, not through anything defined here.
    */
   readonly renderSessionRow: (entry: SessionEntry) => ReactNode;
+  /**
+   * The OPERATOR's OWN toggle, `SessionFilters.hideAgentWorktrees`
+   * (`domain/session-filter.ts`), threaded down from `SessionList.tsx` --
+   * this section respects the SAME preference a session row already does,
+   * rather than growing a second, independent one. Defaults to `true`
+   * (hidden) so every existing caller/test that predates phase 2a keeps its
+   * current behaviour -- vam never surfaced an agent worktree ROW before
+   * this feature existed to adopt worktrees at all, so "hidden" is the only
+   * default that changes nothing for them.
+   */
+  readonly hideAgentWorktrees?: boolean;
 };
 
 export function WorktreesSection({
@@ -112,6 +140,7 @@ export function WorktreesSection({
   forceOpenCreate,
   onCloseCreate,
   renderSessionRow,
+  hideAgentWorktrees = true,
 }: WorktreesSectionProps) {
   const api = window.api?.worktrees;
   const { state, reload } = useWorktrees({ projectId: project.id, api });
@@ -128,10 +157,29 @@ export function WorktreesSection({
     if (forceOpenCreate) setCreating(true);
   }, [forceOpenCreate]);
 
+  // FILTERED BEFORE ANYTHING BELOW READS `worktrees` -- the row count next
+  // to "Worktrees", the empty-section early return, AND the status poll
+  // below all have to agree with what actually gets a row, or the count
+  // would name a worktree the section itself never draws.
+  const rawWorktrees = state.kind === 'ok' ? state.worktrees : [];
+  const worktrees = hideAgentWorktrees
+    ? rawWorktrees.filter((worktree) => !isAgentWorktreeRow(worktree))
+    : rawWorktrees;
+
+  // PHASE 2A'S OWN BADGES -- called UNCONDITIONALLY (React's own rule: no
+  // hook after an early return), `enabled` by "this section actually has
+  // rows to draw" so a project with zero (or only filtered-out) worktrees
+  // never polls at all -- see `useWorktreeStatuses.ts`'s own header.
+  const statuses = useWorktreeStatuses({
+    projectId: project.id,
+    worktreeIds: worktrees.map((worktree) => worktree.worktreeId),
+    statusFn: window.api?.worktrees?.status,
+    enabled: worktrees.length > 0,
+  });
+
   if (state.kind === 'unavailable') {
     return null;
   }
-  const worktrees = state.kind === 'ok' ? state.worktrees : [];
   if (worktrees.length === 0 && !creating) {
     return null;
   }
@@ -301,6 +349,7 @@ export function WorktreesSection({
           const worktreeSessions = allEntries.filter(
             (entry) => entry.project.id === worktree.projectId,
           );
+          const status = statuses.get(worktree.worktreeId);
           return (
             <div
               key={worktree.worktreeId}
@@ -318,19 +367,27 @@ export function WorktreesSection({
                 <span data-worktree-name className="min-w-0 flex-1 truncate text-ink-dim">
                   {displayName(worktree.path)}
                 </span>
-                <button
-                  type="button"
-                  data-worktree-delete={worktree.worktreeId}
-                  aria-label={`delete worktree ${displayName(worktree.path)}`}
-                  onClick={() => {
-                    setDeleteError(null);
-                    setDeleteDirty(false);
-                    setPendingDelete(worktree);
-                  }}
-                  className="vam-tap vam-hit-24 flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-[5px] text-ink-faint hover:text-danger"
-                >
-                  ×
-                </button>
+                {/* NEVER OFFERED ON A LOCKED WORKTREE -- `removeWorktree`
+                    refuses one unconditionally, force or not
+                    (`worktrees.ts`'s own rule), so a clickable × here would
+                    only ever open a dialog whose one button always fails.
+                    Phase 2a's own fix: the row now says so up front instead
+                    of after a click. */}
+                {!worktree.locked && (
+                  <button
+                    type="button"
+                    data-worktree-delete={worktree.worktreeId}
+                    aria-label={`delete worktree ${displayName(worktree.path)}`}
+                    onClick={() => {
+                      setDeleteError(null);
+                      setDeleteDirty(false);
+                      setPendingDelete(worktree);
+                    }}
+                    className="vam-tap vam-hit-24 flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-[5px] text-ink-faint hover:text-danger"
+                  >
+                    ×
+                  </button>
+                )}
               </div>
               {/* Line 2: branch is the FLEXIBLE one here, `flex-1`, and
                   truncates LAST -- a real screenshot (`docs/ui/worktrees-
@@ -349,6 +406,53 @@ export function WorktreesSection({
                   </span>
                 ) : (
                   <span className="flex-1" />
+                )}
+                {/* PHASE 2A'S OWN BADGES -- a dirty dot, then an ahead/behind
+                    pair, drawn ONLY once `status.ts`'s own read answers
+                    (never a placeholder while loading, the same "say
+                    nothing rather than guess" rule `WorktreeInfo.branch:
+                    null` already follows). `--color-diff-file` (a changed
+                    FILE'S own colour in the diff renderer, `out-markdown.tsx`)
+                    reused for "this worktree has changed files" -- the same
+                    hue, not a new one, matching this app's own token
+                    economy. Ahead/behind reuse `--color-diff-add`/`-del`,
+                    the add/remove-line colours: green for commits ready to
+                    push, red for commits not yet pulled. */}
+                {status?.dirty === true && (
+                  <span
+                    data-worktree-dirty
+                    title="uncommitted changes"
+                    className="h-1.5 w-1.5 flex-none rounded-full bg-diff-file"
+                  />
+                )}
+                {status !== undefined && status.ahead !== null && status.behind !== null && (
+                  <span
+                    className="flex flex-none items-center gap-0.5 font-mono text-meta"
+                    title={`${status.ahead} to push, ${status.behind} to pull`}
+                  >
+                    <ArrowUp size={10} strokeWidth={2} className="text-diff-add" />
+                    <span data-worktree-ahead className="text-diff-add">
+                      {status.ahead}
+                    </span>
+                    <ArrowDown size={10} strokeWidth={2} className="text-diff-del" />
+                    <span data-worktree-behind className="text-diff-del">
+                      {status.behind}
+                    </span>
+                  </span>
+                )}
+                {worktree.detached && (
+                  <span data-worktree-detached className="flex-none text-ink-faint text-meta">
+                    detached
+                  </span>
+                )}
+                {worktree.prunable && (
+                  <span
+                    data-worktree-prunable
+                    title={worktree.prunableReason ?? undefined}
+                    className="flex-none text-ink-faint text-meta"
+                  >
+                    prunable
+                  </span>
                 )}
                 {worktree.locked && (
                   <span data-worktree-locked className="flex-none text-ink-faint text-meta">

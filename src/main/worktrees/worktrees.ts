@@ -104,7 +104,7 @@ const clip = (text: string): string =>
 
 type GitFailure = NodeJS.ErrnoException & { killed?: boolean; stderr?: string };
 
-function classifyGitFailure(error: unknown, what: string): SourceError {
+export function classifyGitFailure(error: unknown, what: string): SourceError {
   const failure = error as GitFailure;
   if (failure.code === 'ENOENT') {
     return refused('cli-missing', cliMissingMessage('git', `vam cannot ${what}`));
@@ -122,7 +122,7 @@ function classifyGitFailure(error: unknown, what: string): SourceError {
   );
 }
 
-async function safeRealpath(path: string, realpathFn: RealpathFn): Promise<string | null> {
+export async function safeRealpath(path: string, realpathFn: RealpathFn): Promise<string | null> {
   try {
     return await realpathFn(path);
   } catch {
@@ -153,7 +153,7 @@ function friendlyBranch(entry: WorktreeListEntry): string | null {
 
 /** `git worktree list --porcelain -z`, falling back to the plain porcelain
  *  form for a git older than 2.36 (which does not know `-z`). */
-async function listRaw(
+export async function listRaw(
   repoRoot: string,
   run: GitRun,
 ): Promise<SourceError | readonly WorktreeListEntry[]> {
@@ -176,6 +176,14 @@ async function listRaw(
  * sidebar) is filtered out by realpath comparison, and a `bare` record
  * (git's own administrative entry for a bare clone, never one vam creates)
  * is skipped too.
+ *
+ * ADOPTION NEEDED NO CHANGE HERE (phase 2a, `docs/design/worktrees.md`'s
+ * phase-2 list): `listRaw` already runs an unconditional
+ * `git worktree list --porcelain`, with no filter on WHERE a worktree lives
+ * or WHAT made it -- a worktree a CLI, Orca, or `claude --worktree` created
+ * was already in this answer. `removeWorktree`'s own header explains the
+ * half that DID have to change: listing one and being allowed to safely
+ * remove it used to be two different questions.
  */
 export async function listWorktrees(
   projectId: string,
@@ -205,6 +213,8 @@ export async function listWorktrees(
       locked: entry.locked,
       lockReason: entry.lockedReason,
       prunable: entry.prunable,
+      prunableReason: entry.prunableReason,
+      detached: entry.detached,
     });
   }
   return worktrees;
@@ -386,6 +396,8 @@ export async function createWorktree(
     locked: false,
     lockReason: null,
     prunable: false,
+    prunableReason: null,
+    detached: false,
   };
 }
 
@@ -405,7 +417,7 @@ export async function createWorktree(
  * "`removeWorktree` cannot prove this is a worktree it manages", refused by
  * the caller rather than guessed at.
  */
-async function findRepoRootFromWorktree(
+export async function findRepoRootFromWorktree(
   worktreePath: string,
   realpathFn: RealpathFn,
 ): Promise<string | null> {
@@ -436,7 +448,7 @@ async function findRepoRootFromWorktree(
   return realCommonGitDir === null ? null : dirname(realCommonGitDir);
 }
 
-async function findMatchingEntry(
+export async function findMatchingEntry(
   entries: readonly WorktreeListEntry[],
   realWorktreeId: string,
   realpathFn: RealpathFn,
@@ -478,13 +490,23 @@ function classifyRemoveFailure(error: unknown, worktreePath: string): SourceErro
  * CONFINED TO `input.projectId`'S OWN WORKTREES (rule 6, this module's
  * header): `worktreeId` is never trusted to name its own repository. The
  * repo root comes ONLY from `resolveProjectDirectory(input.projectId)` --
- * the same live-agent-or-pane resolution `list`/`create` already use -- and
- * the candidate must pass `authorize()` against THAT repo's own
- * `<repoRoot>-worktrees/` root before anything else runs. A second,
- * independent check then reads the candidate's OWN `.git` -> `commondir`
- * chain and refuses unless it names the SAME repo root -- a directory that
- * merely sits inside the confined root without actually being one of that
- * repo's registered linked worktrees is refused here, not treated as one.
+ * the same live-agent-or-pane resolution `list`/`create` already use.
+ * TWO INDEPENDENT PROOFS, NEITHER OF THEM LOCATION: the candidate's OWN
+ * `.git` -> `commondir` chain must resolve to that SAME repo root (a
+ * directory whose crafted `.git` file merely CLAIMS a known repo is refused
+ * here), AND the candidate must still be one of THAT repo's own registered
+ * worktrees according to a fresh `git worktree list` (a directory git itself
+ * has never heard of is refused here too, no matter what its `.git` file
+ * says). Together these prove "this really is a linked worktree of the
+ * repo it claims" without caring where on disk it happens to live --
+ * deliberately: v1 ALSO required the candidate to sit inside
+ * `<repoRoot>-worktrees/` (`authorize()`, the same call `createWorktree`
+ * still makes), which is exactly what stood between listing a worktree
+ * `git worktree add` made outside vam and being allowed to remove it again.
+ * Phase 2a drops that third check because the other two already carry the
+ * whole weight rule 6 exists for -- `worktrees.integration.test.ts`'s own
+ * "confinement (S2)" suite still falsifies both, and its "adoption" suite
+ * proves the location check was the only thing that changed.
  */
 export async function removeWorktree(
   input: RemoveWorktreeInput,
@@ -500,19 +522,6 @@ export async function removeWorktree(
   const realWorktreeId = await safeRealpath(input.worktreeId, deps.realpathFn);
   if (realWorktreeId === null) {
     return refused('not-found', `${input.worktreeId} does not exist`);
-  }
-
-  const worktreesRoot = worktreesRootFor(repoRoot);
-  const realWorktreesRoot = await safeRealpath(worktreesRoot, deps.realpathFn);
-  const authorization =
-    realWorktreesRoot === null
-      ? ({ authorized: false } as const)
-      : await authorize(realWorktreeId, [realWorktreesRoot], deps.realpathFn);
-  if (!authorization.authorized) {
-    return refused(
-      'path-confinement',
-      `${input.worktreeId} is not inside ${worktreesRoot}, the known worktrees root for this project`,
-    );
   }
 
   const realRepoRoot = await safeRealpath(repoRoot, deps.realpathFn);

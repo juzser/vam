@@ -17,13 +17,14 @@ MVP that actually shipped, with the decisions the brief left open now made.
   a typed-name confirmation for a dirty tree.
 - A `/New worktree…` command palette action.
 
-**Explicitly out of v1** (see §6, Phase 2):
+**Explicitly out of v1** (see §6, Phase 2 — and §7, phase 2a, for the two
+items it shipped):
 
 - `node_modules`/`.env` copy or symlink on create.
 - Sparse checkouts, SSH/remote worktrees.
-- Detecting or adopting a worktree the operator made by hand
-  (`git worktree add` outside vam).
-- Dirty / ahead-behind badges in the sidebar.
+- ~~Detecting or adopting a worktree the operator made by hand
+  (`git worktree add` outside vam).~~ **Shipped, §7.**
+- ~~Dirty / ahead-behind badges in the sidebar.~~ **Shipped, §7.**
 - Branch auto-delete as anything other than the safe `git branch -d` this
   feature already runs after a successful `remove()`.
 - Exposing worktree creation or removal over the remote (phone) API.
@@ -68,6 +69,16 @@ type WorktreeInfo = {
   locked: boolean;
   lockReason: string | null;
   prunable: boolean;
+  prunableReason: string | null; // phase 2a
+  detached: boolean;             // phase 2a — branch is a short sha BECAUSE of this
+};
+
+// phase 2a — a SEPARATE round trip, `CHANNELS.worktreeStatus`, §7
+type WorktreeStatus = {
+  worktreeId: string;
+  dirty: boolean;
+  ahead: number | null;   // null: no upstream (includes every detached HEAD)
+  behind: number | null;
 };
 
 type CreateWorktreeInput = { projectId: string; name: string; baseRef?: string };
@@ -243,11 +254,10 @@ Security rules, and where each is enforced:
 
 ## 6. Phase 2 (named, not built)
 
-- Detection + adoption of a worktree made outside vam
-  (`git worktree list --porcelain`'s own listing already surfaces one; the
-  gap is only that vam does not yet offer to fold it into the sidebar under
-  a nicer name).
-- Dirty / ahead-behind badges on each worktree row.
+- ~~Detection + adoption of a worktree made outside vam~~ — **shipped, §7
+  (phase 2a)**.
+- ~~Dirty / ahead-behind badges on each worktree row~~ — **shipped, §7
+  (phase 2a)**.
 - `.env` / config copy-on-create (an `.worktreeinclude`-style convention is
   worth reusing conceptually — never Orca's code).
 - A configurable shared `node_modules` symlink — **treat with real
@@ -261,3 +271,75 @@ Security rules, and where each is enforced:
 - SSH/remote worktrees, sparse checkouts, Windows junction fallback (vam's
   toolchain is macOS/Linux-targeted today; unverified whether it should stay
   that way).
+
+## 7. Phase 2a — shipped
+
+**Adoption.** `listWorktrees` needed no change at all: `git worktree list
+--porcelain` was always unconditional, so a worktree a CLI, Orca, or
+`claude --worktree` made was already IN the answer §3.1 describes — v1's own
+gap was narrower than §6 first named it. The actual gap was `removeWorktree`:
+its confinement (§5 rule 6) required the candidate to sit inside
+`<repoRoot>-worktrees/`, which a worktree made outside vam never does. That
+location check is now GONE from `removeWorktree` — the other two proofs rule
+6 already made (the candidate's own `.git` → `commondir` chain resolves to
+the SAME repo root the resolved project names, AND a fresh `git worktree
+list` still registers it) turn out to fully carry the security invariant on
+their own, proven by falsification: disabling the location check alone still
+leaves every attack shape in `worktrees.integration.test.ts`'s "confinement
+(S2)" suite refused. `createWorktree` is UNCHANGED — vam still only ever
+*creates* inside `<repoRoot>-worktrees/`; only *removing* a worktree it did
+not create had to stop caring where that worktree lives.
+
+An adopted worktree that is itself a Claude Code agent worktree
+(`.claude/worktrees/agent-*`, `main/sources/agent-worktree.ts`) is filtered
+from the sidebar row the same way an agent-worktree SESSION already is —
+`SessionFilters.hideAgentWorktrees`, the operator's own existing toggle,
+threaded down as `WorktreesSection`'s own `hideAgentWorktrees` prop rather
+than growing a second, independent one. The two pure predicates that
+recognise one (`hasAgentWorktreeSegment`, `isAgentWorktreeBranch`) moved to
+`shared/agent-worktree.ts` so the renderer can apply the SAME rule to a
+worktree row without pulling `node:fs/promises` into the web bundle;
+`main/sources/agent-worktree.ts` re-exports them unchanged.
+
+`WorktreeInfo` grew two fields: `detached` (a `HEAD` that names no branch —
+`branch` was already a short sha in this case, but nothing said WHY) and
+`prunableReason` (parity with `lockReason`). `locked`/`prunable`/`detached`
+are all marked in the sidebar row; a locked worktree's delete control is not
+merely refused after a click, it is not drawn at all — `removeWorktree`
+refuses one unconditionally regardless, so offering the control was never
+honest.
+
+**Dirty / ahead-behind badges.** A NEW round trip, `CHANNELS.worktreeStatus`
+/ `getWorktreeStatuses` (`main/worktrees/status.ts`), deliberately NOT folded
+into `list()`'s own answer — a dirty check and an ahead/behind count are each
+their own `git` spawn PER worktree, and running both for every worktree of
+every project on every poll would multiply this feature's process count by
+however many worktrees a workspace has, whether or not anyone is looking.
+Every candidate id is proven with the SAME two checks `removeWorktree` now
+uses (commondir chain + live registration) before either `git` call ever
+runs — one code path, reused, not a second place this proof could drift.
+
+`git status --porcelain=v1 -z` runs WITH untracked files (measured against
+this repository: 26ms including them vs. 16ms with `--untracked-files=no`,
+both far under any cadence this polls at) — an untracked file left in a
+worktree is not "clean" to an operator asking "did I leave something here".
+`git rev-list --left-right --count @{u}...HEAD` answers `<behind>\t<ahead>`;
+failing outright (no upstream, or a detached `HEAD`, which cannot have one)
+reads as `null`/`null`, the same "cannot say" `WorktreeInfo.branch: null`
+already means.
+
+The renderer's own `useWorktreeStatuses` hook is the performance gate:
+`mapWithConcurrencyLimit` (reused from `claude-code/concurrency-limit.ts`,
+never reimplemented) bounds how many `git status`/`git rev-list` pairs run
+at once; `useVisibilityInterval`'s `hidden: 'pause'` mode stops polling
+outright once the window is hidden; the poll cadence (20s) is an order of
+magnitude slower than `useSourceModel`'s own base poll (10s) because this
+data is advisory, never correctness-critical; and the hook is only ever
+MOUNTED for a project whose Worktrees section already has rows to draw
+(`WorktreesSection`'s own "hidden when there are none" rule, unchanged) — a
+project with none never polls at all.
+
+A dirty dot reuses `--color-diff-file` (a changed file's own colour in the
+diff renderer) rather than a new token; ahead/behind reuse
+`--color-diff-add`/`-del` (green for commits ready to push, red for commits
+not yet pulled) — the app's own existing hues, not three new ones.

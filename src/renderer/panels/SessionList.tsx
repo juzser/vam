@@ -4573,6 +4573,12 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                             )
                           }
                           renderSessionRow={renderSessionRow}
+                          // THE SAME TOGGLE A SESSION ROW ALREADY OBEYS
+                          // (`isHiddenByAgentWorktreeFilter`, this file's own
+                          // popover) -- an adopted Claude Code agent
+                          // worktree row respects the operator's existing
+                          // preference rather than growing a second one.
+                          hideAgentWorktrees={originFilters.hideAgentWorktrees}
                         />
                       )}
                       {section.items.map((entry) => renderSessionRow(entry))}

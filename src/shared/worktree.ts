@@ -54,6 +54,59 @@ export type WorktreeInfo = {
   /** `true` when git itself reports the worktree's directory is gone from
    *  disk -- a worktree made and then removed by hand outside vam. */
   readonly prunable: boolean;
+  /** The reason `git worktree list --porcelain` gave for `prunable`, or
+   *  `null` for a non-prunable worktree -- the same `lockReason` shape,
+   *  kept for the identical reason: a row that can say WHY says more than
+   *  one that only says THAT. */
+  readonly prunableReason: string | null;
+  /**
+   * `true` for a `HEAD` that names no branch -- `branch` is still a short
+   * sha in this case (`friendlyBranch`'s own fallback), never `null`, so a
+   * row cannot tell "detached at this commit" from "a branch literally
+   * named like a short sha" without this field. Phase 2a's own addition:
+   * v1 folded both readings into one string because nothing yet needed to
+   * tell them apart.
+   */
+  readonly detached: boolean;
+};
+
+/**
+ * One worktree's live git status -- fetched SEPARATELY from `WorktreeInfo`
+ * (a second round trip, `CHANNELS.worktreeStatus`), and only for the rows a
+ * caller actually asked about. Phase 2a's own addition, named in
+ * `docs/design/worktrees.md`'s phase-2 list: "dirty / ahead-behind badges".
+ *
+ * NOT PART OF `list()`'s OWN ANSWER, DELIBERATELY: `listWorktrees` is a
+ * single, cheap `git worktree list --porcelain` call; a dirty check and an
+ * ahead/behind count are each their OWN `git` spawn PER WORKTREE, and eagerly
+ * running both for every worktree of every project on every `list()` call
+ * would multiply this feature's process count by the number of worktrees a
+ * workspace has, on every poll, whether or not a human is looking at any of
+ * them. `useWorktreeStatuses.ts` is the renderer's own gate on when this is
+ * worth asking for at all.
+ */
+export type WorktreeStatus = {
+  readonly worktreeId: string;
+  /** `true` when `git status --porcelain=v1 -z` (run WITH untracked files;
+   *  `worktrees/status.ts`'s own header records the measurement that found
+   *  the plainer, untracked-including form fast enough not to need
+   *  `--untracked-files=no`) answers anything at all. */
+  readonly dirty: boolean;
+  /** Commits on `HEAD` not yet on the upstream branch -- `null` when the
+   *  worktree has no upstream configured (including every DETACHED `HEAD`,
+   *  which cannot have one), the same "cannot say" reading `branch: null`
+   *  already gives `WorktreeInfo`. */
+  readonly ahead: number | null;
+  /** Commits on the upstream branch not yet on `HEAD`. `null` under the
+   *  exact same condition as `ahead` -- the two are read from the same
+   *  `git rev-list --left-right --count` call and share its one failure
+   *  mode. */
+  readonly behind: number | null;
+};
+
+export type WorktreeStatusInput = {
+  readonly projectId: string;
+  readonly worktreeIds: readonly string[];
 };
 
 export type CreateWorktreeInput = {
@@ -75,9 +128,15 @@ export type RemoveWorktreeInput = {
    * let a compromised renderer name ANY linked worktree of ANY git
    * repository on disk and have main derive its own repo root from that
    * directory's `.git` file; main refuses unless this project id is one
-   * `knownProjectIds()` reports AND the worktree's realpath lies inside
-   * THAT project's own `<repoRoot>-worktrees/` (`worktrees.ts`'s security
-   * rule 6).
+   * `knownProjectIds()` reports AND the worktree's own `.git` -> `commondir`
+   * chain resolves to THAT project's repo root AND git itself still lists
+   * it as one of that repo's registered worktrees (`worktrees.ts`'s security
+   * rule 6). Phase 2a dropped the EARLIER, stricter version of this rule --
+   * confining `worktreeId` to living inside `<repoRoot>-worktrees/` -- on
+   * purpose: that additional check was what stood between vam and adopting
+   * a worktree made outside it (`docs/design/worktrees.md`'s phase-2 list),
+   * and the two checks that remain already prove the same thing the
+   * location check did, without caring where on disk the worktree sits.
    */
   readonly projectId: string;
   /** The confirmed kill-anyway route for a DIRTY worktree -- same bargain as

@@ -117,6 +117,30 @@ describe('registerWorktreesIpc — validation', () => {
       error: expect.objectContaining({ code: 'invalid-payload' }),
     });
   });
+
+  it('refuses worktree:status with no projectId at all', async () => {
+    const { handlers } = harness(tempRepo());
+    const result = (await handlers.get(CHANNELS.worktreeStatus)?.(
+      {},
+      { worktreeIds: ['/tmp/x'] },
+    )) as IpcResult<unknown>;
+    expect(result).toEqual({
+      ok: false,
+      error: expect.objectContaining({ code: 'invalid-payload' }),
+    });
+  });
+
+  it('refuses worktree:status whose worktreeIds is not a list of absolute paths', async () => {
+    const { handlers, projectId } = harness(tempRepo());
+    const result = (await handlers.get(CHANNELS.worktreeStatus)?.(
+      {},
+      { projectId, worktreeIds: ['relative/path'] },
+    )) as IpcResult<unknown>;
+    expect(result).toEqual({
+      ok: false,
+      error: expect.objectContaining({ code: 'invalid-payload' }),
+    });
+  });
 });
 
 describe('registerWorktreesIpc — the envelope, end to end against a real repo', () => {
@@ -170,5 +194,24 @@ describe('registerWorktreesIpc — the envelope, end to end against a real repo'
     )) as IpcResult<{ preservedBranch: boolean }>;
 
     expect(removed).toEqual({ ok: true, value: { preservedBranch: false } });
+  });
+
+  it('status answers ok:true with a dirty:false, ahead/behind:null row for a fresh worktree', async () => {
+    const { handlers, projectId } = harness(tempRepo());
+    const created = (await handlers.get(CHANNELS.worktreeCreate)?.(
+      {},
+      { projectId, name: 'feat' },
+    )) as IpcResult<{ worktreeId: string }>;
+    const worktreeId = created.ok ? created.value.worktreeId : '';
+
+    const status = (await handlers.get(CHANNELS.worktreeStatus)?.(
+      {},
+      { projectId, worktreeIds: [worktreeId] },
+    )) as IpcResult<readonly { worktreeId: string; dirty: boolean }[]>;
+
+    expect(status).toEqual({
+      ok: true,
+      value: [{ worktreeId, dirty: false, ahead: null, behind: null }],
+    });
   });
 });

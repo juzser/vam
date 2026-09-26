@@ -628,6 +628,15 @@ export const CHANNELS = {
   worktreeList: 'vam:worktree:list',
   worktreeCreate: 'vam:worktree:create',
   worktreeRemove: 'vam:worktree:remove',
+  /**
+   * PHASE 2A'S OWN FOURTH CHANNEL: a dirty flag and an ahead/behind count,
+   * for a caller-chosen subset of the worktrees `worktreeList` already
+   * answered. Its OWN channel, not folded into `worktreeList`'s own answer
+   * -- see `shared/worktree.ts`'s `WorktreeStatus` header for why eagerly
+   * computing this for every worktree on every `list()` call was rejected.
+   * Desktop-only, like the three above it, for the identical reason.
+   */
+  worktreeStatus: 'vam:worktree:status',
 } as const;
 
 /**
