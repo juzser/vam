@@ -65,7 +65,7 @@ export type Locale = (typeof LOCALES)[number];
 /**
  * THE ENGLISH CATALOGUE, and the source of the key union.
  *
- * Keys are namespaced by WHERE THEY ARE READ (`settings.appearance.theme.hint`)
+ * Keys are namespaced by WHERE THEY ARE READ (`settings.interface.theme.hint`)
  * rather than by what they say. With one flat list of forty names nobody can
  * tell which screen a string is on, and a translator handed "the Settings
  * strings" has no way to take exactly those.
@@ -86,28 +86,38 @@ const EN = {
   // by it. Inside a dialog whose heading reads SETTINGS, `close` says the rest.
   'settings.close': 'close',
 
-  // ── Appearance ───────────────────────────────────────────────────────────
-  // COLOUR AND TYPE, and nothing else -- `settings/sections.ts` carries the
-  // rule that decides which rows those are, and why the two that look like
-  // exceptions are not. The tail this hint used to end with ("how much of a
-  // turn the transcript draws, and the file editor") is what moved.
-  //
-  // WHICH text sizes is not spelled out here any more ("the size of the text in
-  // out and in the terminal"): a panel hint names the FAMILIES a section holds
-  // so the operator knows whether to open it, and the two rows say which
-  // surface they size in their own labels, one screen below.
-  'settings.appearance.hint': "theme, colours, text sizes, and the terminal's own colour scheme",
-  'settings.appearance.theme.label': 'theme',
-  'settings.appearance.theme.hint': 'system follows what the operating system asks for',
-  'settings.appearance.templates.label': 'templates',
-  'settings.appearance.templates.hint':
+  // ── Interface ────────────────────────────────────────────────────────────
+  // THE APP'S OWN PAINT, and nothing else. The cards restructure (operator:
+  // "these are Orca's appearance settings; see what vam can do and add it.
+  // Split into clear, separate sections") split what used to be one
+  // Appearance panel into three: this one, Terminal (the terminal pane's own
+  // paint) and Window & Sidebar (widths) -- `settings/sections.ts` carries
+  // the rule that decided each row's new home. The per-token colour
+  // overrides sit behind an Advanced disclosure now: most operators pick a
+  // template and never open it.
+  'settings.interface.hint': 'theme, templates, and the size a response is drawn at',
+  'settings.interface.theme.label': 'theme',
+  'settings.interface.theme.hint': 'system follows what the operating system asks for',
+  'settings.interface.templates.label': 'templates',
+  'settings.interface.templates.hint':
     'a whole {theme} palette in one press — the swatches below still edit it',
-  'settings.appearance.colours.label': 'colours — {theme}',
-  'settings.appearance.colours.hint': 'unset follows the stylesheet, and {other} keeps its own',
-  'settings.appearance.colours.reset': 'reset {theme} colours',
-  'settings.appearance.outText.label': 'out text',
-  'settings.appearance.outText.hint':
+  'settings.interface.colours.label': 'colours — {theme}',
+  'settings.interface.colours.hint': 'unset follows the stylesheet, and {other} keeps its own',
+  'settings.interface.colours.reset': 'reset {theme} colours',
+  'settings.interface.outText.label': 'out text',
+  'settings.interface.outText.hint':
     "how large the agent's answer is drawn, in every response pane",
+
+  // ── Terminal ─────────────────────────────────────────────────────────────
+  // SPLIT OUT OF APPEARANCE: everything about the terminal PANE's own paint,
+  // gathered into one card instead of four rows scattered through a panel
+  // about the whole app. A Typography sub-group (its text size) and a Themes
+  // sub-group (the dark and light theme lists) are always on screen; the
+  // colour overrides, the background opacity, and the streaming-terminal
+  // switch (moved from Behaviour -- all three are rows a terminal-first
+  // operator reaches for and everyone else never opens) sit behind Advanced.
+  'settings.terminal.hint': "the terminal pane's own text size, colour theme, and paint",
+  'settings.terminal.typography.title': 'Terminal Typography',
   // THE TERMINAL'S OWN SIZE. The label says which surface, because vam draws
   // text in more than one and only this one is measured in columns.
   //
@@ -116,9 +126,10 @@ const EN = {
   // vam having broken their session; HOW it happens -- vam measures the pane
   // and sends tmux a new column count (`terminal-size.ts`) -- is machinery the
   // operator cannot act on, and it lives there and here rather than on screen.
-  'settings.appearance.terminalText.label': 'terminal text',
-  'settings.appearance.terminalText.hint':
+  'settings.terminal.text.label': 'terminal text',
+  'settings.terminal.text.hint':
     'how large the terminal screen is drawn — a bigger size fits fewer columns, and a running screen re-wraps',
+  'settings.terminal.themes.title': 'Themes',
   // THE TERMINAL'S OWN SCHEME, in four rows. One theme row per APP theme
   // rather than one for the theme on screen, because a scheme is a published
   // palette chosen by name and previewed on its chip -- there is nothing to
@@ -133,14 +144,14 @@ const EN = {
   // `terminalColours`, whose own caption says it edits each colour over the
   // scheme chosen above. That is the same fact from the side that does the
   // editing, and this one was paying for it twice -- once per app theme.
-  'settings.appearance.terminalTheme.label': 'terminal theme — {on}',
-  'settings.appearance.terminalTheme.hint':
+  'settings.terminal.theme.label': 'terminal theme — {on}',
+  'settings.terminal.theme.hint':
     'the scheme the terminal wears while the app is {on} — {default} unless you choose another',
-  'settings.appearance.terminalColours.label': 'terminal colours — {theme}',
-  'settings.appearance.terminalColours.hint':
+  'settings.terminal.colours.label': 'terminal colours — {theme}',
+  'settings.terminal.colours.hint':
     'each colour of the {theme} scheme — unset follows the scheme above, and {other} keeps its own',
-  'settings.appearance.terminalColours.reset': 'reset {theme} terminal colours',
-  'settings.appearance.terminalOpacity.label': 'terminal background',
+  'settings.terminal.colours.reset': 'reset {theme} terminal colours',
+  'settings.terminal.opacity.label': 'terminal background',
   // THE FLOOR IS SAID, because a slider that stops at 30% with no word about
   // it reads as a slider that is stuck: under it the pane's own grey shows
   // through more than the scheme's ground does (`prefs/terminal-scheme.ts`).
@@ -148,36 +159,27 @@ const EN = {
   // ground -- is the argument for the floor, not the floor; it is written in
   // `prefs/terminal-scheme.ts`, and what the operator needs on screen is that
   // the slider ends where it ends on purpose.
-  'settings.appearance.terminalOpacity.hint':
+  'settings.terminal.opacity.hint':
     "how much of the scheme's ground is painted over the pane — the rest is the pane showing through; it stops at 30%",
-  // WHAT A SESSION TAB DRAWS. One caption per indicator, and each caption is
-  // the whole documentation of its glyph: three of the eight are not
-  // guessable from a name (`draft` is text you have NOT sent, `pending` is a
-  // prompt the transcript has NOT recorded yet, `agents` is a count), so
-  // every caption says what the mark MEANS rather than what it looks like.
-  // The hint carries the one rule that is not a switch: idle draws nothing.
-  // THE FILE EDITOR'S COLOURS, and only those: its INDENT is in Behaviour,
-  // because a count of spaces is bytes in the operator's file rather than a
-  // colour. The label says which editor, because vam has more than one text
-  // box and only this one has a gutter to keep level.
-  // The tail this hint had ("for the formats vam can read without guessing")
-  // is the note's first sentence, which then NAMES those formats. One of the
-  // two had to go and it is this one: a caption that hedges without saying
-  // which formats leaves the operator no better off than silence.
-  'settings.appearance.editorHighlight.label': 'file editor colours',
-  'settings.appearance.editorHighlight.hint': 'syntax colours in the Files tab',
-  'settings.appearance.editorHighlight.on': 'on',
-  'settings.appearance.editorHighlight.off': 'off',
+  // THE STREAMING TERMINAL: the shipping Terminal tab now
+  // (`docs/design/terminal-streaming.md`'s "Flipping the default"), driven
+  // by xterm.js over a persistent connection instead of periodic
+  // `capture-pane`. On by default; an older tmux -- or a connection that
+  // cannot be re-established -- falls back to the classic renderer
+  // automatically. MOVED HERE FROM BEHAVIOUR: it is a fact about the
+  // terminal's own rendering, not about what a turn shows.
+  'settings.terminal.streamingTerminal.label': 'streaming terminal',
+  'settings.terminal.streamingTerminal.hint': 'a live xterm.js pane instead of periodic capture',
+  'settings.terminal.streamingTerminal.on': 'on',
+  'settings.terminal.streamingTerminal.off': 'off',
 
-  // ── Behaviour ────────────────────────────────────────────────────────────
-  // KEYS MOVE WITH THEIR ROW, because this catalogue is namespaced by WHERE A
-  // STRING IS READ (see the header). `settings.appearance.focusView.label`
-  // read in a Behaviour panel would be the one thing the naming scheme exists
-  // to prevent -- a key that names the wrong screen is a key a translator
-  // cannot file. The STRINGS themselves are unchanged: this is a move of rows
-  // between panels, not a rewrite of what they say.
-  'settings.behaviour.hint':
-    'what vam draws of a turn, how far a line runs, and what Tab puts in a file — colours and text sizes are in Appearance',
+  // ── Window & Sidebar ─────────────────────────────────────────────────────
+  // NEW. For now it holds only `view width`, moved from Behaviour for the
+  // same reason it moved out of Appearance before that: a width is not
+  // paint, it IS the whole choice. Named ahead of the sidebar-appearance and
+  // status-bar rows a later PR adds, so those land in a section already
+  // named for them rather than forcing a second reshuffle.
+  'settings.window.hint': 'how wide the response, terminal, PR and agent views draw',
   // THE VIEWS' WIDTH. The hint carries two facts an operator cannot guess and
   // would otherwise meet as a fault: that the fraction has a threshold, so a
   // pane too narrow for two thirds of it to hold 80 characters is left whole
@@ -196,16 +198,35 @@ const EN = {
   // panel. "instead of filling it" went with it -- the switch's own off label
   // is `full pane` -- and so did "such as one side of a split", an example of
   // a rule the sentence had already stated.
-  'settings.behaviour.narrowViews.label': 'view width',
-  'settings.behaviour.narrowViews.hint':
+  'settings.window.narrowViews.label': 'view width',
+  'settings.window.narrowViews.hint':
     'draw the response, PRs and agents views at two thirds of the pane, while that is at least 80 characters — a narrower pane is left whole. The terminal always fills its pane',
-  'settings.behaviour.narrowViews.on': 'narrowed',
-  'settings.behaviour.narrowViews.off': 'full pane',
-  'settings.behaviour.focusView.label': 'focus view',
-  'settings.behaviour.focusView.hint':
-    "fold each turn's tool calls away, leaving your prompts and the agent's answers",
-  'settings.behaviour.focusView.on': 'on',
-  'settings.behaviour.focusView.off': 'off',
+  'settings.window.narrowViews.on': 'narrowed',
+  'settings.window.narrowViews.off': 'full pane',
+
+  // ── Agents (renamed from Sessions) ───────────────────────────────────────
+  // EVERY ROW HERE IS ABOUT THE AGENT A SESSION DRIVES, which is what earned
+  // the rename: which one starts, which key sends it a prompt, how long its
+  // cache lives -- and now the ADHD skill, joining from Behaviour for the
+  // same reason (it decides what the agent is told to write, not what vam
+  // draws).
+  'settings.agents.hint':
+    'which agent a new session starts, which key sends it a prompt, and how long its cache lives',
+  'settings.agents.provider.label': 'default provider',
+  'settings.agents.sendKey.label': 'send key',
+  'settings.agents.sendKey.hint': 'which key sends the prompt you are typing to the session',
+  // Operator, translated from Orca's own Agents settings: "Claude caches your
+  // conversation to reduce costs. When idle too long the cache expires and
+  // the next message resends full context at higher cost. This shows a
+  // countdown so you know when to resume." The row and its note carry that
+  // same explanation in vam's own voice.
+  'settings.agents.cacheTimer.label': 'cache timer',
+  'settings.agents.cacheTimer.hint':
+    'a countdown on an idle Claude Code session, to when its prompt cache expires',
+  'settings.agents.cacheTimer.on': 'on',
+  'settings.agents.cacheTimer.off': 'off',
+  'settings.agents.cacheTimer.note':
+    'Claude caches a session’s context for a few minutes to an hour after it last did anything; once that cache expires, the next message you send resends the whole context at the uncached price. The badge shows how long is left, beside the age, only while a session is idle or waiting on you.',
   // THE ADHD SKILL CARD -- what replaced the concise-output switch. Operator,
   // translated: "turn Concise output into a card [an Orca screenshot]. Talk
   // about the ADHD skill", and then, the design decision that followed:
@@ -213,6 +234,11 @@ const EN = {
   // directory, rather than typing vam's own wording of it into a session's
   // first prompt. `src/shared/adhd-skill.ts` carries the whole story and the
   // pinned source commit.
+  //
+  // ITS OWN KEYS KEEP THE `settings.behaviour.adhd.*` NAMESPACE even though the
+  // card itself is drawn in Agents now: renaming twenty-odd call sites inside
+  // `AdhdSkillCard.tsx` for a cosmetic match is that component's own call to
+  // make, not this restructure's, which moves the CARD, not its strings.
   //
   // KEPT TERSE ON PURPOSE, MORE THAN THE OLD SWITCH'S OWN DISCLOSURE WAS: this
   // catalogue ships whole inside the eager entry chunk regardless of
@@ -226,9 +252,9 @@ const EN = {
   // THE TITLE NAMES THE SKILL, unlike the old switch's label: this is no
   // longer a request vam types, it is a file vam writes, and the operator is
   // choosing whether that file exists -- which is worth naming plainly. Title
-  // Case is `Block`'s own CSS transform (`capitalize`), which only touches the
-  // first letter of the word it reaches: 'ADHD skill' becomes "ADHD Skill",
-  // never "Adhd Skill".
+  // Case is `SettingsRow`'s own CSS transform (`capitalize`), which only
+  // touches the first letter of the word it reaches: 'ADHD skill' becomes
+  // "ADHD Skill", never "Adhd Skill".
   'settings.behaviour.adhd.title': 'ADHD skill',
   'settings.behaviour.adhd.hint': 'shorter, scannable answers',
   // THREE STATES, and the pill's own words for each -- `src/shared/
@@ -283,16 +309,38 @@ const EN = {
   // is the one thing this note may not do on its own.
   'settings.behaviour.adhd.migration': 'concise output now installs the ADHD skill below.',
   'settings.behaviour.adhd.migrationDismiss': 'Dismiss',
-  // THE STREAMING TERMINAL: the shipping Terminal tab now
-  // (`docs/design/terminal-streaming.md`'s "Flipping the default"), driven
-  // by xterm.js over a persistent connection instead of periodic
-  // `capture-pane`. On by default; an older tmux -- or a connection that
-  // cannot be re-established -- falls back to the classic renderer
-  // automatically.
-  'settings.behaviour.streamingTerminal.label': 'streaming terminal',
-  'settings.behaviour.streamingTerminal.hint': 'a live xterm.js pane instead of periodic capture',
-  'settings.behaviour.streamingTerminal.on': 'on',
-  'settings.behaviour.streamingTerminal.off': 'off',
+
+  // ── Behaviour ────────────────────────────────────────────────────────────
+  // SMALLER THAN IT WAS, not retired: `view width` moved to Window & Sidebar
+  // and `streaming terminal` moved to Terminal's own Advanced disclosure
+  // (both notes above say why). What is left is what a turn shows on screen,
+  // plus a small "Files" sub-group for the file editor's own two rows
+  // (moved from Appearance -- a count of spaces and whether a file is
+  // coloured are both about a FILE `o` can open, closer kin to focus view's
+  // own question than to Interface's paint).
+  'settings.behaviour.hint': "what a turn shows on screen, and how vam's own file editor behaves",
+  'settings.behaviour.focusView.label': 'focus view',
+  'settings.behaviour.focusView.hint':
+    "fold each turn's tool calls away, leaving your prompts and the agent's answers",
+  'settings.behaviour.focusView.on': 'on',
+  'settings.behaviour.focusView.off': 'off',
+  'settings.behaviour.files.title': 'Files',
+  // THE FILE EDITOR'S COLOURS. The label says which editor, because vam has
+  // more than one text box and only this one has a gutter to keep level.
+  // The tail this hint had ("for the formats vam can read without guessing")
+  // is the note's first sentence, which then NAMES those formats. One of the
+  // two had to go and it is this one: a caption that hedges without saying
+  // which formats leaves the operator no better off than silence.
+  'settings.behaviour.editorHighlight.label': 'file editor colours',
+  'settings.behaviour.editorHighlight.hint': 'syntax colours in the Files tab',
+  'settings.behaviour.editorHighlight.on': 'on',
+  'settings.behaviour.editorHighlight.off': 'off',
+  'settings.behaviour.editorIndent.label': 'file editor indent',
+  // SPACES IS NOT A DETAIL: it is what keeps the line-number gutter level with
+  // the text, so the caption says it rather than leaving "indent" to be read
+  // as "a tab".
+  'settings.behaviour.editorIndent.hint':
+    'how many spaces one Tab inserts in the Files tab, and what a format indents by',
   // DESKTOP NOTIFICATIONS. The label names the thing, not the mechanism; the
   // hint names the one status it is about in the application's own phrase
   // for it ("needs you", the sidebar's word for `waiting`). The note is a
@@ -322,12 +370,6 @@ const EN = {
   'settings.notifications.test.unconfirmed':
     'the OS answered neither way in 10 s — vam cannot tell whether it appeared.',
   'settings.notifications.test.browser': 'only the desktop app can send one',
-  'settings.behaviour.editorIndent.label': 'file editor indent',
-  // SPACES IS NOT A DETAIL: it is what keeps the line-number gutter level with
-  // the text, so the caption says it rather than leaving "indent" to be read
-  // as "a tab".
-  'settings.behaviour.editorIndent.hint':
-    'how many spaces one Tab inserts in the Files tab, and what a format indents by',
 
   // ── Update ───────────────────────────────────────────────────────────────
   // THE OPERATOR ASKED A QUESTION, SO EVERY ANSWER IS A SENTENCE. The popover
@@ -356,24 +398,6 @@ const EN = {
   // control and no explanation reads as a broken screen.
   'settings.update.browser':
     'vam checks for updates from the desktop app. This is a browser tab, which has no way to ask.',
-
-  // ── Sessions ─────────────────────────────────────────────────────────────
-  'settings.sessions.hint': 'which agent a new session starts, and which key sends a prompt to one',
-  'settings.sessions.provider.label': 'default provider',
-  'settings.sessions.sendKey.label': 'send key',
-  'settings.sessions.sendKey.hint': 'which key sends the prompt you are typing to the session',
-  // Operator, translated from Orca's own Agents settings: "Claude caches your
-  // conversation to reduce costs. When idle too long the cache expires and
-  // the next message resends full context at higher cost. This shows a
-  // countdown so you know when to resume." The row and its note carry that
-  // same explanation in vam's own voice.
-  'settings.sessions.cacheTimer.label': 'cache timer',
-  'settings.sessions.cacheTimer.hint':
-    'a countdown on an idle Claude Code session, to when its prompt cache expires',
-  'settings.sessions.cacheTimer.on': 'on',
-  'settings.sessions.cacheTimer.off': 'off',
-  'settings.sessions.cacheTimer.note':
-    'Claude caches a session’s context for a few minutes to an hour after it last did anything; once that cache expires, the next message you send resends the whole context at the uncached price. The badge shows how long is left, beside the age, only while a session is idle or waiting on you.',
 
   // ── Integrations ─────────────────────────────────────────────────────────
   // Operator: "add an Integrations section in Settings, to connect a GitHub

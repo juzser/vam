@@ -71,8 +71,8 @@ describe('the catalogue', () => {
 
 describe('interpolation', () => {
   it('fills a named slot', () => {
-    expect(t('settings.appearance.templates.hint', { theme: 'dark' })).toContain('dark');
-    expect(t('settings.appearance.templates.hint', { theme: 'light' })).toContain('light');
+    expect(t('settings.interface.templates.hint', { theme: 'dark' })).toContain('dark');
+    expect(t('settings.interface.templates.hint', { theme: 'light' })).toContain('light');
   });
 
   it('leaves a slot nobody filled visible rather than blank', () => {
@@ -80,7 +80,7 @@ describe('interpolation', () => {
     // give "a whole  palette in one press" -- a sentence that reads as
     // finished and is wrong. Left as `{theme}`, it is obviously a bug and
     // names the slot that was missed.
-    expect(t('settings.appearance.templates.hint', {})).toContain('{theme}');
+    expect(t('settings.interface.templates.hint', {})).toContain('{theme}');
   });
 
   it('never treats a value as a pattern', () => {
@@ -88,7 +88,7 @@ describe('interpolation', () => {
     // containing one would splice the match back into the sentence. Values
     // come from the app, not from a network, but a theme name is still not a
     // regular expression and must never be read as one.
-    expect(t('settings.appearance.templates.hint', { theme: '$& $` $$' })).toContain('$& $` $$');
+    expect(t('settings.interface.templates.hint', { theme: '$& $` $$' })).toContain('$& $` $$');
   });
 
   it('fills every occurrence of a slot, not only the first', () => {

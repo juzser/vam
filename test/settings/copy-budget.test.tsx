@@ -13,28 +13,41 @@
  * survived. That is the house style the other panels are held to here.
  *
  * ── WHAT IS COUNTED, AND WHY IT IS THE PARAGRAPHS ONLY ────────────────────
- * The PROSE, never the whole panel. Appearance renders 372 words and about a
- * hundred and fifteen of them are control names -- thirteen colour tokens,
+ * The PROSE, never the whole card. Old Appearance rendered 372 words and about
+ * a hundred and fifteen of them were control names -- thirteen colour tokens,
  * twelve terminal schemes, eight palette templates. Those are a list the
- * operator SCANS, not a paragraph they read, and a budget over the panel's
- * whole text would be a budget on how many colours vam offers. So the corpus
- * is exactly the sentences: the panel's own hint, and every `<p>` inside its
- * rows -- each row's caption and each note under a switch.
+ * operator SCANS, not a paragraph they read, and a budget over a card's whole
+ * text would be a budget on how many colours vam offers. So the corpus is
+ * exactly the sentences: the card's own hint, and every `<p>` inside its
+ * rows -- each row's caption and each note under a switch. `[data-settings-
+ * rows] p` is scoped to `data-settings-rows` and the hint is a SIBLING of that
+ * element, not a descendant (`primitives.tsx`'s own note on `SettingsCard`),
+ * so counting both never double-counts one paragraph as two.
  *
  * ── A CEILING, NOT A TARGET ───────────────────────────────────────────────
- * Measured in a browser at 1280px on the commit before this one: Appearance
- * 257 prose words over 12 paragraphs, Behaviour 266 over 7. The ceilings below
- * are those numbers with roughly a quarter to a third cut off, which is the
- * size of the Remote pass. They leave a few words of slack on purpose -- this
- * is copy and it will be reworded -- so what they refuse is not a typo but a
- * paragraph coming back.
+ * Measured in happy-dom on the commit that split Appearance into cards
+ * (interface/terminal/window/agents/behaviour, `settings/sections.ts`):
  *
- * THE CORPUS IS ASSERTED FIRST. A budget over a panel that drew no paragraphs
+ *   interface      5 paragraphs   52 words (longest 14)
+ *   terminal       7 paragraphs  110 words (longest 23)
+ *   window         2 paragraphs   43 words (longest 33)
+ *   agents        10 paragraphs  146 words (longest 54)
+ *   behaviour      6 paragraphs  103 words (longest 38)
+ *   notifications  5 paragraphs   79 words (longest 28) -- unchanged by the
+ *                  cards restructure, and its ceiling stays the number the
+ *                  Remote-style pass (#397) already tuned it to.
+ *
+ * The ceilings below give each a little over its own measured total -- this
+ * is copy and it will be reworded -- so what they refuse is not a typo but a
+ * paragraph coming back, the same slack the original Appearance/Behaviour
+ * numbers carried.
+ *
+ * THE CORPUS IS ASSERTED FIRST. A budget over a card that drew no paragraphs
  * at all would pass forever, and this repo has shipped four guards that were
  * green having examined zero of anything. The count of paragraphs is checked
  * before their length, so "concise" can never be satisfied by "absent" -- and
  * every fact these paragraphs carry is held, sentence by sentence, by
- * `view-width`, `focus-view`, `concise-output`, `terminal-colours` and
+ * `view-width`, `focus-view`, `streaming-terminal`, `terminal-colours` and
  * `appearance` in this same directory. This file is only about the size.
  */
 
@@ -90,17 +103,29 @@ const words = (text: string) => text.split(/\s+/).filter((word) => word.length >
 
 /** id, the fewest paragraphs it may draw, the most words they may add up to. */
 const BUDGET: readonly (readonly [string, number, number])[] = [
-  ['appearance', 10, 180],
-  // 210 is the seven-row panel with a quarter cut off. The desktop
-  // notifications row lived here for one release (#440 raised this to 8/255
-  // for it, 244 measured) and then moved to a section of its own; the
-  // numbers go back to what they were before it.
-  ['behaviour', 7, 210],
+  // SPLIT OUT OF APPEARANCE. Theme, templates, out text, and (behind
+  // Advanced, still counted -- `hidden` does not remove a node from the
+  // tree) the per-token colour reset row. Measured 5 paragraphs, 52 words.
+  ['interface', 5, 75],
+  // SPLIT OUT OF APPEARANCE, the rest of it: terminal text, the two theme
+  // rows, and (behind Advanced) the colour grid, the opacity row and the
+  // streaming-terminal switch moved in from Behaviour. Measured 7, 110.
+  ['terminal', 7, 145],
+  // NEW, and small on purpose -- one row today. Measured 2, 43.
+  ['window', 2, 60],
+  // RENAMED FROM SESSIONS, gaining the ADHD skill card's own prose from
+  // Behaviour. Measured 10, 146.
+  ['agents', 10, 180],
+  // SMALLER THAN IT WAS: `view width` and `streaming terminal` left for
+  // Window & Sidebar and Terminal, and the file editor's own two rows (one
+  // of them, `file editor colours`, moved IN from Appearance) joined focus
+  // view as a small Files sub-group. Measured 6, 103.
+  ['behaviour', 6, 135],
   // Its own hint, the switch's hint and three-fact note, the test button's
   // hint, and -- in this harness, which has no bridge -- the one line saying
-  // only the desktop app can send one. Measured at 79 words over 5
-  // paragraphs; the ceiling leaves a short sentence of slack and refuses a
-  // second note. (Behaviour re-measured at 202 over 7 without the row.)
+  // only the desktop app can send one. UNCHANGED by the cards restructure:
+  // this section did not move. Measured at 79 words over 5 paragraphs; the
+  // ceiling leaves a short sentence of slack and refuses a second note.
   ['notifications', 5, 90],
 ];
 

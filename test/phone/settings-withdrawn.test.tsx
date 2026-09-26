@@ -8,15 +8,15 @@
  * thing -- a phone is a REMOTE CONTROL for sessions running on a desktop, and
  * the settings overlay is a desktop instrument that happens to render there.
  *
- * IT IS NOT MERELY CRAMPED, WHICH IS THE PART WORTH WRITING DOWN. Four of the
- * five sections cannot act from a phone at all. Appearance, Sessions, Keyboard
- * and Update read and write `prefs`, which is `localStorage` on whichever
- * device is looking -- so a theme chosen on the phone changes the phone, not
- * the machine the sessions are on, and a keyboard shortcut edited there binds
- * keys for a device with no keyboard. Update reaches
- * `window.api.update`, which the browser build does not have. A control that
- * looks like it configures vam and configures a copy of vam nobody is watching
- * is worse than an absent one.
+ * IT IS NOT MERELY CRAMPED, WHICH IS THE PART WORTH WRITING DOWN. Every
+ * section but Remote cannot act from a phone at all. Interface, Agents,
+ * Keyboard and Update (among others) read and write `prefs`, which is
+ * `localStorage` on whichever device is looking -- so a theme chosen on the
+ * phone changes the phone, not the machine the sessions are on, and a
+ * keyboard shortcut edited there binds keys for a device with no keyboard.
+ * Update reaches `window.api.update`, which the browser build does not have.
+ * A control that looks like it configures vam and configures a copy of vam
+ * nobody is watching is worse than an absent one.
  *
  * Remote is the exception and the reason the door stays: what it shows is a
  * fact about the DESKTOP's pairings, which is the one thing on that overlay a
@@ -160,7 +160,7 @@ describe('the settings overlay at phone width', () => {
         theme="dark"
         onChange={() => {}}
         onClose={() => {}}
-        initialSection="appearance"
+        initialSection="interface"
       />,
     );
     expect(document.querySelector('[data-settings-nav]')).not.toBeNull();

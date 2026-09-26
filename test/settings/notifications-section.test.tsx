@@ -89,11 +89,11 @@ const button = () => document.querySelector<HTMLButtonElement>('[data-notify-tes
 const outcome = () => document.querySelector('[data-notify-test-outcome]')?.textContent ?? '';
 
 describe('the section', () => {
-  it('is in the nav once, between Behaviour and Sessions', () => {
+  it('is in the nav once, between Behaviour and Integrations', () => {
     const ids = SECTIONS.map((section) => section.id);
     expect(ids.filter((id) => id === 'notifications')).toHaveLength(1);
     expect(ids.indexOf('notifications')).toBe(ids.indexOf('behaviour') + 1);
-    expect(ids.indexOf('sessions')).toBe(ids.indexOf('notifications') + 1);
+    expect(ids.indexOf('integrations')).toBe(ids.indexOf('notifications') + 1);
   });
 
   it('draws a panel of its own on the desktop, holding the switch and the button', () => {
