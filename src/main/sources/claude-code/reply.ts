@@ -328,8 +328,17 @@ async function reviewGateOpen(run: TmuxRun, name: string): Promise<boolean> {
  * old `--output-format json` gave (`deliver.ts`), so vam does not know the REPL
  * accepted the submit or that an answer is coming -- that shows up when the
  * transcript does, which is the projection the whole design rests on.
+ *
+ * EXPORTED for `start-in-pane.ts`'s `typeIntoOwnPane`, the ONE other caller
+ * that ever addresses a pane by NAME rather than through `paneForRow`'s proof
+ * (see that module's own header). Once its pane is confirmed to be running a
+ * KNOWN provider (`identifyRunningProvider`, `tmux/shell.ts`), the text
+ * reaching it is an operator's PROMPT, not a shell command, and it must land
+ * through the identical multi-line-safe, review-gate-aware channel a reply
+ * to a live agent already uses -- never the raw, single-line `typeThenEnter`
+ * that command started as a shell.
  */
-async function typeIntoPane(
+export async function typeIntoPane(
   run: TmuxRun,
   name: string,
   prompt: string,

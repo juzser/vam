@@ -26,28 +26,62 @@
  * (`pane_current_command`) says whether the pane is still a shell. Typing
  * `claude` into a running agent sends it as a PROMPT; killing that pane cuts
  * the agent off through a control that promised to close an empty shell. So
- * a pane whose foreground is anything but a shell is `pane-occupied` to both,
- * and the agent's own row -- which the next poll draws -- is where those acts
- * belong, with the confirmation `stop.ts` owes a running one. Silence (a
- * listing with no fourth field) refuses nothing, as everywhere else.
+ * a pane whose foreground is anything but a shell OR A KNOWN PROVIDER is
+ * `pane-occupied` to both, and the agent's own row -- which the next poll
+ * draws -- is where those acts belong, with the confirmation `stop.ts` owes a
+ * running one. Silence (a listing with no fourth field) refuses nothing, as
+ * everywhere else.
+ *
+ * ISSUES 502/507: A PANE CONFIRMED RUNNING A KNOWN PROVIDER IS NOT `pane-occupied`
+ * TO `typeIntoOwnPane` ANY MORE. `recordPrompt` (`source.ts`) routes every
+ * `pane:` row id here -- Start session's own command AND the operator's very
+ * first real message alike, because the Response view's `PaneReady` state
+ * (drawn the instant `identifyRunningProvider` confirms a provider, ahead of
+ * the slower agents-list poll that would otherwise repaint the row) enables
+ * the SAME composer and sends through the SAME write. Refusing that message
+ * left a "ready" pane permanently unable to receive one -- the row this whole
+ * feature exists to enable. So the proof below now answers with which of two
+ * shapes a pane is in, not merely whether it is empty: a SHELL still gets the
+ * ordinary Start-session write (`typeThenEnter`, a single line, no escaping,
+ * because the text is a command a shell runs); a pane a KNOWN provider
+ * (`identifyRunningProvider`, `tmux/shell.ts`) is confirmed running gets the
+ * SAME delivery a reply to a live agent already uses (`typeIntoPane`,
+ * `reply.ts`) -- multi-line-safe and review-gate-aware, because the text is
+ * now a PROMPT into a provider TUI, never typed the shell-command way. `null`
+ * (running, unidentified -- an editor, a build, anything neither table entry
+ * names) still refuses exactly as before: there is no proof that program is
+ * safe to hand keystrokes framed as a provider's prompt, or as anything else.
  */
 
+import type { ProviderId } from '../../../shared/providers.js';
 import type { SourceError } from '../../ipc/channels.js';
 import { isVamSession, killSessionArgv, sendEnterArgv, sendTextArgv } from '../tmux/argv.js';
-import { isShellCommand } from '../tmux/shell.js';
+import { identifyRunningProvider, isShellCommand } from '../tmux/shell.js';
 import {
   classifyTmuxFailure,
   listVamSessions,
   type TmuxRun,
   type TmuxSession,
 } from '../tmux/spawn.js';
+import { typeIntoPane } from './reply.js';
 
-/** The pane, proven to be vam's own and holding only a shell -- or why not. */
-async function ownEmptyPane(
+/**
+ * The pane, proven to be vam's own -- and, when it is no longer a shell,
+ * WHICH known provider (`identifyRunningProvider`) is confirmed running in it,
+ * so the caller can pick the right delivery. `runningProvider` is `undefined`
+ * for a shell (the ordinary, empty-pane case `typeThenEnter` already handled)
+ * and a `ProviderId` for a pane a known provider is confirmed running in --
+ * never `null`, because `null` (running, unidentified) is refused right here,
+ * exactly as an occupied pane always was.
+ */
+async function ownPane(
   run: TmuxRun,
   name: string,
   act: string,
-): Promise<{ readonly pane: TmuxSession } | { readonly error: SourceError }> {
+): Promise<
+  | { readonly pane: TmuxSession; readonly runningProvider: ProviderId | undefined }
+  | { readonly error: SourceError }
+> {
   const listed = await listVamSessions(run);
   if (listed.kind !== 'ok') return { error: listed.error };
   const pane = listed.sessions.find((session) => session.name === name);
@@ -61,15 +95,23 @@ async function ownEmptyPane(
     };
   }
   if (pane.command !== undefined && !isShellCommand(pane.command)) {
-    return {
-      error: {
-        kind: 'refused',
-        code: 'pane-occupied',
-        message: `"${name}" has ${pane.command} running in it now, so it is no longer an empty pane; vam will not ${act} through this control -- the session's own row is where that belongs`,
-      },
-    };
+    // `identifyRunningProvider` only ever answers `undefined` for a shell or
+    // an empty/absent command, both excluded by the branch above, so what is
+    // left here is `ProviderId | null` -- a known provider, confirmed running,
+    // or confirmed running something neither table entry names.
+    const provider = identifyRunningProvider(pane.command);
+    if (provider === null || provider === undefined) {
+      return {
+        error: {
+          kind: 'refused',
+          code: 'pane-occupied',
+          message: `"${name}" has ${pane.command} running in it now, so it is no longer an empty pane; vam will not ${act} through this control -- the session's own row is where that belongs`,
+        },
+      };
+    }
+    return { pane, runningProvider: provider };
   }
-  return { pane };
+  return { pane, runningProvider: undefined };
 }
 
 /**
@@ -79,10 +121,10 @@ async function ownEmptyPane(
  * land: submitting half a command is worse than a command sitting there
  * untyped.
  *
- * SPLIT OUT OF `typeIntoOwnPane`, which is `ownEmptyPane`'s proof plus
+ * SPLIT OUT OF `typeIntoOwnPane`, which is `ownPane`'s proof plus
  * exactly this. The proof exists for the Start session BUTTON, where a poll
  * may have gone stale and the operator may since have typed something by
- * hand into the pane the row was drawn for (see `ownEmptyPane`'s own header).
+ * hand into the pane the row was drawn for (see `ownPane`'s own header).
  * A caller that just created the pane in this SAME run of calls -- a resume
  * (`claude-code/resume.ts`, `codex/resume.ts`), or the "new project" path
  * (`create-session.ts`) -- has no such gap to close: nothing else knows the
@@ -125,7 +167,7 @@ export async function typeThenEnter(
  *
  * Two presses within a few milliseconds -- two rapid Start clicks, or Enter's
  * own native activation landing beside a mouse click -- both reach here
- * before either has run a single `send-keys`, so `ownEmptyPane`'s proof (the
+ * before either has run a single `send-keys`, so `ownPane`'s proof (the
  * pane is still a shell) was true for BOTH: the race is not in the renderer's
  * `disabled` state, which only ever describes the LAST commit, it is that two
  * calls can be in flight for the same pane at once with nothing between them
@@ -136,7 +178,7 @@ export async function typeThenEnter(
  * microseconds later, sees it in the set.
  *
  * MODULE-LEVEL AND PROCESS-WIDE ON PURPOSE: this is the one write path with
- * the poll-gap race `ownEmptyPane`'s own header describes, and main is the
+ * the poll-gap race `ownPane`'s own header describes, and main is the
  * one process every Start/Resume press reaches through, however many
  * `createTmuxRunner()`s the caller minted for the occasion.
  */
@@ -144,8 +186,19 @@ const paneWritesInFlight = new Set<string>();
 
 /**
  * Type `text` into the pane `name`, then press Return once -- `typeThenEnter`
- * plus `ownEmptyPane`'s proof, for Start session, the one caller with a real
- * gap between the row being drawn and this running.
+ * plus `ownPane`'s proof, for Start session AND for `recordPrompt`'s own
+ * `pane:` row branch (`source.ts`), the two callers with a real gap between
+ * the row being drawn and this running.
+ *
+ * WHICH DELIVERY RUNS IS `ownPane`'s OWN ANSWER, NOT A GUESS FROM `text`:
+ * `runningProvider === undefined` is the ordinary empty shell, and gets the
+ * single-line, no-escaping write a shell command wants (`typeThenEnter`) --
+ * this is Start session's own path, unchanged. A `ProviderId` means the pane
+ * is CONFIRMED running a known provider already, so `text` here is a PROMPT
+ * into that provider's TUI -- delivered through `typeIntoPane` (`reply.ts`),
+ * the identical multi-line-safe, review-gate-aware channel a reply to a live
+ * agent already uses. See the file header for why both shapes reach this one
+ * function and why that is correct rather than incidental.
  */
 export async function typeIntoOwnPane(input: {
   run: TmuxRun;
@@ -162,8 +215,9 @@ export async function typeIntoOwnPane(input: {
   }
   paneWritesInFlight.add(name);
   try {
-    const found = await ownEmptyPane(run, name, 'type');
+    const found = await ownPane(run, name, 'type');
     if ('error' in found) return found.error;
+    if (found.runningProvider !== undefined) return await typeIntoPane(run, name, text);
     return await typeThenEnter(run, name, text);
   } finally {
     paneWritesInFlight.delete(name);
@@ -177,7 +231,7 @@ export async function typeIntoOwnPane(input: {
  * there was nothing left to kill in the first place -- see below.
  *
  * IDEMPOTENT ON A PANE THAT IS ALREADY GONE, and this is deliberately NOT
- * `ownEmptyPane`'s missing-pane branch, which `typeIntoOwnPane` still uses
+ * `ownPane`'s missing-pane branch, which `typeIntoOwnPane` still uses
  * unchanged: typing has to refuse when there is no pane to type into, but
  * closing one that no longer exists has already reached Close's own goal --
  * "this pane is not running any more" -- so answering that with a refusal was

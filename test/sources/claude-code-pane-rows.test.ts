@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { LiveAgent } from '../../src/main/sources/claude-code/agents.js';
-import { paneNameOf, paneRowId } from '../../src/main/sources/claude-code/pane-row.js';
+import { paneCwdOf, paneNameOf, paneRowId } from '../../src/main/sources/claude-code/pane-row.js';
 import { projectIdOf } from '../../src/main/sources/claude-code/project-id.js';
 import { loadClaudeCodeProjects } from '../../src/main/sources/claude-code/source.js';
 import type { TmuxSession } from '../../src/main/sources/tmux/spawn.js';
@@ -366,5 +366,37 @@ describe('runningProvider -- who is already in the pane, from its own foreground
     const found = row(project);
     expect(found?.status).toBe('unstarted');
     expect(found?.runningProvider).toBeNull();
+  });
+});
+
+/**
+ * `paneCwdOf` -- what `main/index.ts`'s `resolveSessionCwd` needs to answer
+ * for a `pane:` row id, the SAME id `recordPrompt`/`closeSession` already
+ * dispatch on (`paneNameOf`), so the image-attach picker and the file-editor
+ * tab's directory listing stop refusing `unknown-session` for a pane row the
+ * composer's own PaneReady state already treats as sendable (issues 502/507's
+ * "other entry points" -- see `start-in-pane.ts`'s header for the write side
+ * of the same fix).
+ */
+describe('paneCwdOf -- a pane row id turned back into its own directory', () => {
+  const SESSIONS: readonly TmuxSession[] = [
+    { project: ALPHA_ID, pid: '4242', name: 'vam-alpha-aa11bb', command: '2.1.282', cwd: ALPHA },
+    { project: ALPHA_ID, pid: '4243', name: 'vam-alpha-cc22dd', command: 'zsh' },
+  ];
+
+  it("answers the pane's own cwd for a pane-row id in vam's own listing", () => {
+    expect(paneCwdOf(SESSIONS, paneRowId('vam-alpha-aa11bb'))).toBe(ALPHA);
+  });
+
+  it('answers null for a pane-row id whose session carries no cwd at all', () => {
+    expect(paneCwdOf(SESSIONS, paneRowId('vam-alpha-cc22dd'))).toBeNull();
+  });
+
+  it('answers null for a pane-row id no session in the listing names', () => {
+    expect(paneCwdOf(SESSIONS, paneRowId('vam-alpha-gone99'))).toBeNull();
+  });
+
+  it('answers null for anything that is not a pane-row id at all -- a live agent key', () => {
+    expect(paneCwdOf(SESSIONS, 'sess-1#100')).toBeNull();
   });
 });

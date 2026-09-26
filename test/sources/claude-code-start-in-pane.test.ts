@@ -13,6 +13,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { killOwnPane, typeIntoOwnPane } from '../../src/main/sources/claude-code/start-in-pane.js';
+import { capturePaneArgv } from '../../src/main/sources/tmux/argv.js';
 import type { TmuxRun } from '../../src/main/sources/tmux/spawn.js';
 
 const PANE = 'vam-atlas-aa11bb';
@@ -47,15 +48,80 @@ describe('typeIntoOwnPane -- Start session', () => {
     expect(calls.map((c) => c[0])).toEqual(['list-sessions']);
   });
 
-  it('refuses a pane that already has something other than a shell in front', async () => {
-    // Typing `claude` into a running agent sends it as a PROMPT. The pane
-    // row that offered Start was drawn a poll ago; by now the operator may
-    // have typed the command by hand in the Terminal view.
-    const { run, calls } = fakeTmux(`${PROJECT}\t4242\t${PANE}\tclaude\n`);
+  it('refuses a pane that already has something other than a shell or a known provider in front', async () => {
+    // `vim` (like `npm`, `htop`, or anything else `identifyRunningProvider`
+    // cannot name) is proof of neither a shell nor a configured provider, so
+    // it stays refused: typing into an editor or a build sends it keystrokes
+    // it was never meant to receive. The pane row that offered Start was
+    // drawn a poll ago; by now the operator may have typed the command by
+    // hand in the Terminal view. `claude` and `codex` themselves are no
+    // longer a fixture here -- see the two "confirmed running" tests below,
+    // where a KNOWN provider gets the opposite answer.
+    const { run, calls } = fakeTmux(`${PROJECT}\t4242\t${PANE}\tvim\n`);
     const refused = await typeIntoOwnPane({ run, name: PANE, text: 'claude' });
     expect(refused).toMatchObject({ kind: 'refused', code: 'pane-occupied' });
-    expect(refused?.message).toContain('claude');
+    expect(refused?.message).toContain('vim');
     expect(calls.map((c) => c[0])).toEqual(['list-sessions']);
+  });
+
+  it('refuses a pane running an unrelated program `npm` names just as well', async () => {
+    const { run, calls } = fakeTmux(`${PROJECT}\t4242\t${PANE}\tnpm\n`);
+    const refused = await typeIntoOwnPane({ run, name: PANE, text: 'hello' });
+    expect(refused).toMatchObject({ kind: 'refused', code: 'pane-occupied' });
+    expect(calls.map((c) => c[0])).toEqual(['list-sessions']);
+  });
+
+  /**
+   * THE BUG (issues 502/507): a pane row still drawn `unstarted`/`terminal` whose
+   * foreground is CONFIRMED to be a known provider (`identifyRunningProvider`,
+   * `tmux/shell.ts`) is where the Response view's `PaneReady` state sends the
+   * operator's first real message -- through this exact function, because
+   * `recordPrompt` (`source.ts`) routes every `pane:` row id here regardless
+   * of what is running in the pane. Refusing it as `pane-occupied` (the
+   * un-fixed behaviour) meant a "ready" pane could never actually receive a
+   * message. The fix: a command PROVEN to be a configured provider is
+   * delivered the same way `reply.ts` delivers to a live agent's pane --
+   * `typeIntoPane`, exported from `reply.ts` -- never the single-line,
+   * unescaped `typeThenEnter` a shell command uses.
+   */
+  it('CONFIRMED RUNNING claude (its measured version-string command): delivers the message like a reply, not a shell command', async () => {
+    const { run, calls } = fakeTmux(`${PROJECT}\t4242\t${PANE}\t2.1.282\n`);
+    const result = await typeIntoOwnPane({ run, name: PANE, text: 'hello there' });
+    expect(result).toBeNull();
+    // `typeIntoPane`'s own shape: one literal `send-keys -l` per line, ONE
+    // interpreted Enter, then a `capture-pane` read for the invisible-
+    // character review gate -- never seen on the shell-command path
+    // (`typeThenEnter`), which is exactly what tells the two delivery
+    // mechanisms apart here.
+    expect(calls.slice(1)).toEqual([
+      ['send-keys', '-t', `=${PANE}:`, '-l', '--', 'hello there'],
+      ['send-keys', '-t', `=${PANE}:`, 'Enter'],
+      capturePaneArgv(PANE),
+    ]);
+  });
+
+  it('CONFIRMED RUNNING codex: delivers the message the same way', async () => {
+    const { run, calls } = fakeTmux(`${PROJECT}\t4242\t${PANE}\tcodex\n`);
+    const result = await typeIntoOwnPane({ run, name: PANE, text: 'hello there' });
+    expect(result).toBeNull();
+    expect(calls.slice(1)).toEqual([
+      ['send-keys', '-t', `=${PANE}:`, '-l', '--', 'hello there'],
+      ['send-keys', '-t', `=${PANE}:`, 'Enter'],
+      capturePaneArgv(PANE),
+    ]);
+  });
+
+  it('a multi-line first message into a confirmed provider pane is escaped the way a reply is, never sent as one raw newline', async () => {
+    const { run, calls } = fakeTmux(`${PROJECT}\t4242\t${PANE}\t2.1.282\n`);
+    const result = await typeIntoOwnPane({ run, name: PANE, text: 'line one\nline two' });
+    expect(result).toBeNull();
+    expect(calls.slice(1)).toEqual([
+      ['send-keys', '-t', `=${PANE}:`, '-l', '--', 'line one\\'],
+      ['send-keys', '-t', `=${PANE}:`, 'Enter'],
+      ['send-keys', '-t', `=${PANE}:`, '-l', '--', 'line two'],
+      ['send-keys', '-t', `=${PANE}:`, 'Enter'],
+      capturePaneArgv(PANE),
+    ]);
   });
 
   it('still types when the listing said nothing about the foreground -- absence is not an agent', async () => {
@@ -82,7 +148,7 @@ describe('typeIntoOwnPane -- Start session', () => {
 
   // D12: two presses of Start (or Start's Resume twin) within a few
   // milliseconds -- two rapid clicks, or Enter's native activation landing
-  // beside a mouse click -- used to both pass `ownEmptyPane`'s proof before
+  // beside a mouse click -- used to both pass `ownPane`'s proof before
   // either had typed a single key: the pane is still a shell to BOTH calls,
   // because the first has not run its own `send-keys` yet, so both typed the
   // provider's command into the one pane, one after the other. The guard has
