@@ -216,6 +216,12 @@ const GUARDS = [
   // tooltip, chip position) in both themes and at 390px, which is what
   // `sidebar-tree-shots.mjs`'s DOM-shape checks cannot answer.
   'project-add-menu-shots',
+  // The cache-timer countdown: three phases (normal/warning/expired) on a
+  // dedicated `window.api` stub (not `?demo=1`'s shared fixture), the
+  // warning tint's contrast measured against its real background in both
+  // themes, and that a real tick of the countdown never resizes the badge.
+  // `cache-timer-shots.mjs`'s own header holds the falsification.
+  'cache-timer-shots',
   'workspace-options-shots',
   'sidebar-seam-shots',
   'terminal-chrome-shots',

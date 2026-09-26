@@ -58,7 +58,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import type { Group, Project, SessionStatus } from '../domain/model.js';
+import type { Group, Project, Session, SessionStatus, SourceId } from '../domain/model.js';
 import type {
   GroupBy,
   SessionEntry,
@@ -78,8 +78,10 @@ import {
 } from '../prefs/foreign-hidden-note.js';
 import type { EffectiveTheme } from '../prefs/prefs.js';
 import { markRegisterOf, SourceMark } from '../sources/provider-marks.js';
+import { CacheCountdown } from './CacheCountdown.js';
 import { ConfirmRemoveProject } from './ConfirmRemoveProject.js';
 import { ContextMenu, type ContextMenuItem } from './ContextMenu.js';
+import { useCacheTimerClockDriver } from './cache-timer-clock.js';
 import { GettingStarted } from './GettingStarted.js';
 import { IconMark, parseIcon } from './icon-value.js';
 import { Note } from './Note.js';
@@ -344,6 +346,31 @@ function splitBranch(branch: string): { head: string; tail: string } {
   return cut === -1
     ? { head: '', tail: branch }
     : { head: branch.slice(0, cut + 1), tail: branch.slice(cut + 1) };
+}
+
+/**
+ * Is there a cache timer worth MOUNTING `CacheCountdown` for on this row at
+ * all -- the gate at each render site, so a row this feature can say nothing
+ * about never subscribes to the shared clock (`cache-timer-clock.ts`'s own
+ * "cheap to render" argument: a subscription that never fires is still one
+ * more listener in the set every tick walks).
+ *
+ * DELIBERATELY NOT THE WHOLE OF `cacheTimerFor`'s OWN GATE: this never reads
+ * a clock, so it cannot answer "expired yet" -- only "could this row ever
+ * have an answer". `CacheCountdown` still runs `cacheTimerFor` itself on
+ * every tick for the live phase; this only decides whether that component
+ * exists in the tree at all.
+ */
+function hasCacheTimerData(
+  session: Pick<Session, 'status' | 'lastCacheActivityAt' | 'cacheTtlMs'>,
+  rowSource: SourceId | null,
+): boolean {
+  return (
+    rowSource === 'claude-code' &&
+    (session.status === 'idle' || session.status === 'waiting') &&
+    session.lastCacheActivityAt != null &&
+    session.cacheTtlMs != null
+  );
 }
 
 /**
@@ -1104,6 +1131,18 @@ export type SessionListProps = {
   readonly width?: number;
   /** `PaneResizer`, positioned by the caller — kept out of this file's own concerns. */
   readonly resizeHandle: ReactNode;
+  /**
+   * The Sessions settings switch (`prefs.cacheTimer`) -- draw a countdown to
+   * when a Claude Code session's prompt cache expires, beside its age.
+   * `CacheCountdown.tsx` is the row; `cache-timer-clock.ts` is the one shared
+   * `setInterval` every row's countdown ticks off, driven once by this pane
+   * regardless of how many rows carry one.
+   *
+   * Optional, defaulting to `false` — like every flag on this pane, most
+   * tests that render it are about something else, and a required prop would
+   * have edited every one of them for a feature they do not exercise.
+   */
+  readonly cacheTimerEnabled?: boolean;
 };
 
 /**
@@ -1354,7 +1393,16 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     onToggleTheme,
     width,
     resizeHandle,
+    cacheTimerEnabled = false,
   } = props;
+
+  // ONE DRIVER FOR THE WHOLE PANE, never one per row -- `cache-timer-
+  // clock.ts`'s own header. `enabled` is the setting alone: while it is off
+  // this costs no timer at all, the same as every other
+  // `useVisibilityInterval` caller in this renderer, and every row's own
+  // `CacheCountdown` gate (below, at each render site) is what keeps a row
+  // with nothing to show from ever subscribing to it.
+  useCacheTimerClockDriver(cacheTimerEnabled);
 
   /**
    * What a control wears while its own action is running: it cannot be pressed
@@ -2562,6 +2610,9 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                       </span>
                     </>
                   )}
+                  {cacheTimerEnabled && hasCacheTimerData(session, rowSource) && (
+                    <CacheCountdown session={session} enabled={cacheTimerEnabled} />
+                  )}
                 </span>
               )}
               {/* The waiting row's third line: what is being
@@ -2822,6 +2873,9 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                       </span>
                     )}
                   </span>
+                  {cacheTimerEnabled && hasCacheTimerData(session, rowSource) && (
+                    <CacheCountdown session={session} enabled={cacheTimerEnabled} />
+                  )}
                 </span>
               )}
             </button>

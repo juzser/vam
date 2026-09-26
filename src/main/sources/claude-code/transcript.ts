@@ -32,6 +32,7 @@
 
 import { createHash } from 'node:crypto';
 import type { AgentQuestion, Decision } from '../../../renderer/domain/model.js';
+import { type CacheActivity, detectCacheActivity, NO_CACHE_ACTIVITY } from './cache-activity.js';
 import { extractCommands } from './commands.js';
 import { collectQuestions } from './questions.js';
 
@@ -83,6 +84,14 @@ export type TranscriptFacts = {
    * answered by the rule in `questions.ts`. Empty is the common case.
    */
   readonly questions: readonly AgentQuestion[];
+  /**
+   * When Claude Code's own prompt cache was last read or written in this
+   * window, and how long that touch lives -- `cache-activity.ts` carries the
+   * whole rule. Always present, `NO_CACHE_ACTIVITY` included: this source
+   * always looks, so a session with nothing to report says so rather than
+   * leaving the field off.
+   */
+  readonly cache: CacheActivity;
 };
 
 export const EMPTY_FACTS: TranscriptFacts = {
@@ -91,6 +100,7 @@ export const EMPTY_FACTS: TranscriptFacts = {
   activity: null,
   decisions: [],
   questions: [],
+  cache: NO_CACHE_ACTIVITY,
 };
 
 export type Line = Record<string, unknown>;
@@ -823,7 +833,15 @@ export function summarizeLines(
       })),
     }));
 
-  // Read off the SAME parsed lines: the questions are a second reading of one
-  // pass over the window, not a second read of the file.
-  return { aiTitle, branch, activity, decisions, questions: collectQuestions(lines) };
+  // Read off the SAME parsed lines: the questions and the cache reading are
+  // each a second pass over the window already in memory, not a second read
+  // of the file.
+  return {
+    aiTitle,
+    branch,
+    activity,
+    decisions,
+    questions: collectQuestions(lines),
+    cache: detectCacheActivity(lines),
+  };
 }

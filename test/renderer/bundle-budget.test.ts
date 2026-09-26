@@ -110,14 +110,36 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  *     entry, after Integrations   691,861 B
  *
  * a ~2,169 B growth entirely in Settings-surface strings and nav metadata,
- * not in the new panel's own code. The PREVIOUS `ENTRY_BUDGET_BYTES`
- * (690,000) had already been eaten down to 308 B of slack by unrelated work
- * landed on this branch before this change even started -- this bump does
- * not restore the old 10%-headroom policy, it only clears the one feature
- * that is actually landing here, with the same amount of margin (692,500 -
- * 691,861 = 639 B) the old budget gave for "an ordinary dependency bump."
- * The gzip budget is untouched: `ENTRY_GZIP_BUDGET_BYTES` still passes, since
- * short repeated UI strings compress well.
+ * not in the new panel's own code.
+ *
+ * A FIFTH BUMP, LANDING BESIDE INTEGRATIONS RATHER THAN AFTER IT: the
+ * cache-timer countdown (`domain/cache-timer.ts`, `panels/
+ * CacheCountdown.tsx`, `panels/cache-timer-clock.ts`, three new `Session`
+ * fields threaded through `SessionList.tsx`, and the sidebar's first-ever
+ * use of lucide's `Timer` glyph) is eager by necessity -- it draws in the
+ * sidebar, which every load already pays for, so there is no lazy boundary
+ * to move it behind the way `SettingsOverlay` and `FilesTab` were. Both
+ * features were developed in parallel off the same earlier base and landed
+ * on `main` one after the other, so this branch's own honest baseline is
+ * Integrations' OWN "after" figure above, not the older commit this branch
+ * actually forked from -- re-measured fresh against the combined tree
+ * rather than carrying forward a number a since-landed sibling PR had
+ * already made stale.
+ *
+ * Measured, `electron-vite build`, same code and chunks both times:
+ *
+ *     entry, before (main, with Integrations already on it)   691,861 B
+ *     entry, after (this branch, on top of that)              694,918 B  (+3,057 B, +0.44%)
+ *
+ * `ENTRY_BUDGET_BYTES` moves to 698,300 -- about 0.5% above the measured
+ * "after", a few hundred bytes of headroom for an ordinary dependency patch
+ * rather than the ~10% a lazy split earns: this is organic feature weight in
+ * the eager path, not a chunk that could be moved out of it, so the bar
+ * stays close to what was actually measured instead of inviting the next
+ * eager feature to spend a whole percent before this test notices. The gzip
+ * budget is untouched: `ENTRY_GZIP_BUDGET_BYTES` still passes, since short
+ * repeated UI strings and cache-timer's own small addition both compress
+ * well.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -128,7 +150,7 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 // depends on is even present, decided BEFORE anything tries to build.
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
-const ENTRY_BUDGET_BYTES = 692_500;
+const ENTRY_BUDGET_BYTES = 698_300;
 const ENTRY_GZIP_BUDGET_BYTES = 212_000;
 
 // The one string this repo's markdown stack ships that nothing else in the

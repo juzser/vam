@@ -58,6 +58,7 @@ import {
   type Prefs,
   paletteFor,
   paletteValue,
+  setCacheTimer,
   setConciseOutput,
   setDefaultProvider,
   setEditorHighlight,
@@ -1279,6 +1280,35 @@ export function SettingsOverlay({
                 <p data-submit-key-note className="mt-3 max-w-[52ch] text-control text-ink-dim">
                   the other one takes a newline, so the box stays multiline either way. The composer
                   says which is which while you type.
+                </p>
+              </Block>
+
+              {/* Operator, translated from Orca's own Agents settings: "Claude
+                  caches your conversation to reduce costs. When idle too long
+                  the cache expires and the next message resends full context
+                  at higher cost. This shows a countdown so you know when to
+                  resume." HERE, beside the provider and the send key, because
+                  it is the same family: a fact about how a Claude Code
+                  session is being driven, not about how vam looks
+                  (`sections.ts`'s own rule for the line between Appearance
+                  and Behaviour applies here too -- name the thing the
+                  operator is choosing). `SessionList.tsx`'s `CacheCountdown`
+                  is the row this gates; `domain/cache-timer.ts` is the rule. */}
+              <Block
+                name="cache-timer"
+                label={t('settings.sessions.cacheTimer.label')}
+                hint={t('settings.sessions.cacheTimer.hint')}
+              >
+                <Switch
+                  name="cache-timer"
+                  label={t('settings.sessions.cacheTimer.label')}
+                  checked={prefs.cacheTimer}
+                  onChange={(next) => onChange(setCacheTimer(prefs, next))}
+                  on={t('settings.sessions.cacheTimer.on')}
+                  off={t('settings.sessions.cacheTimer.off')}
+                />
+                <p data-cache-timer-note className="mt-3 max-w-[52ch] text-control text-ink-dim">
+                  {t('settings.sessions.cacheTimer.note')}
                 </p>
               </Block>
             </Panel>

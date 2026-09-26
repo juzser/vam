@@ -755,6 +755,12 @@ export async function loadClaudeCodeProjects(
       // first timestamped line, then its mtime, and `null` is honest when
       // none of the four answers.
       createdAt: isoOrNull(await createdAtMsOf(read, path, agent.startedAt)),
+      // THE SAME TAIL `decisions` ALREADY COST, read a second way
+      // (`cache-activity.ts`). `null` is a real reading -- this window held
+      // no cache-bearing line -- and is exactly what the sidebar's countdown
+      // treats as "nothing to draw".
+      lastCacheActivityAt: read.facts.cache.lastCacheActivityAt,
+      cacheTtlMs: read.facts.cache.cacheTtlMs,
       branch,
       // Absent, not empty, when nobody injected a reader: an empty list is
       // "vam asked GitHub and this branch has none", which a load that never
