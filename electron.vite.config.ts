@@ -46,7 +46,15 @@ export default defineConfig({
     build: {
       minify,
       rollupOptions: {
-        input: { index: 'src/main/index.ts' },
+        // TWO ENTRIES, NOT ONE. `statsWorker` is `src/main/stats/worker.ts`,
+        // spawned by `scan-runner.ts` as a real `node:worker_threads` worker
+        // rather than imported — a worker needs a real file on disk to point
+        // `new Worker(path)` at, and a second rollup input is how
+        // electron-vite gives it one (`out/main/statsWorker.cjs`, bundled
+        // with the SAME externals as `index` — see `check-bundle-
+        // externals.mjs`, which checks both bundles for exactly the defect
+        // class an unbundled worker import would ship).
+        input: { index: 'src/main/index.ts', statsWorker: 'src/main/stats/worker.ts' },
         output: commonjsOutput,
         external,
       },
