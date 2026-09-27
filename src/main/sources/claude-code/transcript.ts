@@ -85,6 +85,16 @@ export type TranscriptFacts = {
    */
   readonly questions: readonly AgentQuestion[];
   /**
+   * The absolute byte offset of the ask behind each entry in `questions`,
+   * keyed by that occurrence's own `effectiveId` -- `collectQuestions`'s own
+   * `CollectedQuestions` type says why this is carried separately from
+   * `questions` itself rather than folded into it. Read by
+   * `source.ts`'s `readTranscript`, which hands it to `mergeOpenQuestion`
+   * (`question-index.ts`) so a reused id's numbering never has to agree
+   * across the two readers.
+   */
+  readonly questionOffsets: ReadonlyMap<string, number>;
+  /**
    * When Claude Code's own prompt cache was last read or written in this
    * window, and how long that touch lives -- `cache-activity.ts` carries the
    * whole rule. Always present, `NO_CACHE_ACTIVITY` included: this source
@@ -100,6 +110,7 @@ export const EMPTY_FACTS: TranscriptFacts = {
   activity: null,
   decisions: [],
   questions: [],
+  questionOffsets: new Map(),
   cache: NO_CACHE_ACTIVITY,
 };
 
@@ -835,13 +846,17 @@ export function summarizeLines(
 
   // Read off the SAME parsed lines: the questions and the cache reading are
   // each a second pass over the window already in memory, not a second read
-  // of the file.
+  // of the file. `collectQuestions` takes `located`, not the stripped `lines`
+  // above: it needs each ask's own byte offset now (`questionOffsets`,
+  // `CollectedQuestions`'s own header).
+  const { questions, offsets: questionOffsets } = collectQuestions(located);
   return {
     aiTitle,
     branch,
     activity,
     decisions,
-    questions: collectQuestions(lines),
+    questions,
+    questionOffsets,
     // `decisionIdPrefix` is the session's own stable id -- the same key
     // `idOf` above mints decision ids from -- so a poll whose own window
     // holds no write can still recall one an earlier poll of this session
