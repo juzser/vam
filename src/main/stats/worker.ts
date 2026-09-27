@@ -58,7 +58,7 @@
  * nothing to do with PRs (nothing is cached yet).
  */
 
-import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { open, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { parentPort, workerData } from 'node:worker_threads';
 import type { PrsCreated } from '../../shared/stats.js';
 import { readGhPrsCreated, toDateOnly } from './gh-prs.js';
@@ -131,6 +131,24 @@ async function main(input: WorkerInput): Promise<void> {
         return { size: s.size, mtimeMs: s.mtimeMs, ino: s.ino };
       } catch {
         return null;
+      }
+    },
+    // Reads the first `byteCount` bytes of `path` for `scan.ts`'s own
+    // fingerprint computation -- see `incremental-cache.ts`'s header for why
+    // the inode alone is not enough (a real CI machine reused one across a
+    // delete-and-recreate). `open`+`read`+`close` rather than a full
+    // `readFile`, so this never holds more than `byteCount` in memory
+    // regardless of the file's own size; `byteCount` is always
+    // `<= HEAD_FINGERPRINT_BYTES`, chosen by `scan.ts`, never this file.
+    readHead: async (path, byteCount) => {
+      const handle = await open(path, 'r');
+      try {
+        const buffer = Buffer.alloc(byteCount);
+        if (buffer.length === 0) return buffer;
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+        return bytesRead === buffer.length ? buffer : buffer.subarray(0, bytesRead);
+      } finally {
+        await handle.close();
       }
     },
     // 128KiB, not `readLinesFrom`'s own 1MiB default -- measured (see

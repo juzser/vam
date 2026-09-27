@@ -6,7 +6,17 @@
  * each driven by a real second scan of a real mutated file, with a spy
  * confirming HOW MUCH each scan actually read.
  */
-import { mkdir, mkdtemp, readdir, rm, stat, truncate, unlink, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  open,
+  readdir,
+  rm,
+  stat,
+  truncate,
+  unlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -67,6 +77,21 @@ function realDeps(overrides: Partial<ScanDeps> = {}): ScanDeps & { readCalls: nu
         return { size: s.size, mtimeMs: s.mtimeMs, ino: s.ino };
       } catch {
         return null;
+      }
+    },
+    // The SAME real head-read `worker.ts`'s own `readHead` does -- this
+    // file's whole point is falsifying the incremental cache against a REAL
+    // filesystem, and a fake fingerprint here would let a replace-detection
+    // bug hide behind a test that never actually reads a byte to catch it.
+    readHead: async (path: string, byteCount: number) => {
+      const handle = await open(path, 'r');
+      try {
+        const buffer = Buffer.alloc(byteCount);
+        if (buffer.length === 0) return buffer;
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+        return bytesRead === buffer.length ? buffer : buffer.subarray(0, bytesRead);
+      } finally {
+        await handle.close();
       }
     },
     readLines: async (path, fromByte, onLine) => {
@@ -218,17 +243,59 @@ describe('runFullScan', () => {
     await writeJsonl(path, [assistantLine()]);
     const first = realDeps();
     const { cache } = await runFullScan(first);
-    const inoBefore = (await stat(path)).ino;
 
+    // NEVER ASSERT THAT THE INODE CHANGES HERE. Measured on real CI (Linux,
+    // ext4/overlayfs): a delete-and-recreate can be handed the SAME inode
+    // number back by the filesystem -- legal, common, and exactly what a
+    // prior version of this test wrongly assumed could never happen
+    // (`expect(inoAfter).not.toBe(inoBefore)`, which failed there with
+    // "expected 9205339 not to be 9205339"). This test's own job is the
+    // OBSERVABLE BEHAVIOUR -- a full re-read, the right token count --
+    // never a claim about what any OS hands back for inode reuse; the
+    // in-place-replacement test right below this one is what specifically
+    // exercises the SAME-inode case.
     await unlink(path);
     await writeJsonl(path, [assistantLine({ timestamp: '2026-09-04T11:00:00.000Z' })]);
-    const inoAfter = (await stat(path)).ino;
-    expect(inoAfter).not.toBe(inoBefore); // the premise this test depends on
 
     const second = realDeps({ cache });
     const { snapshot } = await runFullScan(second);
     expect(second.readCalls).toEqual([0]);
     expect(snapshot.usageOverview.totalTokens).toBe(300);
+  });
+
+  it('INCREMENTAL: a file REPLACED IN PLACE (same inode, truncate + write — the one shape every OS keeps the inode for) is still read from scratch, never treated as an append', async () => {
+    const path = join(home, '.claude', 'projects', 'atlas', 's1.jsonl');
+    await writeJsonl(path, [assistantLine()]);
+    const first = realDeps();
+    const { cache } = await runFullScan(first);
+    const inoBefore = (await stat(path)).ino;
+
+    // Truncate, then write the new content IN PLACE -- the one replacement
+    // shape that keeps the inode on every OS, not just the ones that
+    // happen to reuse a freed one. The replacement is LONGER than the
+    // original: under the OLD "same inode -> safe to append" logic this
+    // would have been folded as a CONTINUATION of the old content (a
+    // stale cached aggregate plus a byte offset into a file whose bytes at
+    // that offset no longer mean what they used to) rather than read
+    // fresh -- the exact blind spot the head fingerprint closes.
+    await truncate(path, 0);
+    await writeFile(
+      path,
+      `${[
+        assistantLine({ timestamp: '2026-09-04T12:00:00.000Z' }),
+        assistantLine({ timestamp: '2026-09-04T13:00:00.000Z' }),
+      ]
+        .map((l) => JSON.stringify(l))
+        .join('\n')}\n`,
+      { flag: 'r+' },
+    );
+    const inoAfter = (await stat(path)).ino;
+    expect(inoAfter).toBe(inoBefore); // the premise THIS test depends on
+
+    const second = realDeps({ cache });
+    const { snapshot } = await runFullScan(second);
+    expect(second.readCalls).toEqual([0]); // a FULL re-read, not an append from the stale offset
+    expect(snapshot.usageOverview.totalTokens).toBe(600); // only the two NEW lines
   });
 
   it('marks a provider with no directory at all as disabled and without data', async () => {

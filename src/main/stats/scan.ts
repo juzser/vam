@@ -60,6 +60,8 @@ import {
   type CacheStore,
   emptyCacheStore,
   type FileStat,
+  HEAD_FINGERPRINT_BYTES,
+  headFingerprintOf,
   planRead,
 } from './incremental-cache.js';
 
@@ -163,6 +165,14 @@ export type ScanDeps = {
   readonly readdir: (path: string) => Promise<readonly string[]>;
   readonly isDirectory: (path: string) => Promise<boolean>;
   readonly statOf: (path: string) => Promise<FileStat | null>;
+  /** Reads up to `byteCount` bytes from the START of `path` — the raw
+   *  primitive `processFile` calls (with a window it chooses, see this
+   *  module's own header) to compute a head fingerprint via
+   *  `headFingerprintOf`. Never the whole file: `byteCount` is always
+   *  `<= HEAD_FINGERPRINT_BYTES`. Returns fewer bytes than asked for a file
+   *  shorter than `byteCount` (down to zero for an empty file), the same
+   *  short-read contract every real `fs.read` already has. */
+  readonly readHead: (path: string, byteCount: number) => Promise<Uint8Array>;
   readonly readLines: (
     path: string,
     fromByte: number,
@@ -296,7 +306,25 @@ async function processFile(
   const stat = await deps.statOf(candidate.path);
   if (stat === null) return deps.cache.files[candidate.path];
   const prevEntry = deps.cache.files[candidate.path];
-  const plan = planRead(prevEntry, stat);
+
+  // The COMPARISON window: capped by the file's PREVIOUSLY KNOWN size (or
+  // today's, for a file with no prior entry at all -- there is nothing to
+  // compare against yet, but a fingerprint still needs to be read so THIS
+  // scan's own cache entry has one for NEXT time to compare against).
+  // Never the file's CURRENT size directly -- see this module's own header
+  // for why that would make an ordinary append past a small file's own
+  // boundary look like a replacement.
+  const compareWindow = Math.min(HEAD_FINGERPRINT_BYTES, prevEntry?.size ?? stat.size, stat.size);
+  let compareFingerprint: string;
+  try {
+    compareFingerprint = headFingerprintOf(await deps.readHead(candidate.path, compareWindow));
+  } catch {
+    // The file vanished or refused between `statOf` and this read — keep
+    // whatever was already cached rather than losing it to a race.
+    return prevEntry;
+  }
+
+  const plan = planRead(prevEntry, stat, compareFingerprint);
   if (plan.kind === 'skip') return prevEntry;
 
   const agg: MutableAggregate =
@@ -363,10 +391,32 @@ async function processFile(
   agg.malformedLines = malformed;
   agg.currentModel = currentModel;
 
+  // The PERSISTED fingerprint: over the file's CURRENT size (capped), so
+  // NEXT scan's comparison window is `min(HEAD_FINGERPRINT_BYTES, THIS
+  // scan's size)` -- exactly what `compareWindow` above expects from
+  // `prevEntry.size` next time. Reuses `compareFingerprint` whenever that
+  // was already computed over the same window (the common case: an
+  // unchanged or freshly-full-read file, where `prevEntry` was undefined or
+  // `stat.size <= (prevEntry?.size ?? stat.size)`), so a file under
+  // `HEAD_FINGERPRINT_BYTES` never pays for a second read of its own head in
+  // the same scan. Falls back to `prevEntry`'s own fingerprint (never
+  // undefined) if this second read fails -- a rare race between the content
+  // read above and this one, not worth losing the whole file's fold over.
+  const persistWindow = Math.min(HEAD_FINGERPRINT_BYTES, stat.size);
+  let persistFingerprint = compareFingerprint;
+  if (persistWindow !== compareWindow) {
+    try {
+      persistFingerprint = headFingerprintOf(await deps.readHead(candidate.path, persistWindow));
+    } catch {
+      persistFingerprint = prevEntry?.headFingerprint ?? compareFingerprint;
+    }
+  }
+
   return {
     size: stat.size,
     mtimeMs: stat.mtimeMs,
     ino: stat.ino,
+    headFingerprint: persistFingerprint,
     offset: bytesConsumed,
     state: agg,
   };
