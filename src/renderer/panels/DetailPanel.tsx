@@ -10272,8 +10272,18 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
               // so there is no baseline left to anchor the buttons to --
               // both are now fixed-height, single-line siblings. Desktop
               // keeps the original two-row `flex-col`, untouched.
+              //
+              // NO `px-*` OF ITS OWN ANY MORE (coordinator follow-up: "the
+              // input should be roughly ≥230px wide" -- it measured 205px
+              // with this row's own `px-2.5` stacked on top of
+              // `data-composer-bar`'s `px-3.5`, the SAME double-padding
+              // shape `data-prompt-box`'s own vertical history above already
+              // paid down once for height. The key-strip nav one row up
+              // carries no padding of its own either, relying solely on the
+              // bar's; this row now matches it, and the reclaimed 20px goes
+              // straight to the pill, the row's one `flex-1` item.
               phone
-                ? 'flex-row flex-wrap items-center gap-x-2 gap-y-1.5 px-2.5'
+                ? 'flex-row flex-wrap items-center gap-x-1.5 gap-y-1.5'
                 : 'flex-col gap-2.5 px-3 py-2.5',
               // PHONE: the focus ring moves to the pill, which is the thing
               // it is a ring FOR (Orca draws it on the input alone, never on
@@ -10302,10 +10312,18 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
               items-start gap-2`. */}
             <div
               data-prompt-input
+              // PHONE: NO `py-*` OF ITS OWN (coordinator follow-up: measured
+              // at 56px tall for one line -- the textarea's own `.vam-tap`
+              // floor already forces 44px, and this pill's OWN `py-1.5`
+              // (6px top/bottom) was padding a box that had already stopped
+              // needing it, stacking a second floor on top of the first the
+              // same way `data-prompt-box`'s own `py-*` once did (see that
+              // div's history above). Dropping it lands the pill back at the
+              // textarea's own 44px, inside the requested 40-44px band.
               className={
                 phone
                   ? [
-                      'flex min-w-0 flex-1 items-center gap-2 rounded-[10px] border bg-card px-3 py-1.5',
+                      'flex min-w-0 flex-1 items-center gap-2 rounded-[10px] border bg-card px-3',
                       active && actionIndex === 0 ? 'border-waiting' : 'border-line-loud',
                     ].join(' ')
                   : 'contents'
@@ -10761,7 +10779,30 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                   Send) inside `data-prompt-tools`, which is exactly where it
                   already sits in DOM order. */}
               {phone && (
-                <div data-popover-root="phone-overflow" className="flex-none">
+                // `w-[30px]`, not an auto `flex-none` width: this wrapper's
+                // only child (the button) carries the negative horizontal
+                // margin `[data-composer-action]`'s own rule gives it
+                // (`styles.css`) to close the gap between the three composer
+                // buttons, and ANY AUTO-SIZED CONTAINER SHRINKS TO ITS
+                // CHILD'S MARGIN BOX, negative margins included -- measured
+                // directly: this wrapper's own `getBoundingClientRect()` read
+                // 34px (44 - 2*5, an earlier -5px margin) wide with an auto
+                // `flex-none` width, not the button's real 44px, which threw
+                // off the FIRST of the row's two gaps relative to the second
+                // (dictate/Send are bare flex items of `data-prompt-tools`
+                // already sized this same way, so they agreed with each
+                // other and only this wrapper disagreed). `30px` is the
+                // button's own 44px CONTENT box minus the same `2 * 7px`
+                // margin `styles.css`'s rule applies -- the same effective
+                // width a bare button contributes as a flex item -- so this
+                // wrapper now behaves exactly like its two siblings, and the
+                // button inside it overflows the wrapper's own (now
+                // explicit, not auto) box by 7px on each side rather than
+                // shrinking it.
+                <div
+                  data-popover-root="phone-overflow"
+                  className="flex w-[26px] flex-none items-center"
+                >
                   <button
                     type="button"
                     data-composer-overflow

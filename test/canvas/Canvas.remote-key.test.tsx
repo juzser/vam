@@ -49,9 +49,17 @@ function press(key: string) {
   });
 }
 
+/**
+ * Which section the overlay opened ON, read off the nav's own "current"
+ * pointer rather than off a `hidden` panel: the cards restructure put every
+ * card on screen at once, so `[data-settings-panel]:not([hidden])` now
+ * matches ALL of them (only a card's own fold, not its section, ever carries
+ * `hidden`) -- `aria-current` is the one thing that still names a single
+ * destination.
+ */
 function activePanel(): string | null {
-  const panel = document.querySelector('[data-settings-panel]:not([hidden])');
-  return panel?.getAttribute('data-settings-panel') ?? null;
+  const item = document.querySelector('[data-settings-nav-item][aria-current="true"]');
+  return item?.getAttribute('data-settings-nav-item') ?? null;
 }
 
 beforeAll(() => {
@@ -96,11 +104,11 @@ describe('the Remote surface is reachable by keystroke', () => {
     expect(activePanel()).toBe('remote');
   });
 
-  it('`,` still opens Settings on Appearance — the two keys stay distinct', async () => {
+  it('`,` still opens Settings on Interface — the two keys stay distinct', async () => {
     render(<Canvas model={MODEL} />);
     press(',');
     await waitFor(() => {
-      expect(activePanel()).toBe('appearance');
+      expect(activePanel()).toBe('interface');
     });
   });
 

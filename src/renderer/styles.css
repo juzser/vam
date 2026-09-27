@@ -2882,6 +2882,46 @@ html {
   border-radius: 9999px;
 }
 
+/* THE GAP BETWEEN THESE THREE BUTTONS, closed the same way the composer's own
+ * height was: the PAINT shrinks, the 44px HIT never does.
+ *
+ * Coordinator, measured against a real screenshot: "the +/mic/Send centres
+ * sit ~50px apart, with ~16px+ empty space between them... shrink the gaps
+ * between the buttons." The arithmetic behind that 16px: two adjacent 44px
+ * `.vam-tap` boxes with a 30px skin centred in each carry 7px of transparent
+ * padding on every side (`(44-30)/2`), so even a 0px `gap` between the BOXES
+ * still reads as 14px of empty paint between the ICONS -- and `data-prompt
+ * -tools`'s own `gap-1` (4px) on top of that is where the ~16-18px came
+ * from. Shrinking the 44px hit floor was the other option this row's own
+ * coordinator message named and explicitly did not want ("don't... silently
+ * shrink them"), so this is the first one: a negative margin small enough to
+ * close most of that 14px of PADDING overlap without moving the layout's own
+ * `gap-1`, which stays for the one seam that needs no closing (the row's own
+ * leading edge, `data-prompt-tools` itself against the pill it sits beside).
+ *
+ * `-7px` on both sides of every one of the three, against `data-prompt
+ * -tools`'s own 4px `gap`, targets a painted gap of `4px container gap + 2 *
+ * 7px pad - 2 * 7px margin = 4px` between two adjacent skins -- measured
+ * directly rather than trusted to the arithmetic alone: real Chromium reads
+ * a 4px painted gap between every adjacent pair at both 360 and 390px
+ * (`e2e/phone-composer-layout.pw.ts`), matching the ≤4px ask.
+ *
+ * THE TRADE-OFF, NAMED RATHER THAN HIDDEN: two adjacent 44px boxes pulled 7px
+ * closer on each facing side overlap by 14px where they meet, and a flex
+ * item later in DOM order paints (and hit-tests) on top of an earlier one in
+ * that shared strip -- so "+"'s own trailing 14px and dictate's own trailing
+ * 14px are each covered by the sibling drawn after them. Every button's OWN
+ * `getBoundingClientRect()` still reads a full 44x44 (margin is never part of
+ * that box, `e2e/phone-shell.pw.ts`'s 44px floor guard stays green), and a
+ * tap anywhere near a button's own PAINTED icon -- which is what an operator
+ * actually aims at -- lands nowhere near the 14px sliver at its trailing
+ * edge. Send, the last of the three, has nothing after it to cede ground to
+ * and keeps its own full reach on both sides. */
+.vam-phone [data-prompt-tools] .vam-tap[data-composer-action] {
+  margin-left: -7px;
+  margin-right: -7px;
+}
+
 /* A COLOUR SWATCH CANNOT HOLD A `[data-tap-skin]`, so its paint comes inward
  * from the other side. `input[type=color]` has no children to mark, and the
  * disc it paints fills the control -- so at the 44 the phone floor asks for, a

@@ -113,7 +113,7 @@ describe('every chord-painting surface routes a Mac glyph through ChordGlyphs', 
           theme="dark"
           onChange={() => {}}
           onClose={() => {}}
-          initialSection="sessions"
+          initialSection="agents"
         />,
       );
       expect(document.querySelector('[data-submit-key-option="shift-enter"]')).not.toBeNull();

@@ -80,6 +80,20 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * markdown split above already established -- enough to absorb an ordinary
  * dependency bump without flapping, but a reverted lazy split on either
  * component puts its chunk straight back into the entry and fails both
+ *
+ * A FOURTH, SMALL, DELIBERATE BUMP: the Stats & Usage entry icon
+ * (`SessionList.tsx`'s avatar bar) is eagerly-loaded chrome, same as every
+ * other icon there, and `StatsScreen` itself is lazy on `SettingsOverlay`'s
+ * own idiom (`StatsScreen-*.js`, fetched on first open, never in this
+ * chunk). Measured, `electron-vite build`, after that one icon and its
+ * button: entry 690,589 B -- 589 B past the PREVIOUS 690,000 budget, which
+ * itself already carried the ~10% headroom the markdown/settings split
+ * established, so this is not that same category of change and does not
+ * earn a second helping of it.
+ *
+ * `ENTRY_BUDGET_BYTES` moves to 691,000 -- just past the measured figure,
+ * not a fresh 10%: this is one icon, not a split, and the budget should
+ * still notice the NEXT one that lands without a reason.
  * budgets outright.
  *
  * A FOURTH GROWTH, ORDINARY THIS TIME RATHER THAN A REGRESSION: the ADHD
@@ -293,6 +307,97 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * moves 212,000 -> 213,000: enough to clear #522's own small, unrelated
  * contribution to the shared gzip stream with the same order of slack every
  * bump above uses, not a fresh re-baseline.
+ *
+ * THE SETTINGS CARDS RESTRUCTURE (Appearance split into Interface, Terminal
+ * and Window & Sidebar; Sessions renamed Agents; four new primitives)
+ * TOUCHES NEITHER BUDGET, and is the first entry here that does not. It is a
+ * pure re-layout of code and strings already behind `SettingsOverlay`'s own
+ * lazy boundary -- no new eager import, no new eager component -- so its
+ * whole cost lands in the `SettingsOverlay-*.js` chunk this file does not
+ * budget (lazy chunks are checked for existence and for the entry's absence
+ * from them, never for size). Measured with a merge-base worktree build at
+ * this PR's own merge-base (`main`, 3ea57e75) and at this branch's tip, same
+ * code and chunks both times, `electron-vite build --mode production`:
+ *
+ *     entry, merge-base       695,970 B  (209,465 B gzip)
+ *     entry, this PR          696,124 B  (209,544 B gzip)  (+154 B, +0.02%)
+ *     SettingsOverlay chunk, merge-base    76,458 B
+ *     SettingsOverlay chunk, this PR       80,171 B  (lazy; unbudgeted)
+ *
+ * +154 B eager / +79 B gzip -- the new icons (`PanelLeft`, `SquareTerminal`)
+ * `sections.ts` now imports, which is also reachable eagerly from
+ * `SessionList.tsx`/`canvas-overlays.ts` (the same reason the Integrations
+ * bump above measured `sections.ts`'s own nav metadata as eager cost). Both
+ * budgets keep the headroom the Integrations/cache-timer bump left them
+ * (699,500 - 696,124 = 3,376 B eager; 212,000 - 209,544 = 2,456 B gzip), so
+ * neither constant moves -- "bump only by the measured need," and the
+ * measured need here is comfortably inside what is already there.
+ *
+ * MEANWHILE, IN PARALLEL, `main` ALSO GREW: THIS STATS & USAGE PR THEN
+ * MERGED `main` AGAIN, and `main` had grown on
+ * its own in the meantime (`phone: FAB project picker, touch-reachable
+ * project controls, session preview line`, #527, 3eb46bbb) -- eager because
+ * the FAB and its icons draw in the phone shell chrome, no lazy boundary to
+ * hide behind. Measured with a merge-base worktree build at #527's own tip
+ * (no Stats & Usage PR at all) and at this branch's own merge commit
+ * (carrying #527 plus every Stats & Usage round), same code and chunks both
+ * times, `electron-vite build --mode production`:
+ *
+ *     entry, main alone (#527, no Stats & Usage)   699,217 B
+ *     entry, merged (#527 + Stats & Usage)         700,155 B  (+938 B)
+ *
+ * The 699,500 budget above had already been eaten down to 283 B of headroom
+ * by #527 alone, unrelated to anything in this PR; this PR's own Stats &
+ * Usage additions (the icon tiles' `i18n/strings.ts` labels -- that
+ * catalogue is entirely eager regardless of which screen reads it, see the
+ * ADHD-card paragraph above) are the +938 B that tips it over, not an
+ * outsized cost of their own. `ENTRY_BUDGET_BYTES` moves 699,500 -> 702,000:
+ * the real merged figure (700,155 B) plus ~1.8 KB (~0.26%) of slack, the
+ * same small-headroom convention every bump above uses -- not a fresh
+ * re-baseline. `ENTRY_GZIP_BUDGET_BYTES` stays at 212,000: this merge's gzip
+ * figure does not approach it.
+ *
+ * THE SETTINGS CARDS BRANCH AND THIS STATS & USAGE TREE (which already
+ * carries #527) THEN MERGED INTO EACH OTHER, each having budgeted for its
+ * own delta alone (696,124 B measured, no bump vs. 700,155 B measured,
+ * bumped to 702,000) -- neither figure accounted for the other landing too,
+ * so the merge needed a real remeasurement rather than trusting either
+ * arithmetic in isolation, the same lesson the ADHD-card/Integrations merge
+ * above already drew. Measured with a worktree build at the true common
+ * ancestor of both trees (810e9e06, before either the settings-cards round 2
+ * work or the #527/Stats & Usage work landed) and at this merge commit
+ * carrying all of it, same code and chunks both times, `electron-vite build
+ * --mode production`:
+ *
+ *     entry, common ancestor (neither tree's own further work)   699,332 B  (210,827 B gzip)
+ *     entry, merged (settings cards + #527 + Stats & Usage)      700,444 B  (211,154 B gzip)
+ *
+ * +1,112 B eager / +327 B gzip combined -- both trees' own work above this
+ * common ancestor was already accounted for in each side's separate
+ * "before/after" pairs; this remeasurement is the two SIDES combining from
+ * that shared point, not a third source of growth. `ENTRY_BUDGET_BYTES`
+ * stays at 702,000: the real merged figure (700,444 B) leaves 1,556 B of
+ * headroom, so this merge does not need to move it -- the Stats & Usage bump
+ * above already covers it. `ENTRY_GZIP_BUDGET_BYTES` stays at 212,000: the
+ * merged gzip figure (211,154 B) leaves 846 B of headroom under it.
+ *
+ * THIS PHONE-COMPOSER FOLLOW-UP BRANCH AND THE SETTINGS-CARDS TREE (which
+ * already carries #527 and Stats & Usage) THEN MERGED INTO EACH OTHER, each
+ * having budgeted for its own delta alone (707,700 on this side, 702,000 on
+ * `main`'s) -- neither figure accounted for the other landing too, so this
+ * merge needed a real remeasurement rather than trusting either arithmetic in
+ * isolation, the same lesson every merge paragraph above already draws.
+ * Measured, `electron-vite build --mode production`, on this merge commit
+ * (both trees combined, plus the composer/key-strip gap-tightening follow-up
+ * in the same commit):
+ *
+ *     entry, merged (phone composer follow-up + settings cards + #527 + Stats & Usage)   706,044 B  (212,509 B gzip)
+ *
+ * Both budgets hold WITHOUT moving: 707,700 - 706,044 = 1,656 B of headroom
+ * left (0.23%), 213,000 - 212,509 = 491 B left (0.23%) -- thinner than this
+ * file's usual ~0.5% convention, but a real measured pass is a real measured
+ * pass; the next PR to land here should expect to remeasure and bump rather
+ * than assume either number still has room.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
