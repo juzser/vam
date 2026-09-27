@@ -26,7 +26,7 @@
  * out is asserted to be BOTH bound and PAINTED where the operator is typing.
  */
 
-import { act, cleanup, fireEvent, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Decision, Project, Session, SessionStatus } from '../../src/renderer/domain/model.js';
@@ -176,11 +176,35 @@ describe('Escape interrupts the session the composer is aimed at', () => {
     expect(note()).toContain('not sent');
   });
 
-  it('reports a missing bridge instead of interrupting nothing in silence', () => {
+  it('falls back to the remote channel with no window.api at all, rather than sending nothing in silence', async () => {
     // No `window.api` at all — the browser build, or Electron before preload.
+    // `typePaneStrokes` no longer refuses instantly here: Escape is one of
+    // the six `paneKeyToRemoteKeyId` answers for (`shared/remote-key.ts`),
+    // so a browser tab with no local bridge still has `/api/send-key`
+    // (`send-key-remote.ts`) to try, the same fallback the phone keystroke
+    // strip takes — this composer already shares that channel with the
+    // strip, per this file's own header, and the fallback is a property of
+    // the channel, not of `phone` being set. `DetailPanel.keystroke-strip
+    // .test.tsx`'s own "falls back to the remote channel" test covers the
+    // full round trip (a stubbed refusal, `/api/send-key`'s exact POST); this
+    // one only checks the composer's Escape reaches the same fallback rather
+    // than the old instant "no keyboard" refusal.
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => ({
+      json: async () => ({ ok: true, value: null }),
+    })) as unknown as typeof fetch;
     draw();
-    fireEvent.keyDown(box(), { key: 'Escape' });
-    expect(note()).toContain('no keyboard into a session');
+    await act(async () => {
+      fireEvent.keyDown(box(), { key: 'Escape' });
+    });
+    await waitFor(() => {
+      expect(note()).toContain('sent');
+    });
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      '/api/send-key',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    globalThis.fetch = originalFetch;
   });
 });
 

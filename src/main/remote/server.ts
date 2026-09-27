@@ -28,6 +28,20 @@
  * socket here. The bearer token is what separates reaching the port from being
  * allowed to use it. `Tailscale-User-*` headers are proxy-asserted and forgeable
  * by anything local, so they are never read as a credential.
+ *
+ * ONE NARROW EXCEPTION TO "no terminal surface", `/api/send-key`
+ * (`send-key.ts`): the phone's keystroke strip has no `window.api.terminal
+ * .send` to press (that bridge exists only in the Electron shell), so this
+ * route sends ONE key from a FIXED SIX-KEY ALLOWLIST -- Escape, Tab, Enter,
+ * Shift-Tab, Space, Backspace, never free text -- into a session's own tmux
+ * pane, resolved the same confined way `recordPrompt` resolves one (exact
+ * `=name` tmux targets, never a client-supplied pane name). Same auth,
+ * same pairing, same rate limit as every other write route here; it proves
+ * its pairing fresh on every call rather than caching one, unlike the
+ * desktop aim-cache (`terminal/ipc.ts`'s `AIM_TTL_MS`). `UNSERVED.terminal`,
+ * below, still means what it always meant for everything else the terminal
+ * surface is -- reading a pane, resizing it, answering a trust prompt, and
+ * sending ARBITRARY text into a running agent all stay unserved.
  */
 
 import { realpath } from 'node:fs/promises';
@@ -51,6 +65,7 @@ import {
 } from './auth.js';
 import type { PairedDevice } from './devices.js';
 import type { PairOutcome } from './pairing.js';
+import { isRemoteKeyId, type RemoteKeyId, sendRemoteKey } from './send-key.js';
 
 /** The one address this server may ever bind. */
 export const LOOPBACK = '127.0.0.1';
@@ -434,8 +449,11 @@ export const UNSERVED: Partial<Record<keyof SourceCapabilities | 'files', string
   renameSession: 'the remote endpoint carries no rename route',
   governance: 'the remote endpoint carries no waiver or lesson routes',
   terminal:
-    'the remote endpoint does not expose the terminal surface: read, send, answer ' +
-    'and resize type into a running agent and need their own rate limit and decision',
+    'the remote endpoint does not expose the full terminal surface: read, resize, ' +
+    'answer and sending arbitrary text each type into a running agent and need ' +
+    'their own rate limit and decision. `/api/send-key` is the one narrow ' +
+    'exception -- a single key, from a fixed six-key allowlist, the same channel ' +
+    'the phone keystroke strip presses over (`send-key.ts`, `shared/remote-key.ts`)',
   files:
     'the remote endpoint carries no file-read, file-write, file-listing or ' +
     'reference-resolving route: arbitrary file access over a network is at least ' +
@@ -762,6 +780,45 @@ function routesFor(options: RemoteServerOptions): Map<string, { method: string; 
           b.provider as string | undefined,
         ) ?? null,
       confineToProjectSet,
+    ],
+    [
+      /**
+       * THE PHONE'S ROUTE INTO A RUNNING AGENT, ONE ALLOWLISTED KEY AT A TIME
+       * -- see `send-key.ts`'s own header for the whole argument (root cause,
+       * resolution, and why an arrow-free six-key allowlist is the entire
+       * surface). Registered here, under the SAME `allowWrites` gate every
+       * other write is, with the SAME auth, pairing and rate limits `write()`
+       * already gives `/api/record-prompt` -- nothing about this route is a
+       * new decision at the transport layer, only a new, narrow ACT at the
+       * source layer.
+       *
+       * `call` DOES NOT DISPATCH THROUGH `s.*`, unlike every write above it --
+       * there is no `MainSource` member for this, deliberately: the write
+       * this feeds is tmux-specific in a way none of `MainSource`'s twelve
+       * members are (`sendToPane`, `terminal/pane.ts`), and inventing a
+       * capability boolean plus a combine.ts routing rule for one narrow,
+       * security-reviewed act would be the opposite of minimal. The ONE
+       * check that stands in for that routing: at least one configured
+       * source has to BE `claude-code`, checked here rather than trusted,
+       * because `sendRemoteKey` itself has no source list to consult and
+       * would otherwise spawn `claude agents --json` looking for a session
+       * that could never be one of vam's own tmux panes on a Codex-only
+       * deployment.
+       */
+      '/api/send-key',
+      'sendKey',
+      (b) => isText(b.sessionId) && isRemoteKeyId(b.key),
+      (_source, b) => {
+        if (!options.sources.some((s) => s.descriptor.id === 'claude-code')) {
+          return Promise.resolve({
+            kind: 'refused' as const,
+            code: 'unsupported:sendKey',
+            message: 'no source here manages a tmux terminal to send a key into',
+          });
+        }
+        return sendRemoteKey(b.sessionId as string, b.key as RemoteKeyId);
+      },
+      undefined,
     ],
   ];
   for (const [path, name, valid, call, guard] of writes) {

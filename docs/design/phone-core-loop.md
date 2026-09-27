@@ -843,3 +843,53 @@ Verified in `test/panels/DetailPanel.phone-earlier-turns.test.tsx`
 `[data-column-more-ask]`, `[data-column-more-note]` — are gone from the
 DOM on phone, not merely hidden) and falsified (forcing the phone branch
 off reddens all six before the branch is restored).
+
+### 4.9 PR 1 follow-up — single line, tighter gaps, reversing §4.7's own growth
+
+Two operator reports against the shipped screenshot, in order: first
+"the buttons are big and cover most of the input... do it like Orca's
+mobile," then, after a stacked-pill draft of this same fix was described
+back to them, the REVERSAL that actually shipped: "the mobile prompt
+input is single line only; shrink the spacing between the buttons to the
+right of the input" — and, separately, "reduce the spacing between the
+quick buttons above the prompt input."
+
+**Growth, undone.** §4.7's own `field-sizing: content` was already gone by
+this point (closed by a later PR's real-Chromium measurement, `resize
+TextareaToContent`'s `scrollHeight` effect standing in for it — see that
+function's own comment in `DetailPanel.tsx`); this follow-up stops calling
+that effect for a phone box at all (`useEffect`/`setInputRef` both gate on
+`!phone` now), so `rows={1}` plus `.vam-tap`'s own 44px floor is the whole
+of the phone box's height, permanently, with no cap left to hit.
+`whitespace-nowrap overflow-x-auto` replaces `overflow-y-auto`: a draft
+longer than the box is wide scrolls sideways now, never wraps down onto
+the buttons beside it the way a growing multi-row box could.
+
+**Tighter, not smaller hit boxes.** `data-prompt-tools`'s own `gap-1.5`
+(6px) drops to `gap-1` (4px), matching the key strip's identical change
+one row up; the three composer buttons' own painted skin shrinks from
+36px back to the app's generic 30px (`.vam-phone .vam-tap[data-composer
+-action] > [data-tap-skin]`, `styles.css`) — Orca's ~36px figure was right
+for a button GROUP beside the pill and a hair large once that pill was
+the only thing being asked to give up more width. The 44px hit floor is
+untouched on every button; the operator's own instruction was to report
+the trade-off rather than silently shrink it further, and there was none
+to report — `gap`/paint were the only two levers that cost the hit box
+nothing.
+
+**The key strip, the same two moves.** `[data-key-strip]`'s own gap
+drops the same 6px→4px, and every chip's own horizontal padding drops
+`px-1.5`→`px-1` (`DetailPanel.tsx`'s `data-tap-pill` skin) — both make
+room for more of the eight keys before the row's own edge, so fewer sit
+behind the "»" overflow at 360px. Captions shrink too, from a
+`chordSymbols`-computed chord plus a `" → agent"` suffix down to one
+hand-typed, platform-independent word or glyph per key (`Esc`, `Tab`,
+`⇧Tab`, `↵`, `Space`, `⌫`, `↑`, `↓` — `phone-key-labels.tsx`), and the
+strip's own order flips: the eight keys lead now, with the keyboard-
+toggle/screen/paste/» utility icons trailing them rather than blocking
+the way to Esc, the most-used key, at 360px.
+
+Measured figures (`e2e/phone-question-shots.mjs`, `e2e/phone-composer
+-layout.pw.ts`, `e2e/phone-key-strip-composer-shots.mjs`) are the PR
+body's own table, not repeated here — this section is the WHY, that
+table is the WHAT.
