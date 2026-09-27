@@ -398,6 +398,59 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * file's usual ~0.5% convention, but a real measured pass is a real measured
  * pass; the next PR to land here should expect to remeasure and bump rather
  * than assume either number still has room.
+ *
+ * MEANWHILE, ON A SIBLING BRANCH, THE PHONE TOOLBAR PASS (Orca one-row
+ * collapse, follow-up to pull request 527, then its own spacing/account-icon
+ * follow-up) MERGED `main` TWICE MORE: first the Stats & Usage PR (#518,
+ * squash-merged first), then Settings Cards (#528, "touches neither budget"
+ * -- the same pure re-layout the paragraph above already covers). Three
+ * independent, additive costs landing in the same eager entry: the toolbar
+ * pass touches phone-only render paths, Stats & Usage a desktop-only icon
+ * beside the account button, Settings Cards nothing eager at all. Measured
+ * with a merge-base worktree build at `main`'s own tip carrying all three
+ * (#527 + #518 + #528, d2c54b66 -- the same commit this branch's own
+ * paragraph above measures as "700,444 B (211,154 B gzip)") and at that
+ * branch's own merge commit, same code and chunks both times,
+ * `electron-vite build --mode production`:
+ *
+ *     entry, main (#527 + #518 + #528, before that merge)   700,444 B  (211,154 B gzip)
+ *     entry, merged (+ the phone toolbar pass)              705,616 B  (211,927 B gzip)  (+5,172 B, +0.74%)
+ *
+ * `ENTRY_BUDGET_BYTES` stayed at 707,000 on that branch: the real merged
+ * figure (705,616 B) left 1,384 B of headroom, so that merge did not need to
+ * move it -- the toolbar pass's own earlier bump already covered it.
+ * `ENTRY_GZIP_BUDGET_BYTES` stayed at 212,500: the merged gzip figure
+ * (211,927 B) left 573 B of headroom under it, the same reasoning. (That
+ * branch's own budget constants, 707,000/212,500, are SMALLER than this
+ * branch's own 707,700/213,000 above -- both are real, independently
+ * measured ceilings against the SAME 700,444 B starting point; the merge
+ * below reconciles them against one real number rather than picking either.)
+ *
+ * THIS PHONE-COMPOSER FOLLOW-UP (now carrying its own further round: the
+ * negative-margin button-group tightening and the composer-height guard's
+ * own 63px update, both documented in `e2e/phone-question-shots.mjs` and
+ * `styles.css`) AND THE PHONE TOOLBAR PASS THEN MERGED INTO EACH OTHER, each
+ * having budgeted for its own delta alone against the same 700,444 B
+ * starting point (707,700/213,000 on this side, 707,000/212,500 on the
+ * toolbar pass's) -- neither figure accounted for the other landing too, so
+ * this merge needed a real remeasurement rather than trusting either
+ * arithmetic in isolation, the same lesson every merge paragraph above
+ * already draws. Measured, `electron-vite build --mode production`, on this
+ * merge commit (composer follow-up + phone toolbar pass + settings cards +
+ * #527 + Stats & Usage, all combined):
+ *
+ *     entry, merged (all of the above)   711,242 B  (213,299 B gzip)
+ *
+ * Both figures land OVER the two branches' own separate budgets (707,700 /
+ * 213,000 here, 707,000 / 212,500 on the toolbar pass's side) -- neither
+ * side's own bump accounted for the other landing at the same time, the same
+ * gap every merge paragraph above has found. `ENTRY_BUDGET_BYTES` moves
+ * 707,700 -> 714,800: the real merged figure (711,242 B) plus ~3.6 KB
+ * (~0.5%) of slack, the same small-headroom convention every bump above
+ * uses. `ENTRY_GZIP_BUDGET_BYTES` moves 213,000 -> 214,400: the merged gzip
+ * figure (213,299 B) plus ~1.1 KB (~0.5%) of the same slack. The next PR to
+ * land here should expect to remeasure and bump rather than assume either
+ * number still has room.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -408,8 +461,8 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 // depends on is even present, decided BEFORE anything tries to build.
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
-const ENTRY_BUDGET_BYTES = 707_700;
-const ENTRY_GZIP_BUDGET_BYTES = 213_000;
+const ENTRY_BUDGET_BYTES = 714_800;
+const ENTRY_GZIP_BUDGET_BYTES = 214_400;
 
 // The one string this repo's markdown stack ships that nothing else in the
 // dependency graph or vam's own source does: `gfmTable`, the extension name

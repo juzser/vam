@@ -92,6 +92,7 @@ type Box = {
   readonly w: number;
   readonly h: number;
   readonly y: number;
+  readonly inToolbar: boolean;
 };
 
 /**
@@ -130,14 +131,29 @@ async function controls(page: Page): Promise<Box[]> {
             w: Math.round(r.width * 10) / 10,
             h: Math.round(r.height * 10) / 10,
             y: Math.round(r.y),
+            // NOT the popover this row's own funnel/grouping buttons open
+            // (`[data-filter-menu]`, drawn INSIDE `[data-phone-toolbar]`,
+            // `styles.css`'s own comment on the 30px rule this measures) --
+            // its own controls keep the ordinary 44px floor.
+            inToolbar:
+              el.closest('[data-phone-toolbar]') !== null &&
+              el.closest('[data-filter-menu]') === null,
           };
         })
         .filter((b) => b.w > 0 && b.h > 0),
   );
 }
 
+/**
+ * THE ONE NAMED EXCEPTION: `[data-phone-toolbar]` floors at 30, not 44 --
+ * the operator's own follow-up request to tighten this one row's spacing
+ * (`styles.css`'s own comment on the rule this measures). Everything else
+ * on the phone shell still has to clear 44.
+ */
 const undersized = (boxes: readonly Box[]) =>
-  boxes.filter((b) => b.w < 44 || b.h < 44).map((b) => `${b.w}x${b.h}  ${b.hooks || b.tag}  "${b.label}"`);
+  boxes
+    .filter((b) => (b.inToolbar ? b.w < 30 || b.h < 30 : b.w < 44 || b.h < 44))
+    .map((b) => `${b.w}x${b.h}  ${b.hooks || b.tag}  "${b.label}"`);
 
 /**
  * PINNED TO `needs-you`, DELIBERATELY, MERGED rather than overwritten. The
@@ -216,6 +232,7 @@ async function readSkins(page: Page): Promise<
     h: number;
     ownerW: number;
     ownerH: number;
+    inToolbar: boolean;
   }[]
 > {
   return page.$$eval('[data-phone-shell] [data-tap-skin]', (els) =>
@@ -231,6 +248,12 @@ async function readSkins(page: Page): Promise<
         h: Math.round(r.height * 10) / 10,
         ownerW: Math.round(o.width * 10) / 10,
         ownerH: Math.round(o.height * 10) / 10,
+        // Same exclusion `controls()` above carries, and for the same
+        // reason: `[data-filter-menu]`'s own skins keep the ordinary 44px
+        // floor, not this row's 30.
+        inToolbar:
+          el.closest('[data-phone-toolbar]') !== null &&
+          el.closest('[data-filter-menu]') === null,
       };
     }),
   );
@@ -428,11 +451,16 @@ test.describe('the phone shell at 390px', () => {
       `skins painting larger than ${SKIN_MAX_W}x${SKIN_MAX_H} (data-tap-pill exempt on width; ` +
         `data-composer-action exempt up to ${ACTION_MAX_W}x${SKIN_MAX_H})`,
     ).toEqual([]);
+    // THE TOOLBAR'S OWN SKINS FLOOR AT 30, NOT 44 -- the same named
+    // exception `undersized()` above carries, for the same reason
+    // (`styles.css`'s own comment on the rule this measures).
     expect(
       skins.length === 0
         ? ['no [data-tap-skin] on either phone screen -- this guard measured nothing']
-        : skins.filter((s) => s.ownerW < TOUCH_MIN || s.ownerH < TOUCH_MIN).map(fmt),
-      'skins whose owner stopped being a 44px touch target',
+        : skins
+            .filter((s) => (s.inToolbar ? s.ownerW < 30 || s.ownerH < 30 : s.ownerW < TOUCH_MIN || s.ownerH < TOUCH_MIN))
+            .map(fmt),
+      'skins whose owner stopped being a real touch target',
     ).toEqual([]);
   });
 
@@ -803,6 +831,10 @@ test.describe('settings at 390px', () => {
   async function openSettings(page: Page): Promise<void> {
     await openDemo(page);
     await expect(page.locator('[data-phone-shell] button[aria-label="settings"]')).toHaveCount(0);
+    // Remote is one tap further in now, behind the toolbar's "more actions"
+    // overflow button (Orca one-row pass, follow-up to pull request 527) --
+    // opening it is what reveals the Remote item this then taps.
+    await page.locator('[data-phone-shell] button[aria-label="more actions"]').first().tap();
     await page.locator('[data-phone-shell] button[aria-label="remote access"]').first().tap();
     await expect(page.locator('[data-settings-overlay]')).toBeVisible();
   }
@@ -928,6 +960,9 @@ test.describe('the overlay sheets at 390px', () => {
   // Through `remote access`: the gear is not drawn at 390px. What this test is
   // about is the SHEET the overlay becomes, not which control opens it.
   const openSettings = async (page: Page): Promise<Locator> => {
+    // Remote is one tap further in now, behind the toolbar's "more actions"
+    // overflow button (Orca one-row pass, follow-up to pull request 527).
+    await page.locator('[data-phone-shell] button[aria-label="more actions"]').tap();
     await page.locator('[data-phone-shell] button[aria-label="remote access"]').tap();
     return page.locator('[data-overlay-host]');
   };

@@ -122,10 +122,71 @@ describe('the phone shell’s hit areas', () => {
         // wrong about -- the row's close `x` is `display: none` here on
         // purpose, and the test below is what holds that.
         if (cs.display === 'none') return false;
+        // THE ONE NAMED EXCEPTION: `[data-phone-toolbar]` (the Orca one-row
+        // pass's own toolbar, `data-projects-header` on a phone) floors at
+        // 30px, not 44 -- the operator's own follow-up request, after
+        // looking at the shipped screenshot, to tighten this one row's
+        // spacing. `sizedFloor` below is what states and checks the number;
+        // this filter only carves the row out of the blanket floor so it is
+        // judged against ITS OWN rule instead of silently exempted from
+        // every rule.
+        if (el.closest('[data-phone-toolbar]') !== null) return false;
         return cs.minHeight !== '44px' || cs.minWidth !== '44px';
       })
       .map((el) => `${el.tagName} ${el.getAttribute('aria-label') ?? ''}`);
     expect(missed, 'controls the 44px rule does not reach').toEqual([]);
+  });
+
+  it('floors the toolbar row at 30px instead of 44, at the operator’s own request', () => {
+    // WCAG 2.2 SC 2.5.8 (AA, the level this repo must clear) sets a 24px
+    // floor; SC 2.5.5 (AAA, the aspirational one `TOUCH_MIN` above cites)
+    // asks for 44. This row trades the AAA figure for a denser toolbar on
+    // the operator's own explicit instruction -- "reduce the spacing... ≤4px
+    // between icons, compact ~28-32px painted icons" -- and stays 6px clear
+    // of the AA floor this repo still has to clear. Every OTHER phone
+    // control keeps 44; this is the one named, deliberate exception.
+    phone();
+    const toolbar = document.querySelector('[data-phone-toolbar]');
+    expect(toolbar, 'the phone toolbar row').not.toBeNull();
+    const toolbarControls = [
+      ...(toolbar as HTMLElement).querySelectorAll('button, [role="button"]'),
+    ].filter((el) => getComputedStyle(el).display !== 'none');
+    expect(toolbarControls.length, 'controls inside the toolbar row').toBeGreaterThan(4);
+    const wrong = toolbarControls
+      .filter((el) => {
+        const cs = getComputedStyle(el);
+        return cs.minHeight !== '30px' || cs.minWidth !== '30px';
+      })
+      .map((el) => `${el.tagName} ${el.getAttribute('aria-label') ?? ''}`);
+    expect(wrong, 'toolbar controls not floored at 30px').toEqual([]);
+  });
+
+  it('does not leak the 30px floor into the workspace-options popover it opens', () => {
+    // FALSIFIED ONCE ALREADY: the popover (`data-filter-menu`) is a DOM
+    // sibling drawn inside this same `[data-phone-toolbar]` row (it anchors
+    // to the row's own left edge), so a selector that floors "every
+    // `.vam-tap` under the toolbar" at 30px catches the popover's own Group
+    // by pills and Sort by/Hide-agent-worktrees rows too -- caught for real
+    // by `e2e/workspace-options-shots.mjs`'s "every control clears the 44px
+    // phone tap floor" on the real render, at 30px where it used to read
+    // 44. Those controls are not the toolbar's own seven; they keep 44.
+    phone();
+    act(() => {
+      (document.querySelector('[data-phone-shell] [data-group-toggle]') as HTMLElement).click();
+    });
+    const menu = document.querySelector('[data-filter-menu]');
+    expect(menu, 'the workspace-options popover').not.toBeNull();
+    const menuControls = [
+      ...(menu as HTMLElement).querySelectorAll('button, [role="radio"]'),
+    ].filter((el) => getComputedStyle(el).display !== 'none');
+    expect(menuControls.length, 'controls inside the popover').toBeGreaterThan(4);
+    const wrong = menuControls
+      .filter((el) => {
+        const cs = getComputedStyle(el);
+        return cs.minHeight !== '44px' || cs.minWidth !== '44px';
+      })
+      .map((el) => `${el.tagName} ${el.getAttribute('aria-label') ?? el.textContent ?? ''}`);
+    expect(wrong, 'popover controls dragged down to the toolbar’s own 30px floor').toEqual([]);
   });
 
   it('removes the hover-revealed close control rather than leaving it invisible', () => {
