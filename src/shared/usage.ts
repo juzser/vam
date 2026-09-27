@@ -190,10 +190,16 @@ export function formatCountdown(resetsAt: string, now: Date): string {
   return `${hours}h ${minutes}m`;
 }
 
-function formatWindow(window: UsageWindow, now: Date): string {
-  return window.kind === 'unknown'
-    ? '—'
-    : `${Math.round(window.percent)}% used · ${formatCountdown(window.resetsAt, now)}`;
+/** `used` (the shipped shape) or `remaining` -- the status bar's own toggle
+ *  (`prefs/status-bar-usage.ts`). The countdown never flips; only the
+ *  percentage's own direction and word do. */
+export type UsageDisplayMode = 'used' | 'remaining';
+
+function formatWindow(window: UsageWindow, now: Date, mode: UsageDisplayMode): string {
+  if (window.kind === 'unknown') return '—';
+  const percent = mode === 'remaining' ? 100 - window.percent : window.percent;
+  const word = mode === 'remaining' ? 'left' : 'used';
+  return `${Math.round(percent)}% ${word} · ${formatCountdown(window.resetsAt, now)}`;
 }
 
 /** True once either window is worth flagging in the "high usage" colour. */
@@ -237,8 +243,16 @@ export type UsageDisplay = {
  * em-dash), a hover reason when it cannot say more, and whether to reach for
  * the "high usage" colour. A snapshot older than `STALE_AFTER_MS` is treated
  * as unknown — a stale number must not read as current.
+ *
+ * `mode` defaults to `used` -- the shipped shape, and every call in this
+ * tree that predates the status bar's `used`/`remaining` toggle
+ * (`prefs/status-bar-usage.ts`) reads on unchanged.
  */
-export function describeUsage(snapshot: UsageSnapshot, now: Date): UsageDisplay {
+export function describeUsage(
+  snapshot: UsageSnapshot,
+  now: Date,
+  mode: UsageDisplayMode = 'used',
+): UsageDisplay {
   if (snapshot.kind !== 'ok') {
     return { text: '—', reason: reasonText(snapshot.reason), highUsage: false, windows: null };
   }
@@ -253,7 +267,7 @@ export function describeUsage(snapshot: UsageSnapshot, now: Date): UsageDisplay 
   }
   const { fiveHour, sevenDay } = snapshot.windows;
   return {
-    text: `${formatWindow(fiveHour, now)} · ${formatWindow(sevenDay, now)}`,
+    text: `${formatWindow(fiveHour, now, mode)} · ${formatWindow(sevenDay, now, mode)}`,
     reason: null,
     highUsage: isHighUsage(snapshot.windows),
     windows: snapshot.windows,

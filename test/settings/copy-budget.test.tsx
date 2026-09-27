@@ -30,8 +30,17 @@
  *
  *   interface      5 paragraphs   52 words (longest 14)
  *   terminal       7 paragraphs  110 words (longest 23)
- *   window         2 paragraphs   43 words (longest 33)
- *   agents        10 paragraphs  146 words (longest 54)
+ *   window         6 paragraphs   63 words (longest 33) -- re-measured when
+ *                  Settings step 2B added the sidebar-appearance and
+ *                  status-bar rows `settings.window.hint` already named
+ *   agents        13 paragraphs  172 words (longest 54) -- re-measured when
+ *                  step 2B added keep-awake, auto tab titles, agent
+ *                  permissions and default agent, THEN AGAIN when a security
+ *                  review found the permissions row's own gate needed to be
+ *                  "the real Electron desktop shell" (`window.api`), not
+ *                  viewport width -- this harness has no `window.api`, so the
+ *                  permissions row and its note (2 paragraphs) never draw
+ *                  here at all, same as a paired browser tab would see
  *   behaviour      6 paragraphs  103 words (longest 38)
  *   notifications  5 paragraphs   79 words (longest 28) -- unchanged by the
  *                  cards restructure, and its ceiling stays the number the
@@ -111,11 +120,20 @@ const BUDGET: readonly (readonly [string, number, number])[] = [
   // rows, and (behind Advanced) the colour grid, the opacity row and the
   // streaming-terminal switch moved in from Behaviour. Measured 7, 110.
   ['terminal', 7, 145],
-  // NEW, and small on purpose -- one row today. Measured 2, 43.
-  ['window', 2, 60],
+  // NEW, and small on purpose -- one row today. Settings step 2B added
+  // sidebar appearance and the status-bar sub-group (usage mode, show
+  // Claude, show Codex). Re-measured 6 paragraphs, 63 words; the ceiling
+  // gives the same short-sentence slack `notifications` carries.
+  ['window', 6, 72],
   // RENAMED FROM SESSIONS, gaining the ADHD skill card's own prose from
-  // Behaviour. Measured 10, 146.
-  ['agents', 10, 180],
+  // Behaviour. Step 2B added keep-awake, auto tab titles, agent permissions
+  // and default agent -- but the permissions row (hint + its always-on note)
+  // is gated on `isDesktopShell()` (`prefs/agent-permissions.ts`) and this
+  // harness has no `window.api`, so those 2 paragraphs never draw here at
+  // all (the confirmation risk copy was already excluded the same way, being
+  // conditional on an open dialog this harness never opens). Re-measured 13,
+  // 172.
+  ['agents', 13, 190],
   // SMALLER THAN IT WAS: `view width` and `streaming terminal` left for
   // Window & Sidebar and Terminal, and the file editor's own two rows (one
   // of them, `file editor colours`, moved IN from Appearance) joined focus

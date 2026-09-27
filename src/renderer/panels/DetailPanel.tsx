@@ -1013,6 +1013,15 @@ export type DetailPanelProps = {
    */
   readonly defaultProvider?: ProviderId;
   /**
+   * Settings -> Agents -> Default agent, `No agent` -- `resolveDefaultAgentSelection`
+   * (`prefs.ts`) reads that choice a SECOND way, alongside resolving
+   * `defaultProvider` above: see `StartSession`'s own doc on the prop of the
+   * same name for what it changes and why it is a re-reading rather than a
+   * third pickable provider. `undefined`/`false` (every caller that predates
+   * `defaultAgent`) draws the screen exactly as it always has.
+   */
+  readonly preferNoAgent?: boolean;
+  /**
    * Persists a NEW default provider, or `undefined` to withdraw the control
    * entirely — ABSENT, NOT DISABLED, the same rule `pickImageAttachment`
    * follows above: a caller with nowhere to put the choice should not draw
@@ -3241,6 +3250,7 @@ function PaneReady({ provider }: { readonly provider: ProviderId | null }) {
 function StartSession({
   paneName,
   defaultProvider,
+  preferNoAgent = false,
   onStart,
   startingPane = null,
   onShowTerminal,
@@ -3248,6 +3258,17 @@ function StartSession({
 }: {
   readonly paneName: string;
   readonly defaultProvider: ProviderId | undefined;
+  /**
+   * Settings -> Agents -> Default agent, `No agent` (`prefs/default-agent.ts`
+   * and `resolveDefaultAgentSelection`'s own header for why this is a second
+   * READING of that preference rather than a third pickable provider): the
+   * picker below still highlights `defaultProvider`, unavoidably (see that
+   * header), but the sentence under it leads with the shell instead of
+   * trailing it, and the mark above stops naming a provider nobody asked
+   * for by default. `false` (every existing caller) is the screen exactly as
+   * it always was.
+   */
+  readonly preferNoAgent?: boolean;
   readonly onStart: ((id: ProviderId) => void) | undefined;
   readonly startingPane?: StartingPaneWait | null;
   readonly onShowTerminal?: () => void;
@@ -3258,9 +3279,10 @@ function StartSession({
   return (
     <div
       data-start-session
+      data-prefer-no-agent={preferNoAgent ? 'true' : undefined}
       className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 px-6 text-center"
     >
-      {onStart !== undefined && (
+      {onStart !== undefined && !preferNoAgent && (
         <IconFrame>
           <span
             data-start-session-mark
@@ -3308,7 +3330,9 @@ function StartSession({
       <p className="max-w-[36ch] text-meta text-ink-quiet">
         {onStart === undefined
           ? 'Switch to the Terminal view and type the agent’s command — `claude` or `codex` — to start one here.'
-          : 'Or switch to the Terminal view and type the command yourself; either way it runs in this same pane.'}
+          : preferNoAgent
+            ? 'Type a command in the Terminal view, or start an agent above; either way it runs in this same pane.'
+            : 'Or switch to the Terminal view and type the command yourself; either way it runs in this same pane.'}
       </p>
     </div>
   );
@@ -3369,6 +3393,7 @@ function TerminalOnlyStart({
   paneName,
   source,
   defaultProvider,
+  preferNoAgent = false,
   onStart,
   resumeCommand,
   onResumeInPane,
@@ -3380,6 +3405,11 @@ function TerminalOnlyStart({
   readonly paneName: string;
   readonly source: string;
   readonly defaultProvider: ProviderId | undefined;
+  /** See `StartSession`'s own doc on this prop -- the trailing hint below is
+   *  the one thing this screen has in common with it to swap. The mark above
+   *  stays the session's own PAST agent regardless: that is a fact, not a
+   *  push toward a provider. */
+  readonly preferNoAgent?: boolean;
   readonly onStart: ((id: ProviderId) => void) | undefined;
   readonly resumeCommand: string | undefined;
   readonly onResumeInPane: (() => void) | undefined;
@@ -3472,7 +3502,9 @@ function TerminalOnlyStart({
       <p className="max-w-[36ch] text-meta text-ink-quiet">
         {onStart === undefined
           ? 'Switch to the Terminal view and type the agent’s command — `claude` or `codex` — to start one here.'
-          : 'Or switch to the Terminal view and type the command yourself; either way it runs in this same pane.'}
+          : preferNoAgent
+            ? 'Type a command in the Terminal view, or start an agent above; either way it runs in this same pane.'
+            : 'Or switch to the Terminal view and type the command yourself; either way it runs in this same pane.'}
       </p>
     </div>
   );
@@ -6350,6 +6382,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
     phone = false,
     onQuestionOpenChange,
     defaultProvider,
+    preferNoAgent = false,
     onSetDefaultProvider,
     onStartSession,
     onResumeInPane,
@@ -9010,6 +9043,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
           <StartSession
             paneName={entry.session.pane ?? entry.session.title}
             defaultProvider={defaultProvider}
+            preferNoAgent={preferNoAgent}
             onStart={onStartSession}
             startingPane={startingPane}
             onShowTerminal={onShowTerminal}
@@ -9021,6 +9055,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
             paneName={entry.session.pane ?? entry.session.title}
             source={entry.session.source ?? entry.project.source ?? 'unknown'}
             defaultProvider={defaultProvider}
+            preferNoAgent={preferNoAgent}
             onStart={onStartSession}
             resumeCommand={entry.session.resumeCommand}
             onResumeInPane={entry.session.resumeCommand === undefined ? undefined : onResumeInPane}
