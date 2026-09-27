@@ -15,9 +15,9 @@ export function useCanvasOverlays() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [keySheetOpen, setKeySheetOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  /** Which section Settings opens on next — `appearance` unless the Remote
+  /** Which section Settings opens on next — `interface` unless the Remote
    *  icon or its key just asked for `remote` directly (see `openSettings`). */
-  const [settingsSection, setSettingsSection] = useState<SectionId>('appearance');
+  const [settingsSection, setSettingsSection] = useState<SectionId>('interface');
   const [errorLogOpen, setErrorLogOpen] = useState(false);
   /** The Stats & Usage screen — its own overlay flag, on `errorLogOpen`'s own
    *  standing rather than a Settings section: nothing in it is a preference

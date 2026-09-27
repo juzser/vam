@@ -2,9 +2,11 @@
 /**
  * The extracted OVERLAY-VISIBILITY hook, asserted through its own return
  * value -- not through `Canvas`'s DOM. The load-bearing rules: `settingsSection`
- * defaults to `appearance`; opening the palette closes nothing else;
- * `settingsSection` survives a close and reopen (it records today's
- * behaviour, not a chosen one); and `confirmForceClose` holds its payload.
+ * defaults to `interface` (the cards restructure's renaming of the old
+ * `appearance` default -- `settings/sections.ts`); opening the palette closes
+ * nothing else; `settingsSection` survives a close and reopen (it records
+ * today's behaviour, not a chosen one); and `confirmForceClose` holds its
+ * payload.
  */
 
 import { act, renderHook } from '@testing-library/react';
@@ -12,10 +14,10 @@ import { describe, expect, it } from 'vitest';
 import { useCanvasOverlays } from '../../src/renderer/canvas/canvas-overlays.js';
 
 describe('useCanvasOverlays', () => {
-  it('settingsSection defaults to appearance', () => {
+  it('settingsSection defaults to interface', () => {
     const { result } = renderHook(() => useCanvasOverlays());
 
-    expect(result.current.settingsSection).toBe('appearance');
+    expect(result.current.settingsSection).toBe('interface');
   });
 
   it('opening the palette closes nothing else', () => {

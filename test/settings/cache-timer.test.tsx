@@ -3,14 +3,15 @@
 /**
  * THE CACHE-TIMER SWITCH, at the surface the operator touches.
  *
- * One row, one switch, in Sessions (`Bot`'s own section: what a session
- * starts as and how it is driven) -- the Anthropic-caching countdown is a
- * fact about a Claude Code session's own state, the same family as the
- * default provider and the send key already living there. `domain/cache-
- * timer.test.ts` and `SessionList.cache-timer.test.tsx` hold what the switch
- * actually gates; this file holds only that the control exists, where, what
- * it writes, and what it tells the operator -- the same split
- * `notify-waiting.test.tsx` already draws for its own switch.
+ * One row, one switch, in Agents (`Bot`'s own section, renamed from Sessions
+ * by the cards restructure: what a session starts as and how it is driven)
+ * -- the Anthropic-caching countdown is a fact about a Claude Code session's
+ * own state, the same family as the default provider and the send key
+ * already living there. `domain/cache-timer.test.ts` and
+ * `SessionList.cache-timer.test.tsx` hold what the switch actually gates;
+ * this file holds only that the control exists, where, what it writes, and
+ * what it tells the operator -- the same split `notify-waiting.test.tsx`
+ * already draws for its own switch.
  */
 
 import { cleanup, fireEvent, render } from '@testing-library/react';
@@ -58,10 +59,10 @@ function changed(onChange: { mock: { calls: unknown[][] } }, index = 0): Prefs {
 }
 
 describe('the control', () => {
-  it('is a switch in the Sessions panel', () => {
+  it('is a switch in the Agents panel', () => {
     open();
     expect(
-      document.querySelector('[data-settings-panel="sessions"] [data-switch="cache-timer"]'),
+      document.querySelector('[data-settings-panel="agents"] [data-switch="cache-timer"]'),
     ).not.toBeNull();
   });
 
@@ -105,7 +106,7 @@ describe('what the operator is told', () => {
 });
 
 describe('not on the phone', () => {
-  it('Sessions stays off PHONE_SECTIONS -- prefs read and write this browser’s storage', () => {
+  it('Agents stays off PHONE_SECTIONS -- prefs read and write this browser’s storage', () => {
     expect(PHONE_SECTIONS).toEqual(['remote']);
   });
 });

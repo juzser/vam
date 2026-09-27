@@ -193,8 +193,10 @@ describe('the section is reachable from the dialog it belongs to', () => {
     render(
       <SettingsOverlay prefs={EMPTY_PREFS} theme="dark" onChange={() => {}} onClose={() => {}} />,
     );
-    const tab = screen.getByRole('tab', { name: 'Update' });
-    fireEvent.click(tab);
+    // NOT `getByRole('button', { name: 'Update' })`: the card's own header is
+    // a button with the same accessible name now, so the query is ambiguous.
+    const navItem = document.querySelector('[data-settings-nav-item="update"]') as HTMLElement;
+    fireEvent.click(navItem);
     expect(version()).toContain(VERSION);
   });
 });

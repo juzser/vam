@@ -70,9 +70,9 @@ function open(prefs: Prefs = EMPTY_PREFS) {
 }
 
 const options = () => [...document.querySelectorAll('[data-provider-option]')];
-const panel = () => document.querySelector('[data-settings-panel="sessions"]');
+const panel = () => document.querySelector('[data-settings-panel="agents"]');
 
-describe('the sessions section, once vam can start more than one agent', () => {
+describe('the agents section, once vam can start more than one agent', () => {
   it('offers every provider in the table, and only those', () => {
     open();
     expect(options().map((option) => option.getAttribute('data-provider-option'))).toEqual(

@@ -250,35 +250,26 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * unaffected by this merge, still comfortably clear of the combined figure.
  *
  * THE PHONE TOOLBAR PASS (Orca one-row collapse, follow-up to pull request
- * 527) THEN MERGED THE STATS & USAGE PR (#518), which had squash-merged into
- * `main` first: one new icon import (`SlidersHorizontal`) and a grouping
- * control, an overflow "more" menu for Remote/the theme toggle (the row
- * measured overflowing at 390px with both drawn bare), and a small
- * viewport-safety fix to `UsagePopover`'s own panel position, on this
- * branch's own side; the Stats & Usage entry icon and its
- * `i18n/strings.ts` labels (eager regardless of which screen reads them,
- * see the ADHD-card paragraph above) on `main`'s side. The two land in the
- * same eager entry with no interaction between them -- the toolbar pass
- * touches phone-only render paths, Stats & Usage a desktop-only icon next
- * to the account button -- so this is two independent, additive costs, not
- * one combined feature. Measured with a merge-base worktree build at
- * `main`'s own tip carrying #527 + #518 (1831afa6) and at this branch's own
- * merge commit carrying all three, same code and chunks both times,
- * `electron-vite build --mode production`:
+ * 527, then its own spacing/account-icon follow-up) MERGED TWICE MORE: first
+ * the Stats & Usage PR (#518, squash-merged first), then Settings Cards
+ * (#528, "touches neither budget" -- a pure re-layout behind
+ * `SettingsOverlay`'s own lazy boundary, see that PR's own paragraph above).
+ * Three independent, additive costs landing in the same eager entry: the
+ * toolbar pass touches phone-only render paths, Stats & Usage a desktop-only
+ * icon beside the account button, Settings Cards nothing eager at all.
+ * Measured with a merge-base worktree build at `main`'s own tip carrying all
+ * three (#527 + #518 + #528, d2c54b66) and at this branch's own merge
+ * commit, same code and chunks both times, `electron-vite build --mode
+ * production`:
  *
- *     entry, main (#527 + #518, before this merge)   700,291 B  (211,076 B gzip)
- *     entry, merged (+ the phone toolbar pass)       705,196 B  (211,819 B gzip)  (+4,905 B, +0.70%)
+ *     entry, main (#527 + #518 + #528, before this merge)   700,444 B  (211,154 B gzip)
+ *     entry, merged (+ the phone toolbar pass)              705,616 B  (211,927 B gzip)  (+5,172 B, +0.74%)
  *
- * `ENTRY_BUDGET_BYTES` moves 702,000 -> 707,000: the real merged figure
- * (705,196 B) plus ~1.8 KB (~0.26%) of slack, the same small-headroom
- * convention every bump above uses -- not either PR's own separate margin
- * carried forward. `ENTRY_GZIP_BUDGET_BYTES` moves for the first time in
- * this file's history, 212,000 -> 212,500: the old budget still technically
- * passed (211,819 B measured, 181 B of headroom) but had never before sat
- * this close, and 181 B is not real headroom against an ordinary dependency
- * patch bump. The new figure is the real merged gzip size (211,819 B) plus
- * ~680 B (~0.32%) of slack, the same convention as the raw-byte budget
- * above.
+ * `ENTRY_BUDGET_BYTES` stays at 707,000: the real merged figure (705,616 B)
+ * leaves 1,384 B of headroom, so this merge does not need to move it -- the
+ * toolbar pass's own earlier bump already covers it. `ENTRY_GZIP_BUDGET_BYTES`
+ * stays at 212,500: the merged gzip figure (211,927 B) leaves 573 B of
+ * headroom under it, the same reasoning.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');

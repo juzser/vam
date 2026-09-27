@@ -541,7 +541,8 @@ for (const each of PLATFORMS) {
       () => document.querySelector('[data-settings-overlay]') !== null,
       `${each.name}: settings reopens for the Send key comparison`,
     );
-    await page.locator('[data-settings-nav-item="sessions"]').click();
+    // Renamed from `sessions` to `agents` by the cards restructure.
+    await page.locator('[data-settings-nav-item="agents"]').click();
     await page.waitForSelector('[data-submit-key-option="shift-enter"]', { timeout: 5_000 });
     const sendKeyGlyph = await page.evaluate(() => {
       const root = document.querySelector('[data-submit-key-option="shift-enter"]');
