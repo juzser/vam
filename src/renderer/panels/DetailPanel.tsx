@@ -3084,6 +3084,7 @@ function ProviderStartControls({
             const selected = choice === chosenPermission;
             const optionButton = (
               <button
+                key={choice}
                 type="button"
                 aria-pressed={selected}
                 data-start-permission-option={choice}

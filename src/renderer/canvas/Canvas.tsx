@@ -166,7 +166,6 @@ import {
   renameGroup,
   resolveDefaultAgentSelection,
   restoreAllDismissedSessions,
-  setAgentPermissions,
   setDefaultProvider,
   setDetailTab,
   setFilesMarkdownView,
@@ -5426,9 +5425,10 @@ function CanvasInner({
         // this one session actually got.
         await sessionSource.write.recordPrompt(
           entry.session.id,
-          sessionArgv(providerId, isDesktopShell() && permission === 'yolo' ? 'yolo' : 'manual').join(
-            ' ',
-          ),
+          sessionArgv(
+            providerId,
+            isDesktopShell() && permission === 'yolo' ? 'yolo' : 'manual',
+          ).join(' '),
         );
         setStatus(
           `started ${provider.label} in "${title}" — its session appears here once it registers`,
@@ -7716,11 +7716,19 @@ function CanvasInner({
         defaultProvider: defaultAgentSelection.providerId,
         preferNoAgent: defaultAgentSelection.preferNoAgent,
         onSetDefaultProvider: (id) => savePrefs(setDefaultProvider(prefs, id)),
+        // THE START SCREEN'S OWN PERMISSION PICKER PRESELECTS FROM THIS --
+        // `ProviderStartControls`' own header (`DetailPanel.tsx`) for the
+        // whole design: a read of the same preference Settings writes,
+        // identical in spirit to `defaultProvider` above it.
+        agentPermissions: prefs.agentPermissions,
         // THIS PANE'S ROW, when it is a pane with nothing in it: the start
         // screen's one act. Withdrawn (absent) where there is no session to
         // start in, so the screen says "use the Terminal view" instead of
         // drawing a button that cannot type.
-        onStartSession: entry === null ? undefined : (id) => void startSessionIn(entry, id),
+        onStartSession:
+          entry === null
+            ? undefined
+            : (id, permission) => void startSessionIn(entry, id, permission),
         // THIS PANE'S ROW, on the `terminal` getting-started screen's
         // secondary act -- see `resumeInPane`'s own comment for why this is
         // not `reopenSession`. Withdrawn on the same "no session, no control"
