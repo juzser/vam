@@ -32,6 +32,7 @@
 
 import { createHash } from 'node:crypto';
 import type { AgentQuestion, Decision } from '../../../renderer/domain/model.js';
+import { type CacheActivity, detectCacheActivity, NO_CACHE_ACTIVITY } from './cache-activity.js';
 import { extractCommands } from './commands.js';
 import { collectQuestions } from './questions.js';
 
@@ -93,6 +94,14 @@ export type TranscriptFacts = {
    * across the two readers.
    */
   readonly questionOffsets: ReadonlyMap<string, number>;
+  /**
+   * When Claude Code's own prompt cache was last read or written in this
+   * window, and how long that touch lives -- `cache-activity.ts` carries the
+   * whole rule. Always present, `NO_CACHE_ACTIVITY` included: this source
+   * always looks, so a session with nothing to report says so rather than
+   * leaving the field off.
+   */
+  readonly cache: CacheActivity;
 };
 
 export const EMPTY_FACTS: TranscriptFacts = {
@@ -102,6 +111,7 @@ export const EMPTY_FACTS: TranscriptFacts = {
   decisions: [],
   questions: [],
   questionOffsets: new Map(),
+  cache: NO_CACHE_ACTIVITY,
 };
 
 export type Line = Record<string, unknown>;
@@ -834,10 +844,24 @@ export function summarizeLines(
       })),
     }));
 
-  // Read off the SAME parsed lines: the questions are a second reading of one
-  // pass over the window, not a second read of the file. `located`, not the
-  // stripped `lines` above: `collectQuestions` needs each ask's own byte
-  // offset now (`questionOffsets`, `CollectedQuestions`'s own header).
+  // Read off the SAME parsed lines: the questions and the cache reading are
+  // each a second pass over the window already in memory, not a second read
+  // of the file. `collectQuestions` takes `located`, not the stripped `lines`
+  // above: it needs each ask's own byte offset now (`questionOffsets`,
+  // `CollectedQuestions`'s own header).
   const { questions, offsets: questionOffsets } = collectQuestions(located);
-  return { aiTitle, branch, activity, decisions, questions, questionOffsets };
+  return {
+    aiTitle,
+    branch,
+    activity,
+    decisions,
+    questions,
+    questionOffsets,
+    // `decisionIdPrefix` is the session's own stable id -- the same key
+    // `idOf` above mints decision ids from -- so a poll whose own window
+    // holds no write can still recall one an earlier poll of this session
+    // showed (`cache-activity.ts`'s own header, "NEVER GUESS, ACROSS POLLS
+    // TOO").
+    cache: detectCacheActivity(lines, decisionIdPrefix),
+  };
 }

@@ -247,6 +247,34 @@ describe('useFileBuffers', () => {
     expect(read).toHaveBeenCalledTimes(2); // app.ts once, other.ts once — never app.ts twice
   });
 
+  it('X-SET-2 — Mod-s on an unedited buffer is a no-op: no write, no normalise, no state change', async () => {
+    const read = vi.fn().mockResolvedValue({
+      isBinary: false,
+      content: 'a  \nb\t\n', // already dirty by normalisation's own standard, but NEVER EDITED
+      signature: signature(6),
+    });
+    const write = vi.fn();
+    const { result } = renderHook(() =>
+      useFileBuffers({ sessionId: 'session-1', root: null, read, write }),
+    );
+
+    act(() => result.current.openFile('/w/atlas/notes.txt'));
+    await waitFor(() =>
+      expect(result.current.buffers['/w/atlas/notes.txt']?.kind).toBe('editable'),
+    );
+
+    const beforeSave = result.current.buffers['/w/atlas/notes.txt'];
+
+    await act(async () => {
+      await result.current.saveFile('/w/atlas/notes.txt');
+    });
+
+    expect(write).not.toHaveBeenCalled();
+    // The buffer object itself is untouched — not merely equal in value, but
+    // the SAME reference, so nothing re-rendered on account of this save.
+    expect(result.current.buffers['/w/atlas/notes.txt']).toBe(beforeSave);
+  });
+
   it('unsavedKey reflects exactly the dirty files, labelled relative to root, and clears once saved', async () => {
     const read = vi.fn().mockResolvedValue({
       isBinary: false,

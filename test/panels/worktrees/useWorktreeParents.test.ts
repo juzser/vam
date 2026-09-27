@@ -64,6 +64,32 @@ describe('useWorktreeParents', () => {
     expect(result.current.size).toBe(1);
   });
 
+  /**
+   * SECOND GUARD, defensive: even after the main-process fix
+   * (`listWorktrees` never reports the main worktree as anyone's child), a
+   * cycle in this hook's own `parents` map must never hide every project on
+   * it. Two projects whose OWN `list()` answers each name the OTHER as a
+   * child (the exact shape the cross-provider review reproduced against
+   * real git before the main-process fix) must not leave a mutual
+   * parent-assignment in the map -- either one being "hidden under" the
+   * other forms a cycle with no unsuppressed ancestor to stop at, which
+   * would hide BOTH projects' sidebar sections at once
+   * (`SessionList.tsx`'s `isSuppressedWorktreeChild`). The safe fallback is
+   * to drop the cyclic edges entirely, so both projects read as
+   * `parentId: undefined` and draw at the top level.
+   */
+  it('breaks a CYCLE in the parent map rather than assigning either side a parent', async () => {
+    const list = vi.fn(async (parentId: string) => {
+      if (parentId === 'm') return [worktree({ projectId: 'l' })];
+      if (parentId === 'l') return [worktree({ projectId: 'm' })];
+      return [];
+    });
+    const { result } = renderHook(() => useWorktreeParents(['m', 'l'], fakeApi(list)));
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(result.current.has('m')).toBe(false));
+    expect(result.current.has('l')).toBe(false);
+  });
+
   it('re-fetches when the id SET changes, not on every render with the same set', async () => {
     const list = vi.fn().mockResolvedValue([]);
     const { rerender } = renderHook(({ ids }) => useWorktreeParents(ids, fakeApi(list)), {

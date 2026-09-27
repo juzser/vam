@@ -83,6 +83,35 @@ export function paneNameOf(rowId: string): string | null {
 }
 
 /**
+ * A pane-row id's OWN working directory, straight off vam's own tmux
+ * listing -- or `null` for anything that is not one, or that names no pane
+ * currently in it.
+ *
+ * WHY THIS EXISTS (issues 502/507's "other entry points"). `resolveSessionCwd`
+ * (`main/index.ts`) is what the image-attach picker and the file-editor
+ * tab's directory listing both resolve a session id through, but it only
+ * ever consulted `claude agents --json` -- so a `pane:` row id, the identical
+ * id `recordPrompt`/`closeSession` already dispatch on (this file's own
+ * header), answered `unknown-session` even once the Response view's
+ * `PaneReady` state had confirmed a provider was running and enabled the
+ * composer for it. There is no agent to look up for a pane row; there never
+ * is. `main/index.ts` calls this FIRST, exactly as `paneNameOf` is checked
+ * before `recordPrompt` ever asks `listLiveAgents`.
+ *
+ * NOT GATED ON `identifyRunningProvider`, unlike `typeIntoOwnPane`'s delivery
+ * choice: this answers a DIRECTORY to scope a file dialog to, never sends a
+ * keystroke, so there is nothing here for "known provider vs. unidentified
+ * program" to protect. Any pane vam's own listing still shows -- shell,
+ * known provider, or anything else -- answers its real cwd.
+ */
+export function paneCwdOf(sessions: readonly TmuxSession[], rowId: string): string | null {
+  const name = paneNameOf(rowId);
+  if (name === null) return null;
+  const cwd = sessions.find((session) => session.name === name)?.cwd;
+  return cwd === undefined || cwd === '' ? null : cwd;
+}
+
+/**
  * The vam tmux sessions no row has been proven to be in.
  *
  * `claimed` is every pane `paneForRow` answered for a LIVE agent row this

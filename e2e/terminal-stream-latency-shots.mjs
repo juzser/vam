@@ -348,6 +348,34 @@ async function waitForPaintContaining(needle, deadlineMs) {
   }
 }
 
+/**
+ * X-AUD-1 (cross-provider review): TEST 2 and TEST 3 used to build their
+ * command line as `` `echo ${marker}` `` / `` `...; echo ${marker}` `` and
+ * send it with `send-keys -l` -- a LITERAL keystroke injection, which the
+ * pty echoes back onto the screen (a real `%output` notification,
+ * rendered by the SAME app xterm this file measures) the moment it is
+ * typed, well before Enter is even sent. `waitForPaintContaining(marker,
+ * ...)` searched `window.__paints` (the app's own rendered rows -- already
+ * correct, never tmux's own screen), but with the marker typed verbatim
+ * it could be satisfied by that typed-line ECHO alone: this guard could
+ * pass even if the command's own OUTPUT never rendered a single byte,
+ * because the marker was already on screen before the command ever ran.
+ *
+ * THE FIX: never type the marker's contiguous text. Split it across two
+ * adjacent single-quoted shell literals (`'<a>''<b>'`) -- the shell
+ * concatenates them into one argument before `printf` ever sees it, so the
+ * OUTPUT still contains the marker exactly once, contiguous, while the
+ * TYPED command line (and thus its echo) contains `<a>''<b>`, which never
+ * matches the contiguous needle `waitForPaintContaining` searches for.
+ */
+function markerPrintCommand(prefix) {
+  const marker = `${prefix}-${Math.random().toString(36).slice(2, 8)}`;
+  const mid = Math.ceil(marker.length / 2);
+  const a = marker.slice(0, mid);
+  const b = marker.slice(mid);
+  return { marker, printCmd: `printf '%s\\n' '${a}''${b}'` };
+}
+
 /* ── TEST 1: steady typing, keydown-to-paint, n=50 at 80ms ─────────────── */
 async function measureTyping() {
   await resetPerf();
@@ -382,9 +410,9 @@ async function measureEcho() {
   });
   const outputLatencies = [];
   for (let i = 0; i < 30; i += 1) {
-    const marker = `OUT-${i}-${Math.random().toString(36).slice(2, 8)}`;
+    const { marker, printCmd } = markerPrintCommand(`OUT-${i}`);
     const t0 = Date.now();
-    tmux('send-keys', '-t', `=${TMUX_SESSION}:`, '-l', '--', `echo ${marker}`);
+    tmux('send-keys', '-t', `=${TMUX_SESSION}:`, '-l', '--', printCmd);
     tmux('send-keys', '-t', `=${TMUX_SESSION}:`, 'Enter');
     const hit = await waitForPaintContaining(marker, 2_000);
     if (hit !== null) outputLatencies.push(hit.epoch - t0);
@@ -407,8 +435,8 @@ async function measureBurst() {
   });
   const burstLatencies = [];
   for (let i = 0; i < 5; i += 1) {
-    const marker = `BURST-DONE-${Math.random().toString(36).slice(2, 8)}`;
-    const cmd = `yes burstline | head -n 2000; echo ${marker}`;
+    const { marker, printCmd } = markerPrintCommand('BURST-DONE');
+    const cmd = `yes burstline | head -n 2000; ${printCmd}`;
     const t0 = Date.now();
     tmux('send-keys', '-t', `=${TMUX_SESSION}:`, '-l', '--', cmd);
     tmux('send-keys', '-t', `=${TMUX_SESSION}:`, 'Enter');

@@ -32,6 +32,7 @@ import {
 import { DEFAULT_SESSION_FILTERS, type SessionFilters } from '../domain/session-filter.js';
 import { type KeyBindings, MAX_BINDINGS, setActiveBindings } from '../keyboard/chords.js';
 import { setActiveProvider } from '../sources/provider.js';
+import { DEFAULT_CACHE_TIMER, readCacheTimer } from './cache-timer.js';
 import { DEFAULT_CONCISE_OUTPUT, readConciseOutput } from './concise-output.js';
 import {
   clampEditorIndent,
@@ -650,24 +651,19 @@ export type Prefs = {
    */
   readonly narrowViews: boolean;
   /**
-   * Whether vam asks the agent for a shorter, clearer answer.
+   * LEGACY, READ-ONLY-IN-SPIRIT: whether the operator once had the old
+   * "concise output" switch on, before this app installed the real
+   * `ayghri/i-have-adhd` skill instead of typing vam's own wording of it into
+   * a session's first prompt (`src/shared/adhd-skill.ts`'s header carries the
+   * whole story). The switch itself is gone -- there is no row that writes
+   * `true` here any more -- and the field survives ONLY so
+   * `AdhdSkillCard.tsx` can show a one-time migration note to an operator who
+   * had it on, then flip this back to `false` once they have seen it (via the
+   * same `setConciseOutput` this file still exports).
    *
-   * THE ONE FIELD IN THIS RECORD NOTHING IN THE RENDERER READS, and that is
-   * the fact worth carrying here. Every other preference changes something on
-   * screen or in `localStorage`; this one changes what vam TYPES INTO SOMEBODY
-   * ELSE'S PANE. It reaches the only code that consults it -- main, at the
-   * seam where a prompt becomes keystrokes -- over `window.api.prefs`, pushed
-   * by `activatePrefs` on every read and write, the same crossing `prRepos`
-   * makes and for the same reason.
-   *
-   * `prefs/concise-output.ts` carries why the default is off;
-   * `main/terminal/concise.ts` carries what is sent, when it travels, and the
-   * limit vam cannot see (a `/clear` empties the agent's context and nothing
-   * tells vam).
-   *
-   * GLOBAL, for the reason `focusView` is, plus one of its own: it is a
-   * standing instruction about how the operator wants to be answered, which
-   * does not change between the sessions they have open.
+   * Never pushed to main any more: nothing there reads it. The push
+   * `activatePrefs` used to make on every read and write is deleted along
+   * with `main/terminal/concise.ts`.
    *
    * Exempt from the icon TTL like `theme` and `panes`: it describes the
    * person, not a session that stopped existing.
@@ -683,6 +679,18 @@ export type Prefs = {
    * like `conciseOutput`, for the same reason.
    */
   readonly notifyWaiting: boolean;
+  /**
+   * Whether the sidebar draws a countdown to when a Claude Code session's
+   * prompt cache expires. `prefs/cache-timer.ts` carries the default and the
+   * operator's own ask; `domain/cache-timer.ts` is the rule this gates and
+   * `panels/CacheCountdown.tsx` the row it gates.
+   *
+   * GLOBAL and per device, the same fact `notifyWaiting` is: a countdown is
+   * a reading preference about the machine looking at the sidebar, not
+   * about the session it counts down for. Exempt from the icon TTL for the
+   * same reason.
+   */
+  readonly cacheTimer: boolean;
   /**
    * Which face a `.md` file opens wearing in the Files tab: the rendered
    * document, or the raw text. `prefs/files-markdown-view.ts` carries the
@@ -785,6 +793,7 @@ export const EMPTY_PREFS: Prefs = {
   narrowViews: DEFAULT_NARROW_VIEWS,
   conciseOutput: DEFAULT_CONCISE_OUTPUT,
   notifyWaiting: DEFAULT_NOTIFY_WAITING,
+  cacheTimer: DEFAULT_CACHE_TIMER,
   filesMarkdownView: DEFAULT_FILES_MARKDOWN_VIEW,
   streamingTerminal: DEFAULT_STREAMING_TERMINAL,
   // A truly empty payload has nothing to migrate FROM -- it already reads
@@ -1078,6 +1087,9 @@ function parsePrefs(
     // Per field like every line above it; a boolean is a choice and anything
     // else is the default, which is ON (`./notify.ts` says why).
     notifyWaiting: readNotifyWaiting((parsed as { notifyWaiting?: unknown }).notifyWaiting),
+    // Per field like every line above it; a boolean is a choice and anything
+    // else is the default, which is ON (`./cache-timer.ts` says why).
+    cacheTimer: readCacheTimer((parsed as { cacheTimer?: unknown }).cacheTimer),
     // Per field like every line above it, and normalised in the direction
     // `files-markdown-view.ts` argues at length: unlike every sibling here,
     // the safe default for an UNREADABLE value is the NEW behaviour
@@ -1702,10 +1714,12 @@ export function setNarrowViews(prefs: Prefs, narrow: unknown): Prefs {
   return { ...prefs, narrowViews: readNarrowViews(narrow) };
 }
 
-/** Normalised on the way in as well as on the way out, like every setter above
- *  it -- and this is the one where the direction is not a nicety: anything but
- *  a literal `true` is off, because "on" means vam types a paragraph of its
- *  own into a pane somebody's agent is reading. */
+/**
+ * NORMALISED, LIKE EVERY SETTER ABOVE IT -- kept now for exactly one caller:
+ * `AdhdSkillCard.tsx` flips this to `false` once an operator who had the old
+ * switch on has seen the one-time migration note. Nothing writes `true` here
+ * any more; the row that once did is gone.
+ */
 export function setConciseOutput(prefs: Prefs, on: unknown): Prefs {
   return { ...prefs, conciseOutput: readConciseOutput(on) };
 }
@@ -1724,6 +1738,12 @@ export function setStreamingTerminal(prefs: Prefs, on: unknown): Prefs {
  *  banner, and a switch that is off makes no call at all. */
 export function setNotifyWaiting(prefs: Prefs, on: unknown): Prefs {
   return { ...prefs, notifyWaiting: readNotifyWaiting(on) };
+}
+
+/** Normalised on the way in as well as on the way out, like `setNotifyWaiting`
+ *  above it. The one caller is the Sessions settings row's own switch. */
+export function setCacheTimer(prefs: Prefs, on: unknown): Prefs {
+  return { ...prefs, cacheTimer: readCacheTimer(on) };
 }
 
 /** Normalised on the way in as well as on the way out, like every setter
@@ -2707,10 +2727,17 @@ export function activatePrefs(prefs: Prefs): Prefs {
   setActiveFilesMarkdownView(prefs.filesMarkdownView);
   setActiveStreamingTerminal(prefs.streamingTerminal);
   /**
-   * AND TWO PREFERENCES CROSS INTO MAIN, because the thing each one changes
-   * happens there: `gh` is spawned by `main/sources/claude-code/source.ts`,
-   * and the concise-output rules are typed into a pane by
-   * `main/terminal/concise.ts`. Neither has access to this store.
+   * ONE PREFERENCE CROSSES INTO MAIN, because what it changes happens there:
+   * `gh` is spawned by `main/sources/claude-code/source.ts`, which has no
+   * access to this store.
+   *
+   * A SECOND CROSSING LIVED HERE ONCE, pushing `conciseOutput` to
+   * `main/terminal/concise.ts` on every read and write. That module is
+   * deleted -- see `src/shared/adhd-skill.ts`'s header for what replaced it --
+   * and nothing in main reads this preference any more, so there is nothing
+   * left to push. `AdhdSkillCard.tsx` still reads `prefs.conciseOutput`
+   * directly, in the renderer, for the one-time migration note; that is a
+   * local read, not a crossing, and belongs nowhere near `activatePrefs`.
    *
    * HERE RATHER THAN AT THE PICKER, for the reason every line above it is
    * here: `activatePrefs` runs on every read AND every write, so a reload arms
@@ -2727,21 +2754,6 @@ export function activatePrefs(prefs: Prefs): Prefs {
    * has no `prefs` at all and this must simply not happen.
    */
   globalThis.window?.api?.prefs?.setPrRepos?.(prefs.prRepos)?.catch?.(() => {});
-  /**
-   * THE SECOND CROSSING, AND THE ONLY READER THIS PREFERENCE HAS. Nothing in
-   * the renderer consults `conciseOutput`; main does, at the seam where a
-   * prompt becomes keystrokes. So this line is not a projection that can go
-   * one poll stale like the map above it -- it IS the setting. Wired to the
-   * control alone it would leave main holding `false` until somebody opened
-   * settings, and every session started before that would be answered at full
-   * length by a vam whose switch was on.
-   *
-   * BOTH STATES ARE PUSHED. `false` is as load-bearing as `true` here: it is
-   * how turning the switch off reaches main at all, and -- because main clears
-   * its priming ledger on `false` -- it is what makes off-and-on-again the
-   * operator's one way to re-arm a session whose agent has forgotten.
-   */
-  globalThis.window?.api?.prefs?.setConciseOutput?.(prefs.conciseOutput)?.catch?.(() => {});
   return prefs;
 }
 

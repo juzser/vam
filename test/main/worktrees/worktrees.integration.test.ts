@@ -72,6 +72,22 @@ function depsFor(repoRoot: string): WorktreesDeps {
   };
 }
 
+/**
+ * Both the main checkout AND a linked worktree registered as their OWN
+ * known projects -- exactly the shape vam's own sidebar creates once an
+ * operator opens a `git worktree add`-made directory as a second project
+ * (`docs/design/worktrees.md` §4: a worktree's session digests to its OWN
+ * `projectId`, a real, addressable project, not a synonym for its parent's).
+ */
+function depsForProjects(dirsByProjectId: ReadonlyMap<string, string>): WorktreesDeps {
+  return {
+    run: runGitViaCli(),
+    realpathFn: (p: string) => realpath(p),
+    resolveProjectDirectory: async (id: string) => dirsByProjectId.get(id) ?? null,
+    knownProjectIds: async () => [...dirsByProjectId.keys()],
+  };
+}
+
 describe('worktreesRootFor', () => {
   it('is a sibling of the repository, named `<repoName>-worktrees`', () => {
     expect(worktreesRootFor('/srv/work/vam')).toBe('/srv/work/vam-worktrees');
@@ -277,6 +293,58 @@ describe('listWorktrees', () => {
     expect(worktrees[0]?.prunable).toBe(false);
     expect(worktrees[0]?.prunableReason).toBeNull();
     expect(worktrees.some((w) => w.path === repo)).toBe(false);
+  });
+
+  /**
+   * THE PARENT/CHILD CYCLE (cross-provider review finding): a linked
+   * worktree is ALSO its own known vam project (`projectIdOf(worktreeId)`,
+   * §4) -- so the sidebar's `useWorktreeParents` hook calls `list()` for
+   * EVERY visible project of a repo, including the linked worktree's own
+   * project, not only the main checkout's. `listWorktrees` used to filter
+   * only the QUERYING project's own directory ("self") out of git's answer,
+   * on the theory that "self" and "the main worktree" were the same thing --
+   * true only when the query originates FROM the main checkout. Query it
+   * FROM the linked worktree instead and `repoRootOf` resolves to the
+   * worktree's OWN directory (it has a `.git` FILE, which counts,
+   * `sources/repo.ts`'s own comment on why), so "self" no longer means "the
+   * main worktree" -- the main checkout survives the self-filter and comes
+   * back as one of the linked worktree's own "children", the reverse of
+   * reality. `useWorktreeParents` then records parent(mainProject) ===
+   * linkedProject on top of the correct parent(linkedProject) ===
+   * mainProject already recorded from the OTHER direction -- a two-node
+   * cycle that hides BOTH projects' sidebar sections at once
+   * (`SessionList.tsx`'s `isSuppressedWorktreeChild`: each looks like a
+   * suppressed child of the other, and neither has an unsuppressed ancestor
+   * to stop at).
+   */
+  it('queried from the LINKED WORKTREE itself, never reports the main checkout as one of its children', async () => {
+    const parent = tempParent();
+    const repo = tempRepo(parent);
+    const mainProjectId = projectIdOf(repo);
+    const dirs = new Map<string, string>([[mainProjectId, repo]]);
+    const created = await createWorktree(
+      { projectId: mainProjectId, name: 'feat' },
+      depsForProjects(dirs),
+    );
+    const worktreePath = (created as { path: string }).path;
+    const linkedProjectId = projectIdOf(worktreePath);
+    dirs.set(linkedProjectId, worktreePath);
+    const deps = depsForProjects(dirs);
+
+    const fromMain = await listWorktrees(mainProjectId, deps);
+    const fromLinked = await listWorktrees(linkedProjectId, deps);
+
+    expect(Array.isArray(fromMain)).toBe(true);
+    expect(Array.isArray(fromLinked)).toBe(true);
+    const mainChildren = fromMain as readonly { path: string }[];
+    const linkedChildren = fromLinked as readonly { path: string }[];
+    // The correct direction: the linked worktree IS one of the main
+    // checkout's children.
+    expect(mainChildren.some((w) => w.path === worktreePath)).toBe(true);
+    // The bug: the main checkout must never come back as one of the linked
+    // worktree's own children -- that is the reverse edge that closes the
+    // cycle.
+    expect(linkedChildren.some((w) => w.path === repo)).toBe(false);
   });
 
   it('marks a DETACHED HEAD worktree, branch reads as its short sha', async () => {

@@ -31,6 +31,49 @@
 import { useEffect, useRef, useState } from 'react';
 import type { WorktreesApi } from '../../../preload/api.js';
 
+/**
+ * SECOND GUARD, defensive: `listWorktrees` (main process,
+ * `main/worktrees/worktrees.ts`) is the actual fix for the parent/child
+ * cycle a cross-provider review found (a linked worktree's own project
+ * used to report the main checkout as one of ITS children, on top of the
+ * main checkout correctly reporting the linked worktree as one of its own
+ * -- a two-node cycle that hid both projects' sidebar sections at once,
+ * neither having an unsuppressed ancestor to stop at). This hook has no way
+ * to prove a future regression -- in this map-building code, or in a git
+ * topology main's own fix does not yet cover -- can never produce one
+ * again, so it never trusts a raw parent chain to be acyclic: ANY project
+ * whose chain of parents leads back to itself has that chain's cyclic
+ * members stripped of their own parent edge here, before `SessionList.tsx`
+ * ever reads the map. A project on a broken cycle simply reads
+ * `parentId: undefined` again and draws at the top level -- worst case an
+ * extra top-level row, never a project's sessions becoming unreachable.
+ */
+function breakCycles(raw: ReadonlyMap<string, string>): ReadonlyMap<string, string> {
+  const result = new Map(raw);
+  for (const start of raw.keys()) {
+    const seen = new Set<string>();
+    let current: string | undefined = start;
+    while (current !== undefined) {
+      if (seen.has(current)) {
+        // `current` is the first node this walk revisits -- everything
+        // from here back around to itself is the cycle. Each cyclic node
+        // loses its OWN parent edge, which resolves every node on the
+        // cycle in one pass; a "tail" that merely leads INTO the cycle
+        // (not part of it) keeps its own edge untouched.
+        let node: string | undefined = current;
+        do {
+          result.delete(node);
+          node = raw.get(node);
+        } while (node !== undefined && node !== current);
+        break;
+      }
+      seen.add(current);
+      current = raw.get(current);
+    }
+  }
+  return result;
+}
+
 export function useWorktreeParents(
   projectIds: readonly string[],
   api: WorktreesApi | undefined,
@@ -60,7 +103,7 @@ export function useWorktreeParents(
           .catch(() => [] as readonly (readonly [string, string])[]),
       ),
     ).then((lists) => {
-      if (!cancelled) setParents(new Map(lists.flat()));
+      if (!cancelled) setParents(breakCycles(new Map(lists.flat())));
     });
     return () => {
       cancelled = true;

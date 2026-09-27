@@ -465,7 +465,25 @@ describe('Start session — the wait for the agent to register', () => {
       expect(resumeButton()).toBeNull();
     });
 
+    /**
+     * Issues 502/507's OWN BLIND SPOT, RECORDED HERE SO NOBODY TRUSTS THIS ALONE
+     * AGAIN. `sourceWith` stubs `write.recordPrompt` to resolve unconditionally
+     * (see its own header above), so this test can only prove WHICH api and
+     * WHICH id the composer calls -- it never reaches main's real
+     * `typeIntoOwnPane` (`start-in-pane.ts`), and so it could not see -- and did
+     * not see, before the fix -- that main refused every one of these calls
+     * with `pane-occupied`. The two facts this test DOES pin are load-bearing:
+     * the call is `recordPrompt`, not some other write, and the id is
+     * `UNSTARTED.id` itself -- a `pane:`-prefixed row id (asserted below),
+     * which is exactly the shape `source.ts` routes to `typeIntoOwnPane` BY
+     * NAME rather than through `paneForRow`'s pairing. The refusal itself is
+     * reproduced and fixed at the real backend in
+     * `test/sources/claude-code-pane-provider-reply.test.ts` (the real
+     * `CLAUDE_CODE_SOURCE.recordPrompt`, a fake `tmux` on `PATH`) and at the
+     * unit level in `test/sources/claude-code-start-in-pane.test.ts`.
+     */
     it('sends a first message from the ready state through the normal composer path, once the pane itself confirms', async () => {
+      expect(UNSTARTED.id.startsWith('pane:')).toBe(true);
       const startScreen = vi.fn(async () => ({
         kind: 'ok' as const,
         screen: 'ready' as const,
@@ -497,6 +515,9 @@ describe('Start session — the wait for the agent to register', () => {
       await act(async () => {
         box?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
       });
+      // THE API AND THE ID: `recordPrompt`, called with the pane row's OWN id
+      // -- never a live-agent key, because there is no live agent for this row
+      // yet. This is the exact call `typeIntoOwnPane` refused before the fix.
       expect(recorded).toEqual([[UNSTARTED.id, 'hello there']]);
     });
 

@@ -395,6 +395,194 @@ for (const width of WIDTHS) {
   });
 }
 
+/**
+ * THE LIST SCREEN ITSELF, at the same three widths -- added for the phone/
+ * Orca pass: the floating "+" (`data-phone-fab`, `PhoneShell.tsx`) is a new,
+ * `fixed`-positioned element over the whole screen, and the project
+ * heading's fold/menu/`+` are newly PAINTED on a phone rather than merely
+ * present-but-invisible (`opacity-0` before this pass) -- both are exactly
+ * the kind of change this file's own header warns can grow the layout
+ * viewport or paint past its edge without either failing a `getBoundingClientRect()`
+ * check on the element itself. `PROJECTS` above already has one project
+ * (`alpha`) and a long branch name; that is enough surface for a fold, a
+ * menu and a `+` to have somewhere to draw.
+ */
+for (const width of WIDTHS) {
+  test.describe(`the list screen at ${width}px, with a floating + and a revealed project heading`, () => {
+    test.beforeEach(async ({ page }) => {
+      await page.setViewportSize({ width, height: 844 });
+    });
+
+    test('no element sticks out past the viewport', async ({ page }) => {
+      await stubOverflowSource(page);
+      await page.waitForTimeout(200);
+
+      const offscreen = await offscreenElements(page, width);
+      expect(offscreen, JSON.stringify(offscreen, null, 2)).toEqual([]);
+    });
+
+    test('the floating + and the project heading’s fold/menu/+ all clear the 44px touch floor, painted', async ({
+      page,
+    }) => {
+      await stubOverflowSource(page);
+
+      const fab = page.locator('[data-phone-fab]');
+      await expect(fab).toBeVisible();
+      const fabBox = await fab.boundingBox();
+      if (fabBox === null) throw new Error('no FAB box');
+      expect(fabBox.width, 'FAB width').toBeGreaterThanOrEqual(44);
+      expect(fabBox.height, 'FAB height').toBeGreaterThanOrEqual(44);
+      // Entirely inside the configured viewport too -- a `fixed` element is
+      // exactly the shape that can float past an edge unnoticed by a check
+      // that only ever asks about `scrollWidth`.
+      expect(fabBox.x + fabBox.width, 'FAB right edge').toBeLessThanOrEqual(width + 0.5);
+
+      for (const hook of [
+        '[data-project-collapse="p1"]',
+        '[data-project-menu="p1"]',
+        '[data-new-session-in-project="p1"]',
+      ]) {
+        const el = page.locator(hook);
+        await expect(el, hook).toBeVisible();
+        const box = await el.boundingBox();
+        if (box === null) throw new Error(`no box for ${hook}`);
+        expect(box.width, `${hook} width`).toBeGreaterThanOrEqual(44);
+        expect(box.height, `${hook} height`).toBeGreaterThanOrEqual(44);
+      }
+    });
+
+    /**
+     * The FAB's own sheet (`SessionCreatePicker`), the operator's own
+     * revision of a first cut that guessed the topmost project: tapping `+`
+     * now opens a picker, and picking a row is what actually creates the
+     * session (`PhoneShell.fab.test.tsx` holds that `onAddInProject` is
+     * called with THAT project, at the unit level, against a real prop
+     * wiring; this is the geometry a unit test cannot see).
+     */
+    test('the picker sheet: 44px rows, no overflow, and the backdrop closes it', async ({
+      page,
+    }) => {
+      await stubOverflowSource(page);
+      await page.locator('[data-phone-fab]').tap();
+
+      const sheet = page.locator('[data-session-create-picker]');
+      await expect(sheet).toBeVisible();
+      const row = page.locator('[data-project-choice-create="p1"]');
+      await expect(row).toBeVisible();
+      const rowBox = await row.boundingBox();
+      if (rowBox === null) throw new Error('no picker row box');
+      expect(rowBox.width, 'picker row width').toBeGreaterThanOrEqual(44);
+      expect(rowBox.height, 'picker row height').toBeGreaterThanOrEqual(44);
+
+      const offscreen = await offscreenElements(page, width);
+      expect(offscreen, JSON.stringify(offscreen, null, 2)).toEqual([]);
+
+      // The scrim: the host's own full-bleed `<button>`, the click-away
+      // target every overlay in this codebase shares (`GroupPicker.tsx`,
+      // `ProjectPicker.tsx`, `IconPicker.tsx`) -- the one dismissal route a
+      // real phone actually has here. Escape is real too, but only once
+      // something INSIDE the sheet holds focus, which none of this
+      // codebase's own list-only pickers ever auto-focus (`GroupPicker`'s
+      // own rename input is the one exception, and it is the input that
+      // takes the keydown, not the panel) -- `ProjectPicker.test.tsx`'s own
+      // "closes on Escape" test holds the same boundary, firing the key
+      // directly at the panel rather than through a real, unfocused
+      // `page.keyboard.press`. `PhoneShell.fab.test.tsx` proves the listener
+      // fires, the same way.
+      await page.locator('[data-overlay-host] > button').tap({ position: { x: 2, y: 2 } });
+      await expect(sheet).toBeHidden();
+    });
+  });
+}
+
+/**
+ * THE REGRESSION MEASURED ON THE SHIPPED SCREENSHOT:
+ * `phone-controls-list-dark-after.png` showed the FAB sitting directly over
+ * the last row's own preview line ("Written. It turned on…"). `PROJECTS`
+ * above (three sessions) never scrolls, so it cannot exercise this at all --
+ * this fixture is deliberately long enough that the list scrolls, and the
+ * check is geometric: scroll the list's own pane to its true end and ask
+ * whether the FAB's rectangle and the last row's rectangle still overlap.
+ * `SessionList.tsx`'s own `pb-[calc(...)]` (phone only) is what this is
+ * falsifying -- delete that padding and this test is the one that catches it.
+ */
+test.describe('the list scrolls fully clear of the FAB', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+  });
+
+  test('at max scroll, the last row does not intersect the FAB', async ({ page }) => {
+    const manySessions = Array.from({ length: 20 }, (_, i) => ({
+      id: `s${i}`,
+      title: `session-${i}`,
+      icon: null,
+      epic: null,
+      status: 'done',
+      runningAgents: 0,
+      activity: null,
+      age: `${i + 1}m`,
+      branch: null,
+      vamControlled: true,
+      source: 'stub-overflow',
+      decisions: [turn(`s${i}`, `turn ${i} finished`)],
+    }));
+    await page.route('**/api/**', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: false,
+          error: { kind: 'unreachable', code: 'stub-overflow', message: 'the stub refuses writes' },
+        }),
+      }),
+    );
+    await page.route('**/api/describe', (route) => route.fulfill(envelope(DESCRIPTOR)));
+    await page.route('**/api/load', (route) =>
+      route.fulfill(
+        envelope([{ id: 'p1', name: 'alpha', source: 'stub-overflow', sessions: manySessions }]),
+      ),
+    );
+    await page.goto('/');
+    await expect(page.locator('[data-phone-shell] [data-session-row]').first()).toBeVisible();
+
+    const fab = page.locator('[data-phone-fab]');
+    await expect(fab).toBeVisible();
+    const fabBox = await fab.boundingBox();
+    if (fabBox === null) throw new Error('no FAB box');
+
+    const scrolled = await page.evaluate(() => {
+      const shell = document.querySelector('[data-phone-shell="list"]');
+      if (shell === null) return null;
+      for (const el of shell.querySelectorAll('*')) {
+        const cs = getComputedStyle(el);
+        if (cs.overflowY === 'auto' && el.scrollHeight > el.clientHeight) {
+          el.scrollTop = el.scrollHeight;
+          return { scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight };
+        }
+      }
+      return null;
+    });
+    expect(scrolled, 'the list must actually be a scroller here — 20 rows in an 844px view').not.toBeNull();
+    expect(scrolled?.scrollTop, 'must have really scrolled').toBeGreaterThan(0);
+
+    const rows = page.locator('[data-session-row]');
+    const lastRow = rows.last();
+    await expect(lastRow).toBeVisible();
+    const lastBox = await lastRow.boundingBox();
+    if (lastBox === null) throw new Error('no last-row box');
+
+    const intersects =
+      lastBox.x < fabBox.x + fabBox.width &&
+      lastBox.x + lastBox.width > fabBox.x &&
+      lastBox.y < fabBox.y + fabBox.height &&
+      lastBox.y + lastBox.height > fabBox.y;
+    expect(
+      intersects,
+      `last row ${JSON.stringify(lastBox)} vs FAB ${JSON.stringify(fabBox)}`,
+    ).toBe(false);
+  });
+});
+
 test.describe('the keystroke strip scrolls horizontally', () => {
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
@@ -486,9 +674,16 @@ test.describe('the keystroke strip scrolls horizontally', () => {
       'a drag across the strip must not also register as a tap on a chip',
     ).toHaveCount(0);
 
+    // A REAL touch tap, not a synthesised mouse click (S3 finding, cross-
+    // provider review): this file's own drag above already dispatches real
+    // touch events via CDP, and this project's `hasTouch: true`
+    // (`playwright.phone.config.ts`) is what makes `.tap()` dispatch actual
+    // `touchstart`/`touchend` rather than `mousedown`/`mouseup` -- the
+    // fine-vs-coarse-pointer distinction this same suite's own header names
+    // for the hover-only close control elsewhere in this file.
     const backspace = page.locator('[data-key-strip-key="backspace"]');
     await backspace.scrollIntoViewIfNeeded();
-    await backspace.click();
+    await backspace.tap();
     await expect(
       page.locator('[data-mode-cycle]'),
       'a plain tap must still reach the handler',

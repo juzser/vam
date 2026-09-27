@@ -35,7 +35,6 @@
 
 import { PROVIDERS } from '../../../shared/providers.js';
 import type { SourceError } from '../../ipc/channels.js';
-import { withConciseLead } from '../../terminal/concise.js';
 import { plain } from '../../terminal/plain.js';
 import { promptKeystrokes, sendEnterArgv } from '../tmux/argv.js';
 import { isShellCommand } from '../tmux/shell.js';
@@ -328,8 +327,17 @@ async function reviewGateOpen(run: TmuxRun, name: string): Promise<boolean> {
  * old `--output-format json` gave (`deliver.ts`), so vam does not know the REPL
  * accepted the submit or that an answer is coming -- that shows up when the
  * transcript does, which is the projection the whole design rests on.
+ *
+ * EXPORTED for `start-in-pane.ts`'s `typeIntoOwnPane`, the ONE other caller
+ * that ever addresses a pane by NAME rather than through `paneForRow`'s proof
+ * (see that module's own header). Once its pane is confirmed to be running a
+ * KNOWN provider (`identifyRunningProvider`, `tmux/shell.ts`), the text
+ * reaching it is an operator's PROMPT, not a shell command, and it must land
+ * through the identical multi-line-safe, review-gate-aware channel a reply
+ * to a live agent already uses -- never the raw, single-line `typeThenEnter`
+ * that command started as a shell.
  */
-async function typeIntoPane(
+export async function typeIntoPane(
   run: TmuxRun,
   name: string,
   prompt: string,
@@ -413,33 +421,16 @@ export async function replyToSession(input: {
   const listed = await listVamSessions(run);
   const pane = listed.kind === 'ok' ? paneForRow(listed.sessions, agents, row, input.panes) : null;
   if (pane !== null) {
-    /**
-     * THE CONCISE-OUTPUT RULES, IF THE OPERATOR HAS THEM ON AND THIS SESSION
-     * HAS NOT BEEN TOLD YET.
-     *
-     * HERE, AND NOT IN THE CALLER. This is the last point at which the prompt
-     * is still a string and the first at which vam knows there IS a pane to
-     * type into: `recordPrompt` above could not tell a delivery from a refusal
-     * without re-deriving the pairing, and the composer in the renderer
-     * could not tell either. It is `main/terminal/concise.ts`'s decision --
-     * what the rules say, who has had them, what the switch does -- and this
-     * line is only the seam it is applied at.
-     *
-     * KEYED BY THE SESSION ID rather than by `rowId`: the row carries the pid
-     * of the process serving it (`<sessionId>#<pid>`) and a session resumed by
-     * a second process is the same conversation with the same context. Priming
-     * per row would type the rules into a context that already has them.
-     *
-     * `delivered()` IS CALLED ONLY ON A CLEAN SEND. `typeIntoPane` answers
-     * non-null when a keystroke failed -- including the case where the text
-     * landed but Return did not -- and in every one of those the session has
-     * not read anything, so the rules must still be waiting for the prompt
-     * that does arrive.
-     */
-    const lead = withConciseLead(sessionId, prompt);
-    const error = await typeIntoPane(run, pane, lead.prompt);
-    if (error === null) lead.delivered();
-    return error;
+    // THE PROMPT, UNCHANGED. vam used to lead the first prompt to a session
+    // with its own wording of an ADHD-friendly output style
+    // (`main/terminal/concise.ts`, deleted): typed once per session, ahead of
+    // whatever the operator wrote. That mechanism is retired -- the same
+    // effect now comes from installing the REAL skill into the agent's own
+    // skills directory (`src/main/skills/adhd-skill.ts`, the Settings card),
+    // which works for every session, including one the operator started by
+    // hand, and is not undone by this module forgetting anything. So there is
+    // no lead here any more: what the operator typed is what tmux receives.
+    return typeIntoPane(run, pane, prompt);
   }
   // NO PANE, NO DELIVERY, AND THE REFUSAL SAYS SO. There is no second channel
   // to fall through to (see the header): a session vam did not start, or one it

@@ -17,7 +17,7 @@ import { useCallback, useMemo, useState } from 'react';
 import type { FileReadResult, FileSignature, FileWriteResult } from '../../main/files/types.js';
 import type { SourceError } from '../sources/port.js';
 import { relativeLabel } from './files-editor-text.js';
-import { normalizeForSave } from './files-save-normalize.js';
+import { normalizeForSaveWithMap } from './files-save-normalize.js';
 import { encodeUnsaved } from './unsaved-files.js';
 
 export type SaveState =
@@ -59,11 +59,16 @@ export interface UseFileBuffersParams {
   /**
    * Fired only when saving trims/newlines the buffer's text out from under
    * the caret (`files-save-normalize.ts`) -- never on a save that changes
-   * nothing. The caret itself is a DOM concern this hook does not own
-   * (`FilesTab.tsx`'s `textareaRef`/`pendingSelection`), so it is reported
-   * here rather than clamped inside the hook.
+   * nothing (including the X-SET-2 no-op above, which returns before this
+   * could ever fire). `mapOffset` is the normalisation's own offset map --
+   * S3 in the cross-provider review -- so a caller holding a caret in the
+   * OLD text can place it at the same logical position in the new text
+   * rather than merely clamping it to a shorter length. The caret itself is
+   * a DOM concern this hook does not own (`FilesTab.tsx`'s
+   * `textareaRef`/`pendingSelection`), so it is reported here rather than
+   * clamped inside the hook.
    */
-  readonly onNormalizedBeforeSave?: (path: string, normalizedContent: string) => void;
+  readonly onNormalizedBeforeSave?: (path: string, mapOffset: (offset: number) => number) => void;
 }
 
 export interface UseFileBuffersResult {
@@ -194,23 +199,36 @@ export function useFileBuffers({
    * state at resolve time as "saved" would silently mark text nobody ever
    * asked vam to write as clean.
    *
+   * X-SET-2 — AN UNEDITED BUFFER IS A NO-OP SAVE, FULL STOP. `isDirty` is the
+   * one true "has the operator actually changed anything" check this module
+   * already carries (the dirty dot on screen reads the same thing), so a
+   * clean buffer returns before any of the rest of this runs: no `write`
+   * call, no normalisation, no `save` state transition, no bumped
+   * `baseSignature`/mtime. Mod-s pressed on a file nobody touched must be
+   * indistinguishable, on disk, from Mod-s never having been pressed —
+   * previously this ran the normaliser and re-wrote the file regardless,
+   * which could touch the mtime of a file that was only ever READ.
+   *
    * TRIM TRAILING WHITESPACE, ONE FINAL NEWLINE — the operator's save-time
-   * ask (`files-save-normalize.ts`'s own header carries the behaviour table
-   * and why it does not carve out `.env`/`.ini` the way Format does).
-   * Computed from the buffer captured above, never re-read from `buffers`
-   * after this point, for the same reason `sentContent`/`baseSignature`
-   * already are. ONLY WHEN NORMALISING ACTUALLY CHANGED SOMETHING does the
-   * buffer's own content move and `onNormalizedBeforeSave` fire — an already
-   * -clean buffer gets no caret reset and no extra render.
+   * ask (`files-save-normalize.ts`'s own header carries the behaviour table,
+   * the extensions exempted from the per-line trim, and why `.env`/`.ini`
+   * are not among them). Computed from the buffer captured above, never
+   * re-read from `buffers` after this point, for the same reason
+   * `sentContent`/`baseSignature` already are. ONLY WHEN NORMALISING
+   * ACTUALLY CHANGED SOMETHING does the buffer's own content move and
+   * `onNormalizedBeforeSave` fire — a save that turned out to need no
+   * rewrite gets no caret reset and no extra render.
    */
   const saveFile = useCallback(
     async (path: string) => {
       const buffer = buffers[path];
       if (buffer?.kind !== 'editable' || write === undefined) return;
-      const sentContent = normalizeForSave(buffer.content);
+      if (!isDirty(buffer)) return;
+      const normalized = normalizeForSaveWithMap(buffer.content, path);
+      const sentContent = normalized.value;
       const baseSignature = buffer.baseSignature;
       if (sentContent !== buffer.content) {
-        onNormalizedBeforeSave?.(path, sentContent);
+        onNormalizedBeforeSave?.(path, normalized.mapOffset);
         setContent(path, sentContent);
       }
       setBuffers((prev) => {

@@ -172,10 +172,38 @@ export async function listRaw(
 
 /**
  * Every LINKED worktree of the project `projectId` names -- the main
- * worktree itself (the project's own checkout, already a row in the
- * sidebar) is filtered out by realpath comparison, and a `bare` record
- * (git's own administrative entry for a bare clone, never one vam creates)
- * is skipped too.
+ * worktree itself (the repository's own primary checkout, already a row in
+ * the sidebar) is NEVER one of them, and a `bare` record (git's own
+ * administrative entry for a bare clone, never one vam creates) is skipped
+ * too.
+ *
+ * THE MAIN WORKTREE IS FOUND BY PORCELAIN ORDER, NOT BY "IS THIS THE
+ * DIRECTORY WE WERE ASKED ABOUT" (a cross-provider review finding, fixed
+ * here): `git worktree list --porcelain` always lists the repository's main
+ * worktree FIRST, `entries[0]`, regardless of which of the repo's own
+ * worktrees `cwd` happens to be when the command runs. The previous version
+ * of this function instead filtered only `selfRealPath` -- the QUERYING
+ * project's own resolved directory -- on the assumption that "self" and
+ * "the main worktree" were the same thing. That holds when `projectId`
+ * names the main checkout itself, but a linked worktree is ALSO its own
+ * known vam project (`projectIdOf(worktreeId)`, `docs/design/worktrees.md`
+ * §4) -- and queried FROM one, `repoRootOf` resolves to the linked
+ * worktree's OWN directory (a linked worktree's `.git` is a FILE, which
+ * counts just as much as a directory, `sources/repo.ts`'s own comment on
+ * why), so `selfRealPath` no longer means "the main worktree" at all. The
+ * main checkout used to survive that self-filter and come back as one of
+ * the LINKED worktree's own "children" -- the reverse of reality, and
+ * exactly the shape that closes a parent/child cycle: the sidebar's
+ * `useWorktreeParents` hook calls `list()` for every visible project of a
+ * repo, so `parent(mainProject) === linkedProject` got recorded on top of
+ * the correct `parent(linkedProject) === mainProject`, and each project
+ * then read as a "suppressed child" of the other with no unsuppressed
+ * ancestor to stop at -- both sections vanished from the sidebar at once.
+ * Filtering the porcelain-first entry closes this for every querying
+ * project at once, main checkout or linked worktree alike; `selfRealPath`
+ * is now redundant with it whenever `projectId` names the main checkout,
+ * and still does its own job (excluding a linked worktree from its OWN
+ * list) whenever it doesn't.
  *
  * ADOPTION NEEDED NO CHANGE HERE (phase 2a, `docs/design/worktrees.md`'s
  * phase-2 list): `listRaw` already runs an unconditional
@@ -200,6 +228,18 @@ export async function listWorktrees(
   if ('kind' in entries) return entries;
 
   const selfRealPath = await safeRealpath(repoRoot, deps.realpathFn);
+  // THE MAIN WORKTREE, BY PORCELAIN ORDER -- `entries[0]` is guaranteed by
+  // git itself to be the repository's own primary checkout, no matter which
+  // of the repo's worktrees `repoRoot` (this call's own `cwd`) happens to
+  // be (this function's own header explains why `selfRealPath` alone is not
+  // enough). `entries` is never empty here in practice (the repository this
+  // function runs against always has at least its own main-worktree record),
+  // but the empty case is handled rather than assumed.
+  const mainEntry = entries[0];
+  const mainRealPath =
+    mainEntry === undefined
+      ? null
+      : ((await safeRealpath(mainEntry.path, deps.realpathFn)) ?? mainEntry.path);
   // `external`'s OWN COMPARISON ROOT -- realpath'd like every other path this
   // function compares, tolerating a root that does not exist yet (no
   // vam-made worktree of this repo ever created): `safeRealpath` answering
@@ -215,6 +255,7 @@ export async function listWorktrees(
     if (entry.bare) continue;
     const realPath = (await safeRealpath(entry.path, deps.realpathFn)) ?? entry.path;
     if (selfRealPath !== null && realPath === selfRealPath) continue;
+    if (mainRealPath !== null && realPath === mainRealPath) continue;
     worktrees.push({
       worktreeId: realPath,
       path: realPath,

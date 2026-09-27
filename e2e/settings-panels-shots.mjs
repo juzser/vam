@@ -46,7 +46,7 @@ const outDir = process.argv[3] ?? 'docs/ui';
 const ROWS = [
   ['view width', '[data-switch="narrow-views"]', 'behaviour', 'appearance'],
   ['focus view', '[data-switch="focus-view"]', 'behaviour', 'appearance'],
-  ['concise output', '[data-switch="concise-output"]', 'behaviour', 'appearance'],
+  ['the ADHD skill card', '[data-settings-block="adhd-skill"]', 'behaviour', 'appearance'],
   ['file editor indent', 'input[aria-label="editor indent"]', 'behaviour', 'appearance'],
   ['the colour templates', '[data-palette-template]', 'appearance', 'behaviour'],
   ['the colour swatches', '[data-palette-swatch]', 'appearance', 'behaviour'],
@@ -193,81 +193,90 @@ console.log('=== which panel each setting is in, measured as paint');
 }
 
 // ---------------------------------------------------------------------------
-// THE ONE ROW THAT TYPES INTO SOMEBODY ELSE'S AGENT, AND ITS DISCLOSURE.
+// THE ADHD SKILL CARD -- what replaced the concise-output switch, in both
+// states an operator can find it in, dark and light.
 //
-// Operator, translated: "turn this ADHD skill into a setting that can be
-// toggled on and off in vam... put it next to the focus view setting."
+// Operator, translated: "turn Concise output in Settings into a card [an
+// Orca screenshot]. Talk about the ADHD skill" -- and the design decision
+// that followed: install the REAL `ayghri/i-have-adhd` skill, rather than
+// typing vam's own wording of it into a session's first prompt. See
+// `src/renderer/settings/AdhdSkillCard.tsx`'s own header for the whole
+// argument.
 //
-// The switch writes a preference main reads before it types a prompt into a
-// pane (`main/terminal/concise.ts`). Before an operator throws it they are
-// owed four facts they cannot guess -- that vam's own words will appear in
-// their transcript, that they ride the FIRST prompt to each session, that a
-// `/clear` empties them and vam cannot tell, and that turning the switch off
-// cannot un-say them. `test/settings/concise-output.test.tsx` holds the
-// SENTENCES. What is asserted here is that the paragraph is PAINTED next to
-// the control, on the panel the operator is actually looking at -- a note
-// mounted inside a hidden panel, or clipped outside the scrollport, is a
-// disclosure nobody read, and no unit environment can tell the difference.
-console.log('\n=== the concise-output row and what it discloses');
+// A BROWSER TAB HAS NO PRELOAD, so `window.api.adhdSkill` does not exist
+// here on its own -- the same fact `settings-chrome-shots.mjs` already works
+// around for `RemotePanel`. Stubbed the same way: `addInitScript` installs a
+// fake bridge BEFORE the page's own script runs, answering a fixed status so
+// this guard never touches a real `~/.claude` or `~/.agents` on the machine
+// running it.
+console.log('\n=== the ADHD skill card, not installed and installed, dark and light');
 {
-  const page = await openSettings();
-  await page.locator('[data-settings-nav-item="behaviour"]').click();
-  await page.waitForTimeout(150);
+  const NOT_INSTALLED = {
+    overall: 'not-installed',
+    agents: [
+      { agent: 'claude', state: 'not-installed', dir: '~/.claude/skills/i-have-adhd' },
+      { agent: 'codex', state: 'not-installed', dir: '~/.agents/skills/i-have-adhd' },
+    ],
+  };
+  const INSTALLED = {
+    overall: 'installed',
+    agents: [
+      { agent: 'claude', state: 'installed', dir: '~/.claude/skills/i-have-adhd' },
+      { agent: 'codex', state: 'installed', dir: '~/.agents/skills/i-have-adhd' },
+    ],
+  };
 
-  const row = await page.evaluate(() => {
-    const port = document.querySelector('[data-settings-scroll]');
-    const control = document.querySelector('[data-switch="concise-output"]');
-    const note = document.querySelector('[data-concise-output-note]');
-    const focus = document.querySelector('[data-switch="focus-view"]');
-    if (port === null || control === null || note === null || focus === null) return null;
-    const box = (el) => {
-      const r = el.getBoundingClientRect();
-      return { top: Math.round(r.top), bottom: Math.round(r.bottom), h: Math.round(r.height) };
-    };
-    return {
-      control: box(control),
-      note: box(note),
-      focus: box(focus),
-      words: (note.textContent ?? '').trim().length,
-      // The scrollport's whole extent, not its visible window: a note below
-      // the fold is reachable by scrolling, a note outside this is not.
-      reach: port.scrollHeight,
-      portTop: Math.round(port.getBoundingClientRect().top),
-    };
-  });
-  if (row === null) {
-    throw new Error('the behaviour panel draws no concise-output switch, or no note beside it');
+  async function shootCard(status, slug) {
+    const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
+    page.on('pageerror', (err) => console.error('PAGE ERROR:', err));
+    await page.addInitScript((fixedStatus) => {
+      const answer = () => Promise.resolve(fixedStatus);
+      globalThis.window.api = {
+        ...(globalThis.window.api ?? {}),
+        adhdSkill: { status: answer, install: answer, remove: answer },
+        clipboard: { writeText: async () => true },
+        link: { open: async () => true },
+      };
+    }, status);
+    await page.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
+    await page.waitForSelector('button[aria-label="settings"]', { timeout: 15_000 });
+    await page.locator('button[aria-label="settings"]').first().click();
+    await page.waitForSelector('[data-settings-nav]', { timeout: 5_000 });
+    await page.locator('[data-settings-nav-item="behaviour"]').click();
+    await page.waitForSelector('[data-settings-block="adhd-skill"]', { timeout: 5_000 });
+    await page.waitForSelector(`[data-adhd-skill-pill="${status.overall}"]`, { timeout: 5_000 });
+
+    const box = await page
+      .locator('[data-settings-block="adhd-skill"]')
+      .evaluate((el) => el.getBoundingClientRect());
+    if (box.height === 0) {
+      throw new Error(`the ADHD skill card (${slug}) has no height`);
+    }
+    const install = await page.locator('[data-adhd-skill-install]').count();
+    if (install !== 1) {
+      throw new Error(`the ADHD skill card (${slug}) drew ${install} Install/Reinstall buttons`);
+    }
+    const agents = await page.locator('[data-adhd-skill-agent]').count();
+    if (agents !== 2) {
+      throw new Error(`the ADHD skill card (${slug}) drew ${agents} agent coverage chips, not 2`);
+    }
+
+    for (const theme of ['dark', 'light']) {
+      await page.evaluate((t) => {
+        document.documentElement.classList.toggle('light', t === 'light');
+      }, theme);
+      await page.waitForTimeout(120);
+      await page.locator('[data-settings-block="adhd-skill"]').scrollIntoViewIfNeeded();
+      await page.locator('[data-settings-block="adhd-skill"]').screenshot({
+        path: `${outDir}/settings-adhd-skill-${slug}-${theme}.png`,
+      });
+      console.log(`${outDir}/settings-adhd-skill-${slug}-${theme}.png`);
+    }
+    await page.close();
   }
-  console.log(`  ${JSON.stringify(row)}`);
-  // PAINTED, not merely mounted.
-  if (row.control.h === 0 || row.note.h === 0) {
-    throw new Error(`the row or its note has no height: ${JSON.stringify(row)}`);
-  }
-  // UNDER FOCUS VIEW, which is where the operator asked for it. Measured as
-  // the y of the two controls rather than as sibling order, because that is
-  // the thing an operator can actually see.
-  if (row.control.top <= row.focus.top) {
-    throw new Error(
-      `concise output is drawn at y=${row.control.top}, above focus view at y=${row.focus.top}`,
-    );
-  }
-  // THE NOTE IS THE DISCLOSURE, so an empty one is the defect. A floor rather
-  // than an exact length: it is prose and will be reworded.
-  if (row.words < 200) {
-    throw new Error(`the disclosure is ${row.words} characters, too short to carry four facts`);
-  }
-  // AND IT IS INSIDE THE BOX THAT SCROLLS. Beyond `scrollHeight` there is no
-  // gesture in this dialog that reaches it.
-  if (row.note.bottom - row.portTop > row.reach + 1) {
-    throw new Error(
-      `the disclosure ends ${row.note.bottom - row.portTop}px down a scrollport ${row.reach}px deep — it cannot be scrolled to`,
-    );
-  }
-  await page.locator('[data-concise-output-note]').scrollIntoViewIfNeeded();
-  await page.waitForTimeout(150);
-  await page.screenshot({ path: `${outDir}/settings-concise-output.png` });
-  console.log(`${outDir}/settings-concise-output.png`);
-  await page.close();
+
+  await shootCard(NOT_INSTALLED, 'not-installed');
+  await shootCard(INSTALLED, 'installed');
 }
 
 // ---------------------------------------------------------------------------

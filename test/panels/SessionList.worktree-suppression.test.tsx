@@ -145,6 +145,40 @@ describe('SessionList — UI1: a worktree does not also draw its own top-level s
     expect(container.querySelector('[data-session-row="s-parent"]')).not.toBeNull();
   });
 
+  /**
+   * SECOND GUARD, exercised end to end through the real component: a
+   * cross-provider review found that a linked worktree's own project could
+   * report the main checkout as one of ITS children, on top of the main
+   * checkout correctly reporting the linked worktree as one of its own --
+   * closing a two-node cycle with no unsuppressed ancestor to stop at, and
+   * hiding BOTH project headings at once. `useWorktreeParents.test.ts`
+   * already falsifies this at the hook level in isolation; this test proves
+   * the same fallback holds once wired through `SessionList`'s own
+   * `isSuppressedWorktreeChild`, the actual code path an operator's sidebar
+   * runs.
+   */
+  it('a mutual (cyclic) parent assignment suppresses NEITHER project -- both fall back to top level', async () => {
+    installApi(async (projectId) => {
+      if (projectId === 'p1') return [worktree({ projectId: 'claude-code:feat-00000000' })];
+      if (projectId === 'claude-code:feat-00000000') return [worktree({ projectId: 'p1' })];
+      return [];
+    });
+    const { container } = render(<SessionList {...baseProps(parentAndChild())} />);
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(container.querySelector('[data-project-heading][data-project-id="p1"]')).not.toBeNull();
+    expect(
+      container.querySelector(
+        '[data-project-heading][data-project-id="claude-code:feat-00000000"]',
+      ),
+    ).not.toBeNull();
+    expect(container.querySelector('[data-session-row="s-parent"]')).not.toBeNull();
+    expect(container.querySelector('[data-session-row="s-child"]')).not.toBeNull();
+  });
+
   it('with no window.api at all, nothing is suppressed (browser/demo build, #486 unaffected)', async () => {
     const { container } = render(<SessionList {...baseProps(parentAndChild())} />);
     await act(async () => {
