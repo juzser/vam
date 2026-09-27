@@ -26,7 +26,7 @@
  * do anything: every press lands where you already are.
  */
 
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionList } from '../../src/renderer/panels/SessionList.js';
 import { PHONE_QUERY } from '../../src/renderer/phone/viewport.js';
@@ -84,7 +84,15 @@ describe('the phone’s own chrome', () => {
 
   it('keeps remote access, which is the one the phone has a reason for', () => {
     render(<SessionList {...baseProps(entriesOf([]))} phone />);
-    expect(screen.getByRole('button', { name: 'remote access' })).toBeTruthy();
+    // One tap further in now, behind the toolbar's "more actions" overflow
+    // button (Orca one-row pass, follow-up to pull request 527) -- reachable,
+    // which is the property this test holds, not "bare in the row". Its own
+    // accessible ROLE changed with the move too: a menu item
+    // (`role="menuitem"`, the same the project heading's own "…" menu items
+    // already carry), not a plain button, so `getByLabelText` is what finds
+    // it here rather than `getByRole('button', …)`.
+    fireEvent.click(screen.getByRole('button', { name: 'more actions' }));
+    expect(screen.getByLabelText('remote access')).toBeTruthy();
   });
 
   /**

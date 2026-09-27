@@ -2790,6 +2790,10 @@ html {
   min-width: 44px;
 }
 
+/* The account icon's OWN floor moved out of the list above and down to the
+   toolbar-wide 30px rule near `.vam-tap` below -- see that rule's own
+   comment for why the whole row floors at 30 now, not 44. */
+
 /* The same floor, for a control the shell HOSTS rather than owns -- opted into
    at the component, never reached for from here.
  *
@@ -2812,6 +2816,64 @@ html {
 .vam-phone .vam-tap {
   min-height: 44px;
   min-width: 44px;
+}
+
+/* THE ONE NAMED EXCEPTION TO THE FLOOR ABOVE, and it is named for exactly
+ * that reason: the operator's own follow-up request, after looking at the
+ * shipped Orca-one-row screenshot, to tighten this ONE row's spacing --
+ * "reduce the spacing between the buttons... target <=4px between icons,
+ * compact ~28-32px painted icons". The row's skin was already 30px
+ * (`.vam-tap > [data-tap-skin]` below) and its own flex `gap` was already
+ * 4px (`SessionList.tsx`'s `data-projects-header`, `gap-1` on a phone) --
+ * what stood between those two numbers and the operator's own ask was the
+ * INVISIBLE padding the 44px floor still drew around a 30px skin, 7px a
+ * side. Two adjacent 44px hits then show 14px between painted edges before
+ * the flex gap is even added, no matter how tight that gap is set. Flooring
+ * this row at 30 instead removes exactly that padding: hit and paint become
+ * the same box, so two neighbours show the row's own 4px flex gap and
+ * nothing more.
+ *
+ * HIGHER SPECIFICITY THAN THE RULE ABOVE ON PURPOSE (an attribute plus two
+ * classes beats two classes), so this wins regardless of source order --
+ * and `[data-usage-toggle]` is folded in here rather than left on its own
+ * enumerated rule above: the account icon sits in this same row now and
+ * gets the same floor, not a second number to keep in sync by hand.
+ *
+ * STILL CLEAR OF WCAG 2.2 SC 2.5.8 (AA, the level this repo has to clear) by
+ * 6px; short only of SC 2.5.5 (AAA, the aspirational figure `TOUCH_MIN` in
+ * `e2e/phone-shell.pw.ts` cites), which every OTHER control on the phone
+ * shell keeps and this one row, at the operator's own explicit request for
+ * a denser toolbar, does not.
+ *
+ * AN ENUMERATION OF THE ROW'S OWN SEVEN, BY NAME -- NOT `.vam-tap` UNDER
+ * `[data-phone-toolbar]`, and that form was tried first and falsified:
+ * `[data-filter-menu]` (the Group by/Sort by/Hide-* popover this row's own
+ * funnel and grouping buttons open) is drawn INSIDE this same
+ * `[data-phone-toolbar]` row, positioned `absolute` off its left edge, not
+ * beside it -- so a bare descendant selector caught the popover's OWN pills
+ * and rows too (they carry `vam-tap` for the same reasons this row's own
+ * controls do), dragging twelve unrelated controls down to 30px along with
+ * the row's real seven. `e2e/workspace-options-shots.mjs` caught it on a
+ * real render: "every control clears the 44px phone tap floor" read twelve
+ * boxes at 30 where it used to read 44. A `:not()` exclusion of
+ * `[data-filter-menu] *` reads right and is valid CSS (Selectors 4 permits a
+ * complex selector inside `:not()`) but happy-dom -- `test/phone/touch-
+ * targets.test.tsx`'s own engine -- resolves it wrong (verified: it matched
+ * BOTH sides of a two-button fixture, one inside the guarded subtree and one
+ * outside), so a real green Playwright pass would have sat beside a
+ * permanently-red unit test with no way to make the two agree. Naming the
+ * seven instead needs no exclusion at all: the popover's controls were never
+ * on the list. */
+[data-phone-shell] [data-phone-toolbar] [data-new-group],
+[data-phone-shell] [data-phone-toolbar] [data-new-project],
+[data-phone-shell] [data-phone-toolbar] [data-filter-toggle],
+[data-phone-shell] [data-phone-toolbar] [data-group-toggle],
+[data-phone-shell] [data-phone-toolbar] [data-usage-toggle],
+[data-phone-shell] [data-phone-toolbar] [data-more-toggle],
+[data-phone-shell] [data-phone-toolbar] [data-search-toggle],
+[data-phone-shell] [data-phone-toolbar] [data-search-cancel] {
+  min-height: 30px;
+  min-width: 30px;
 }
 
 /* The other half of the sizing: the hit stays 44, the PAINT comes inward.
