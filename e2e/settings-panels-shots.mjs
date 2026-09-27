@@ -95,11 +95,15 @@ const ROWS = [
 
   // AGENTS — renamed from Sessions, and gained the ADHD skill card that used
   // to sit in Behaviour. Keep-awake/auto-tab-titles/permissions/default-agent
-  // are this section's own second PR.
+  // are this section's own second PR. Agent permissions is NOT in this sweep
+  // — a security review found its own gate needs to be `isDesktopShell()`
+  // (`window.api` presence), not viewport width, so it never draws in THIS
+  // browser harness (no bridge) at all; the dedicated check right after this
+  // sweep asserts that absence explicitly rather than let the row silently
+  // read as "0 matches, trivially inside its own card".
   ['the ADHD skill card', '[data-settings-block="adhd-skill"]', 'agents', false],
   ['keep computer awake', '[data-keep-awake-option]', 'agents', false],
   ['auto tab titles', '[data-switch="auto-tab-titles"]', 'agents', false],
-  ['agent permissions', '[data-agent-permissions-option]', 'agents', false],
   ['default agent', '[data-default-agent-option]', 'agents', false],
 
   // BEHAVIOUR — smaller, not gone: focus view stays, and the file editor's
@@ -225,6 +229,26 @@ console.log('\n=== every row lives in exactly one card, painted or not by its ow
         seen.onScreen === seen.inTree,
       );
     }
+  }
+
+  // AGENT PERMISSIONS, SEPARATELY, PROVING AN ABSENCE RATHER THAN LEAVING ONE
+  // UNPROVEN. This browser has no `window.api` (`vite preview` serves the
+  // pure web build, no Electron preload) — the same state a paired device
+  // over Tailscale is in at ANY viewport width, which is exactly the gap a
+  // security review found: an earlier version of this gate checked viewport
+  // width instead, so a paired browser at desktop width saw this row and
+  // could set Yolo in its own localStorage. `isDesktopShell()` now reads
+  // `window.api` presence, so the row (and its confirmation) must be
+  // ZERO matches here, not merely "0, and nobody checked".
+  {
+    const permissionsRow = await page.evaluate(
+      () => document.querySelectorAll('[data-agent-permissions-option]').length,
+    );
+    check(
+      'agent permissions: absent in this browser harness (no window.api) — the desktop-only gate',
+      permissionsRow === 0,
+      `found ${permissionsRow}`,
+    );
   }
 
   console.log('\n=== each card draws its own corpus of labelled rows');

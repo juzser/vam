@@ -313,10 +313,18 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * times, `electron-vite build --mode production`:
  *
  *     entry, main (phone toolbar, no step 2B)   705,616 B  (211,927 B gzip)
- *     entry, merged (+ step 2B)                 PLACEHOLDER_EAGER B  (PLACEHOLDER_GZIP B gzip)
+ *     entry, merged (+ step 2B)                 712,220 B  (213,705 B gzip)  (+6,604 B, +0.94%)
  *
- * `ENTRY_BUDGET_BYTES` moves 709,500 -> PLACEHOLDER_BUDGET: PLACEHOLDER_REASONING
- * `ENTRY_GZIP_BUDGET_BYTES` moves 213,500 -> PLACEHOLDER_GZIP_BUDGET: PLACEHOLDER_GZIP_REASONING
+ * +6,604 B eager / +1,778 B gzip -- within measurement noise of step 2B's own
+ * isolated delta (+6,569 B / +1,726 B, above): the phone toolbar pass touches
+ * only phone-only render paths, none of which step 2B's own eager growth
+ * (`Canvas.tsx`/`prefs.ts`/`shared/*`, the same paragraph) shares, so the two
+ * sides' costs are simply additive rather than interacting. `ENTRY_BUDGET_
+ * BYTES` moves 709,500 -> 714,500: the real merged figure (712,220 B) plus
+ * ~2.2 KB (~0.32%) of slack, the same small-headroom convention every bump
+ * above uses -- not a fresh re-baseline off either side's own margin.
+ * `ENTRY_GZIP_BUDGET_BYTES` moves 213,500 -> 214,500: the measured figure
+ * (213,705 B) plus ~0.8 KB (~0.37%) of the same slack.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -327,8 +335,8 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 // depends on is even present, decided BEFORE anything tries to build.
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
-const ENTRY_BUDGET_BYTES = 709_500; // PLACEHOLDER, fixed after remeasurement
-const ENTRY_GZIP_BUDGET_BYTES = 213_500; // PLACEHOLDER, fixed after remeasurement
+const ENTRY_BUDGET_BYTES = 714_500;
+const ENTRY_GZIP_BUDGET_BYTES = 214_500;
 
 // The one string this repo's markdown stack ships that nothing else in the
 // dependency graph or vam's own source does: `gfmTable`, the extension name

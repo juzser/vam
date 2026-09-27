@@ -144,6 +144,7 @@ import { halfPageTarget } from '../panels/stick-to-bottom.js';
 import { TABS, tabForDigit, visibleTabs } from '../panels/tabs.js';
 import { PhoneShell } from '../phone/PhoneShell.js';
 import { usePhoneViewport } from '../phone/viewport.js';
+import { isDesktopShell } from '../prefs/agent-permissions.js';
 import { type FocusCandidate, resolveFocusNodeId } from '../prefs/focus.js';
 import { DEFAULT_PANES, PANE_RESIZE_STEP } from '../prefs/panes.js';
 import {
@@ -5400,10 +5401,14 @@ function CanvasInner({
         // session CREATION -- `resumeInPane` below types
         // `entry.session.resumeCommand` verbatim and never reads
         // `agentPermissions` at all, so flipping this setting never touches
-        // an already-running or previously-run session.
+        // an already-running or previously-run session. `isDesktopShell()`
+        // (`prefs/agent-permissions.ts`) is the SECOND gate: a paired browser
+        // tab has no `window.api` at any viewport width, so a `'yolo'` value
+        // sitting in THAT tab's own `localStorage` is treated as `'manual'`
+        // here regardless -- viewport width alone was never the right check.
         await sessionSource.write.recordPrompt(
           entry.session.id,
-          sessionArgv(providerId, prefs.agentPermissions).join(' '),
+          sessionArgv(providerId, isDesktopShell() ? prefs.agentPermissions : 'manual').join(' '),
         );
         setStatus(
           `started ${provider.label} in "${title}" — its session appears here once it registers`,

@@ -65,7 +65,7 @@ import {
 import { type BindingRow, buildBindingSheet } from '../keyboard/keysheet.js';
 import { ChordGlyphs } from '../keyboard/ShortcutTip.js';
 import { usePhoneViewport } from '../phone/viewport.js';
-import { type AgentPermissions } from '../prefs/agent-permissions.js';
+import { type AgentPermissions, isDesktopShell } from '../prefs/agent-permissions.js';
 import { type DefaultAgent } from '../prefs/default-agent.js';
 import { EDITOR_INDENT_MAX, EDITOR_INDENT_MIN } from '../prefs/editor.js';
 import { type KeepAwakeMode } from '../prefs/keep-awake.js';
@@ -1057,67 +1057,87 @@ export function SettingsOverlay({
                     "the refusal is where the operator is looking" rule the
                     keyboard editor's own clash notice already follows), that
                     names the risk in the operator's own words before a
-                    second press commits it. */}
-                <SettingsRow
-                  label={t('settings.agents.permissions.label')}
-                  hint={t('settings.agents.permissions.hint')}
-                >
-                  <div className="flex gap-1">
-                    {AGENT_PERMISSIONS_CHOICES.map((choice) => (
-                      <button
-                        key={choice}
-                        type="button"
-                        data-agent-permissions-option={choice}
-                        aria-pressed={prefs.agentPermissions === choice}
-                        onClick={() => {
-                          if (choice === 'manual') {
-                            setConfirmingYolo(false);
-                            onChange(setAgentPermissions(prefs, choice));
-                            return;
-                          }
-                          setConfirmingYolo(true);
-                        }}
-                        className={`vam-tap flex h-[28px] cursor-pointer items-center rounded border px-3 text-control capitalize ${FOCUS_RING} ${
-                          prefs.agentPermissions === choice
-                            ? 'border-line-loudest bg-raised text-ink'
-                            : 'border-line text-ink-dim'
-                        }`}
-                      >
-                        {t(`settings.agents.permissions.${choice}` as const)}
-                      </button>
-                    ))}
-                  </div>
-                  <p data-permissions-note className="mt-3 max-w-[52ch] text-control text-ink-dim">
-                    {t('settings.agents.permissions.note')}
-                  </p>
-                  {confirmingYolo && prefs.agentPermissions !== 'yolo' ? (
-                    <div
-                      data-yolo-risk
-                      role="alertdialog"
-                      aria-label={t('settings.agents.permissions.yolo.confirmLabel')}
-                      className="mt-3 flex max-w-[52ch] flex-col gap-2 rounded border border-line-strong bg-sunken p-3"
-                    >
-                      <p className="text-control text-waiting">
-                        {t('settings.agents.permissions.yolo.risk')}
-                      </p>
-                      <div className="flex gap-2">
-                        <SmallButton
-                          label={t('settings.agents.permissions.yolo.confirm')}
-                          onPick={() => {
-                            setConfirmingYolo(false);
-                            onChange(setAgentPermissions(prefs, 'yolo'));
+                    second press commits it.
+
+                    HIDDEN OUTSIDE THE REAL DESKTOP SHELL. `isDesktopShell()`
+                    (`prefs/agent-permissions.ts`) reads `window.api`, present
+                    only inside the packaged Electron app -- never in a
+                    browser tab, paired over Tailscale or not, at ANY viewport
+                    width. An earlier version of this gate checked viewport
+                    width (`PHONE_SECTIONS`) instead, which conflated "narrow
+                    layout" with "not the desktop app": a paired browser
+                    sitting at desktop width saw this row and could set Yolo
+                    in ITS OWN localStorage. `startSessionIn` (`Canvas.tsx`)
+                    carries the same gate independently, so even if this row
+                    were reachable some other way, the preference could not
+                    be honoured outside the desktop shell -- but hiding the
+                    control here is the plainer fact for whoever reads this
+                    code next. */}
+                {isDesktopShell() ? (
+                  <SettingsRow
+                    label={t('settings.agents.permissions.label')}
+                    hint={t('settings.agents.permissions.hint')}
+                  >
+                    <div className="flex gap-1">
+                      {AGENT_PERMISSIONS_CHOICES.map((choice) => (
+                        <button
+                          key={choice}
+                          type="button"
+                          data-agent-permissions-option={choice}
+                          aria-pressed={prefs.agentPermissions === choice}
+                          onClick={() => {
+                            if (choice === 'manual') {
+                              setConfirmingYolo(false);
+                              onChange(setAgentPermissions(prefs, choice));
+                              return;
+                            }
+                            setConfirmingYolo(true);
                           }}
-                          hook="yolo-confirm-yes"
-                        />
-                        <SmallButton
-                          label={t('settings.agents.permissions.yolo.cancel')}
-                          onPick={() => setConfirmingYolo(false)}
-                          hook="yolo-confirm-cancel"
-                        />
-                      </div>
+                          className={`vam-tap flex h-[28px] cursor-pointer items-center rounded border px-3 text-control capitalize ${FOCUS_RING} ${
+                            prefs.agentPermissions === choice
+                              ? 'border-line-loudest bg-raised text-ink'
+                              : 'border-line text-ink-dim'
+                          }`}
+                        >
+                          {t(`settings.agents.permissions.${choice}` as const)}
+                        </button>
+                      ))}
                     </div>
-                  ) : null}
-                </SettingsRow>
+                    <p
+                      data-permissions-note
+                      className="mt-3 max-w-[52ch] text-control text-ink-dim"
+                    >
+                      {t('settings.agents.permissions.note')}
+                    </p>
+                    {confirmingYolo && prefs.agentPermissions !== 'yolo' ? (
+                      <div
+                        data-yolo-risk
+                        role="alertdialog"
+                        aria-label={t('settings.agents.permissions.yolo.confirmLabel')}
+                        className="mt-3 flex max-w-[52ch] flex-col gap-2 rounded border border-line-strong bg-sunken p-3"
+                      >
+                        <p className="text-control text-waiting">
+                          {t('settings.agents.permissions.yolo.risk')}
+                        </p>
+                        <div className="flex gap-2">
+                          <SmallButton
+                            label={t('settings.agents.permissions.yolo.confirm')}
+                            onPick={() => {
+                              setConfirmingYolo(false);
+                              onChange(setAgentPermissions(prefs, 'yolo'));
+                            }}
+                            hook="yolo-confirm-yes"
+                          />
+                          <SmallButton
+                            label={t('settings.agents.permissions.yolo.cancel')}
+                            onPick={() => setConfirmingYolo(false)}
+                            hook="yolo-confirm-cancel"
+                          />
+                        </div>
+                      </div>
+                    ) : null}
+                  </SettingsRow>
+                ) : null}
 
                 <SettingsRow
                   label={t('settings.agents.defaultAgent.label')}

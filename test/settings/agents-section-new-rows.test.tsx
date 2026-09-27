@@ -13,7 +13,15 @@ import { SettingsOverlay } from '../../src/renderer/settings/SettingsOverlay.js'
 
 afterEach(() => {
   document.body.innerHTML = '';
+  Reflect.deleteProperty(window, 'api');
 });
+
+/** Stubs a truthy, minimal `window.api` -- `isDesktopShell()`'s own signal
+ *  (`prefs/agent-permissions.ts`) for "this is the real Electron shell, not a
+ *  paired browser tab at any viewport width." */
+function markDesktopShell(): void {
+  (window as unknown as { api: unknown }).api = {};
+}
 
 function open(prefs: Prefs = EMPTY_PREFS) {
   const onChange = vi.fn();
@@ -71,18 +79,21 @@ describe('agent permissions -- SECURITY-SENSITIVE', () => {
   const risk = () => document.querySelector('[data-yolo-risk]');
 
   it('manual is pressed by default, and yolo is not', () => {
+    markDesktopShell();
     open();
     expect(manual()?.getAttribute('aria-pressed')).toBe('true');
     expect(yolo()?.getAttribute('aria-pressed')).toBe('false');
   });
 
   it('picking manual writes immediately -- no confirmation for the safe direction', () => {
+    markDesktopShell();
     const { onChange } = open({ ...EMPTY_PREFS, agentPermissions: 'yolo' });
     fireEvent.click(manual() as HTMLElement);
     expect(changed(onChange, 0).agentPermissions).toBe('manual');
   });
 
   it('picking yolo does NOT write yet -- it opens a confirmation naming the risk', () => {
+    markDesktopShell();
     const { onChange } = open();
     fireEvent.click(yolo() as HTMLElement);
     expect(onChange).not.toHaveBeenCalled();
@@ -91,6 +102,7 @@ describe('agent permissions -- SECURITY-SENSITIVE', () => {
   });
 
   it('cancelling the confirmation writes nothing and leaves manual pressed', () => {
+    markDesktopShell();
     const { onChange } = open();
     fireEvent.click(yolo() as HTMLElement);
     fireEvent.click(confirmCancel() as HTMLElement);
@@ -100,6 +112,7 @@ describe('agent permissions -- SECURITY-SENSITIVE', () => {
   });
 
   it('confirming writes yolo', () => {
+    markDesktopShell();
     const { onChange } = open();
     fireEvent.click(yolo() as HTMLElement);
     fireEvent.click(confirmYes() as HTMLElement);
@@ -107,8 +120,20 @@ describe('agent permissions -- SECURITY-SENSITIVE', () => {
   });
 
   it('once yolo is already the stored choice, it is pressed with no confirmation offered', () => {
+    markDesktopShell();
     open({ ...EMPTY_PREFS, agentPermissions: 'yolo' });
     expect(yolo()?.getAttribute('aria-pressed')).toBe('true');
+    expect(risk()).toBeNull();
+  });
+
+  it('is ABSENT outside the real desktop shell -- a paired browser tab at any viewport width has no window.api', () => {
+    // No markDesktopShell() call: `window.api` stays undefined, the same
+    // state a paired browser tab is in regardless of its own layout width
+    // (#529/S2's own finding: viewport width and "is this the desktop app"
+    // are two different questions, and only the second one is the gate).
+    open();
+    expect(manual()).toBeNull();
+    expect(yolo()).toBeNull();
     expect(risk()).toBeNull();
   });
 });

@@ -9,7 +9,12 @@
  *  - Yolo types exactly the right flag per provider
  *    (`shared/providers.ts`'s `sessionArgv`, verified against each
  *    provider's real `--help`), as a SEPARATE argv element joined once,
- *    never a string built by concatenation.
+ *    never a string built by concatenation -- but ONLY inside the real
+ *    Electron desktop shell (`window.api !== undefined`, `isDesktopShell()`
+ *    in `prefs/agent-permissions.ts`). A paired browser tab has no
+ *    `window.api` regardless of its viewport width, so a `'yolo'` value
+ *    sitting in THAT tab's own `localStorage` is inert there: this file's
+ *    own "desktop shell" describe block below pins that down.
  *  - `resumeInPane` -- a DIFFERENT write, for a session that already existed
  *    -- types `entry.session.resumeCommand` verbatim, regardless of
  *    `agentPermissions`: the setting never reaches an already-running (or
@@ -113,8 +118,16 @@ beforeAll(() => {
 afterEach(() => {
   cleanup();
   localStorage.clear();
+  Reflect.deleteProperty(window, 'api');
   vi.useRealTimers();
 });
+
+/** Stubs a truthy, minimal `window.api` -- the same "is this the real
+ *  Electron shell" signal `App.tsx`/`isDesktopShell()` read, with no members
+ *  this test's own `startSessionIn` path touches. */
+function markDesktopShell(): void {
+  (window as unknown as { api: unknown }).api = {};
+}
 
 describe('agentPermissions: manual (the default) adds no flag', () => {
   it('types the bare command on Start', async () => {
@@ -137,8 +150,9 @@ describe('agentPermissions: manual (the default) adds no flag', () => {
   });
 });
 
-describe('agentPermissions: yolo appends exactly the right flag, per provider', () => {
+describe('agentPermissions: yolo appends exactly the right flag, per provider -- inside the real desktop shell', () => {
   it('claude code', async () => {
+    markDesktopShell();
     seed({ agentPermissions: 'yolo' });
     const { source, recorded } = sourceWith();
     render(<Canvas model={modelWith(UNSTARTED)} source={source} />);
@@ -149,6 +163,7 @@ describe('agentPermissions: yolo appends exactly the right flag, per provider', 
   });
 
   it('codex, chosen from the same picker', async () => {
+    markDesktopShell();
     seed({ agentPermissions: 'yolo' });
     const { source, recorded } = sourceWith();
     render(<Canvas model={modelWith(UNSTARTED)} source={source} />);
@@ -159,6 +174,21 @@ describe('agentPermissions: yolo appends exactly the right flag, per provider', 
       startButton()?.click();
     });
     expect(recorded).toEqual([[UNSTARTED.id, 'codex --dangerously-bypass-approvals-and-sandbox']]);
+  });
+});
+
+describe('agentPermissions: yolo is INERT outside the real desktop shell', () => {
+  it('a paired browser tab with no window.api sends the bare command, even with yolo in ITS OWN localStorage', async () => {
+    // No markDesktopShell() call -- `window.api` stays undefined, exactly
+    // the state a paired browser tab (any viewport width; #529/S2's own
+    // finding was that `PHONE_SECTIONS` gates layout, not device) is in.
+    seed({ agentPermissions: 'yolo' });
+    const { source, recorded } = sourceWith();
+    render(<Canvas model={modelWith(UNSTARTED)} source={source} />);
+    await act(async () => {
+      startButton()?.click();
+    });
+    expect(recorded).toEqual([[UNSTARTED.id, 'claude']]);
   });
 });
 

@@ -22,13 +22,28 @@
  *    and it is the only reader of this preference; nothing re-types a running
  *    session's command, so flipping this switch never touches a session
  *    already talking to its provider.
- *  - NEVER REACHABLE FROM THE PHONE OR THE REMOTE API. `settings/sections.ts`'s
- *    `PHONE_SECTIONS` already excludes the whole Agents card from the phone
- *    build, and `main/remote/server.ts`'s write routes take no `permissions`
- *    field at all -- `test/remote/server.no-permissions-field.test.ts` pins
- *    that an extra one in a request body is silently dropped, never forwarded.
- *    Prefs themselves are `localStorage`, per device; there is no channel that
- *    could carry this from one device to another even if a route existed.
+ *  - GATED ON THE DESKTOP SHELL, NOT ON VIEWPORT WIDTH. There is no separate
+ *    phone build: `main/remote/server.ts` serves the SAME renderer a paired
+ *    browser opens over Tailscale, and `usePhoneViewport()` is only a
+ *    `matchMedia('(max-width: 519px)')` check -- a paired browser sitting at
+ *    DESKTOP width sees the same Agents card a real desktop user does. An
+ *    earlier version of this comment claimed `PHONE_SECTIONS` (`settings/
+ *    sections.ts`) excluded this from "the phone build"; that conflated
+ *    narrow layout with a different device, and was wrong. The real gate is
+ *    `isDesktopShell()` below -- `window.api` exists only inside the actual
+ *    Electron shell, never in ANY browser tab regardless of width -- and both
+ *    `SettingsOverlay.tsx` (hides the row and its confirmation) and
+ *    `startSessionIn` (treats the preference as `'manual'` regardless of what
+ *    a remote tab's own `localStorage` holds) read it. This is DEFENCE IN
+ *    DEPTH, not the security boundary: `recordPrompt` already lets a paired
+ *    device type arbitrary text into a pane, Yolo's flag included, so a
+ *    paired device that wanted to run permission-skipped commands could
+ *    already do so before this preference existed. What this gate prevents is
+ *    a Yolo *setting* silently carried in a remote tab's own `localStorage`
+ *    (set there by mistake, or by an operator who forgot which tab they were
+ *    in) from being honoured the moment that tab's `startSessionIn` runs.
+ *  - Prefs themselves are `localStorage`, per device; there is no channel that
+ *    could carry a `'yolo'` value from one device's storage to another's.
  */
 
 export type AgentPermissions = 'manual' | 'yolo';
@@ -37,4 +52,18 @@ export const DEFAULT_AGENT_PERMISSIONS: AgentPermissions = 'manual';
 
 export function readAgentPermissions(raw: unknown): AgentPermissions {
   return raw === 'manual' || raw === 'yolo' ? raw : DEFAULT_AGENT_PERMISSIONS;
+}
+
+/**
+ * Whether this renderer is running inside the real Electron desktop shell --
+ * the same check `App.tsx` makes at the very top of the tree ("The bridge
+ * exists only in the Electron shell. In a browser there is no `window.api`
+ * and nothing below it is reachable, which is why the check is for the
+ * object rather than for a build flag") -- read again here because Yolo's
+ * gate needs to survive independently of however the tree above it is
+ * composed. A paired browser at any viewport width has no `window.api`; only
+ * the packaged app does.
+ */
+export function isDesktopShell(): boolean {
+  return globalThis.window?.api !== undefined;
 }
