@@ -24,10 +24,17 @@ export default defineConfig({
     // again: it spawns a real Electron binary via `runProbe` and needs the
     // longer timeout `vitest.app.config.ts` gives it, not the default
     // suite's -- measured directly (5000ms timeout, unexcluded).
+    //
+    // `test/electron/stats-worker.test.ts` needs no display and spawns no
+    // Electron binary at all -- only `out/main/statsWorker.cjs`, which
+    // `electron-vite build` has not produced yet at this point in the gate.
+    // Left in, it fails with ENOENT on a clean checkout rather than testing
+    // anything.
     exclude: [
       'test/electron/launch.test.ts',
       'test/electron/userdata-isolation.test.ts',
       'test/electron/getting-started-image.test.ts',
+      'test/electron/stats-worker.test.ts',
       '**/node_modules/**',
       '**/dist/**',
     ],

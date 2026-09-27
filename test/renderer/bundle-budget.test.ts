@@ -80,6 +80,20 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * markdown split above already established -- enough to absorb an ordinary
  * dependency bump without flapping, but a reverted lazy split on either
  * component puts its chunk straight back into the entry and fails both
+ *
+ * A FOURTH, SMALL, DELIBERATE BUMP: the Stats & Usage entry icon
+ * (`SessionList.tsx`'s avatar bar) is eagerly-loaded chrome, same as every
+ * other icon there, and `StatsScreen` itself is lazy on `SettingsOverlay`'s
+ * own idiom (`StatsScreen-*.js`, fetched on first open, never in this
+ * chunk). Measured, `electron-vite build`, after that one icon and its
+ * button: entry 690,589 B -- 589 B past the PREVIOUS 690,000 budget, which
+ * itself already carried the ~10% headroom the markdown/settings split
+ * established, so this is not that same category of change and does not
+ * earn a second helping of it.
+ *
+ * `ENTRY_BUDGET_BYTES` moves to 691,000 -- just past the measured figure,
+ * not a fresh 10%: this is one icon, not a split, and the budget should
+ * still notice the NEXT one that lands without a reason.
  * budgets outright.
  *
  * A FOURTH GROWTH, ORDINARY THIS TIME RATHER THAN A REGRESSION: the ADHD
@@ -234,6 +248,29 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * dependency patch bump" -- not the three features' own separate margins
  * stacked on top of each other. `ENTRY_GZIP_BUDGET_BYTES` stays at 212,000:
  * unaffected by this merge, still comfortably clear of the combined figure.
+ *
+ * THIS STATS & USAGE PR THEN MERGED `main` AGAIN, and `main` had grown on
+ * its own in the meantime (`phone: FAB project picker, touch-reachable
+ * project controls, session preview line`, #527, 3eb46bbb) -- eager because
+ * the FAB and its icons draw in the phone shell chrome, no lazy boundary to
+ * hide behind. Measured with a merge-base worktree build at #527's own tip
+ * (no Stats & Usage PR at all) and at this branch's own merge commit
+ * (carrying #527 plus every Stats & Usage round), same code and chunks both
+ * times, `electron-vite build --mode production`:
+ *
+ *     entry, main alone (#527, no Stats & Usage)   699,217 B
+ *     entry, merged (#527 + Stats & Usage)         700,155 B  (+938 B)
+ *
+ * The 699,500 budget above had already been eaten down to 283 B of headroom
+ * by #527 alone, unrelated to anything in this PR; this PR's own Stats &
+ * Usage additions (the icon tiles' `i18n/strings.ts` labels -- that
+ * catalogue is entirely eager regardless of which screen reads it, see the
+ * ADHD-card paragraph above) are the +938 B that tips it over, not an
+ * outsized cost of their own. `ENTRY_BUDGET_BYTES` moves 699,500 -> 702,000:
+ * the real merged figure (700,155 B) plus ~1.8 KB (~0.26%) of slack, the
+ * same small-headroom convention every bump above uses -- not a fresh
+ * re-baseline. `ENTRY_GZIP_BUDGET_BYTES` stays at 212,000: this merge's gzip
+ * figure does not approach it.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -244,7 +281,7 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 // depends on is even present, decided BEFORE anything tries to build.
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
-const ENTRY_BUDGET_BYTES = 699_500;
+const ENTRY_BUDGET_BYTES = 702_000;
 const ENTRY_GZIP_BUDGET_BYTES = 212_000;
 
 // The one string this repo's markdown stack ships that nothing else in the
