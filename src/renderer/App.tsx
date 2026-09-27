@@ -26,6 +26,7 @@ import type {
   MainErrorsApi,
   NotifyApi,
   PrsApi,
+  StatsApi,
   TerminalApi,
   TerminalStreamApi,
   UpdateApi,
@@ -59,6 +60,17 @@ declare global {
      */
     readonly api?: DesktopSourceApi & {
       readonly usage: UsageApi;
+      /**
+       * The Stats & Usage screen's one channel — a full scan of this
+       * machine's own transcripts, run in main's own worker thread.
+       * OPTIONAL in the type for the reason `notify`/`prefs` are: a
+       * packaged build whose preload predates this member has the bridge
+       * without it, and the entry icon must be able to see that rather
+       * than throw. Desktop-only: the browser build has no bridge at all,
+       * and the screen draws nothing there — the same rule `usage` states
+       * for the status bar cell.
+       */
+      readonly stats?: StatsApi;
       readonly clipboard: ClipboardApi;
       /**
        * Opens a PREFILLED issue form in the operator's own browser and posts

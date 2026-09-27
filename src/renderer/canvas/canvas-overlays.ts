@@ -19,6 +19,10 @@ export function useCanvasOverlays() {
    *  icon or its key just asked for `remote` directly (see `openSettings`). */
   const [settingsSection, setSettingsSection] = useState<SectionId>('appearance');
   const [errorLogOpen, setErrorLogOpen] = useState(false);
+  /** The Stats & Usage screen — its own overlay flag, on `errorLogOpen`'s own
+   *  standing rather than a Settings section: nothing in it is a preference
+   *  the operator chooses, so it is not `settingsSection`'s concern either. */
+  const [statsOpen, setStatsOpen] = useState(false);
   /**
    * The row a close refused without being able to prove it is not vam's own
    * -- `SourceError.forcible` -- and offered the operator a confirmed kill
@@ -50,6 +54,8 @@ export function useCanvasOverlays() {
     setSettingsSection,
     errorLogOpen,
     setErrorLogOpen,
+    statsOpen,
+    setStatsOpen,
     confirmForceClose,
     setConfirmForceClose,
   };
