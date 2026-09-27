@@ -53,6 +53,7 @@ every `Mod-` chord answers it as it always did.
 | `Ctrl-Alt-1` `Ctrl-Alt-2` `Ctrl-Alt-3` `Ctrl-Alt-4` `Ctrl-Alt-5` | Show a view in the focused pane — Response, PRs, Terminal, Agents, Files, in that fixed order. Ctrl+Option+number on macOS, Ctrl+Alt+number elsewhere: one three-key chord, the same physical keys on every platform. A digit always names the SAME view: if this source has no terminal, `Ctrl-Alt-3` says so rather than opening whatever sits third, and `Ctrl-Alt-5` says the same on a build without the desktop file bridge. Plain Alt+number used to do this and is bound to nothing now — switching a view is the three-key chord alone |
 | `Ctrl-Alt-6` `Ctrl-Alt-7` `Ctrl-Alt-8` `Ctrl-Alt-9` | Nothing — bound only so they say there is no sixth view instead of reaching the browser |
 | `1` `2` `3` `4` `5` `6` `7` `8` `9` | **Select only:** the same views on one key — `3` is Terminal because Terminal is view 3, exactly as `Ctrl-Alt-3` is, and a digit past the last view refuses aloud in the same words. **In Insert a digit is text** and goes to whatever holds the caret: the prompt box, the search line, a rename field, the Files filter, a question card's option marks, and the terminal, where it is typed into the session. That is the whole difference between the two spellings, and the reason the three-key chord is still here: `Ctrl-Alt-3` switches a view *while you are writing a prompt*, and a bare `3` cannot. Matched by the KEY'S POSITION, so an AZERTY digit row works unshifted; `Shift+number` is a different keystroke and is bound to nothing. A bare `0` is bound to nothing either — the zero is `z0`'s and `Mod-0`'s |
+| `Mod-=` `Mod-+` / `Mod--` | Zoom the whole app in / out, 80–150% in 10% steps — reverses an earlier decision to remove zoom outright (#281); pinch and a stray wheel zoom are still refused, only this deliberate, stepped zoom is back. `Mod-=` and `Mod-+` are the same physical key, unshifted and shifted, both bound so either spelling works. No reset chord: `Mod-0` is `focusList` and `Mod-Shift-0` cannot exist on macOS (the whole digit row is unreachable under Shift — see the digit row's own note); the Settings row's reset button is the way back to 100%. Persists, and applies again at launch. Desktop only: Electron's `webContents` zoom factor has no equivalent in the phone/web build — see *In a browser tab* below for what that build does with the keystroke instead |
 | `Mod-d` / `Mod-u` | Half a screen down / up the FOCUSED PANE's transcript — vim's own `Ctrl-D` / `Ctrl-U`. Half the column's visible height per press, instant, clamped at both ends; scrolling to the top is what reads earlier turns in, exactly as a trackpad scroll there does. **Select only:** with the caret in the prompt box, on a question card or in the terminal these two stay that surface's own, where `Ctrl-D` is delete-forward (and EOF) and `Ctrl-U` deletes to the start of the line. **The one letter pair that answers Ctrl as well as Cmd** — every other `Mod-<letter>` is the command modifier alone, and these two kept Control because that is where a vim user's hand goes |
 | `<` / `>` | Narrow / widen the focused side pane |
 | `Escape` | Cancel whatever is half-typed |
@@ -122,11 +123,12 @@ vam ships one keyboard two ways, and only one of them has the keyboard to
 itself. In the **desktop app** nothing competes: vam builds its own Electron
 menu and leaves out the four items whose key equivalents it wanted, so every
 chord above reaches the page. Over **Tailscale Serve** the page is a tab in
-Chrome or Safari, and fifteen of these are chords the browser keeps for
+Chrome or Safari, and eighteen of these are chords the browser keeps for
 itself — zoom, tab selection, and the tab and window lifecycle:
 
 `Mod-0` `Mod-1` `Mod-2` `Mod-3` `Mod-4` `Mod-5` `Mod-6` `Mod-7` `Mod-8`
-`Mod-9` `Mod-n` `Mod-t` `Mod-w` `Mod-Shift-[` `Mod-Shift-]`
+`Mod-9` `Mod-=` `Mod-+` `Mod--` `Mod-n` `Mod-t` `Mod-w` `Mod-Shift-[`
+`Mod-Shift-]`
 
 vam claims every keystroke it acts on, which is everything a page is allowed
 to do; a browser is free to act anyway on these, and for zoom and tab
@@ -135,6 +137,18 @@ switching it does. Where one of them matters there is another way in:
 session as well as `Mod-w`, `o` starts one as well as `Mod-n`, and the tab
 ring is walkable with `zw` / `zW`. Leaving the prompt box is `Ctrl-[` — vim's
 own Escape, and no browser binds it.
+
+`Mod-=` / `Mod-+` / `Mod--` ARE THE THREE NEWEST, AND THE ONE PLACE THIS
+DEPLOYMENT'S ANSWER IS "vam'S OWN SIDE DOES NOTHING". The desktop app's own
+UI zoom (#281's reversal, above) has no equivalent over Tailscale Serve at
+all — Electron's `webContents.setZoomFactor` is a desktop concept, and there
+is no `window.api.prefs.setUiZoom` for this build to call — so the keystroke
+(and the Settings row's own stepper, which is still on screen: the row is
+not hidden the way a phone's Settings hides desktop-only sections outright)
+stores a preference nobody reads back here, and the browser's own native
+page zoom answers alone, exactly as it always has on `Mod-0`. On the paired
+**phone** build the whole row is absent, the same way every other desktop
+setting is (`sections.ts`'s `PHONE_SECTIONS`).
 
 The digit row is the one place that list got HARDER rather than easier. It
 used to answer Ctrl+number as well, which Chrome and Safari do not want on

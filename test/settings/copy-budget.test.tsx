@@ -119,6 +119,13 @@ const BUDGET: readonly (readonly [string, number, number])[] = [
   // SPLIT OUT OF APPEARANCE, the rest of it: terminal text, the two theme
   // rows, and (behind Advanced) the colour grid, the opacity row and the
   // streaming-terminal switch moved in from Behaviour. Measured 7, 110.
+  // GREW by four paragraphs for the font/preview/divider work (settings
+  // step 2A): the font-family row's hint, its "none detected" fallback
+  // note (this harness has no `window.api.fonts` bridge, so it always
+  // draws), the live-preview row's hint, and the pane-divider row's hint
+  // behind Advanced. Re-measured at 11 paragraphs, 147 words -- the two
+  // longest new hints were tightened by a few words apiece to land back
+  // at 144, under the same 145 ceiling rather than raising it.
   ['terminal', 7, 145],
   // NEW, and small on purpose -- one row today. Settings step 2B added
   // sidebar appearance and the status-bar sub-group (usage mode, show

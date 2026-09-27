@@ -116,7 +116,7 @@ describe('SplitResizer — what it is, before what it does', () => {
     expect(handle.className).toMatch(/select-none/);
     // Transparent at rest, tinted on hover — the sidebar handle's own rule.
     expect(handle.className).toMatch(/bg-transparent/);
-    expect(handle.className).toMatch(/hover:bg-line-loudest/);
+    expect(handle.className).toMatch(/hover:bg-pane-divider/);
   });
 
   it('a column split’s divider is a HORIZONTAL line, dragged up and down', () => {
@@ -183,7 +183,7 @@ describe('SplitResizer — a divider that cannot move at all', () => {
     expect(handle.getAttribute('aria-disabled')).toBe('true');
     expect(handle.className).toMatch(/cursor-not-allowed/);
     expect(handle.className).not.toMatch(/cursor-col-resize/);
-    expect(handle.className).not.toMatch(/hover:bg-line-loudest/);
+    expect(handle.className).not.toMatch(/hover:bg-pane-divider/);
   });
 
   it('carries the reason in its accessible name, for a reader that never clicks', () => {

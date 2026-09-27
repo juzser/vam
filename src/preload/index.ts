@@ -17,6 +17,7 @@ import {
   createClipboardApi,
   createDialogApi,
   createFilesApi,
+  createFontsApi,
   createGithubApi,
   createIssueApi,
   createLinkApi,
@@ -76,6 +77,9 @@ contextBridge.exposeInMainWorld('api', {
   // session's own working directory in main before a byte moves either way.
   // See `src/main/files/authorize.ts` and `src/main/files/ipc.ts`.
   files: createFilesApi(ipcRenderer),
+  // The Terminal font-family picker's installed-monospace-fonts list. See
+  // `main/fonts/list-monospace.ts` and `main/fonts/ipc.ts`.
+  fonts: createFontsApi(ipcRenderer),
   // The pairing screen's own channels. Exposed unconditionally like every
   // other member -- whether main registered them is runtime state, and the
   // bridge's shape may not depend on runtime state.

@@ -222,6 +222,17 @@
   --color-line-loudest: var(--vam-line-loudest);
   --color-line-tip: var(--vam-line-tip);
 
+  /* THE SPLIT-PANE DIVIDER'S OWN TOKEN, so `bg-pane-divider` exists as a
+     utility -- `PaneResizer.tsx`/`SplitResizer.tsx` used to share
+     `bg-line-loudest` with a dozen other call sites (file tree hovers, the
+     worktree list, the pairing panel's buttons); a settings swatch on that
+     token would have repainted all of them for a setting that only ever
+     asked about a splitter. Defaults BELOW are the exact values
+     `--vam-line-loudest` already carries in both themes, so shipping this
+     token moves nobody's screen until they actually choose a colour
+     (`prefs.ts`'s `PANE_DIVIDER_TOKEN`). */
+  --color-pane-divider: var(--vam-pane-divider);
+
   /* THE TOOLTIP'S OWN SURFACE, four tokens and one idea: a tip is the theme
      turned inside out. It is filled with the colour the theme WRITES with and
      written on with colours near the one the theme is MADE of, which is what
@@ -1084,6 +1095,11 @@
   --vam-line-strong: #525252;
   --vam-line-loud: #595959;
   --vam-line-loudest: #7a7a7a;
+  /* THE SPLIT-PANE DIVIDER'S OWN TOKEN -- see the `@theme inline` block
+     above for why it exists apart from `--vam-line-loudest`. Same value as
+     that token, on purpose: shipping the setting must not repaint a
+     splitter nobody has customised yet. */
+  --vam-pane-divider: #7a7a7a;
   /* THE BOUNDARY OF A COMPONENT THAT HAS TO IDENTIFY ITSELF, and the only
      line token that exists to clear a contrast floor rather than to sit at a
      place in the visual order.
@@ -1605,6 +1621,9 @@ html.light {
      both wear. */
   --vam-line-loud: #c9c7c1;
   --vam-line-loudest: #8f8f8a;
+  /* The same token, the same "no repaint until chosen" rule -- see the dark
+     block's own comment. */
+  --vam-pane-divider: #8f8f8a;
   /* The same boundary in light — see the dark block for the measurement, the
      reason, and the note that the tooltip has left this token to
      `PairingPanel.tsx`'s buttons. The artboard's own third-rung grey is

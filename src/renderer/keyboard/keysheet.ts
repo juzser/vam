@@ -73,9 +73,9 @@ export const MODE_TITLES: Readonly<Record<CursorMode, string>> = {
   insert: 'Insert',
 };
 
-export type ActionGroup = 'navigation' | 'session' | 'panes' | 'review' | 'view';
+export type ActionGroup = 'navigation' | 'session' | 'panes' | 'review' | 'view' | 'display';
 
-export const GROUP_ORDER = ['navigation', 'session', 'panes', 'review', 'view'] as const;
+export const GROUP_ORDER = ['navigation', 'session', 'panes', 'review', 'view', 'display'] as const;
 
 const GROUP_TITLES: Readonly<Record<ActionGroup, string>> = {
   navigation: 'move around',
@@ -83,6 +83,12 @@ const GROUP_TITLES: Readonly<Record<ActionGroup, string>> = {
   panes: 'panes & focus',
   review: 'take away',
   view: 'open something',
+  // ADDED FOR issue 281's REVERSAL, and deliberately its own group rather than a
+  // row folded into `view`: zoom is not a surface the operator OPENS — it is
+  // an ongoing property of how the whole window is drawn, which is a
+  // different question from "how do I get to…" or "how do I do something to
+  // this session…" that the other five groups each answer.
+  display: 'zoom & display',
 };
 
 type Meta<K extends KeyAction['kind']> = {
@@ -429,6 +435,16 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
   remote: { group: 'view', label: () => 'remote access — pair a phone, unpair one, or revoke all' },
   errorLog: { group: 'view', label: () => 'the error log and the report to send' },
   help: { group: 'view', label: () => 'this sheet' },
+  /**
+   * `Mod-=` / `Mod-+` / `Mod--` — issue 281's reversal. `chords.ts`'s own comment
+   * on the binding argues why there is no reset chord; this caption names
+   * the SETTING'S row rather than repeating the arithmetic, the same way
+   * `toggleFocusView`'s caption points at its own settings row.
+   */
+  zoom: {
+    group: 'display',
+    label: (a) => (a.delta === 1 ? 'zoom in — UI 10% larger' : 'zoom out — UI 10% smaller'),
+  },
   // Escape is handled ahead of every table in `resolveChord`, so it is in no
   // table and gets no row: the sheet lists what the tables hold, and a row with
   // no binding behind it is the defect this module exists to make impossible.

@@ -300,10 +300,16 @@ export function SplitResizer(props: SplitResizerProps) {
         // cannot move keeps neither: one that went on promising a drag and
         // then did nothing is the failure this state exists to make legible.
         reach.divisible ? (row ? 'cursor-col-resize' : 'cursor-row-resize') : 'cursor-not-allowed',
+        // `bg-pane-divider`, NOT `bg-line-loudest`: this is the ONE call
+        // site the operator's "pane divider colour" setting owns
+        // (`prefs.ts`'s `PANE_DIVIDER_TOKEN`) -- `line-loudest` is shared by
+        // a dozen other hovers and borders across the app, and a swatch on
+        // that token would have repainted all of them for a setting that
+        // only ever asked about a splitter.
         reach.divisible
           ? dragging
-            ? 'bg-line-loudest'
-            : 'bg-transparent hover:bg-line-loudest'
+            ? 'bg-pane-divider'
+            : 'bg-transparent hover:bg-pane-divider'
           : 'bg-transparent',
       ].join(' ')}
       onKeyDown={onKeyDown}

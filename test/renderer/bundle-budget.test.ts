@@ -477,31 +477,70 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * `ENTRY_GZIP_BUDGET_BYTES` moves 213,500 -> 214,500: the measured figure
  * (213,705 B) plus ~0.8 KB (~0.37%) of the same slack.
  *
- * THIS PHONE-COMPOSER FOLLOW-UP (now carrying its own further round: the
- * negative-margin button-group tightening and the composer-height guard's
- * own 63px update, both documented in `e2e/phone-question-shots.mjs` and
- * `styles.css`) AND THE PHONE TOOLBAR PASS THEN MERGED INTO EACH OTHER, each
- * having budgeted for its own delta alone against the same 700,444 B
- * starting point (707,700/213,000 on this side, 707,000/212,500 on the
- * toolbar pass's) -- neither figure accounted for the other landing too, so
- * this merge needed a real remeasurement rather than trusting either
- * arithmetic in isolation, the same lesson every merge paragraph above
- * already draws. Measured, `electron-vite build --mode production`, on this
- * merge commit (composer follow-up + phone toolbar pass + settings cards +
- * #527 + Stats & Usage, all combined):
+ * SETTINGS STEP 2A (terminal font family + live preview + pane-divider
+ * colour, UI font family, and UI zoom, reversing #281 -- `main/zoom.ts`'s own
+ * header carries that story) THEN MERGED THE PHONE TOOLBAR PASS IN, and this
+ * branch's own earlier figure above (703,011 B, measured against d2c54b66
+ * alone, before the toolbar pass existed) went stale the moment the two
+ * landed together -- the same lesson every merge paragraph above already
+ * draws. All five Settings rows are eager regardless of which side of the
+ * merge they arrived from -- Settings itself has no lazy boundary here, so
+ * their `i18n/strings.ts` copy, `TerminalPreview.tsx` and the new
+ * `FontFamilyField`/stepper markup land in the entry chunk whether or not
+ * the operator ever opens that card. Measured at `main`'s own tip carrying
+ * the toolbar pass alone (cdc8be7b, no step 2A) and at this merge commit
+ * carrying both, same code and chunks both times, `electron-vite build
+ * --mode production`:
  *
- *     entry, merged (all of the above)   711,242 B  (213,299 B gzip)
+ *     entry, main (toolbar pass, no step 2A)   705,616 B  (211,927 B gzip)
+ *     entry, merged (+ Settings step 2A)       708,220 B  (212,170 B gzip)  (+2,604 B, +0.37%)
  *
- * Both figures land OVER the two branches' own separate budgets (707,700 /
- * 213,000 here, 707,000 / 212,500 on the toolbar pass's side) -- neither
- * side's own bump accounted for the other landing at the same time, the same
- * gap every merge paragraph above has found. `ENTRY_BUDGET_BYTES` moves
- * 707,700 -> 714,800: the real merged figure (711,242 B) plus ~3.6 KB
- * (~0.5%) of slack, the same small-headroom convention every bump above
- * uses. `ENTRY_GZIP_BUDGET_BYTES` moves 213,000 -> 214,400: the merged gzip
- * figure (213,299 B) plus ~1.1 KB (~0.5%) of the same slack. The next PR to
- * land here should expect to remeasure and bump rather than assume either
- * number still has room.
+ * `ENTRY_BUDGET_BYTES` moved 707,000 -> 710,000 for that merge: the real
+ * figure (708,220 B) plus ~1.8 KB (~0.25%) of slack, the same small-headroom
+ * convention every bump above uses. `ENTRY_GZIP_BUDGET_BYTES` moved
+ * 212,500 -> 213,000: the merged gzip figure (212,170 B) had only 330 B of
+ * headroom left under the old budget, thinner than this file's own
+ * convention leaves anywhere else, so it moved too. BOTH FIGURES THEN WENT
+ * STALE AGAIN, the same paragraph below explains: `main` grew a THIRD
+ * independent branch (the phone-composer follow-up, #530) while this one was
+ * still open.
+ *
+ * MEANWHILE, `main` ALSO MERGED THE PHONE-COMPOSER FOLLOW-UP (#530: the
+ * Orca-shaped composer and its own keystroke strip reaching the phone) INTO
+ * THE PHONE TOOLBAR PASS, each having budgeted for its own delta alone
+ * against the same 700,444 B starting point (707,700/213,000 on the
+ * composer follow-up's own side, 707,000/212,500 on the toolbar pass's) --
+ * neither figure accounted for the other landing too, so THAT merge needed
+ * its own remeasurement, the same lesson every paragraph here keeps
+ * drawing. Measured on `main`'s own tip carrying all of it (composer
+ * follow-up + toolbar pass + settings cards + #527 + Stats & Usage,
+ * a1cdb816):
+ *
+ *     entry, main (composer follow-up + toolbar pass, no step 2A)   711,242 B  (213,299 B gzip)
+ *
+ * `ENTRY_BUDGET_BYTES` moved 707,700 -> 714,800 on `main` for that merge (the
+ * real figure, 711,242 B, plus ~3.6 KB/~0.5% slack); `ENTRY_GZIP_BUDGET_BYTES`
+ * moved 213,000 -> 214,400 (213,299 B plus ~1.1 KB/~0.5%).
+ *
+ * SETTINGS STEP 2A + PHONE TOOLBAR PASS then merged THIS THIRD BRANCH in
+ * too, so BOTH of the paragraphs above (708,220 B/710,000 here; 711,242 B/
+ * 714,800 on `main`) are stale the instant this merge lands -- each measured
+ * only two of the three branches now present. Measured on `main`'s own tip
+ * carrying all three (a1cdb816) and on this merge commit carrying all four
+ * (composer follow-up + toolbar pass + Settings step 2A + settings cards +
+ * #527 + Stats & Usage), same code and chunks both times, `electron-vite
+ * build --mode production`:
+ *
+ *     entry, main (composer follow-up + toolbar pass, no step 2A)   711,242 B  (213,299 B gzip)
+ *     entry, merged (+ Settings step 2A)                            713,837 B  (213,680 B gzip)  (+2,595 B, +0.36%)
+ *
+ * `ENTRY_BUDGET_BYTES` moves 714,800 -> 716,000: the real merged figure
+ * (713,837 B) plus ~2.2 KB (~0.30%) of slack, the same convention every bump
+ * above uses -- not the separate branches' own margins added together.
+ * `ENTRY_GZIP_BUDGET_BYTES` moves 214,400 -> 214,700: the merged gzip figure
+ * (213,680 B) plus ~1 KB (~0.48%) of the same slack. The next PR to land
+ * here should still expect to remeasure rather than assume either number
+ * has room.
  *
  * THAT TREE (composer follow-up + phone toolbar pass) AND THIS ONE (step 2B
  * + phone toolbar pass + its own S2 security fix) THEN MERGED INTO EACH
@@ -522,6 +561,31 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * plus ~1.6 KB (~0.22%) of slack, the same small-headroom convention every
  * bump above uses. `ENTRY_GZIP_BUDGET_BYTES` moves 214,400 -> 215,800: the
  * merged gzip figure (215,155 B) plus ~0.6 KB (~0.3%) of the same slack.
+ *
+ * SETTINGS STEP 2A (this branch) AND SETTINGS STEP 2B (`main`'s tip,
+ * e1eb6f2b) THEN MERGED INTO EACH OTHER, each having budgeted for its own
+ * delta alone against a shared ancestor that did not carry the other
+ * (713,837 B/716,000 here, measured against a1cdb816; 717,898 B/719,500 on
+ * `main`, measured against its own composer-follow-up + toolbar-pass tree)
+ * -- neither figure accounted for the sibling Settings PR landing at the
+ * same time, the same gap every merge paragraph above has found. Measured,
+ * `electron-vite build --mode production`, on this merge commit (step 2A +
+ * step 2B + composer follow-up + phone toolbar pass + settings cards + #527
+ * + Stats & Usage, all combined):
+ *
+ *     entry, merged (all of the above)   720,494 B  (215,514 B gzip)
+ *
+ * +2,596 B eager / +359 B gzip over `main`'s own tip -- within measurement
+ * noise of Settings step 2A's own isolated eager delta measured earlier in
+ * this file (+2,595 B against the toolbar pass alone), consistent with the
+ * same reasoning every additive merge above draws: step 2A's rows share no
+ * eager code with step 2B's.
+ * `ENTRY_BUDGET_BYTES` moves 719,500 -> 723,000: the real merged figure
+ * (720,494 B) plus ~2.5 KB (~0.35%) of slack, the same small-headroom
+ * convention every bump above uses. `ENTRY_GZIP_BUDGET_BYTES` moves
+ * 215,800 -> 216,300: the merged gzip figure (215,514 B) plus ~0.8 KB
+ * (~0.36%) of the same slack. The next PR to land here should expect to
+ * remeasure rather than assume either number still has room.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -532,8 +596,8 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 // depends on is even present, decided BEFORE anything tries to build.
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
-const ENTRY_BUDGET_BYTES = 719_500;
-const ENTRY_GZIP_BUDGET_BYTES = 215_800;
+const ENTRY_BUDGET_BYTES = 723_000;
+const ENTRY_GZIP_BUDGET_BYTES = 216_300;
 
 // The one string this repo's markdown stack ships that nothing else in the
 // dependency graph or vam's own source does: `gfmTable`, the extension name

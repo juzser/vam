@@ -48,6 +48,7 @@ import {
   PROVIDERS,
   resolveProvider,
 } from '../../shared/providers.js';
+import { UI_ZOOM_MAX, UI_ZOOM_MIN, UI_ZOOM_STEP } from '../../shared/ui-zoom.js';
 import type { SourceId } from '../domain/model.js';
 import { t } from '../i18n/strings.js';
 import {
@@ -78,9 +79,10 @@ import {
   clearPalette,
   clearPaletteColor,
   type EffectiveTheme,
+  INTERFACE_PALETTE_TOKENS,
   OUT_FONT_SIZE_MAX,
   OUT_FONT_SIZE_MIN,
-  PALETTE_TOKENS,
+  PANE_DIVIDER_TOKEN,
   type Prefs,
   paletteFor,
   paletteValue,
@@ -104,8 +106,11 @@ import {
   setStatusBarShowCodexUsage,
   setStatusBarUsageMode,
   setStreamingTerminal,
+  setTerminalFontFamily,
   setTerminalFontSize,
   setTheme,
+  setUiFontFamily,
+  setUiZoom,
   stylesheetPaletteValue,
   type Theme,
 } from '../prefs/prefs.js';
@@ -113,6 +118,7 @@ import { type SidebarAppearance } from '../prefs/sidebar-appearance.js';
 import { type UsageDisplayMode } from '../prefs/status-bar-usage.js';
 import { type PromptSubmitKey, SUBMIT_KEY_LABELS } from '../prefs/submit-key.js';
 import { TERMINAL_FONT_SIZES } from '../prefs/terminal-font.js';
+import { MAX_TERMINAL_FONT_FAMILY_LENGTH } from '../prefs/terminal-font-family.js';
 import {
   clearTerminalSchemeColor,
   clearTerminalSchemeOverrides,
@@ -130,6 +136,7 @@ import {
   type TerminalTheme,
   terminalThemesFor,
 } from '../prefs/terminal-scheme.js';
+import { MAX_UI_FONT_FAMILY_LENGTH } from '../prefs/ui-font-family.js';
 import type { SourceDeclines } from '../sources/port.js';
 import { AdhdSkillCard, desktopAdhdSkillApi } from './AdhdSkillCard.js';
 import { desktopGithubApi, GithubPanel } from './GithubPanel.js';
@@ -139,6 +146,7 @@ import { RemoteLimits } from './RemoteLimits.js';
 import { desktopRemoteApi, RemotePanel } from './RemotePanel.js';
 import { Switch } from './Switch.js';
 import { PHONE_SECTIONS, SECTIONS, type SectionId, shortcutSections } from './sections.js';
+import { TerminalPreview } from './TerminalPreview.js';
 import { desktopUpdateApi, UpdatePanel } from './UpdatePanel.js';
 
 export type SettingsOverlayProps = {
@@ -364,6 +372,27 @@ export function SettingsOverlay({
    */
   const [integrationsOpen, setIntegrationsOpen] = useState(true);
   const [remoteOpen, setRemoteOpen] = useState(true);
+  /**
+   * THE TERMINAL FONT PICKER'S "installed monospace fonts" HALF -- read ONCE,
+   * on mount, off `main/fonts/list-monospace.ts` through the desktop bridge.
+   * `[]` is a real, total answer here, never a loading state the row has to
+   * show: an empty list is exactly what the phone/web build (no bridge at
+   * all) and a machine whose font directories this scan could not read both
+   * look like, and the row's free-text field already covers both.
+   */
+  const [monospaceFonts, setMonospaceFonts] = useState<readonly string[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    globalThis.window?.api?.fonts
+      ?.listMonospace()
+      .then((families) => {
+        if (!cancelled) setMonospaceFonts(families);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   /**
    * SECURITY-SENSITIVE. Whether the Agents card is mid-way through
    * confirming a switch TO Yolo -- the one direction of `agentPermissions`
@@ -701,6 +730,53 @@ export function SettingsOverlay({
                   />
                 </SettingsRow>
 
+                {/* THE APP CHROME'S OWN FONT — the sidebar, the dialog,
+                    every label and button. Free text only, unlike the
+                    terminal's own picker: there is no "detected sans fonts"
+                    scan, and building one would be a second font-enumeration
+                    feature this ask never named. */}
+                <SettingsRow
+                  label={t('settings.interface.uiFontFamily.label')}
+                  hint={t('settings.interface.uiFontFamily.hint')}
+                >
+                  <FontFamilyField
+                    name="UI font family"
+                    value={prefs.uiFontFamily}
+                    maxLength={MAX_UI_FONT_FAMILY_LENGTH}
+                    onCommit={(next) => onChange(setUiFontFamily(prefs, next))}
+                  />
+                </SettingsRow>
+
+                {/* UI ZOOM — issue 281's reversal. The chords are named in the
+                    hint using the SAME `chordSymbols` rendering the keyboard
+                    editor uses below, so a change to either spelling cannot
+                    drift the other. */}
+                <SettingsRow
+                  label={t('settings.interface.uiZoom.label')}
+                  hint={t('settings.interface.uiZoom.hint', {
+                    in: chordSymbols('Mod-='),
+                    out: chordSymbols('Mod--'),
+                  })}
+                  action={
+                    prefs.uiZoom === 100 ? null : (
+                      <SmallButton
+                        label={t('settings.interface.uiZoom.reset')}
+                        onPick={() => onChange(setUiZoom(prefs, 100))}
+                      />
+                    )
+                  }
+                >
+                  <Stepper
+                    name="UI zoom"
+                    min={UI_ZOOM_MIN}
+                    max={UI_ZOOM_MAX}
+                    step={UI_ZOOM_STEP}
+                    value={prefs.uiZoom}
+                    unit="%"
+                    onCommit={(next) => onChange(setUiZoom(prefs, next))}
+                  />
+                </SettingsRow>
+
                 {/* THE PER-TOKEN COLOURS, BEHIND ADVANCED. Most operators pick
                     a template above and never open this: it is the row a
                     template writes into, one swatch per token, editing the
@@ -723,7 +799,7 @@ export function SettingsOverlay({
                     layout="stacked"
                   >
                     <div className="grid grid-cols-2 gap-x-6 gap-y-[10px] sm:grid-cols-3">
-                      {PALETTE_TOKENS.map(({ token, label }) => {
+                      {INTERFACE_PALETTE_TOKENS.map(({ token, label }) => {
                         const overridden = paletteFor(prefs.palette, theme)[token] !== undefined;
                         return (
                           <div key={token} className="flex items-center gap-[10px]">
@@ -791,6 +867,60 @@ export function SettingsOverlay({
                       ))}
                     </div>
                   </SettingsRow>
+
+                  {/* THE FONT FAMILY PICKER: free text, always, plus a chip
+                      per detected monospace font when `main/fonts/list-
+                      monospace.ts` found any. A chip fills the field rather
+                      than replacing it with a second control -- there is one
+                      value, `prefs.terminalFontFamily`, and one way to set
+                      it. */}
+                  <SettingsRow
+                    label={t('settings.terminal.fontFamily.label')}
+                    hint={t('settings.terminal.fontFamily.hint')}
+                    layout="stacked"
+                  >
+                    <div className="flex flex-col gap-1.5">
+                      <FontFamilyField
+                        name="terminal font family"
+                        value={prefs.terminalFontFamily}
+                        maxLength={MAX_TERMINAL_FONT_FAMILY_LENGTH}
+                        onCommit={(next) => onChange(setTerminalFontFamily(prefs, next))}
+                      />
+                      {monospaceFonts.length > 0 ? (
+                        <div className="flex flex-wrap gap-1.5">
+                          {monospaceFonts.map((family) => (
+                            <button
+                              key={family}
+                              type="button"
+                              data-monospace-font-option={family}
+                              aria-pressed={prefs.terminalFontFamily === family}
+                              onClick={() => onChange(setTerminalFontFamily(prefs, family))}
+                              className={`vam-tap flex h-[26px] cursor-pointer items-center rounded border px-2 text-control ${FOCUS_RING} ${
+                                prefs.terminalFontFamily === family
+                                  ? 'border-line-loudest bg-raised text-ink'
+                                  : 'border-line text-ink-dim'
+                              }`}
+                              style={{ fontFamily: `'${family}', ${prefs.terminalFontFamily}` }}
+                            >
+                              {family}
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-ink-faint text-meta">
+                          {t('settings.terminal.fontFamily.noneDetected')}
+                        </p>
+                      )}
+                    </div>
+                  </SettingsRow>
+
+                  <SettingsRow
+                    label={t('settings.terminal.preview.label')}
+                    hint={t('settings.terminal.preview.hint')}
+                    layout="stacked"
+                  >
+                    <TerminalPreview />
+                  </SettingsRow>
                 </SettingsSubgroup>
 
                 <SettingsSubgroup title={t('settings.terminal.themes.title')}>
@@ -813,6 +943,47 @@ export function SettingsOverlay({
                       on={t('settings.terminal.streamingTerminal.on')}
                       off={t('settings.terminal.streamingTerminal.off')}
                     />
+                  </SettingsRow>
+
+                  {/* THE SPLIT-PANE DIVIDER'S OWN COLOUR — `PANE_DIVIDER_TOKEN`
+                      rides the same `setPaletteColor`/`clearPaletteColor`
+                      machinery the Interface grid uses for its own swatches,
+                      but this ONE token is drawn here instead: see
+                      `prefs.ts`'s own comment on the constant for why. */}
+                  <SettingsRow
+                    label={t('settings.terminal.paneDivider.label')}
+                    hint={t('settings.terminal.paneDivider.hint', { theme })}
+                  >
+                    <div className="flex items-center gap-[10px]">
+                      <input
+                        type="color"
+                        data-palette-swatch={PANE_DIVIDER_TOKEN}
+                        aria-label={`pane divider colour, ${theme}`}
+                        value={paletteValue(paletteFor(prefs.palette, theme), PANE_DIVIDER_TOKEN)}
+                        onChange={(event) =>
+                          onChange(
+                            setPaletteColor(prefs, theme, PANE_DIVIDER_TOKEN, event.target.value),
+                          )
+                        }
+                        className={`vam-swatch vam-tap h-[24px] w-[24px] cursor-pointer rounded-full border-none bg-transparent p-0 ${FOCUS_RING} ${
+                          paletteFor(prefs.palette, theme)[PANE_DIVIDER_TOKEN] !== undefined
+                            ? 'ring-2 ring-ink'
+                            : 'ring-1 ring-ink-faint'
+                        }`}
+                      />
+                      {paletteFor(prefs.palette, theme)[PANE_DIVIDER_TOKEN] !== undefined ? (
+                        <button
+                          type="button"
+                          aria-label={`reset pane divider colour, ${theme}`}
+                          onClick={() =>
+                            onChange(clearPaletteColor(prefs, theme, PANE_DIVIDER_TOKEN))
+                          }
+                          className={`vam-hit-24 cursor-pointer text-ink-dim hover:text-ink ${FOCUS_RING}`}
+                        >
+                          <RotateCcw size={12} strokeWidth={1.8} aria-hidden="true" />
+                        </button>
+                      ) : null}
+                    </div>
                   </SettingsRow>
                 </AdvancedDisclosure>
               </SettingsCard>
@@ -2107,6 +2278,48 @@ function HexField({
       }}
       onBlur={() => setDraft(null)}
       className={`vam-tap h-[24px] w-[72px] rounded border border-ink-faint bg-well px-1.5 text-center font-mono text-control text-ink outline-none ${FOCUS_RING}`}
+    />
+  );
+}
+
+/**
+ * A FREE-TEXT FONT FAMILY NAME — the fallback half of both font pickers
+ * (terminal, UI), and the whole of the UI one. Unlike `HexField`, there is no
+ * "not yet a valid hex" gate to hold a draft against: `readTerminalFontFamily`
+ * / `readUiFontFamily` are TOTAL, so every keystroke is a value worth
+ * committing, and the draft here exists only so the box shows exactly what
+ * was typed (a stray quote included) rather than the already-stripped value
+ * a controlled `value={value}` would snap it back to mid-keystroke.
+ */
+function FontFamilyField({
+  name,
+  value,
+  maxLength,
+  onCommit,
+}: {
+  readonly name: string;
+  readonly value: string;
+  readonly maxLength: number;
+  readonly onCommit: (next: string) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  return (
+    <input
+      type="text"
+      data-font-family-field={name}
+      aria-label={name}
+      spellCheck={false}
+      autoComplete="off"
+      maxLength={maxLength}
+      placeholder={t('settings.fontFamily.placeholder')}
+      value={draft ?? value}
+      onChange={(event) => {
+        const raw = event.target.value;
+        setDraft(raw);
+        onCommit(raw);
+      }}
+      onBlur={() => setDraft(null)}
+      className={`vam-tap h-[28px] w-full max-w-[280px] rounded border border-ink-faint bg-well px-2 text-body text-ink outline-none ${FOCUS_RING}`}
     />
   );
 }
