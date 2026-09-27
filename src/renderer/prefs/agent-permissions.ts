@@ -44,6 +44,13 @@
  *    in) from being honoured the moment that tab's `startSessionIn` runs.
  *  - Prefs themselves are `localStorage`, per device; there is no channel that
  *    could carry a `'yolo'` value from one device's storage to another's.
+ *  - A YOLO START LEAVES A SEPARATE, PERMANENT MARK. `startSessionIn` records
+ *    the fact into `prefs/yolo-starts.ts`'s own bucket at the moment it
+ *    applies this flag, and the tab strip (`canvas/Canvas.tsx`'s `TabStrip`)
+ *    paints it as a quiet, ALWAYS-ON `ShieldOff` mark with a tooltip. That
+ *    mark is driven by the recorded fact, never by this preference's CURRENT
+ *    value -- changing `agentPermissions` back to `manual` afterward does not
+ *    un-mark a session already started with the flag.
  */
 
 export type AgentPermissions = 'manual' | 'yolo';

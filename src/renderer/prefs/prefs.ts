@@ -99,6 +99,7 @@ import {
   type TerminalSchemePref,
 } from './terminal-scheme.js';
 import { DEFAULT_NARROW_VIEWS, readNarrowViews, setActiveNarrowViews } from './view-width.js';
+import { readYoloStart, type YoloStartMark } from './yolo-starts.js';
 
 const KEY = 'vam.prefs.v1';
 
@@ -442,6 +443,14 @@ export type Prefs = {
    * keeping either.
    */
   readonly renames: Readonly<Record<string, Readonly<Record<string, RenameChoice>>>>;
+  /**
+   * Source id → pane (or session id, when a row has no pane) → the fact that
+   * vam started that session with the permission-skip flag. Same keying,
+   * storage and TTL as `renames` -- see `prefs/yolo-starts.ts` for the whole
+   * story of why this is keyed by pane and recorded once rather than
+   * re-derived from `agentPermissions` on every read.
+   */
+  readonly yoloStarts: Readonly<Record<string, Readonly<Record<string, YoloStartMark>>>>;
   /**
    * The colours the operator chose, ONE SET PER THEME — dark's and light's,
    * each a token → colour map for the few tokens vam offers.
@@ -853,6 +862,7 @@ export const EMPTY_PREFS: Prefs = {
   groups: {},
   collapsedGroups: {},
   renames: {},
+  yoloStarts: {},
   palette: { dark: {}, light: {} },
   keyBindings: {},
   outFontSize: DEFAULT_OUT_FONT_SIZE,
@@ -965,6 +975,7 @@ function parsePrefs(
     groups?: unknown;
     collapsedGroups?: unknown;
     renames?: unknown;
+    yoloStarts?: unknown;
   };
   const cutoff = new Date(now.getTime() - TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
   // Read ONCE, ahead of the field below that consults it -- see
@@ -1088,6 +1099,11 @@ function parsePrefs(
       ),
       cutoff,
     ),
+    // A BRAND NEW FIELD, no legacy source id to migrate: a payload from a vam
+    // that predates this has no key at all, and reads back as "nothing
+    // recorded". Same TTL as `renames` -- see `prefs/yolo-starts.ts`'s own
+    // header on why a session's mark is not worth keeping forever either.
+    yoloStarts: pruneBuckets(readBuckets(record.yoloStarts, readYoloStart), cutoff),
     // Per field like everything above it: a payload from a vam that predates
     // either of these has no key at all, and reads back as "no overrides" —
     // the shipped palette and the shipped chords — without touching a
@@ -2110,6 +2126,25 @@ export function setRename(
 }
 
 /**
+ * Writes the ONE fact the persistent Yolo indicator ever records: that THIS
+ * pane (or session id, when there is no pane) was started with the
+ * permission-skip flag. `Canvas.tsx`'s `startSessionIn` is the only caller,
+ * and it calls this only when the flag was actually applied -- there is no
+ * "started with manual" entry to write, because `applyYoloStarts` already
+ * reads an absent key as exactly that.
+ *
+ * NO CLEAR PATH, unlike `setRename`'s empty-string undo: a start-time fact is
+ * not an operator's editable choice, so there is nothing here for an
+ * operator to take back. The TTL (`readPrefs`'s `pruneBuckets` pass) is the
+ * only way an entry ever leaves this bucket.
+ */
+export function recordYoloStart(prefs: Prefs, sourceId: string, key: string, now: Date): Prefs {
+  const bucket = prefs.yoloStarts[sourceId] ?? emptyMap<YoloStartMark>();
+  const nextBucket = withEntry(bucket, key, { at: now.toISOString() });
+  return { ...prefs, yoloStarts: withEntry(prefs.yoloStarts, sourceId, nextBucket) };
+}
+
+/**
  * An empty title CLEARS the override, restoring the source's own name --
  * exactly `setRename`, one field over rather than one level up. The
  * project's `id` is never the thing being written here: this only ever
@@ -2246,6 +2281,41 @@ export function applyRenames(
         }),
       };
     }),
+  };
+}
+
+/**
+ * Put the recorded Yolo starts onto the model, once, before anything reads
+ * it -- the same "one place knows" argument `applyRenames` above already
+ * makes. `SessionList.tsx`/`Canvas.tsx`'s tab strip read `session.
+ * startedWithYolo` as a plain domain fact; neither knows it came from a
+ * local preference rather than the source itself.
+ *
+ * KEYED BY PANE, WITH SESSION ID AS THE FALLBACK -- `session.pane ??
+ * session.id`, the identical key `recordYoloStart`'s one caller
+ * (`Canvas.tsx`'s `startSessionIn`) writes under. `Session.source`, not
+ * `project.source`: a project can mix sessions from several sources now
+ * (`domain/model.ts`'s own note on `Project.source`), and `recordYoloStart`
+ * is always called with the SESSION's own source.
+ */
+export function applyYoloStarts(model: CanvasModel, yoloStarts: Prefs['yoloStarts']): CanvasModel {
+  if (Object.keys(yoloStarts).length === 0) {
+    return model;
+  }
+  return {
+    ...model,
+    projects: model.projects.map((project) => ({
+      ...project,
+      sessions: project.sessions.map((session) => {
+        const source = session.source ?? project.source;
+        if (source === undefined) {
+          return session;
+        }
+        const bucket = yoloStarts[source];
+        const key = session.pane ?? session.id;
+        return bucket?.[key] === undefined ? session : { ...session, startedWithYolo: true };
+      }),
+    })),
   };
 }
 
