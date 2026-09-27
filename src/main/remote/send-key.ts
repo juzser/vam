@@ -45,6 +45,13 @@
  * one). And it is a POST, authenticated exactly like `/api/record-prompt` --
  * see `remote/server.ts`'s route table, which is the only place this
  * function is called from.
+ *
+ * NO POWER BEYOND THE PROMPT ROUTE. `/api/record-prompt` (`recordPrompt` ->
+ * `replyToSession` -> `typeIntoPane`) already types arbitrary text followed by
+ * Enter into this same pane, so a device that can press Enter here could
+ * already do so there. Neither route reads the pane first, and neither gates
+ * on a pending permission or plan-approval prompt: a key sent while one is
+ * showing lands on whatever option the CLI's cursor sits on.
  */
 
 import {
