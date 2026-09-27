@@ -581,9 +581,72 @@ async function readyStateShot({ theme }) {
   await page.close();
 }
 
+/**
+ * THE PER-SESSION PERMISSION PICKER -- the operator's own request, "start a
+ * session with a permission parameter option", beside the provider fieldset
+ * this same screen already draws (`DetailPanel.tsx`'s `ProviderStartControls`,
+ * `DetailPanel.start-session.test.tsx`'s own unit coverage). Needs
+ * `window.api` (`stubApiScript`), unlike the plain "1. DESKTOP, RESPONSE
+ * VIEW" block above: `isDesktopShell()` reads `window.api`'s presence, and
+ * `?demo=1` alone never sets it.
+ */
+async function permissionPickerShot({ theme }) {
+  const outName = `start-screen-permission-picker-${theme}`;
+  const page = await browser.newPage({ viewport: { width: 900, height: 640 } });
+  page.on('pageerror', (err) => console.error('PAGE ERROR:', err));
+  await page.addInitScript(stubApiScript, { row: ROW, pane: PANE, hangRecordPrompt: false });
+  await page.addInitScript(
+    (t) => globalThis.localStorage.setItem('vam.prefs.v1', JSON.stringify({ theme: t })),
+    theme,
+  );
+  await page.goto(`${origin}?demo=1`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('[data-tab-strip]');
+  await page.locator(`[data-session-row="${ROW}"]`).first().click();
+  await page.waitForSelector('[data-start-permission]', { timeout: 5_000 });
+
+  const shape = await page.evaluate(() => ({
+    hasFieldset: document.querySelector('[data-start-permission]') !== null,
+    options: [...document.querySelectorAll('[data-start-permission-option]')].map((o) => ({
+      id: o.getAttribute('data-start-permission-option'),
+      pressed: o.getAttribute('aria-pressed'),
+    })),
+  }));
+  console.log(`${outName}:`, JSON.stringify(shape));
+  check(`${outName}: the permission picker is drawn beside the provider picker`, shape.hasFieldset);
+  check(
+    `${outName}: Manual is preselected by default`,
+    shape.options.find((o) => o.id === 'manual')?.pressed === 'true' &&
+      shape.options.find((o) => o.id === 'yolo')?.pressed === 'false',
+    JSON.stringify(shape.options),
+  );
+
+  // THE TOOLTIP, OPEN -- focus, not hover, the same `tooltip-shots.mjs` idiom:
+  // `Note` opens on focus too (its whole reason for existing over a bare
+  // `title`), and a screenshot cannot drive a real pointer hover.
+  await page.locator('[data-start-permission-option="yolo"]').focus();
+  const tipDrawn = await page
+    .waitForSelector('[role="tooltip"]', { timeout: 3_000 })
+    .then(() => true)
+    .catch(() => false);
+  check(`${outName}: the Yolo tooltip opens on focus`, tipDrawn);
+  const tipText = await page.evaluate(
+    () => document.querySelector('[role="tooltip"]')?.textContent ?? null,
+  );
+  check(
+    `${outName}: it names plainly what Yolo does`,
+    tipText !== null && /skips .*permission prompts/.test(tipText),
+    tipText,
+  );
+
+  const box = await page.locator('[data-start-session]').boundingBox();
+  await page.screenshot({ path: `${outDir}/${outName}.png`, clip: box ?? undefined });
+  await page.close();
+}
+
 for (const theme of ['dark', 'light']) {
   await trustCardShot({ theme });
   await readyStateShot({ theme });
+  await permissionPickerShot({ theme });
 }
 
 await browser.close();

@@ -586,6 +586,35 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * 215,800 -> 216,300: the merged gzip figure (215,514 B) plus ~0.8 KB
  * (~0.36%) of the same slack. The next PR to land here should expect to
  * remeasure rather than assume either number still has room.
+ *
+ * A SIXTH, SMALL, ORDINARY GROWTH, AFTER THE YOLO-INDICATOR REVERT (#535):
+ * the per-session permission picker (`DetailPanel.tsx`'s
+ * `ProviderStartControls`) adds a second small `fieldset` beside the
+ * provider picker -- two buttons, two icons (`Shield`/`ShieldOff`), one
+ * `Note` tooltip -- the same "one control, not a split" category as the
+ * Stats & Usage icon bump earlier in this file.
+ *
+ * Measured with a merge-base worktree build (`git worktree add --detach` at
+ * `origin/main`'s own tip, 5817a38d -- the revert commit, i.e. WITHOUT this
+ * PR's picker), same code and chunks both times, `electron-vite build
+ * --mode production`:
+ *
+ *     entry, main (5817a38d, no picker)   720,494 B  (216,019 B gzip, THIS machine's zlib)
+ *     entry, merged (+ the picker)        722,046 B  (216,344 B gzip)  (+1,552 B / +0.22%, +325 B gzip / +0.15%)
+ *
+ * SAME CROSS-MACHINE GZIP CAVEAT the previous (reverted) paragraph already
+ * recorded: this machine's zlib gzips `main`'s own unchanged 720,494 B to
+ * 216,019 B, not 215,514 B -- so, again, the DELTA (+325 B gzip, measured
+ * before/after in this one run) is what is portable, not the absolute
+ * figure.
+ *
+ * `ENTRY_BUDGET_BYTES` moves 723,000 -> 723,500: the real merged figure
+ * (722,046 B) plus ~1.5 KB (~0.2%) of slack, the same small-headroom
+ * convention every bump above uses. `ENTRY_GZIP_BUDGET_BYTES` moves
+ * 216,300 -> 216,700: the merged gzip figure (216,344 B, THIS machine's
+ * zlib) plus ~350 B (~0.16%) of the same slack. The next PR to land here
+ * should expect to remeasure rather than assume either number still has
+ * room.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -596,8 +625,8 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 // depends on is even present, decided BEFORE anything tries to build.
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
-const ENTRY_BUDGET_BYTES = 723_000;
-const ENTRY_GZIP_BUDGET_BYTES = 216_300;
+const ENTRY_BUDGET_BYTES = 723_500;
+const ENTRY_GZIP_BUDGET_BYTES = 216_700;
 
 // The one string this repo's markdown stack ships that nothing else in the
 // dependency graph or vam's own source does: `gfmTable`, the extension name

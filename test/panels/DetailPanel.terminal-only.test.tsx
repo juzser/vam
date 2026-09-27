@@ -212,4 +212,21 @@ describe('the Response view of a pane whose agent exited but whose conversation 
     draw({ onStartSession: () => {}, tab: 'Terminal', terminal: true });
     expect(q('[data-terminal-only-start]')).toBeNull();
   });
+
+  /**
+   * ONE IMPLEMENTATION, PROVEN TWICE -- `ProviderStartControls`'s own header:
+   * this screen shares the exact component `DetailPanel.start-session.test.tsx`
+   * already covers in full, so this is a single confirming test rather than a
+   * duplicate suite.
+   */
+  it('offers the same permission picker as the plain start screen, inside the desktop shell', () => {
+    (window as unknown as { api: unknown }).api = {};
+    const started: Array<[string, string]> = [];
+    draw({ onStartSession: (id, permission) => started.push([id, permission]) });
+    expect(q('[data-start-permission]')).not.toBeNull();
+    fireEvent.click(q('[data-start-permission-option="yolo"]') as Element);
+    fireEvent.click(q('[data-start-session-button]') as Element);
+    expect(started).toEqual([['claude-code', 'yolo']]);
+    Reflect.deleteProperty(window, 'api');
+  });
 });

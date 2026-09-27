@@ -172,6 +172,81 @@ describe('the Response view of a pane with nothing started in it', () => {
 });
 
 /**
+ * THE PER-SESSION PERMISSION PICKER -- the operator's own request, "start a
+ * session with a permission parameter option", beside the provider picker
+ * this same screen already draws. `isDesktopShell()` (`prefs/agent-
+ * permissions.ts`) reads `window.api`, so these tests stub or delete it the
+ * same way the "start screen card" describe block above already does.
+ */
+describe('the per-session permission picker', () => {
+  afterEach(() => {
+    Reflect.deleteProperty(window, 'api');
+  });
+
+  it('draws nothing at all outside the real desktop shell', () => {
+    // No `window.api` -- a paired browser tab, any viewport width, including
+    // the phone FAB flow that funnels into this same screen.
+    draw({ onStartSession: () => {} });
+    expect(q('[data-start-permission]')).toBeNull();
+    expect(q('[data-start-permission-option="manual"]')).toBeNull();
+    expect(q('[data-start-permission-option="yolo"]')).toBeNull();
+  });
+
+  it('draws both options inside the real desktop shell, Manual preselected by default', () => {
+    (window as unknown as { api: unknown }).api = {};
+    draw({ onStartSession: () => {} });
+    expect(q('[data-start-permission]')?.tagName).toBe('FIELDSET');
+    expect(q('[data-start-permission-option="manual"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(q('[data-start-permission-option="yolo"]')?.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('preselects from the agentPermissions prop, the same way defaultProvider preselects the provider', () => {
+    (window as unknown as { api: unknown }).api = {};
+    draw({ onStartSession: () => {}, agentPermissions: 'yolo' });
+    expect(q('[data-start-permission-option="yolo"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(q('[data-start-permission-option="manual"]')?.getAttribute('aria-pressed')).toBe(
+      'false',
+    );
+  });
+
+  it('moves the pressed state when the operator clicks the other option', () => {
+    (window as unknown as { api: unknown }).api = {};
+    draw({ onStartSession: () => {} });
+    fireEvent.click(q('[data-start-permission-option="yolo"]') as Element);
+    expect(q('[data-start-permission-option="yolo"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(q('[data-start-permission-option="manual"]')?.getAttribute('aria-pressed')).toBe(
+      'false',
+    );
+  });
+
+  it('names plainly, in a keyboard-reachable tooltip, what Yolo does -- never a bare title', () => {
+    (window as unknown as { api: unknown }).api = {};
+    draw({ onStartSession: () => {} });
+    const yolo = q('[data-start-permission-option="yolo"]');
+    expect(yolo?.getAttribute('data-note')).toMatch(/skips .*permission prompts/);
+    // Manual carries no risk note -- only Yolo needs the explanation.
+    expect(q('[data-start-permission-option="manual"]')?.getAttribute('data-note')).toBeNull();
+  });
+
+  it('Start hands the CHOSEN permission to the caller, as the second argument', () => {
+    const started: Array<[string, string]> = [];
+    (window as unknown as { api: unknown }).api = {};
+    draw({ onStartSession: (id, permission) => started.push([id, permission]) });
+    fireEvent.click(q('[data-start-permission-option="yolo"]') as Element);
+    fireEvent.click(q('[data-start-session-button]') as Element);
+    expect(started).toEqual([['claude-code', 'yolo']]);
+  });
+
+  it('a manual choice sends manual, unchanged', () => {
+    const started: Array<[string, string]> = [];
+    (window as unknown as { api: unknown }).api = {};
+    draw({ onStartSession: (id, permission) => started.push([id, permission]) });
+    fireEvent.click(q('[data-start-session-button]') as Element);
+    expect(started).toEqual([['claude-code', 'manual']]);
+  });
+});
+
+/**
  * THE OPERATOR'S FIRST REPORT, MADE CONCRETE: "if the CLI has an update or
  * needs to trust the folder, the Response view is stuck in the loading state
  * while the terminal is asking about the update and trust." `startingPane.

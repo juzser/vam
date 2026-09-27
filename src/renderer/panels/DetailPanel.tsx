@@ -90,6 +90,8 @@ import {
   Paperclip,
   Play,
   Plus,
+  Shield,
+  ShieldOff,
   Sparkles,
   SquareTerminal,
   TriangleAlert,
@@ -147,6 +149,7 @@ import { insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
 import { PHONE_KEY_LABELS, phoneKeyLabelNodes } from '../keyboard/phone-key-labels.js';
 import { questionKeys, resolveQuestionKey } from '../keyboard/question-keys.js';
 import { ChordGlyphs, ShortcutTip } from '../keyboard/ShortcutTip.js';
+import { type AgentPermissions, isDesktopShell } from '../prefs/agent-permissions.js';
 import {
   activeFocusView,
   drawsProgressLine,
@@ -1013,6 +1016,14 @@ export type DetailPanelProps = {
    */
   readonly defaultProvider?: ProviderId;
   /**
+   * A per-session permission choice, on the identical relationship
+   * `defaultProvider` above has with the provider fieldset it sits beside
+   * (`ProviderStartControls`'s own header for the whole design) --
+   * `prefs.agentPermissions`, read here only to PRESELECT the picker.
+   * `undefined` preselects Manual, the safe fallback.
+   */
+  readonly agentPermissions?: AgentPermissions;
+  /**
    * Settings -> Agents -> Default agent, `No agent` -- `resolveDefaultAgentSelection`
    * (`prefs.ts`) reads that choice a SECOND way, alongside resolving
    * `defaultProvider` above: see `StartSession`'s own doc on the prop of the
@@ -1053,8 +1064,14 @@ export type DetailPanelProps = {
    * Optional, and ABSENT withdraws the button on the same rule as
    * `onSetDefaultProvider`: the screen still says what the row is and how to
    * start something in it (the Terminal view), it just cannot do it from here.
+   *
+   * TAKES THE CHOSEN PERMISSION AS ITS SECOND ARGUMENT, never reading
+   * `agentPermissions` itself -- `Canvas.tsx`'s own `startSessionIn` argument
+   * for why: the picker's own choice at the moment Start is pressed is the
+   * one fact that must reach the argv, with no reliance on whatever the
+   * global preference happens to read by the time the write actually runs.
    */
-  readonly onStartSession?: (id: ProviderId) => void;
+  readonly onStartSession?: (id: ProviderId, permission: AgentPermissions) => void;
   /**
    * RESUME, for a `terminal` row -- a pane whose agent exited but whose
    * conversation vam still knows (`model.ts`). The SECONDARY action on the
@@ -2960,17 +2977,52 @@ export type StartingPaneWait =
  * owns a `useState` of its own to hand this component the same two props,
  * so there is exactly one shape for "the picker's current choice" rather
  * than one owned and one lifted.
+ *
+ * THE PERMISSION OPTION, next to the provider fieldset, on the identical
+ * `chosen`/`onChosenChange` shape (`chosenPermission`/
+ * `onChosenPermissionChange`) -- the operator's own request: "start a
+ * session with a permission parameter option", made HERE rather than only
+ * in Settings, because a per-session choice belongs beside the other
+ * per-session choice (which provider). Preselected from
+ * `agentPermissions` -- `prefs.agentPermissions`, the Settings value, read
+ * down the same way `defaultProvider` already is -- so Settings and this
+ * picker start in agreement; `onStart` is handed the CHOSEN permission
+ * alongside the chosen provider, and `Canvas.tsx`'s own `onStartSession`
+ * writes it back to that same preference the moment a session actually
+ * starts, so the NEXT pane's picker preselects whatever was last chosen
+ * here (or in Settings) -- one value, two places to set it, same rule
+ * `onSetDefaultProvider`'s own comment already draws for the provider
+ * picker beside it.
+ *
+ * NO CONFIRM DIALOG, unlike the Settings row's switch to Yolo -- pressing
+ * Start with Yolo already selected IS the explicit per-session opt-in the
+ * operator asked for; the tooltip on that option says plainly what it does
+ * instead of a second dialog repeating it.
+ *
+ * HIDDEN OUTSIDE THE REAL DESKTOP SHELL -- `isDesktopShell()` (`prefs/
+ * agent-permissions.ts`), the identical gate the Settings row and
+ * `startSessionIn` both already read independently: a paired browser tab (any
+ * viewport width, including the phone FAB's own project picker, which funnels
+ * into this same screen once a pane is opened) draws no permission option at
+ * all and its session starts Manual regardless of `chosenPermission`'s value
+ * here -- `startSessionIn` carries that same gate a second time, so hiding
+ * the control is the plainer fact for whoever reads this file next, not the
+ * only thing enforcing it.
  */
 function ProviderStartControls({
   chosen,
   onChosenChange,
+  chosenPermission,
+  onChosenPermissionChange,
   onStart,
   disabled = false,
   starting = null,
 }: {
   readonly chosen: ProviderId;
   readonly onChosenChange: (id: ProviderId) => void;
-  readonly onStart: (id: ProviderId) => void;
+  readonly chosenPermission: AgentPermissions;
+  readonly onChosenPermissionChange: (next: AgentPermissions) => void;
+  readonly onStart: (id: ProviderId, permission: AgentPermissions) => void;
   /**
    * FROZEN WHILE THIS PANE'S ROW IS WAITING -- for Start OR for Resume, the
    * screen's other act: only one write may be in flight against a pane at
@@ -3021,10 +3073,57 @@ function ProviderStartControls({
           );
         })}
       </fieldset>
+      {isDesktopShell() && (
+        <fieldset
+          data-start-permission
+          aria-label="permission mode for this session"
+          disabled={disabled}
+          className="flex items-center gap-1 rounded-[10px] border border-line-strong bg-card p-1 disabled:cursor-progress disabled:opacity-60"
+        >
+          {(['manual', 'yolo'] as const).map((choice) => {
+            const selected = choice === chosenPermission;
+            const optionButton = (
+              <button
+                key={choice}
+                type="button"
+                aria-pressed={selected}
+                data-start-permission-option={choice}
+                onClick={() => onChosenPermissionChange(choice)}
+                className={[
+                  'vam-tap flex cursor-pointer items-center gap-1.5 rounded-[6px] px-2.5 py-1 text-control capitalize',
+                  selected
+                    ? 'bg-line-strong text-ink'
+                    : 'text-ink-dim hover:bg-line-strong hover:text-ink',
+                ].join(' ')}
+              >
+                {choice === 'yolo' ? (
+                  <ShieldOff size={12} strokeWidth={1.8} />
+                ) : (
+                  <Shield size={12} strokeWidth={1.8} />
+                )}
+                {choice}
+              </button>
+            );
+            // ONLY YOLO CARRIES THE RISK NOTE -- Manual is the safe, expected
+            // state and needs no explanation; the same asymmetry the Settings
+            // row's own confirmation-only-on-Yolo already draws.
+            return choice === 'yolo' ? (
+              <Note
+                key={choice}
+                text={`skips ${resolveProvider(chosen).label}’s permission prompts for this session`}
+              >
+                {optionButton}
+              </Note>
+            ) : (
+              <span key={choice}>{optionButton}</span>
+            );
+          })}
+        </fieldset>
+      )}
       <button
         type="button"
         data-start-session-button
-        onClick={() => onStart(chosen)}
+        onClick={() => onStart(chosen, chosenPermission)}
         disabled={disabled}
         aria-busy={starting !== null}
         className="vam-tap flex cursor-pointer items-center gap-1.5 rounded-[8px] bg-ink px-3.5 py-1.5 text-control text-panel hover:opacity-90 disabled:cursor-progress disabled:opacity-70"
@@ -3250,6 +3349,7 @@ function PaneReady({ provider }: { readonly provider: ProviderId | null }) {
 function StartSession({
   paneName,
   defaultProvider,
+  agentPermissions,
   preferNoAgent = false,
   onStart,
   startingPane = null,
@@ -3258,6 +3358,14 @@ function StartSession({
 }: {
   readonly paneName: string;
   readonly defaultProvider: ProviderId | undefined;
+  /**
+   * Settings -> Agents -> Agent permissions -- `prefs.agentPermissions`,
+   * read here only to PRESELECT `ProviderStartControls`' own permission
+   * option, the identical relationship `defaultProvider` above already has
+   * with the provider fieldset beside it. `undefined` preselects Manual, the
+   * same safe fallback `readAgentPermissions` gives any unreadable value.
+   */
+  readonly agentPermissions?: AgentPermissions;
   /**
    * Settings -> Agents -> Default agent, `No agent` (`prefs/default-agent.ts`
    * and `resolveDefaultAgentSelection`'s own header for why this is a second
@@ -3269,12 +3377,15 @@ function StartSession({
    * it always was.
    */
   readonly preferNoAgent?: boolean;
-  readonly onStart: ((id: ProviderId) => void) | undefined;
+  readonly onStart: ((id: ProviderId, permission: AgentPermissions) => void) | undefined;
   readonly startingPane?: StartingPaneWait | null;
   readonly onShowTerminal?: () => void;
   readonly onAnswerTrust?: (trust: boolean) => void;
 }) {
   const [chosen, setChosen] = useState<ProviderId>(() => resolveProvider(defaultProvider).id);
+  const [chosenPermission, setChosenPermission] = useState<AgentPermissions>(
+    () => agentPermissions ?? 'manual',
+  );
   const starting = startingPane ?? null;
   return (
     <div
@@ -3305,6 +3416,8 @@ function StartSession({
         <ProviderStartControls
           chosen={chosen}
           onChosenChange={setChosen}
+          chosenPermission={chosenPermission}
+          onChosenPermissionChange={setChosenPermission}
           onStart={onStart}
           disabled={starting !== null}
           starting={
@@ -3393,6 +3506,7 @@ function TerminalOnlyStart({
   paneName,
   source,
   defaultProvider,
+  agentPermissions,
   preferNoAgent = false,
   onStart,
   resumeCommand,
@@ -3405,12 +3519,14 @@ function TerminalOnlyStart({
   readonly paneName: string;
   readonly source: string;
   readonly defaultProvider: ProviderId | undefined;
+  /** See `StartSession`'s own doc on this prop. */
+  readonly agentPermissions?: AgentPermissions;
   /** See `StartSession`'s own doc on this prop -- the trailing hint below is
    *  the one thing this screen has in common with it to swap. The mark above
    *  stays the session's own PAST agent regardless: that is a fact, not a
    *  push toward a provider. */
   readonly preferNoAgent?: boolean;
-  readonly onStart: ((id: ProviderId) => void) | undefined;
+  readonly onStart: ((id: ProviderId, permission: AgentPermissions) => void) | undefined;
   readonly resumeCommand: string | undefined;
   readonly onResumeInPane: (() => void) | undefined;
   readonly startingPane?: StartingPaneWait | null;
@@ -3422,6 +3538,9 @@ function TerminalOnlyStart({
   // this restart picker's current pick, so this state exists only to give
   // that shared component the two props it now needs.
   const [chosen, setChosen] = useState<ProviderId>(() => resolveProvider(defaultProvider).id);
+  const [chosenPermission, setChosenPermission] = useState<AgentPermissions>(
+    () => agentPermissions ?? 'manual',
+  );
   const starting = startingPane ?? null;
   return (
     <div
@@ -3454,6 +3573,8 @@ function TerminalOnlyStart({
         <ProviderStartControls
           chosen={chosen}
           onChosenChange={setChosen}
+          chosenPermission={chosenPermission}
+          onChosenPermissionChange={setChosenPermission}
           onStart={onStart}
           disabled={starting !== null}
           starting={
@@ -6382,6 +6503,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
     phone = false,
     onQuestionOpenChange,
     defaultProvider,
+    agentPermissions,
     preferNoAgent = false,
     onSetDefaultProvider,
     onStartSession,
@@ -9043,6 +9165,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
           <StartSession
             paneName={entry.session.pane ?? entry.session.title}
             defaultProvider={defaultProvider}
+            agentPermissions={agentPermissions}
             preferNoAgent={preferNoAgent}
             onStart={onStartSession}
             startingPane={startingPane}
@@ -9055,6 +9178,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
             paneName={entry.session.pane ?? entry.session.title}
             source={entry.session.source ?? entry.project.source ?? 'unknown'}
             defaultProvider={defaultProvider}
+            agentPermissions={agentPermissions}
             preferNoAgent={preferNoAgent}
             onStart={onStartSession}
             resumeCommand={entry.session.resumeCommand}

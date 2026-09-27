@@ -145,7 +145,7 @@ import { halfPageTarget } from '../panels/stick-to-bottom.js';
 import { TABS, tabForDigit, visibleTabs } from '../panels/tabs.js';
 import { PhoneShell } from '../phone/PhoneShell.js';
 import { usePhoneViewport } from '../phone/viewport.js';
-import { isDesktopShell } from '../prefs/agent-permissions.js';
+import { type AgentPermissions, isDesktopShell } from '../prefs/agent-permissions.js';
 import { type FocusCandidate, resolveFocusNodeId } from '../prefs/focus.js';
 import { DEFAULT_PANES, PANE_RESIZE_STEP } from '../prefs/panes.js';
 import {
@@ -5358,7 +5358,11 @@ function CanvasInner({
    * makes.
    */
   const startSessionIn = useCallback(
-    async (entry: SessionEntry, providerId: ProviderId): Promise<void> => {
+    async (
+      entry: SessionEntry,
+      providerId: ProviderId,
+      permission: AgentPermissions,
+    ): Promise<void> => {
       const provider = resolveProvider(providerId);
       const title = entry.session.title;
       const paneKey = entry.session.pane ?? entry.session.id;
@@ -5401,16 +5405,30 @@ function CanvasInner({
         // (`shared/providers.ts`) appends the permission-skipping flag as its
         // own argv element, never a string concatenation, and ONLY here, at
         // session CREATION -- `resumeInPane` below types
-        // `entry.session.resumeCommand` verbatim and never reads
-        // `agentPermissions` at all, so flipping this setting never touches
-        // an already-running or previously-run session. `isDesktopShell()`
-        // (`prefs/agent-permissions.ts`) is the SECOND gate: a paired browser
-        // tab has no `window.api` at any viewport width, so a `'yolo'` value
-        // sitting in THAT tab's own `localStorage` is treated as `'manual'`
-        // here regardless -- viewport width alone was never the right check.
+        // `entry.session.resumeCommand` verbatim and never reads `permission`
+        // at all, so flipping this choice never touches an already-running or
+        // previously-run session. `isDesktopShell()` (`prefs/agent-
+        // permissions.ts`) is the SECOND gate: a paired browser tab has no
+        // `window.api` at any viewport width, so a `'yolo'` value passed here
+        // (which, off the desktop shell, `ProviderStartControls`' own gate
+        // never lets an operator actually choose) is treated as `'manual'`
+        // regardless -- viewport width alone was never the right check.
+        //
+        // `permission` IS THE PER-SESSION CHOICE ITSELF, not a re-read of
+        // `prefs.agentPermissions` -- `DetailPanel.tsx`'s own
+        // `ProviderStartControls` (the start screen's picker) hands this
+        // function the exact value the operator chose at the moment Start
+        // was pressed, which `onStartSession` (below, this file) also
+        // persists back to that same preference for the NEXT picker's
+        // preselection -- but this call reads its OWN parameter, never the
+        // preference a second time, so the two can never disagree about what
+        // this one session actually got.
         await sessionSource.write.recordPrompt(
           entry.session.id,
-          sessionArgv(providerId, isDesktopShell() ? prefs.agentPermissions : 'manual').join(' '),
+          sessionArgv(
+            providerId,
+            isDesktopShell() && permission === 'yolo' ? 'yolo' : 'manual',
+          ).join(' '),
         );
         setStatus(
           `started ${provider.label} in "${title}" — its session appears here once it registers`,
@@ -5435,7 +5453,6 @@ function CanvasInner({
       beginStartingPane,
       clearStartingPane,
       setStatus,
-      prefs.agentPermissions,
     ],
   );
 
@@ -7699,11 +7716,19 @@ function CanvasInner({
         defaultProvider: defaultAgentSelection.providerId,
         preferNoAgent: defaultAgentSelection.preferNoAgent,
         onSetDefaultProvider: (id) => savePrefs(setDefaultProvider(prefs, id)),
+        // THE START SCREEN'S OWN PERMISSION PICKER PRESELECTS FROM THIS --
+        // `ProviderStartControls`' own header (`DetailPanel.tsx`) for the
+        // whole design: a read of the same preference Settings writes,
+        // identical in spirit to `defaultProvider` above it.
+        agentPermissions: prefs.agentPermissions,
         // THIS PANE'S ROW, when it is a pane with nothing in it: the start
         // screen's one act. Withdrawn (absent) where there is no session to
         // start in, so the screen says "use the Terminal view" instead of
         // drawing a button that cannot type.
-        onStartSession: entry === null ? undefined : (id) => void startSessionIn(entry, id),
+        onStartSession:
+          entry === null
+            ? undefined
+            : (id, permission) => void startSessionIn(entry, id, permission),
         // THIS PANE'S ROW, on the `terminal` getting-started screen's
         // secondary act -- see `resumeInPane`'s own comment for why this is
         // not `reopenSession`. Withdrawn on the same "no session, no control"
