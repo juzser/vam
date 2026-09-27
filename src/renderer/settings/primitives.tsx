@@ -118,7 +118,7 @@ export function SettingsCard({
             className={`flex-none text-ink-dim transition-transform ${open ? '' : '-rotate-90'}`}
           />
         </button>
-        <div className="border-line-loud border-t" />
+        <div data-settings-card-divider className="border-line-loud border-t" />
         {/* THE HINT IS A SIBLING OF THE ROWS, NOT ONE OF THEM -- it is the
             section's own description, not a row's caption, and
             `copy-budget.test.tsx` counts `[data-settings-rows] p` as "one
@@ -126,7 +126,7 @@ export function SettingsCard({
             inside would double-count it (once by its own hook, once by
             that selector). Both share the one `hidden` wrapper, so the hint
             folds shut with the rest of the card's content. */}
-        <div id={contentId} hidden={!open} className="px-4 py-4">
+        <div id={contentId} data-settings-card-body hidden={!open} className="px-4 py-4">
           <p data-settings-panel-hint className="vam-sentence mb-5 text-control text-ink-dim">
             {hint}
           </p>
@@ -303,16 +303,29 @@ export function SettingsSubgroup({
   readonly children: React.ReactNode;
 }) {
   return (
-    <div className="mt-6 border-line-loud border-t pt-6 first:mt-0 first:border-t-0 first:pt-0">
-      <div className="flex items-center gap-3 border-line-loud border-b pb-[6px]">
+    <div
+      data-settings-subgroup
+      className="mt-6 border-line-loud border-t pt-6 first:mt-0 first:border-t-0 first:pt-0"
+    >
+      <div
+        data-settings-subgroup-heading
+        className="flex items-center gap-3 border-line-loud border-b pb-[6px]"
+      >
         <h4 className="flex-1 font-semibold text-body text-ink capitalize">{title}</h4>
         {action === undefined ? null : action}
       </div>
       {/* INDENTED, so the rows read as belonging to the heading above them
           rather than as one more run of the card's own top-level rows. Each
           row keeps its own `first:` reset because this is its own DOM
-          parent. */}
-      <div className="pl-3">{children}</div>
+          parent. `pt-4`: the operator's own report -- "the bottom line of a
+          section heading must have a gap before the config below it" -- and
+          measured true here (`e2e/settings-chrome-shots.mjs`'s ITEM 8): this
+          heading's own `border-b` sat flush against the first row with no
+          gap at all, unlike `SettingsCard`'s outer header, whose `py-4` body
+          padding already cleared its own divider by 16px in every section. */}
+      <div data-settings-subgroup-body className="pl-3 pt-4">
+        {children}
+      </div>
     </div>
   );
 }

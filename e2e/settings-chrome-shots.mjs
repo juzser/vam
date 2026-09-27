@@ -1486,5 +1486,86 @@ console.log("\n=== the inline row split (Orca's shape), as paint");
   );
 }
 
+// ---------------------------------------------------------------- ITEM 8.
+// A HEADING'S OWN BOTTOM LINE HAS A GAP BEFORE THE CONFIG BELOW IT.
+//
+// Operator: "the bottom line of a section heading in Settings must have a
+// gap before the config below it; right now they're stuck together." Two
+// different headings draw a bottom rule in this dialog -- `SettingsCard`'s
+// own header (a `border-t` divider between the button and the body) and
+// `SettingsSubgroup`'s own title bar (a `border-b` on the title itself) --
+// and only a real layout can say whether either one's rule sits flush
+// against what follows: `getBoundingClientRect` on a `hidden`-folded or
+// zero-height box is not what this is asking, and a stylesheet rule proves
+// only that a class was typed, the same lesson this file's own header
+// draws about `text-transform`.
+//
+// EVERY SECTION'S OWN CARD, not one sampled section -- the operator's own
+// ask -- so a fix that only widened one card's padding while leaving the
+// shared component untouched elsewhere would still be caught here.
+console.log("\n=== a heading's own bottom line clears the config below it");
+{
+  const GAP_FLOOR = 12;
+  const page = await openSettings(1100, 900);
+  const sectionIds = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-settings-nav-item]')].map((el) =>
+      el.getAttribute('data-settings-nav-item'),
+    ),
+  );
+
+  for (const sectionId of sectionIds) {
+    await page.locator(`[data-settings-nav-item="${sectionId}"]`).click();
+    await page.waitForTimeout(120);
+
+    // THE CARD'S OWN HEADER: the divider's bottom edge to the body's first
+    // child (the panel's own hint, always drawn -- `SettingsCard` makes it a
+    // mandatory prop).
+    const cardGap = await page.evaluate((id) => {
+      const panel = document.querySelector(`[data-settings-panel="${id}"]`);
+      const divider = panel?.querySelector('[data-settings-card-divider]') ?? null;
+      const body = panel?.querySelector('[data-settings-card-body]') ?? null;
+      const first = body?.firstElementChild ?? null;
+      if (divider === null || first === null) return null;
+      const d = divider.getBoundingClientRect();
+      const f = first.getBoundingClientRect();
+      return f.top - d.bottom;
+    }, sectionId);
+    if (cardGap === null) {
+      throw new Error(`${sectionId}: missing its own card divider or body's first child`);
+    }
+    if (cardGap < GAP_FLOOR) {
+      throw new Error(`${sectionId}: the card header's own divider clears only ${cardGap}px before the body, short of ${GAP_FLOOR}px`);
+    }
+
+    // EVERY SUBGROUP INSIDE IT, if any (Terminal draws two -- "Terminal
+    // Typography", "Themes" -- Behaviour draws one, "Files"; most sections
+    // draw none at all, which is not a hole in this sweep -- a section with
+    // no subgroup has no second heading to ask this question about).
+    const subgroupGaps = await page.evaluate((id) => {
+      const panel = document.querySelector(`[data-settings-panel="${id}"]`);
+      return [...(panel?.querySelectorAll('[data-settings-subgroup]') ?? [])].map((group) => {
+        const heading = group.querySelector('[data-settings-subgroup-heading]');
+        const body = group.querySelector('[data-settings-subgroup-body]');
+        const first = body?.firstElementChild ?? null;
+        if (heading === null || first === null) return null;
+        const h = heading.getBoundingClientRect();
+        const f = first.getBoundingClientRect();
+        return f.top - h.bottom;
+      });
+    }, sectionId);
+    for (const gap of subgroupGaps) {
+      if (gap === null) {
+        throw new Error(`${sectionId}: a subgroup is missing its own heading or body's first child`);
+      }
+      if (gap < GAP_FLOOR) {
+        throw new Error(`${sectionId}: a subgroup heading clears only ${gap}px before its first row, short of ${GAP_FLOOR}px`);
+      }
+    }
+    console.log(`  ${sectionId}: card ${cardGap}px, ${subgroupGaps.length} subgroup(s) ${JSON.stringify(subgroupGaps)}`);
+  }
+  await page.close();
+  console.log(`  every card header and every subgroup heading clears at least ${GAP_FLOOR}px before its own body, over all ${sectionIds.length} sections`);
+}
+
 await browser.close();
 console.log('settings chrome: the narrow nav is named at every width, the Remote button paints, the case ladder holds, and the switch reads as one.');
