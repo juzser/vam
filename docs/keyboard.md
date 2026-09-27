@@ -150,3 +150,38 @@ browser really swallows is the one thing no test here can measure — keys
 injected by Playwright go straight to the renderer and never through the
 browser's own accelerators — so the right-hand side of that file is Chrome's
 and Apple's documentation, not a measurement.
+
+## On the phone
+
+A phone has no physical keyboard for the session's own chords, so the
+keystroke strip above the composer offers six of them as taps: Escape, Tab,
+Enter, Shift-Tab, Space and Backspace — Claude Code's own option pickers
+(`AskUserQuestion`, a permission prompt, `/model`, plan approval) are walked
+with exactly this set. `Up`/`Down` (vam's own addition, vam/terminal-arrows)
+join them wherever the desktop's local channel is available, but never over
+the phone's own remote one — see below.
+
+**Two channels, one strip.** In the Electron shell the strip presses
+`window.api.terminal.send`, the same bridge the Terminal tab and the mode
+switcher use, and carries all eight keys. Served remotely, over Tailscale
+Serve, there is no `window.api` at all: the strip falls back to
+`/api/send-key` (`src/main/remote/send-key.ts`), a route that accepts
+exactly the six keys above, from a fixed allowlist, into the session's own
+tmux pane — never free text, and never a client-named pane. `Up`/`Down` are
+withdrawn from the strip itself on this channel rather than drawn as two
+buttons that always fail: absent, not disabled, the same rule the mode
+switcher already applies for a session vam did not start.
+
+**Paste** reads the phone's own clipboard
+(`navigator.clipboard.readText()`) and types the result through the
+existing prompt path — the same as typing it — never through
+`/api/send-key`, which stays allowlist-only. It disables itself, with a
+tooltip saying why, wherever the browser has no clipboard-read API or the
+last read was denied.
+
+Held against the code by `test/shared/remote-key.test.ts` (the allowlist,
+closed), `test/main/remote/send-key.test.ts` and `test/main/remote/
+send-key-route.test.ts` (pane resolution and the HTTP route), `test/panels/
+DetailPanel.keystroke-strip.test.tsx` (which keys draw on which channel) and
+`e2e/phone-composer-keys.pw.ts` (the strip and the route, in a real
+browser).

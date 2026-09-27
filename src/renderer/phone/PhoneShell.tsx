@@ -888,6 +888,16 @@ export function PhoneShell({
           tab={view}
           initialTab="Response"
           tabRequest={viewRequest}
+          // THE OTHER DIRECTION: the composer's own key-strip "screen" icon
+          // (Orca's layout) asking to move, rather than being told to.
+          // Routed through the SAME `setView`/`setViewRequest` pair
+          // `ViewIcons.onSelect` above already calls, so the row's own
+          // selection and the pane's view can never disagree about which
+          // tab is on -- there is exactly one place that decides.
+          onRequestTab={(tab) => {
+            setView(tab);
+            setViewRequest({ tab });
+          }}
           records={records}
           onQuestionOpenChange={setQuestionOpen}
         />

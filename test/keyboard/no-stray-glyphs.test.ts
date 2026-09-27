@@ -34,11 +34,24 @@ const RENDERER_ROOT = join(__dirname, '../../src/renderer');
  *  the same defect as one key with two spellings"). */
 const GLYPHS = ['⌘', '⇧', '⌥', '⌃', '⏎', '⎋', '⌫', '⇥', '␣', '↵'] as const;
 
-/** The one file allowed to type a glyph literally: the table itself.
+/** The files allowed to type a glyph literally: the table itself, and the
+ *  ONE other table this codebase keeps on purpose.
  *  `ShortcutTip.tsx` — the one PAINTED consumer — computes every glyph
  *  through `chordSegments`/`chordSymbols` and holds none of its own; it is
- *  not here on purpose, so a literal added to it would trip this guard too. */
-const ALLOWED = new Set(['src/renderer/keyboard/chords.ts']);
+ *  not here on purpose, so a literal added to it would trip this guard too.
+ *  `phone-key-labels.tsx` is the SECOND table this rule's own header warns
+ *  against, opened deliberately: the phone keystroke strip's captions used
+ *  to be `chordSymbols` output, which is `navigator.platform`-read, so the
+ *  same button painted a different caption on an iPhone than on the Android
+ *  phone this same bundle is served to — the operator asked for one short,
+ *  plain label regardless of which phone is reading it, which is exactly
+ *  the one thing `chords.ts`'s table cannot give (its whole job is
+ *  answering "which platform"). Its own doc comment carries the argument in
+ *  full. */
+const ALLOWED = new Set([
+  'src/renderer/keyboard/chords.ts',
+  'src/renderer/keyboard/phone-key-labels.tsx',
+]);
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {

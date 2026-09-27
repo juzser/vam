@@ -228,24 +228,18 @@ describe('every chord-painting surface routes a Mac glyph through ChordGlyphs', 
         />,
       );
       expect(document.querySelectorAll('[data-key-strip-key]').length).toBeGreaterThan(0);
-      // THE ONE DOCUMENTED EXCEPTION THIS SWEEP HAS TO NAME. `KEY_STRIP`'s
-      // own doc comment (`DetailPanel.tsx`) states it: `Esc`/`Enter` carry a
-      // caption naming a different destination than their textarea siblings
-      // (`" → agent"`) — an arrow used as prose ("leads to"), not a rendering
-      // of the ArrowRight key `chordSegments` also happens to draw with the
-      // same Unicode character. It is deliberately NOT `chord`/`suffix`
-      // routed through `ChordGlyphs` — `suffix` is plain caption text by the
-      // table's own design — so it is excluded by name rather than by
-      // weakening the guard for every other glyph this strip paints (the
-      // chord itself, `⎋`/`⏎`/`⇧⇥`/`␣`/`↑`/`↓`, all still checked below).
-      const found = findUnwrappedGlyphs(document.body);
-      const suffixArrows = found.filter((v) => v.text === ' → agent');
-      const other = found.filter((v) => v.text !== ' → agent');
-      expect(
-        suffixArrows.length,
-        'the documented "→ agent" suffix exception moved or disappeared — update this test',
-      ).toBe(2);
-      expect(describeAll('phone key strip', other)).toBe('');
+      // NO EXCEPTION LEFT TO NAME (composer follow-up, reversing the "→
+      // agent" suffix exception this test used to carry). The strip no
+      // longer routes ANY caption through `chordSymbols`/`ChordGlyphs` at
+      // all -- `chord`/`suffix` still exist on `KEY_STRIP` for the
+      // sent/sending banner (`stripCaption`), but the BUTTON now paints
+      // `phoneKeyLabelNodes(item.label)` (`phone-key-labels.tsx`), which
+      // wraps its own pictograms (`⇧`/`⌫`/`↑`/`↓`/`↵`) in `font-sans` the
+      // same way `ChordGlyphs` wraps a computed segment. So this sweep finds
+      // nothing unwrapped anywhere on the strip now, word or glyph alike --
+      // the general case every OTHER surface in this file already holds,
+      // with nothing strip-specific left to carve out.
+      expect(describeAll('phone key strip', findUnwrappedGlyphs(document.body))).toBe('');
       cleanup();
     });
   });

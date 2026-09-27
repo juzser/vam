@@ -261,29 +261,47 @@ async function openWaiting(page: Page): Promise<void> {
 /**
  * THE COMPOSER'S TOOL ROW, AS A ROW RATHER THAN AS BOXES.
  *
- * `scrollWidth` vs `clientWidth`, and every child's right edge against the
- * 390px screen -- asked of the layout rather than of appearance, because
- * `vam-no-scrollbar` hides scrollbars in this app and an overflowing row looks
- * exactly like one that fits. The failure it catches is the one a per-control
- * 44px census cannot see at all: every box in the row can clear 44 while the
- * last of them sits off the side of the screen.
+ * Every actual CONTROL's right edge against the 390px screen -- asked of the
+ * layout rather than of appearance, because `vam-no-scrollbar` hides
+ * scrollbars in this app and an overflowing row looks exactly like one that
+ * fits. The failure it catches is the one a per-control 44px census cannot
+ * see at all: every box in the row can clear 44 while the last of them sits
+ * off the side of the screen. Reads every `.vam-tap` INSIDE the row rather
+ * than the row's own direct children, so the "+" (a `data-popover-root`
+ * wrapper around its own button) is checked by its actual tap target, not by
+ * a wrapper div that may not be the same size as what it wraps (composer
+ * follow-up, below).
+ *
+ * `scrollWidth` VS `clientWidth` USED TO BE PART OF THIS CHECK TOO, and no
+ * longer is: the composer follow-up that tightened the gap between these
+ * three buttons closes it with a negative `margin-left`/`margin-right` on
+ * each one (`[data-composer-action]`, `styles.css`), which makes two
+ * adjacent 44px boxes overlap by design -- the same 14px `scrollWidth`
+ * would have to count whether or not anything is actually off-screen.
+ * Measured directly: `scrollWidth` reads past `clientWidth` here now on
+ * every one of this suite's own scenarios, by the SAME small, bounded
+ * amount the margin rule introduces, never growing with how long the
+ * suggestion offer is -- which is what tells this apart from the DEFECT
+ * this function was written for (a row that overflows because its OWN
+ * total content is too wide for the space it has, which DOES grow with
+ * content and DOES eventually push a control off-screen). The per-control
+ * screen-edge check below is what actually answers "did anything end up off
+ * the screen", and it is unweakened.
  */
 async function toolsRowFits(page: Page, where: string): Promise<void> {
   const row = await page.evaluate(() => {
     const el = document.querySelector('[data-phone-shell] [data-prompt-tools]');
     if (el === null) return null;
     return {
-      scrollW: el.scrollWidth,
-      clientW: el.clientWidth,
-      offScreen: [...el.children]
-        .map((child) => {
-          const r = child.getBoundingClientRect();
+      offScreen: [...el.querySelectorAll('.vam-tap')]
+        .map((control) => {
+          const r = control.getBoundingClientRect();
           return {
             hooks:
-              [...child.attributes]
+              [...control.attributes]
                 .map((a) => a.name)
                 .filter((n) => n.startsWith('data-') && n !== 'data-state')
-                .join(',') || child.tagName,
+                .join(',') || control.tagName,
             right: Math.round(r.right),
             left: Math.round(r.left),
           };
@@ -292,10 +310,6 @@ async function toolsRowFits(page: Page, where: string): Promise<void> {
     };
   });
   expect(row, `the composer tool row, with ${where}`).not.toBeNull();
-  expect(
-    (row?.scrollW ?? 0) <= (row?.clientW ?? 0),
-    `the tool row overflows its own box with ${where}: scrollWidth ${row?.scrollW} into clientWidth ${row?.clientW}`,
-  ).toBe(true);
   expect(row?.offScreen, `controls off the 390px screen with ${where}`).toEqual([]);
 }
 
@@ -452,6 +466,125 @@ test.describe('the answer survives the keyboard', () => {
         `pixels of the agent's answer inside the band a ${keyboard}px keyboard leaves ` +
           `([${top}, ${SHELL_H}]) once iOS has panned to the box ` +
           `(answer ${JSON.stringify(b.answer)}, card ${JSON.stringify(b.card)}, composer ${JSON.stringify(b.composer)})`,
+      ).toBeGreaterThanOrEqual(ANSWER_MIN_PX);
+    });
+  }
+});
+
+/**
+ * THE KEYSTROKE STRIP IS THE COMPOSER'S OWN FIRST CHILD (`DetailPanel.tsx`'s
+ * own comment: "First child, so it inherits `composerHidden` for free"), so
+ * `[data-composer-bar]`'s bounding box already carries the strip's height
+ * whenever it draws -- these tests need no new plumbing beyond a session with
+ * NO question open (`alpha-running`, `s2`): unlike the tests above, the
+ * composer here is usable the moment the session opens, with nothing to tap
+ * through first, and the strip only draws over a `vamControlled` session with
+ * nothing to answer -- exactly `s2`'s own shape.
+ *
+ * WHY A SEPARATE BLOCK RATHER THAN A visualViewport LISTENER: the operator's
+ * ask was "strip and composer sit on top of the keyboard, terminal view
+ * shrinks to fill space above" -- and `[data-overlay-host]`'s own comment in
+ * `styles.css` already answers a near-identical brief the same way, ruling a
+ * `visualViewport` listener out by name for "the jitter and double-resize
+ * loops it is a known source of." The shell is `100dvh` and every row inside
+ * `data-composer-bar` is `flex-none`, so a shrinking viewport (Android) or an
+ * iOS pan already puts the strip where the ask wants it with no listener at
+ * all -- these tests measure that this still holds now that the strip is a
+ * real row of its own above the composer, the same way `the answer survives
+ * the keyboard` above measures it for the inline question.
+ */
+test.describe('the key strip sits on the keyboard too, on a running session with no question open', () => {
+  async function openRunning(page: Page): Promise<Locator> {
+    await page
+      .locator('[data-phone-shell] [data-session-row]', { hasText: 'alpha-running' })
+      .first()
+      .click();
+    await expect(page.locator('[data-phone-shell]')).toHaveAttribute('data-phone-shell', 'session');
+    const strip = page.locator('[data-phone-shell] [data-key-strip]');
+    await expect(strip).toBeVisible();
+    const box = page.locator('[data-phone-shell] [data-composer-bar] textarea');
+    await box.click();
+    await expect(box).toBeFocused();
+    await expect(page.locator('[data-phone-shell]')).toHaveAttribute('data-phone-keyboard', 'open');
+    return strip;
+  }
+
+  for (const keyboard of KEYBOARDS) {
+    test(`SHRUNK viewport, ${keyboard}px keyboard: the strip and composer stay on screen, transcript shrinks above them`, async ({
+      page,
+    }) => {
+      const height = SHELL_H - keyboard;
+      await page.setViewportSize({ width: 390, height });
+      await stubRemote(page);
+      const strip = await openRunning(page);
+
+      const b = await bands(page);
+      const stripBox = await strip.boundingBox();
+      expect(stripBox, 'the key strip').not.toBeNull();
+      expect(b.composer, 'the composer (the strip is its first child)').not.toBeNull();
+      expect(b.column, 'the transcript scroller').not.toBeNull();
+
+      // NOTHING MAY LEAVE THE SCREEN, the same failure mode `the answer
+      // survives the keyboard` above was written for.
+      expect(
+        b.header?.top,
+        `the app bar's own top edge at a ${keyboard}px keyboard -- negative means the shell overflowed and the root scrolled`,
+      ).toBe(0);
+      expect(
+        (stripBox?.y ?? -1) + (stripBox?.height ?? 0),
+        `the strip's own bottom against a ${height}px viewport`,
+      ).toBeLessThanOrEqual(height);
+      expect(
+        b.composer?.bottom,
+        `the composer's bottom (strip included) against a ${height}px viewport`,
+      ).toBeLessThanOrEqual(height);
+
+      // THE STRIP SITS DIRECTLY ON TOP OF THE COMPOSER, AND THE TRANSCRIPT
+      // ENDS AT OR ABOVE THE STRIP -- never under either of them.
+      expect(
+        stripBox?.y,
+        'the strip never sits above the app bar',
+      ).toBeGreaterThanOrEqual(b.header?.bottom ?? 0);
+      expect(
+        b.column?.bottom,
+        `the transcript ends at or above the strip's own top (${stripBox?.y}), never under it`,
+      ).toBeLessThanOrEqual(stripBox?.y ?? Number.POSITIVE_INFINITY);
+
+      const visible = Math.max(
+        0,
+        Math.min(b.column?.bottom ?? 0, height) - Math.max(b.column?.top ?? 0, 0),
+      );
+      expect(
+        visible,
+        `pixels of the transcript on screen with a ${keyboard}px keyboard up ` +
+          `(header ${JSON.stringify(b.header)}, column ${JSON.stringify(b.column)}, ` +
+          `strip ${JSON.stringify(stripBox)}, composer ${JSON.stringify(b.composer)})`,
+      ).toBeGreaterThanOrEqual(ANSWER_MIN_PX);
+    });
+
+    test(`IOS layout, ${keyboard}px keyboard: the strip and composer still sit at the foot of the layout viewport`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 390, height: SHELL_H });
+      await stubRemote(page);
+      const strip = await openRunning(page);
+
+      const b = await bands(page);
+      const stripBox = await strip.boundingBox();
+      // The layout viewport is untouched (iOS does not shrink it), so the
+      // composer -- strip included -- still ends at the foot of `100dvh`,
+      // exactly as `IOS layout` above asserts for the inline-question case.
+      expect(b.composer?.bottom, 'the composer still ends at the foot of the layout viewport').toBe(
+        SHELL_H,
+      );
+      expect(stripBox?.y, 'the strip').not.toBeNull();
+      const top = keyboard;
+      const visible = Math.max(0, (b.column?.bottom ?? 0) - Math.max(b.column?.top ?? 0, top));
+      expect(
+        visible,
+        `pixels of the transcript inside the band a ${keyboard}px keyboard leaves ` +
+          `([${top}, ${SHELL_H}]) once iOS has panned to the box ` +
+          `(column ${JSON.stringify(b.column)}, strip ${JSON.stringify(stripBox)}, composer ${JSON.stringify(b.composer)})`,
       ).toBeGreaterThanOrEqual(ANSWER_MIN_PX);
     });
   }
