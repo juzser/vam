@@ -586,6 +586,42 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * 215,800 -> 216,300: the merged gzip figure (215,514 B) plus ~0.8 KB
  * (~0.36%) of the same slack. The next PR to land here should expect to
  * remeasure rather than assume either number still has room.
+ *
+ * A FIFTH, SMALL, ORDINARY GROWTH: the persistent Yolo indicator adds one
+ * eager tab mark (`Canvas.tsx`'s `TabStrip`, a `ShieldOff` icon plus a `Note`
+ * tooltip) and the prefs plumbing behind it (`prefs/yolo-starts.ts`,
+ * `prefs.ts`'s `recordYoloStart`/`applyYoloStarts`) -- one icon and a small
+ * always-on mark, not a split, the same category as the Stats & Usage icon
+ * bump above.
+ *
+ * Measured with a merge-base worktree build (`git worktree add --detach` at
+ * this PR's own merge commit's OTHER parent, 92ae788a, i.e. `main`'s tip the
+ * moment before this PR's own commit lands), same code and chunks both
+ * times, `electron-vite build --mode production`:
+ *
+ *     entry, main (92ae788a, no Yolo indicator)   720,494 B  (216,019 B gzip)
+ *     entry, merged (+ the Yolo indicator)         721,800 B  (216,396 B gzip)  (+1,306 B / +0.18%, +377 B gzip / +0.17%)
+ *
+ * A NOTE ON THE GZIP FIGURE, so a future reader does not chase a phantom
+ * regression: measured on THIS machine's Node/zlib, `main`'s own tip
+ * (720,494 B, byte-identical to the 720,494 B the PREVIOUS paragraph
+ * measured) gzips to 216,019 B here, not the 215,514 B that paragraph
+ * recorded -- a ~500 B gap on IDENTICAL bytes, so it is the gzip
+ * implementation (Node/zlib version) that differs across sessions, not the
+ * content. The DELTA (+377 B gzip for this PR's own change, measured
+ * before/after in this same environment, same tool, same run) is what is
+ * portable; the absolute baseline is not, which is why this paragraph
+ * reports the delta explicitly rather than only the merged figure.
+ *
+ * `ENTRY_BUDGET_BYTES` moves 723,000 -> 723,500: the real merged figure
+ * (721,800 B) plus ~1.7 KB (~0.24%) of slack, the same small-headroom
+ * convention every bump above uses. `ENTRY_GZIP_BUDGET_BYTES` moves
+ * 216,300 -> 216,700: the merged gzip figure (216,396 B, THIS machine's
+ * zlib) plus ~300 B (~0.14%) of the same slack -- deliberately measured
+ * against this session's own gzip run rather than the previous paragraph's
+ * now-established-as-machine-dependent figure, per the note above. The next
+ * PR to land here should expect to remeasure rather than assume either
+ * number still has room.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -596,8 +632,8 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 // depends on is even present, decided BEFORE anything tries to build.
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
-const ENTRY_BUDGET_BYTES = 723_000;
-const ENTRY_GZIP_BUDGET_BYTES = 216_300;
+const ENTRY_BUDGET_BYTES = 723_500;
+const ENTRY_GZIP_BUDGET_BYTES = 216_700;
 
 // The one string this repo's markdown stack ships that nothing else in the
 // dependency graph or vam's own source does: `gfmTable`, the extension name
