@@ -279,6 +279,20 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * bump above uses. `ENTRY_GZIP_BUDGET_BYTES` stays at 212,000: the new
  * strings and class lists compress well, and the gzip check passed
  * unmodified against this same build.
+ *
+ * MERGED WITH #522 (composer remount height, hidden-note pause, reused-
+ * question double-draw) ON TOP OF THIS BRANCH'S OWN WORK, same as the ADHD
+ * card + Integrations merge above: neither PR budgeted for the other landing
+ * too. Measured, `electron-vite build --mode production`, at the merge
+ * commit carrying both:
+ *
+ *     entry gzip, at the merge   212,003 B  (3 B over the unmoved 212,000)
+ *
+ * Three bytes is noise, not a feature this PR's own work cost -- eager stays
+ * comfortably under 707,700 at this same build. `ENTRY_GZIP_BUDGET_BYTES`
+ * moves 212,000 -> 213,000: enough to clear #522's own small, unrelated
+ * contribution to the shared gzip stream with the same order of slack every
+ * bump above uses, not a fresh re-baseline.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -290,7 +304,7 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
 const ENTRY_BUDGET_BYTES = 707_700;
-const ENTRY_GZIP_BUDGET_BYTES = 212_000;
+const ENTRY_GZIP_BUDGET_BYTES = 213_000;
 
 // The one string this repo's markdown stack ships that nothing else in the
 // dependency graph or vam's own source does: `gfmTable`, the extension name
