@@ -192,6 +192,46 @@ describe('agentPermissions: yolo is INERT outside the real desktop shell', () =>
   });
 });
 
+describe('the start screen picker overrides whatever agentPermissions currently reads', () => {
+  it('choosing Yolo in the picker starts Yolo, even with manual (the default) in prefs', async () => {
+    markDesktopShell();
+    const { source, recorded } = sourceWith();
+    render(<Canvas model={modelWith(UNSTARTED)} source={source} />);
+    await act(async () => {
+      document.querySelector<HTMLElement>('[data-start-permission-option="yolo"]')?.click();
+    });
+    await act(async () => {
+      startButton()?.click();
+    });
+    expect(recorded).toEqual([[UNSTARTED.id, 'claude --dangerously-skip-permissions']]);
+  });
+
+  it('choosing Manual in the picker starts Manual, even with yolo preselected from prefs', async () => {
+    markDesktopShell();
+    seed({ agentPermissions: 'yolo' });
+    const { source, recorded } = sourceWith();
+    render(<Canvas model={modelWith(UNSTARTED)} source={source} />);
+    await act(async () => {
+      document.querySelector<HTMLElement>('[data-start-permission-option="manual"]')?.click();
+    });
+    await act(async () => {
+      startButton()?.click();
+    });
+    expect(recorded).toEqual([[UNSTARTED.id, 'claude']]);
+  });
+
+  // NOT YET IMPLEMENTED: a permission classifier denial ([Security Weaken])
+  // blocked the write that would persist the picker's own choice back to
+  // `prefs.agentPermissions` as the NEXT screen's preselection. The picker
+  // still PRESELECTS from that preference (the two tests above and the
+  // "yolo appends exactly the right flag" describe block already prove
+  // that read); only the write-back is missing. Left as `todo`, not
+  // deleted, so this gap stays visible rather than silently uncovered.
+  it.todo(
+    'remembers the picker’s own choice as the NEXT screen’s preselection, once the write-back is unblocked',
+  );
+});
+
 describe('agentPermissions never reaches an already-existing session', () => {
   it('resumeInPane types the resume command verbatim, yolo or not', async () => {
     seed({ agentPermissions: 'yolo' });
