@@ -182,14 +182,16 @@ describe('the text the phone list screen is made of', () => {
       expect(hit.length, `no element on this screen reads "${text}"`).toBeGreaterThan(0);
       return hit;
     };
-    for (const node of named('Search sessions')) {
-      // The control as well as the label: the class sits on the button, and a
-      // check that only reached the inner span survived reverting it.
-      expect(node.className, 'the search label').not.toContain('text-ink-faint');
-      expect(node.closest('button')?.className, 'the search control').not.toContain(
-        'text-ink-faint',
-      );
-    }
+    // NOT `named('Search sessions')` any more. The Orca one-row pass
+    // (follow-up to pull request 527) collapsed the phone's full-width
+    // "Search sessions" box to a bare icon -- the words are the button's
+    // `aria-label` now, not painted text, so a contrast sweep over painted
+    // text has nothing left to find there and would be asserting over an
+    // empty corpus if it still looked (this file's own header: "green having
+    // examined nothing"). Found by label instead, and judged the same way.
+    const search = document.querySelector('button[aria-label="search sessions"]');
+    expect(search, 'the phone’s search icon').not.toBeNull();
+    expect(search?.className, 'the search control').not.toContain('text-ink-faint');
 
     // The popover's own captions -- the phone's only text-search route
     // reaches this surface, so they are on the critical path too. "Origin"

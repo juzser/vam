@@ -726,7 +726,14 @@ test.describe('every control a finger meets, in every state', () => {
     '[data-phone-shell] button, [data-phone-shell] summary, [data-phone-shell] a[href],' +
     ' [data-phone-shell] input, [data-phone-shell] textarea, [data-phone-shell] [role="button"]';
 
-  type Box = { label: string; hooks: string; tag: string; w: number; h: number };
+  type Box = {
+    label: string;
+    hooks: string;
+    tag: string;
+    w: number;
+    h: number;
+    inToolbar: boolean;
+  };
 
   const census = (page: Page): Promise<Box[]> =>
     page.$$eval(CONTROLS, (els) =>
@@ -750,6 +757,15 @@ test.describe('every control a finger meets, in every state', () => {
             tag: el.tagName,
             w: Math.round(r.width * 10) / 10,
             h: Math.round(r.height * 10) / 10,
+            // THE ONE NAMED EXCEPTION: `[data-phone-toolbar]` floors at 30,
+            // not 44 (`styles.css`'s own comment on the rule this measures,
+            // the operator's own follow-up request to tighten this one
+            // row's spacing) -- but NOT the workspace-options popover
+            // (`[data-filter-menu]`) it opens, drawn inside the same row:
+            // that popover's own controls keep the ordinary 44px floor.
+            inToolbar:
+              el.closest('[data-phone-toolbar]') !== null &&
+              el.closest('[data-filter-menu]') === null,
           };
         })
         // A 0x0 box is not a touch target that misses 44, it is not a touch
@@ -772,7 +788,7 @@ test.describe('every control a finger meets, in every state', () => {
       seen.push(...boxes);
       undersized.push(
         ...boxes
-          .filter((b) => b.w < TOUCH_MIN || b.h < TOUCH_MIN)
+          .filter((b) => (b.inToolbar ? b.w < 30 || b.h < 30 : b.w < TOUCH_MIN || b.h < TOUCH_MIN))
           .map((b) => `${where}: ${b.w}x${b.h}  ${b.hooks || b.tag}  "${b.label}"`),
       );
     };
@@ -872,6 +888,9 @@ test.describe('what the session screen no longer spends room on', () => {
     ).toHaveCount(0);
 
     await page.locator('[data-phone-back]').tap();
+    // Remote is one tap further in now, behind the toolbar's "more actions"
+    // overflow button (Orca one-row pass, follow-up to pull request 527).
+    await page.locator('[data-phone-shell] button[aria-label="more actions"]').first().tap();
     await page.locator('[data-phone-shell] button[aria-label="remote access"]').first().tap();
     await expect(page.locator('[data-settings-overlay]')).toBeVisible();
     const limits = page.locator('[data-settings-overlay] [data-remote-limits]');

@@ -10,7 +10,7 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { act } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { UsagePopover } from '../../src/renderer/panels/UsagePopover.js';
+import { UsagePopover, usagePanelLeftOffset } from '../../src/renderer/panels/UsagePopover.js';
 import type { CodexUsageSnapshot } from '../../src/shared/codex-usage.js';
 import type { UsageSnapshot } from '../../src/shared/usage.js';
 
@@ -90,6 +90,38 @@ describe('the usage popover trigger', () => {
     expect(button.tagName).toBe('BUTTON');
     expect(button.textContent).not.toContain('V');
     expect(panel()).toBeNull();
+  });
+
+  it('paints the desktop toggle exactly as before -- a filled circle at rest', () => {
+    // NO PROP AT ALL, matching `SessionList.tsx`'s own desktop call site
+    // (`{!phone && <UsagePopover />}`) -- this is the untouched half of the
+    // operator's own request: "the account button" complaint was about the
+    // PHONE toolbar's after-shot, not the sidebar's avatar bar, which keeps
+    // its filled circle.
+    render(<UsagePopover />);
+    expect(toggle().className).toContain('bg-line-strong');
+  });
+
+  it('drops the phone toggle’s background at rest, at the operator’s own request', () => {
+    // "Remove the account button's background so it looks less big" -- the
+    // grey filled circle at REST, on the phone toolbar's own after-shot.
+    // `phone` is the one prop this component takes now, and only its own
+    // toolbar call site (`SessionList.tsx`, `{phone && <UsagePopover phone
+    // />}`) passes it.
+    render(<UsagePopover phone />);
+    const button = toggle();
+    // TOKEN equality, not substring: `hover:bg-line-strong` legitimately
+    // CONTAINS the string "bg-line-strong" and is exactly the class this
+    // test wants to see -- only the bare, unprefixed token paints at rest.
+    expect(button.className.split(/\s+/), 'no filled circle at rest').not.toContain(
+      'bg-line-strong',
+    );
+    // "Keep a hover/pressed/focus-visible state" -- a phone has no hover,
+    // so `:active` (the press) carries the same weight `hover:` does on
+    // desktop, and `focus-visible:` is what a hardware keyboard still gets.
+    expect(button.className, 'a hover fill').toMatch(/hover:bg-line-strong/);
+    expect(button.className, 'a pressed fill').toMatch(/active:bg-line-strong/);
+    expect(button.className, 'a focus-visible fill').toMatch(/focus-visible:bg-line-strong/);
   });
 
   it('opens the panel on click, and closes it again on a second click', async () => {
@@ -249,5 +281,54 @@ describe('the usage popover, with both providers reachable', () => {
 
     expect(get).toHaveBeenCalledTimes(1);
     expect(getCodex).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * `usagePanelLeftOffset`, in isolation -- happy-dom lays nothing out
+ * (`getBoundingClientRect()` reads all zeroes), so the geometry this fixes
+ * cannot be driven through a real render here at all; only Playwright, at a
+ * real viewport, can (`e2e/usage-popover-shots.mjs`'s own phone check).
+ *
+ * THE BUG THIS GUARDS: the toggle used to sit at the sidebar's own left
+ * corner unconditionally, so `left: 0` (the panel's own positioning, relative
+ * to a wrapper exactly as wide as the toggle) always fit. The Orca one-row
+ * pass (`SessionList.tsx`) relocated it into the middle of the phone
+ * toolbar -- measured at x:242 in a 390px viewport, `left: 0` put a 320px
+ * panel's right edge at 562, 172px past the screen. Falsified: revert this
+ * function to `() => 0` and this file's own tests below turn red.
+ */
+describe('usagePanelLeftOffset', () => {
+  it('stays at 0 when the toggle is near the left edge, same as before this fix', () => {
+    // The desktop avatar bar's own case: toggle at x:12, 390px viewport,
+    // 320px panel -- `left: 0` already keeps the panel's right edge (332)
+    // inside the 378px safe area, so nothing should move it.
+    expect(usagePanelLeftOffset(12, 390, 320)).toBe(0);
+  });
+
+  it('pulls the panel left just far enough when the toggle sits mid-row on a phone', () => {
+    // The exact measured regression: toggle at x:241, 390px viewport, a
+    // gutter-capped 366px panel (`min(320, 390-24)`). The panel's right edge
+    // must land on the 378px gutter line: 241 + offset + 366 = 378.
+    const offset = usagePanelLeftOffset(241, 390, 366);
+    expect(241 + offset + 366).toBeCloseTo(378, 5);
+    expect(offset).toBeLessThan(0);
+  });
+
+  it('never pushes the panel’s left edge past the gutter on the other side', () => {
+    // A toggle flush against the left edge (x:0): even pulling all the way
+    // to 0 offset must not put the panel's OWN left edge under the 12px
+    // gutter -- the lower bound this function also enforces.
+    const offset = usagePanelLeftOffset(0, 390, 320);
+    expect(0 + offset).toBeGreaterThanOrEqual(12 - 1e-9);
+  });
+
+  it('is a no-op whenever the natural (0) position already fits', () => {
+    // Up to buttonLeft:58 a 320px panel's right edge (buttonLeft+320) still
+    // clears the 378px safe-area line in a 390px viewport; beyond it, the
+    // offset test above already holds the pulled-left case.
+    for (const buttonLeft of [12, 50, 58]) {
+      expect(usagePanelLeftOffset(buttonLeft, 390, 320)).toBe(0);
+    }
   });
 });
