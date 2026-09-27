@@ -6237,6 +6237,26 @@ const TurnBlock = memo(function TurnBlock({
 });
 
 /**
+ * GROW THE COMPOSER WITH ITS TEXT INSTEAD OF SCROLLING A ONE-LINE SLOT.
+ * Measured from the content each time: shrinking needs the reset to `auto`
+ * first, or the box only ever gets taller. The cap lives in the class list,
+ * not here. A plain module-level function, not a hook, so both the
+ * draft-change effect and the mount-time ref callback below (`inputRef`'s own
+ * comment) can share the one write without either needing the other's
+ * identity as a dependency.
+ */
+function resizeTextareaToContent(box: HTMLTextAreaElement, draftValue: string): void {
+  box.style.height = 'auto';
+  // An empty box returns to its `rows` height, not to one line's worth:
+  // `auto` on a textarea is the placeholder's two lines (desktop) or one
+  // (phone), `scrollHeight` is the content's, and with no content those are
+  // not the same number.
+  if (draftValue !== '') {
+    box.style.height = `${box.scrollHeight}px`;
+  }
+}
+
+/**
  * `React.memo`: same reason `SessionList.tsx:734` already carries it --
  * `draft` and its siblings live one level up in `Canvas`, so a keystroke in
  * ANOTHER pane must not re-render this one. `Canvas.tsx` carries the
@@ -7292,9 +7312,8 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
     onDraftChange(appendImagePath(draft, path));
   };
 
-  // Grow with the text instead of scrolling a one-line slot. Measured from the
-  // content each time: shrinking needs the reset to `auto` first, or the box
-  // only ever gets taller. The cap lives in the class list, not here.
+  // `resizeTextareaToContent` (above `DetailPanel` itself) is the resize
+  // logic; this effect is its draft-change trigger.
   //
   // THIS IS ALSO THE PHONE COMPOSER'S OWN GROWTH NOW, and it did not used to
   // be: phone wore `field-sizing: content` (`data-prompt-box`'s own comment
@@ -7316,15 +7335,33 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
   useEffect(() => {
     const box = inputRef.current;
     if (box === null) return;
-    box.style.height = 'auto';
-    // An empty box returns to its `rows` height, not to one line's worth:
-    // `auto` on a textarea is the placeholder's two lines (desktop) or one
-    // (phone), `scrollHeight` is the content's, and with no content those
-    // are not the same number.
-    if (draft !== '') {
-      box.style.height = `${box.scrollHeight}px`;
-    }
+    resizeTextareaToContent(box, draft);
   }, [draft]);
+  /**
+   * THE SAME RESIZE, RUN ON MOUNT TOO -- not only when `draft` changes.
+   *
+   * The effect above lives on `DetailPanel`, which never unmounts; the
+   * TEXTAREA it measures does -- `composerHidden` withdraws the whole
+   * composer block while a question is open, and "Chat about this" remounts
+   * it (`DetailPanel.questions.test.tsx`'s "stands down while a question is
+   * open"). A remount with an unchanged, already multi-line draft gives the
+   * effect above nothing to fire on (`draft` did not change), so the fresh
+   * node was left at its bare `rows` height instead of the height its own
+   * content asks for (`DetailPanel.composer-remount-height.test.tsx`). A ref
+   * CALLBACK fires exactly on mount/unmount regardless of what else changed,
+   * which is precisely the gap the dependency array above cannot cover.
+   *
+   * `draftRef` (declared above, by `toggleDictation`), never `draft` closed
+   * over directly: this callback's own identity has to stay stable (`[]`,
+   * below), or a fresh identity on every keystroke would make React re-invoke
+   * it (once with `null`, once with the node again) on every render, which is
+   * this same bug self-inflicted continuously rather than only on a real
+   * remount.
+   */
+  const setInputRef = useCallback((box: HTMLTextAreaElement | null) => {
+    inputRef.current = box;
+    if (box !== null) resizeTextareaToContent(box, draftRef.current);
+  }, []);
 
   /**
    * THE DOCUMENT IS THE SESSION NOW, not the turn.
@@ -9955,7 +9992,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
             row `data-prompt-box` now lays out; see that div's own comment. */}
             <div className={phone ? 'contents' : 'flex items-start gap-2'}>
               <textarea
-                ref={inputRef}
+                ref={setInputRef}
                 rows={phone ? 1 : 2}
                 value={draft}
                 readOnly={!composing}

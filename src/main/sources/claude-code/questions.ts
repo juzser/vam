@@ -24,6 +24,7 @@
  */
 
 import type { AgentQuestion, QuestionOption } from '../../../renderer/domain/model.js';
+import type { Located } from './transcript.js';
 
 /** A pane draws a list, not a menu; a record offering more is malformed. */
 const MAX_OPTIONS = 12;
@@ -143,6 +144,26 @@ function resultText(part: Line): string | null {
   return text === '' ? null : text;
 }
 
+/** `collectQuestions`'s whole finding: the questions themselves, plus where
+ * each occurrence's own ask lives in the file -- see that function's header.
+ */
+export type CollectedQuestions = {
+  readonly questions: readonly AgentQuestion[];
+  /**
+   * The absolute byte offset of the `tool_use` line that asked each
+   * occurrence, keyed by that occurrence's own `effectiveId` -- one entry per
+   * `AskUserQuestion` call, answered or not, never per individual question
+   * (several questions from one call share one offset). EXPORTED FOR
+   * `question-index.ts`'s `mergeOpenQuestion`: see that function's own header
+   * for why an occurrence's OFFSET, not how either path numbered it, is the
+   * one fact the two readings can never disagree on. An occurrence whose
+   * `start` this scan was not told (a caller with no located byte range) is
+   * left out here, same as it always was invisible to anything keyed by
+   * position.
+   */
+  readonly offsets: ReadonlyMap<string, number>;
+};
+
 /**
  * Every `AskUserQuestion` in these lines, oldest first, each carrying the
  * answer it has received or `null` while it is still open.
@@ -155,14 +176,23 @@ function resultText(part: Line): string | null {
  * to it, rather than every occurrence sharing that id, and `nextEffectiveId`
  * gives the 2nd and later occurrence its own id so it renders as its own
  * card.
+ *
+ * NOTHING HERE STOPS TWO OCCURRENCES OF ONE REUSED RAW ID FROM BOTH BEING
+ * OPEN AT ONCE: two asks under the same id with no result between them push
+ * two entries onto that id's stack, and if neither is ever answered, both
+ * come back with `answer: null` -- two genuinely distinct open questions,
+ * sharing a raw id purely because the transcript that wrote them is
+ * defective. `mergeOpenQuestion` used to assume this could not happen; see
+ * its own header for the S2 that assumption cost.
  */
-export function collectQuestions(lines: readonly Line[]): readonly AgentQuestion[] {
+export function collectQuestions(located: readonly Located[]): CollectedQuestions {
   const asked: { effectiveId: string; question: AgentQuestion }[] = [];
   const answers = new Map<string, string | null>();
   const occurrences = new Map<string, number>();
   const pending = new Map<string, string[]>();
+  const offsets = new Map<string, number>();
 
-  for (const line of lines) {
+  for (const { line, start } of located) {
     for (const part of contentParts(line)) {
       if (part['type'] === 'tool_use' && part['name'] === 'AskUserQuestion') {
         const toolUseId = str(part['id']);
@@ -170,6 +200,7 @@ export function collectQuestions(lines: readonly Line[]): readonly AgentQuestion
         const occurrence = (occurrences.get(toolUseId) ?? 0) + 1;
         occurrences.set(toolUseId, occurrence);
         const effectiveId = nextEffectiveId(toolUseId, occurrence);
+        if (start !== null) offsets.set(effectiveId, start);
         for (const question of questionsFromToolUse(part, effectiveId)) {
           asked.push({ effectiveId, question });
         }
@@ -189,7 +220,8 @@ export function collectQuestions(lines: readonly Line[]): readonly AgentQuestion
     }
   }
 
-  return asked.map(({ effectiveId, question }) =>
+  const questions = asked.map(({ effectiveId, question }) =>
     answers.has(effectiveId) ? { ...question, answer: answers.get(effectiveId) ?? '' } : question,
   );
+  return { questions, offsets };
 }
