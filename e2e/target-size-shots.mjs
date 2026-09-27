@@ -179,7 +179,17 @@ await page.waitForSelector('[data-settings-overlay] .vam-hit-24', { timeout: 300
 // painted anywhere the probe below can point at. Without this, every miss
 // resolves to the modal's own backdrop button, which sits behind the whole
 // dialog and answers for any pixel the dialog does not currently paint over.
-await page.locator('[data-settings-overlay] .vam-hit-24').first().scrollIntoViewIfNeeded();
+//
+// `{ block: 'center' }`, NOT `scrollIntoViewIfNeeded()` -- measured after the
+// row-layout fix shortened every row above this one, which moved the reset
+// button close enough to the viewport's OWN bottom edge that Playwright's
+// "scroll the minimum amount" heuristic left its 24px reach zone spilling
+// past y=800 into the backdrop again, this time only on its bottom edge. A
+// deliberate CENTER leaves real margin on every side regardless of how tall
+// the rows above happen to be.
+await page.locator('[data-settings-overlay] .vam-hit-24').first().evaluate((el) => {
+  el.scrollIntoView({ block: 'center' });
+});
 await page.waitForTimeout(120);
 const inSettings = await probe('[data-settings-overlay]');
 const settingsUndersized = inSettings.filter((row) => row.undersized);
