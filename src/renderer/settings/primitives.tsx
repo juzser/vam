@@ -138,9 +138,9 @@ export function SettingsCard({
 }
 
 /**
- * One setting: its name, what it is for underneath rather than beside, and
- * the control under both -- `Block`'s replacement, moved out of
- * `SettingsOverlay.tsx` so a card built anywhere can use it.
+ * One setting: its name, what it is for, and its control -- `Block`'s
+ * replacement, moved out of `SettingsOverlay.tsx` so a card built anywhere
+ * can use it.
  *
  * `role="group"`/`aria-labelledby` ASSOCIATE THE ROW WITH ITS LABEL formally,
  * on top of whatever accessible name the control inside already carries on
@@ -148,12 +148,26 @@ export function SettingsCard({
  * that manages its own name unchanged is still one control among several in
  * a row, and the group is what tells a screen reader which label a whole row
  * -- action button included -- answers to.
+ *
+ * TWO SHAPES, BECAUSE ORCA'S OWN ROWS ARE TWO SHAPES. Operator: "Orca's rows
+ * put the label and its muted description on the LEFT and the control on
+ * the RIGHT, on the same line" -- true of a switch, a stepper, a segmented
+ * choice, a select, a single button, or a swatch-plus-hex, none of which
+ * needs the row's own width to draw itself. It is NOT true of a control
+ * that is itself a grid or a list -- the Templates preset grid, a colour
+ * -swatch grid, a theme chip list -- where a right-hand column would either
+ * crush the label to nothing or force the grid to wrap somewhere the
+ * operator did not ask it to. `layout` names which shape this row is,
+ * explicitly, rather than guessing from what `children` happens to contain:
+ * a guess is a rule that breaks the day somebody hands this a control
+ * shaped differently than the ones it was tuned against.
  */
 export function SettingsRow({
   label,
   hint,
   action,
   name,
+  layout = 'inline',
   children,
 }: {
   readonly label: string;
@@ -162,9 +176,28 @@ export function SettingsRow({
   /** A hook for a guard that has to find THIS row's box -- `data-settings-block`.
    *  Optional, because most rows are found by the control they hold. */
   readonly name?: string;
+  /**
+   * `'inline'` (default): label+description left, control right, on the
+   * label's own line -- Orca's shape, and what most rows want. `'stacked'`:
+   * control under the label, full width -- for a control that IS a grid or
+   * a list rather than one compact widget.
+   */
+  readonly layout?: 'inline' | 'stacked';
   readonly children: React.ReactNode;
 }) {
   const labelId = useId();
+  const inline = layout === 'inline';
+  const heading = (
+    <div className="flex items-baseline gap-3">
+      <h4 id={labelId} className="font-medium text-body text-ink capitalize">
+        {label}
+      </h4>
+      {action === undefined ? null : <span className="ml-auto">{action}</span>}
+    </div>
+  );
+  const description = (
+    <p className="vam-sentence mt-1 max-w-[52ch] text-control text-ink-dim">{hint}</p>
+  );
   return (
     // `<fieldset>` is biome's own alternative, and it is the wrong one here:
     // its default `min-width: min-content` fights the grid/flex layouts a
@@ -175,18 +208,78 @@ export function SettingsRow({
     // biome-ignore lint/a11y/useSemanticElements: see above
     <div
       data-settings-block={name}
+      data-settings-row-layout={layout}
       role="group"
       aria-labelledby={labelId}
-      className="mt-6 border-line-loud border-t pt-6 first:mt-0 first:border-t-0 first:pt-0"
+      // `@container`: an inline row's own split below has to answer for
+      // THIS row's own available width, not the viewport's -- the narrow
+      // strip and the wide rail leave a different amount of it, and a row
+      // indented under a `SettingsSubgroup` has less again.
+      // `DetailPanel.tsx`'s own PR row already paid for the lesson
+      // `@container` teaches: the query cannot fire on the element that
+      // declares the container, so this class and the split beneath it
+      // (inside the `inline` branch) live one level apart.
+      className="@container mt-6 border-line-loud border-t pt-6 first:mt-0 first:border-t-0 first:pt-0"
     >
-      <div className="flex items-baseline gap-3">
-        <h4 id={labelId} className="font-medium text-body text-ink capitalize">
-          {label}
-        </h4>
-        {action === undefined ? null : <span className="ml-auto">{action}</span>}
-      </div>
-      <p className="vam-sentence mt-1 max-w-[52ch] text-control text-ink-dim">{hint}</p>
-      <div className="mt-3">{children}</div>
+      {inline ? (
+        <div
+          // MOBILE-FIRST STACKED, THEN A ROW ABOVE 440px OF THE ROW'S OWN
+          // WIDTH -- measured against the real build: the narrowest desktop
+          // dialog's own row width is ~413px (a 520px window, the narrow
+          // strip's own chrome taken out), the next width guards test is
+          // ~450px (560px window) -- so 440px is the one number between
+          // them, and it is what keeps "at 520px, inline rows fall back to
+          // stacked" true without also demoting the very next width tested.
+          //
+          // `items-start`, NOT `items-center` -- measured against the real
+          // paint before this was written: several rows carry a helper
+          // paragraph under their primary control (the send-key note, the
+          // cache-timer note), which makes the control column taller than
+          // the label column. Centring the two against EACH OTHER then
+          // floats the label down into the middle of that extra height,
+          // reading as disconnected from its own control rather than level
+          // with it. Top-aligned, the label's own first line sits level
+          // with the control's own first line in every row this file has,
+          // whether the control column is one line or four.
+          className="flex flex-col gap-3 @min-[440px]:flex-row @min-[440px]:items-start @min-[440px]:gap-4"
+        >
+          <div className="min-w-0 @min-[440px]:flex-1">
+            {heading}
+            {description}
+          </div>
+          {/* THE CONTROL NEVER WRAPS, AND NEVER CLAIMS MORE THAN IT NEEDS.
+              `flex-none` keeps a button row/switch/stepper at its own
+              natural width rather than being stretched or shrunk by the
+              row's own flex distribution; the label side is what gives.
+              A FEW OF THESE ROWS ALSO CARRY A HELPER PARAGRAPH under their
+              primary control (the send-key note, the cache-timer note) --
+              `max-w-[280px]` bounds THAT secondary text to a column
+              narrower than its own unconstrained `max-w-[52ch]`, which
+              would otherwise claim most of the row and crush the label
+              beside it.
+              `flex flex-col items-end`: MEASURED, not assumed, before this
+              was written -- without it, a control narrower than its own
+              note (every switch is; the note wraps to 2-3 lines at 280px)
+              sat at the LEFT edge of this column, flush with the note
+              below it rather than with the row's own right edge, which is
+              the one thing "on the right" was supposed to mean. Right
+              -aligning the column's own children fixes the control's
+              position without right-aligning the note's own TEXT (a flex
+              item's box moves; the prose inside it keeps reading
+              left-to-right). A control with no note (a stepper, most
+              switches) is unaffected: nothing else in the column to move
+              it away from. */}
+          <div className="@min-[440px]:flex @min-[440px]:max-w-[280px] @min-[440px]:flex-none @min-[440px]:flex-col @min-[440px]:items-end">
+            {children}
+          </div>
+        </div>
+      ) : (
+        <>
+          {heading}
+          {description}
+          <div className="mt-3">{children}</div>
+        </>
+      )}
     </div>
   );
 }

@@ -592,6 +592,7 @@ export function SettingsOverlay({
                 <SettingsRow
                   label={t('settings.interface.templates.label')}
                   hint={t('settings.interface.templates.hint', { theme })}
+                  layout="stacked"
                 >
                   <div className="flex flex-wrap gap-1.5">
                     {PALETTE_TEMPLATES.map((template) => {
@@ -669,6 +670,7 @@ export function SettingsOverlay({
                         />
                       )
                     }
+                    layout="stacked"
                   >
                     <div className="grid grid-cols-2 gap-x-6 gap-y-[10px] sm:grid-cols-3">
                       {PALETTE_TOKENS.map(({ token, label }) => {
@@ -1570,6 +1572,7 @@ function TerminalAdvancedRows({
             />
           ) : null
         }
+        layout="stacked"
       >
         {/* TWO COLUMNS, MEASURED. A cell is a 24px swatch, a 72px hex field, a
             16px reset slot and three 8px gaps around a label, and the widest
@@ -1708,6 +1711,7 @@ function TerminalThemeRow({
         on,
         default: fallback?.label ?? DEFAULT_TERMINAL_THEME[on],
       })}
+      layout="stacked"
     >
       <div data-terminal-theme-row={on} className="flex flex-wrap gap-1.5">
         {terminalThemesFor(on).map((theme) => (

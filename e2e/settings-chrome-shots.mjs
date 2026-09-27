@@ -1343,5 +1343,135 @@ console.log('\n=== the behaviour section’s switch');
   await page.close();
 }
 
+// ---------------------------------------------------------------- ITEM 7.
+// THE INLINE ROW SPLIT, AS PAINT.
+//
+// Operator: "Orca's rows put the label and its muted description on the
+// LEFT and the CONTROL on the RIGHT, on the same line." `primitives.tsx`'s
+// `SettingsRow` answers with a `layout` prop and an `@container` split --
+// this is the browser measurement that split was always going to need,
+// since a class name is a claim about markup and a `@min-[440px]:flex-row`
+// rule is a claim jsdom cannot see at all (it applies no stylesheet and
+// resolves no container query).
+//
+// THREE CLAIMS, NONE OF THEM HELD BY `data-settings-row-layout` ALONE (that
+// attribute is the CONTRACT `primitives.test.tsx` already holds; this is
+// whether the CSS keyed to it actually paints):
+//  1. WIDE, AN INLINE ROW'S LABEL AND CONTROL SHARE A LINE -- their boxes
+//     overlap vertically, and the control sits to the label's right with a
+//     real gap between them, not on top of it.
+//  2. NARROW (520px, the desktop floor), THE SAME ROW FALLS BACK TO STACKED
+//     -- the control's box is entirely BELOW the label's, not beside it,
+//     which is the one thing the container query is FOR.
+//  3. A `layout="stacked"` ROW (the Templates grid) never takes the inline
+//     split, wide or narrow -- its own control is always under its label,
+//     and it is drawn across the row's own full width rather than squeezed
+//     into a right-hand column that was never given to it.
+console.log("\n=== the inline row split (Orca's shape), as paint");
+{
+  /** The row wrapping a control, and whether it is a real box at all. */
+  async function rowBoxes(page, controlSelector) {
+    return page.evaluate((sel) => {
+      const control = document.querySelector(sel);
+      const row = control?.closest('[role="group"]') ?? null;
+      const label = row?.querySelector('h4') ?? null;
+      if (control === null || row === null || label === null) return null;
+      return {
+        layout: row.getAttribute('data-settings-row-layout'),
+        row: row.getBoundingClientRect().toJSON(),
+        label: label.getBoundingClientRect().toJSON(),
+        control: control.getBoundingClientRect().toJSON(),
+      };
+    }, controlSelector);
+  }
+
+  /** Two boxes share a line: their vertical spans overlap by a real amount,
+   *  not by a stray rounding pixel. */
+  const overlapsVertically = (a, b) => Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 8;
+
+  for (const width of [1100, 520]) {
+    const page = await openSettings(width, 900);
+    await page.locator('[data-settings-nav-item="behaviour"]').click();
+    await page.waitForTimeout(150);
+    const focusView = await rowBoxes(page, '[data-switch="focus-view"]');
+    if (focusView === null) {
+      throw new Error(`${width}px: the focus view row is missing a label, a control, or its own group`);
+    }
+    if (focusView.layout !== 'inline') {
+      throw new Error(`${width}px: the focus view row is not marked layout="inline": ${focusView.layout}`);
+    }
+    if (width === 1100) {
+      console.log(
+        `  ${width}px: label ${JSON.stringify(focusView.label)}, control ${JSON.stringify(focusView.control)}`,
+      );
+      if (!overlapsVertically(focusView.label, focusView.control)) {
+        throw new Error(
+          `${width}px: focus view's label and control do not share a line: ${JSON.stringify(focusView)}`,
+        );
+      }
+      if (focusView.control.left <= focusView.label.right) {
+        throw new Error(
+          `${width}px: focus view's control (left ${focusView.control.left}) does not sit clear to the right of its label (right ${focusView.label.right})`,
+        );
+      }
+      // RIGHT-ALIGNED, not merely to the right of the label -- Orca's own
+      // shape puts the control at the row's own right edge.
+      if (focusView.row.right - focusView.control.right > 4) {
+        throw new Error(
+          `${width}px: focus view's control sits ${(focusView.row.right - focusView.control.right).toFixed(1)}px short of the row's own right edge`,
+        );
+      }
+    } else {
+      // NARROW: the fallback. The control is entirely under the label now,
+      // not beside it -- the one property a container query either has or
+      // does not.
+      if (overlapsVertically(focusView.label, focusView.control)) {
+        throw new Error(
+          `${width}px: focus view's label and control still share a line at the narrow floor: ${JSON.stringify(focusView)}`,
+        );
+      }
+      if (focusView.control.top < focusView.label.bottom) {
+        throw new Error(
+          `${width}px: focus view's control (top ${focusView.control.top}) is not below its label (bottom ${focusView.label.bottom}) at the narrow floor`,
+        );
+      }
+    }
+    await page.close();
+  }
+
+  // AND A `layout="stacked"` ROW NEVER TAKES THE SPLIT, wide or narrow --
+  // Templates is the row this file's own case-ladder sweep already reads
+  // labels and controls off, so this reuses the same corpus rather than
+  // inventing a second one.
+  for (const width of [1100, 520]) {
+    const page = await openSettings(width, 900);
+    const templates = await rowBoxes(page, '[data-palette-template]');
+    if (templates === null) {
+      throw new Error(`${width}px: the templates row is missing a label, a control, or its own group`);
+    }
+    if (templates.layout !== 'stacked') {
+      throw new Error(`${width}px: the templates row is not marked layout="stacked": ${templates.layout}`);
+    }
+    if (overlapsVertically(templates.label, templates.control)) {
+      throw new Error(
+        `${width}px: the templates row's control shares a line with its label -- a stacked row took the inline split: ${JSON.stringify(templates)}`,
+      );
+    }
+    // WIDE, ACROSS THE ROW -- not squeezed into a column that was never
+    // built for it. The first template chip's own left edge should still
+    // sit at the row's own left edge (both flush), unlike an inline row's
+    // control, which sits at the row's right edge instead.
+    if (templates.control.left - templates.row.left > 4) {
+      throw new Error(
+        `${width}px: the templates grid starts ${(templates.control.left - templates.row.left).toFixed(1)}px in from the row's own left edge`,
+      );
+    }
+    await page.close();
+  }
+  console.log(
+    '  every inline row shares a line wide and stacks narrow; a stacked row never takes the split',
+  );
+}
+
 await browser.close();
 console.log('settings chrome: the narrow nav is named at every width, the Remote button paints, the case ladder holds, and the switch reads as one.');

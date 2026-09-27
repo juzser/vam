@@ -118,6 +118,34 @@ describe('SettingsRow', () => {
     const group = screen.getByRole('group', { name: 'out text' });
     expect(group.querySelector('input')).not.toBeNull();
   });
+
+  it('defaults to layout="inline" -- label and description left, control right, on one line', () => {
+    render(
+      <SettingsRow label="theme" hint="system follows the OS">
+        <input aria-label="theme choice" />
+      </SettingsRow>,
+    );
+    // A CLASS NAME IS A FACT ABOUT THE MARKUP, NOT ABOUT THE PAINT --
+    // `settings-chrome-shots.mjs`'s own row-geometry checks measure the
+    // real split in a browser; what this asserts is the CONTRACT a guard
+    // reads off `data-settings-row-layout` to know which measurement to
+    // make, the same "attribute states the fact, e2e proves it painted"
+    // split this codebase already draws elsewhere.
+    expect(
+      screen.getByRole('group', { name: 'theme' }).getAttribute('data-settings-row-layout'),
+    ).toBe('inline');
+  });
+
+  it('layout="stacked" keeps a wide control (a grid, a chip list) under the label, and says so', () => {
+    render(
+      <SettingsRow label="templates" hint="a whole palette in one press" layout="stacked">
+        <div data-testid="template-grid">grid of chips</div>
+      </SettingsRow>,
+    );
+    const group = screen.getByRole('group', { name: 'templates' });
+    expect(group.getAttribute('data-settings-row-layout')).toBe('stacked');
+    expect(group.querySelector('[data-testid="template-grid"]')).not.toBeNull();
+  });
 });
 
 describe('SettingsSubgroup', () => {
