@@ -782,6 +782,10 @@ test.describe('settings at 390px', () => {
   async function openSettings(page: Page): Promise<void> {
     await openDemo(page);
     await expect(page.locator('[data-phone-shell] button[aria-label="settings"]')).toHaveCount(0);
+    // Remote is one tap further in now, behind the toolbar's "more actions"
+    // overflow button (Orca one-row pass, follow-up to pull request 527) --
+    // opening it is what reveals the Remote item this then taps.
+    await page.locator('[data-phone-shell] button[aria-label="more actions"]').first().tap();
     await page.locator('[data-phone-shell] button[aria-label="remote access"]').first().tap();
     await expect(page.locator('[data-settings-overlay]')).toBeVisible();
   }
@@ -907,6 +911,9 @@ test.describe('the overlay sheets at 390px', () => {
   // Through `remote access`: the gear is not drawn at 390px. What this test is
   // about is the SHEET the overlay becomes, not which control opens it.
   const openSettings = async (page: Page): Promise<Locator> => {
+    // Remote is one tap further in now, behind the toolbar's "more actions"
+    // overflow button (Orca one-row pass, follow-up to pull request 527).
+    await page.locator('[data-phone-shell] button[aria-label="more actions"]').tap();
     await page.locator('[data-phone-shell] button[aria-label="remote access"]').tap();
     return page.locator('[data-overlay-host]');
   };

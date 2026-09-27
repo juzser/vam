@@ -2785,7 +2785,14 @@ html {
 [data-phone-shell] [data-remote-limits] summary,
 [data-phone-shell] [data-prompt-record],
 [data-phone-shell] [data-prompt-dictate],
-[data-phone-shell] [data-status-pill] {
+[data-phone-shell] [data-status-pill],
+/* The account icon, relocated into the phone's one toolbar row (Orca
+   one-row pass, follow-up to pull request 527, `SessionList.tsx`'s own
+   comment on `UsagePopover`). It used to inherit this floor for free by
+   living inside `[data-avatar-bar]` above; `UsagePopover` itself takes no
+   `phone` prop, so the floor has to follow it to its new address by name,
+   the same way every other bare-glyph control in this list does. */
+[data-phone-shell] [data-phone-toolbar] [data-usage-toggle] {
   min-height: 44px;
   min-width: 44px;
 }

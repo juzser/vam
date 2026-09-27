@@ -42,6 +42,7 @@ import {
   RotateCcw,
   Search,
   Settings,
+  SlidersHorizontal,
   Smartphone,
   Sun,
   Terminal,
@@ -1219,6 +1220,18 @@ const GROUP_BY_PILLS: readonly {
   { value: 'project', label: 'Project', disabled: false },
 ];
 
+/**
+ * The phone toolbar's own grouping control reads this rather than filtering
+ * `GROUP_BY_PILLS` for a match on every render -- `GroupBy` itself excludes
+ * `'pr'` (that pill is disabled and writes nothing, see `GROUP_BY_PILLS`'s own
+ * comment), so this is a `Record`, not a lookup that can miss.
+ */
+const GROUP_BY_LABEL: Readonly<Record<GroupBy, string>> = {
+  none: 'None',
+  status: 'Status',
+  project: 'Project',
+};
+
 /** In the drill-in's own order, top to bottom -- `created` first because it
  *  is the shipped default (`selectors.ts`'s `DEFAULT_VIEW_OPTIONS`), the same
  *  reason `needs-you` used to head this list before it was. */
@@ -1653,6 +1666,54 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     document.addEventListener('pointerdown', dismiss);
     return () => document.removeEventListener('pointerdown', dismiss);
   }, [filterMenuOpen, onFilterMenuToggle]);
+
+  /**
+   * The phone toolbar's overflow menu (Orca one-row pass): Remote and the
+   * theme toggle, tucked behind one "more" button rather than drawn bare in
+   * the row -- the operator's own suggestion for exactly this case
+   * ("possibly inside an overflow menu"), reached for once the row was
+   * measured overflowing at 390px with both drawn bare (`e2e/phone-
+   * overflow.pw.ts`'s own row-overflow tests are what this state exists to
+   * keep green). Local state, not a prop: unlike the filter popover this
+   * menu answers to nothing outside this component, and its own two items
+   * call props (`onRemote`, `onToggleTheme`) that already exist.
+   */
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const moreButtonRef = useRef<HTMLButtonElement>(null);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+  const moreMenuWasOpen = useRef(false);
+
+  /** Same contract as the filter popover's own focus effect, above. */
+  useEffect(() => {
+    if (moreMenuOpen) {
+      moreMenuRef.current?.querySelector('button')?.focus();
+    } else if (moreMenuWasOpen.current) {
+      moreButtonRef.current?.focus();
+    }
+    moreMenuWasOpen.current = moreMenuOpen;
+  }, [moreMenuOpen]);
+
+  /** Same contract as the filter popover's own dismiss effect, above. */
+  useEffect(() => {
+    if (!moreMenuOpen) {
+      return;
+    }
+    const dismiss = (event: PointerEvent) => {
+      const target = event.target as globalThis.Node | null;
+      if (target === null) {
+        return;
+      }
+      if (moreMenuRef.current?.contains(target) === true) {
+        return;
+      }
+      if (moreButtonRef.current?.contains(target) === true) {
+        return;
+      }
+      setMoreMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', dismiss);
+    return () => document.removeEventListener('pointerdown', dismiss);
+  }, [moreMenuOpen]);
 
   // Imperative focus in both cases, for the same reason: the keystroke that
   // opened the box is the request for it, so `autoFocus` would be claiming a
@@ -3043,8 +3104,15 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
               opens usage for every provider vam knows, reset times and all.
               `UsagePopover` is self-contained (its own open state, its own
               polling, its own dismissal wiring). See that component's own
-              header for the rest. */}
-          <UsagePopover />
+              header for the rest.
+
+              NOT HERE ON A PHONE any more (Orca one-row pass): this row is
+              now the phone's STATUS row, holding only the connectivity dot --
+              every icon that used to share it (this one, Remote, the theme
+              toggle) moved down into `data-projects-header`, which became the
+              phone's one TOOLBAR row below it. See that row's own comments
+              for where each landed. */}
+          {!phone && <UsagePopover />}
           {/* Pushes the icons to the right edge on every surface. On a
               phone, and only there, it is ALSO where the connectivity dot
               lives now: `min-w-0`/`truncate` so the rare non-healthy arms
@@ -3086,73 +3154,92 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
               44px floor for the phone shell, the same rule Settings and the
               theme toggle already ride on, and none of the three paints a
               border that pull request 222's shrink-to-30 rule would need to
-              undo — an icon with no border needs no opt-out either way. */}
-          <ShortcutTip label="Remote access" action={REMOTE_ACTION}>
-            <button
-              type="button"
-              onClick={onRemote}
-              aria-label="remote access"
-              className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-[7px] text-ink-faint hover:text-ink"
+              undo — an icon with no border needs no opt-out either way.
+
+              DESKTOP ONLY, now: on a phone this control moved to the one
+              toolbar row (`data-projects-header`), where it opts into
+              `vam-tap` itself instead of inheriting this bar's 44px rule. */}
+          {!phone && (
+            <ShortcutTip label="Remote access" action={REMOTE_ACTION}>
+              <button
+                type="button"
+                onClick={onRemote}
+                aria-label="remote access"
+                className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-[7px] text-ink-faint hover:text-ink"
+              >
+                <Smartphone size={14} strokeWidth={1.5} />
+              </button>
+            </ShortcutTip>
+          )}
+          {/* No chord reaches the theme toggle, so the tip is its label.
+              DESKTOP ONLY -- see the Remote comment just above; the phone's
+              own copy lives in the toolbar row now. */}
+          {!phone && (
+            <ShortcutTip
+              label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
             >
-              <Smartphone size={14} strokeWidth={1.5} />
-            </button>
-          </ShortcutTip>
-          {/* No chord reaches the theme toggle, so the tip is its label. */}
-          <ShortcutTip label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}>
-            <button
-              type="button"
-              onClick={onToggleTheme}
-              aria-label={theme === 'dark' ? 'switch to light theme' : 'switch to dark theme'}
-              className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-[7px] text-ink-faint hover:text-ink"
-            >
-              <Sun size={14} strokeWidth={1.5} />
-            </button>
-          </ShortcutTip>
+              <button
+                type="button"
+                onClick={onToggleTheme}
+                aria-label={theme === 'dark' ? 'switch to light theme' : 'switch to dark theme'}
+                className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-[7px] text-ink-faint hover:text-ink"
+              >
+                <Sun size={14} strokeWidth={1.5} />
+              </button>
+            </ShortcutTip>
+          )}
         </div>
 
-        <div className="flex items-center gap-2">
-          <div className="min-w-0 flex-1">
-            {filtering ? (
-              <div className="flex h-[30px] items-center gap-2 rounded-[8px] border border-line bg-card px-2.5">
-                <span className="font-mono text-meta text-ink-faint">/</span>
-                <input
-                  ref={filterRef}
-                  value={filter}
-                  onChange={(event) => onFilterChange(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      event.preventDefault();
-                      onFilterCommit();
-                    } else if (event.key === 'Escape') {
-                      event.preventDefault();
-                      onFilterCancel();
-                    }
-                  }}
-                  placeholder="Search sessions"
-                  className="min-w-0 flex-1 bg-transparent font-mono text-control text-ink outline-none placeholder:text-ink-faint"
-                  aria-label="filter sessions"
-                />
-                <span className="font-mono text-meta text-ink-faint">{entries.length}</span>
-              </div>
-            ) : (
-              <ShortcutTip label="Search sessions" action={SEARCH_ACTION}>
-                <button
-                  type="button"
-                  onClick={onOpenFilter}
-                  aria-label="search sessions"
-                  className="vam-tap flex h-[30px] w-full cursor-pointer items-center gap-2 rounded-[8px] border border-line bg-card px-2.5 text-ink-dim hover:border-line-strong"
-                >
-                  <Search size={14} strokeWidth={1.6} />
-                  <span className="flex-1 text-left text-control">Search sessions</span>
-                  <InlineChord
-                    action={SEARCH_ACTION}
-                    className="rounded-[4px] border border-line-strong px-1 py-px font-mono text-meta"
+        {/* DESKTOP ONLY. A phone no longer carries a full-width search box of
+            its own row -- it is an icon in the toolbar row that expands IN
+            PLACE over that row instead (`data-projects-header`, "Orca's one-
+            row pass" below), which is what collapsed this header from three
+            rows to (at most) two: this status bar, and the toolbar. */}
+        {!phone && (
+          <div className="flex items-center gap-2">
+            <div className="min-w-0 flex-1">
+              {filtering ? (
+                <div className="flex h-[30px] items-center gap-2 rounded-[8px] border border-line bg-card px-2.5">
+                  <span className="font-mono text-meta text-ink-faint">/</span>
+                  <input
+                    ref={filterRef}
+                    value={filter}
+                    onChange={(event) => onFilterChange(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        onFilterCommit();
+                      } else if (event.key === 'Escape') {
+                        event.preventDefault();
+                        onFilterCancel();
+                      }
+                    }}
+                    placeholder="Search sessions"
+                    className="min-w-0 flex-1 bg-transparent font-mono text-control text-ink outline-none placeholder:text-ink-faint"
+                    aria-label="filter sessions"
                   />
-                </button>
-              </ShortcutTip>
-            )}
+                  <span className="font-mono text-meta text-ink-faint">{entries.length}</span>
+                </div>
+              ) : (
+                <ShortcutTip label="Search sessions" action={SEARCH_ACTION}>
+                  <button
+                    type="button"
+                    onClick={onOpenFilter}
+                    aria-label="search sessions"
+                    className="vam-tap flex h-[30px] w-full cursor-pointer items-center gap-2 rounded-[8px] border border-line bg-card px-2.5 text-ink-dim hover:border-line-strong"
+                  >
+                    <Search size={14} strokeWidth={1.6} />
+                    <span className="flex-1 text-left text-control">Search sessions</span>
+                    <InlineChord
+                      action={SEARCH_ACTION}
+                      className="rounded-[4px] border border-line-strong px-1 py-px font-mono text-meta"
+                    />
+                  </button>
+                </ShortcutTip>
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </header>
 
       {/* The seam between the two blocks, at the operator's request: search
@@ -3161,15 +3248,76 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
           box -- moved, not copied: two controls answering the same question
           in one column is how a sidebar stops being readable. It belongs to
           the project list rather than to search, because what it narrows is
-          the list below it. */}
+          the list below it.
+
+          ORCA'S ONE-ROW PASS (follow-up to pull request 527). On a phone this
+          is now the SHELL'S ONE TOOLBAR ROW, not merely the projects row: the
+          avatar bar above lost every icon but the connectivity dot (moved
+          into the status row instead of a bar of its own -- see that div's
+          own comments), the full-width search box is gone from the header
+          entirely, and both landed here, alongside the controls that already
+          lived in this row. Nothing that existed is unreachable -- see each
+          control's own comment below for where it landed. `data-phone-
+          toolbar` (phone only) is a stable e2e hook, not a style selector: no
+          rule keys off it, because unlike `[data-key-strip]` (`DetailPanel.
+          tsx`, always wider than its row) this one is not guaranteed to
+          overflow -- a fade tuned for "always more to the right" would paint
+          a false promise the day this row's own content fits. `overflow-x-
+          auto` and `vam-no-scrollbar` are the same "the row scrolls, the
+          page does not" shape that strip shipped for exactly this reason
+          (`e2e/phone-overflow.pw.ts`'s own header: "the quick buttons row
+          above the prompt input can't be scrolled horizontally"), minus the
+          fade. `overscroll-x-contain` for the same reason that strip carries
+          it: a drag that reaches either end of this row must not bounce the
+          page beneath it. */}
       <div
         data-projects-header
-        className="relative flex items-center gap-1.5 border-line border-b px-3 py-2"
+        {...(phone ? { 'data-phone-toolbar': '' } : {})}
+        className={[
+          'relative flex items-center border-line border-b px-3 py-2',
+          // `gap-1` on a phone, not the desktop's `gap-1.5`: eight controls
+          // measured 410px of content in a 389px box at 390px with the wider
+          // gap -- 2px off each of seven gaps is 14px back, part of the
+          // margin `e2e/phone-overflow.pw.ts` holds against this row's own
+          // scrollWidth/clientWidth budget.
+          phone ? 'gap-1' : 'gap-1.5',
+          // NOT WHILE THE POPOVER OR SEARCH OVERLAY IS OPEN. `overflow-x:
+          // auto` with `overflow-y` left at its default computes `overflow-
+          // y: auto` too -- CSS's own "the pair travels together" rule, the
+          // same one `styles.css`'s own `[data-key-strip]` comment already
+          // names for a different row. That is invisible on this row's
+          // RESTING state (nothing tall enough overflows Y), but the filter
+          // popover is an ABSOLUTE child of this same row, 421px tall against
+          // a 61px box -- and once Y-overflow is `auto`, this row becomes the
+          // popover's own scroll container, and its `getBoundingClientRect()`
+          // read -13 instead of the anchored 79 a fresh `open` should read
+          // (`e2e/workspace-options-shots.mjs`'s own phone check caught it:
+          // "the popover fits the 390px phone viewport", failing at y:-13).
+          // `overflow-y: hidden` would dodge the coercion but clip the
+          // popover to this row's own 61px box instead -- worse. Simplest is
+          // narrowest: the row only NEEDS to scroll in its resting state:
+          // once either overlay is up, everything competing for the row's
+          // own horizontal space is already covered or moot, so `overflow-x`
+          // reverts to `visible` (no coercion, nothing to clip) for exactly
+          // as long as that is true.
+          phone && !filterMenuOpen && !filtering
+            ? 'overflow-x-auto overscroll-x-contain vam-no-scrollbar'
+            : '',
+        ].join(' ')}
       >
-        <span className="font-mono text-meta text-ink-dim uppercase tracking-[0.12em]">
-          Projects
-        </span>
-        <span className="flex-1" />
+        {/* DESKTOP ONLY. The heading and the spacer that used to push every
+            control to the row's right edge -- both gone on a phone, where
+            the row now holds too much to spare either: Orca's own toolbar
+            names nothing, it only acts, and the controls read left to
+            right instead of hugging the far edge. */}
+        {!phone && (
+          <>
+            <span className="font-mono text-meta text-ink-dim uppercase tracking-[0.12em]">
+              Projects
+            </span>
+            <span className="flex-1" />
+          </>
+        )}
         {/* The layer above: a group of the projects vam already knows, named
             "project" because that is the operator's word for it (see the
             vocabulary table in `domain/model.ts`). LEFT of the directory
@@ -3252,7 +3400,16 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
             aria-haspopup="dialog"
             aria-expanded={filterMenuOpen}
             aria-label="filter sessions"
-            onClick={() => onFilterMenuToggle(!filterMenuOpen)}
+            onClick={() => {
+              // Phone only: the two controls now share one row, and the
+              // search overlay (below) covers this very button while it is
+              // open -- opening the popover underneath it left both
+              // visible at once, one drawn over the other. Closing search
+              // first is a no-op everywhere else, since `filtering` is only
+              // ever true here after the phone's own search icon set it.
+              if (phone && filtering) onFilterCancel();
+              onFilterMenuToggle(!filterMenuOpen);
+            }}
             className={[
               'vam-tap flex h-[26px] w-[26px] flex-none cursor-pointer items-center justify-center',
               filterMenuOpen || narrowing ? 'text-ink' : 'text-ink-faint',
@@ -3305,6 +3462,45 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
             </span>
           </button>
         </ShortcutTip>
+
+        {/* THE GROUPING CONTROL, phone only -- Orca's own second element in
+            this row, "sliders or a layers icon with a short label,
+            truncated". It reuses the identical popover the funnel opens
+            (`onFilterMenuToggle`) rather than building a second surface for
+            "Group by", which already lives inside that popover
+            (`viewOptions.groupBy`, the segmented control below) -- two doors
+            into one room, not two rooms. `data-tap-pill` (see
+            `DetailPanel.tsx`'s own key-strip captions for the identical
+            opt-out) because this skin holds a WORD, not one glyph: the
+            shared `[data-tap-skin]` rule clamps to a 30px square, which a
+            label like "Project" does not fit. */}
+        {phone && (
+          <ShortcutTip label={`Group by ${GROUP_BY_LABEL[viewOptions.groupBy]}`}>
+            <button
+              type="button"
+              data-group-toggle
+              aria-haspopup="dialog"
+              aria-expanded={filterMenuOpen}
+              aria-label={`group by ${GROUP_BY_LABEL[viewOptions.groupBy]}`}
+              onClick={() => {
+                if (filtering) onFilterCancel();
+                onFilterMenuToggle(!filterMenuOpen);
+              }}
+              className="vam-tap flex flex-none cursor-pointer items-center"
+            >
+              <span
+                data-tap-skin
+                data-tap-pill
+                className="flex h-[30px] shrink-0 items-center gap-1 whitespace-nowrap rounded-[7px] border border-line bg-card px-1.5 text-ink-faint hover:border-line-strong"
+              >
+                <SlidersHorizontal size={13} strokeWidth={1.6} aria-hidden="true" />
+                <span className="max-w-[64px] truncate font-mono text-control">
+                  {GROUP_BY_LABEL[viewOptions.groupBy]}
+                </span>
+              </span>
+            </button>
+          </ShortcutTip>
+        )}
 
         {filterMenuOpen && (
           <div
@@ -3789,6 +3985,173 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
             )}
           </div>
         )}
+
+        {/* THE REST OF ORCA'S ROW, phone only: the icons that used to live in
+            the avatar bar above (account, Remote, the theme toggle), plus
+            search, last -- Orca's own order ("icon buttons: account,
+            list/view, and search"). None of the three is a new control; each
+            is the identical button the avatar bar drew before this pass,
+            only relocated. Remote and the theme toggle opt into `vam-tap`
+            directly (a plain glyph, no `[data-tap-skin]` needed) now that
+            they no longer sit inside `[data-avatar-bar]`, whose own CSS rule
+            gave them the same 44px floor for free.
+
+            `UsagePopover` TAKES NO `phone` PROP (its own header states why:
+            its 24px button used to inherit the floor the same free way,
+            living inside `[data-avatar-bar]`). Wrapping it in a `vam-tap`
+            span here would size THAT span to 44 and leave the real `<button
+            data-usage-toggle>` inside it unsized -- `test/phone/touch-
+            targets.test.tsx` reads `getComputedStyle` off the actual
+            control, not a decorative ancestor, and caught exactly that.
+            `styles.css` enumerates `[data-usage-toggle]` under this row
+            instead, the same "opt in by name, not by a blanket selector"
+            rule every other enumeration in that file already follows. */}
+        {phone && <UsagePopover />}
+        {/* REMOTE AND THE THEME TOGGLE, BEHIND ONE "MORE" BUTTON. Drawn bare
+            (each its own `vam-tap` icon, same as every other control in this
+            row) this row measured 460px of content in a 389px box at 390px --
+            71px unreachable without a scroll, on the two controls the
+            operator asked for last and named as candidates for exactly this
+            move ("possibly inside an overflow menu"). Tucking both behind
+            one 44px button gives the row back 44px net (two icons for one)
+            and, more to the point, moves them out of the row a finger has to
+            scroll to reach: `e2e/phone-overflow.pw.ts` holds the row's own
+            scrollWidth/clientWidth budget at 360/390/430px. Neither control
+            is gone -- both are one more tap away, same handlers
+            (`onRemote`, `onToggleTheme`), same labels. */}
+        {phone && (
+          <span className="relative flex-none">
+            <ShortcutTip label="More">
+              <button
+                ref={moreButtonRef}
+                type="button"
+                data-more-toggle
+                aria-haspopup="menu"
+                aria-expanded={moreMenuOpen}
+                aria-label="more actions"
+                onClick={() => setMoreMenuOpen((open) => !open)}
+                className="vam-tap flex cursor-pointer items-center justify-center text-ink-faint"
+              >
+                <MoreHorizontal size={16} strokeWidth={1.6} />
+              </button>
+            </ShortcutTip>
+            {moreMenuOpen && (
+              <div
+                ref={moreMenuRef}
+                data-more-menu
+                role="menu"
+                aria-label="more actions"
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    event.preventDefault();
+                    setMoreMenuOpen(false);
+                  }
+                }}
+                className="absolute top-[46px] right-0 z-20 flex w-[176px] flex-col rounded-[9px] border border-line-strong bg-card p-1 shadow-lg"
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMoreMenuOpen(false);
+                    onRemote();
+                  }}
+                  aria-label="remote access"
+                  className="vam-tap flex cursor-pointer items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                >
+                  <Smartphone size={14} strokeWidth={1.5} aria-hidden="true" />
+                  Remote access
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMoreMenuOpen(false);
+                    onToggleTheme();
+                  }}
+                  aria-label={theme === 'dark' ? 'switch to light theme' : 'switch to dark theme'}
+                  className="vam-tap flex cursor-pointer items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                >
+                  <Sun size={14} strokeWidth={1.5} aria-hidden="true" />
+                  {theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+                </button>
+              </div>
+            )}
+          </span>
+        )}
+        {/* SEARCH, LAST, phone only. Collapsed it is one icon; expanded
+            (`filtering`, the same state and the same `filterRef`/handlers the
+            desktop's full-width box used, see the header above) it is an
+            `absolute inset-0` overlay that covers this ENTIRE row -- the row
+            already carries `relative` for the filter popover's own anchor, so
+            this needs no positioning context of its own. Covering the row
+            rather than growing it sidesteps the horizontal scroll this row
+            otherwise has: nothing to scroll past while a search is live, and
+            nothing else in the row competes with it for space either. Esc
+            (the input's own `onKeyDown`, unchanged) and the trailing `X`
+            button both call `onFilterCancel`, which clears the query as well
+            as closing -- "a clear button collapses it" and "Esc collapses
+            it" are the same one handler, not two. */}
+        {phone &&
+          (filtering ? (
+            <div className="absolute inset-0 z-10 flex items-center gap-2 bg-sidebar px-3 py-2">
+              <Search
+                size={14}
+                strokeWidth={1.6}
+                aria-hidden="true"
+                className="flex-none text-ink-dim"
+              />
+              <input
+                ref={filterRef}
+                value={filter}
+                onChange={(event) => onFilterChange(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    onFilterCommit();
+                  } else if (event.key === 'Escape') {
+                    event.preventDefault();
+                    onFilterCancel();
+                  }
+                }}
+                placeholder="Search sessions"
+                className="min-w-0 flex-1 bg-transparent font-mono text-control text-ink outline-none placeholder:text-ink-faint"
+                aria-label="filter sessions"
+              />
+              <span className="flex-none font-mono text-meta text-ink-faint">{entries.length}</span>
+              <button
+                type="button"
+                onClick={onFilterCancel}
+                aria-label="cancel search"
+                className="vam-tap flex flex-none cursor-pointer items-center justify-center text-ink-faint"
+              >
+                <X size={14} strokeWidth={1.6} />
+              </button>
+            </div>
+          ) : (
+            <ShortcutTip label="Search sessions" action={SEARCH_ACTION}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (filterMenuOpen) onFilterMenuToggle(false);
+                  onOpenFilter();
+                }}
+                aria-label="search sessions"
+                className="vam-tap flex flex-none cursor-pointer items-center justify-center text-ink-dim"
+              >
+                <Search size={14} strokeWidth={1.6} />
+                {/* Suppressed, not deleted -- same as the desktop's own copy
+                    of this hint (`[data-inline-chord]`, `styles.css`): a
+                    folio keyboard at 390px still fires the chord, and the key
+                    sheet still documents it, even though nothing paints it
+                    beside a bare icon. */}
+                <InlineChord
+                  action={SEARCH_ACTION}
+                  className="rounded-[4px] border border-line-strong px-1 py-px font-mono text-meta"
+                />
+              </button>
+            </ShortcutTip>
+          ))}
       </div>
 
       {/* WITHDRAWN WHILE GETTING-STARTED OWNS THE SCREEN -- see

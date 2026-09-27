@@ -234,6 +234,27 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * dependency patch bump" -- not the three features' own separate margins
  * stacked on top of each other. `ENTRY_GZIP_BUDGET_BYTES` stays at 212,000:
  * unaffected by this merge, still comfortably clear of the combined figure.
+ *
+ * THE PHONE TOOLBAR PASS (Orca one-row collapse, follow-up to pull request
+ * 527): one new icon import (`SlidersHorizontal`) and a grouping control, an
+ * overflow "more" menu for Remote/the theme toggle (the row measured
+ * overflowing at 390px with both drawn bare), and a small viewport-safety fix
+ * to `UsagePopover`'s own panel position -- its trigger no longer always sits
+ * at the sidebar's left corner once relocated into this row, which the
+ * account popover's `left: 0` assumed unconditionally. All eager either way,
+ * since the sidebar always was. Measured with a baseline worktree build at
+ * pull request 527's own merge commit (3eb46bbb, before this pass) and this
+ * branch's tip, same `electron-vite build --mode production` both times:
+ *
+ *     entry, main (3eb46bbb, before this pass)   699,217 B
+ *     entry, this branch (after this pass)       704,165 B  (+4,948 B, +0.71%)
+ *
+ * `ENTRY_BUDGET_BYTES` moves 699,500 -> 706,000: the real figure (704,165 B)
+ * plus ~1.8 KB (~0.26%) of slack -- less headroom than the ~0.5% convention
+ * above, since 706,000 was set once, from the pass's own first (smaller)
+ * measurement, and held rather than bumped a second time for the "more" menu
+ * and the popover fix added afterward. `ENTRY_GZIP_BUDGET_BYTES` stays at
+ * 212,000: untouched by this pass.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -244,7 +265,7 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 // depends on is even present, decided BEFORE anything tries to build.
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
-const ENTRY_BUDGET_BYTES = 699_500;
+const ENTRY_BUDGET_BYTES = 706_000;
 const ENTRY_GZIP_BUDGET_BYTES = 212_000;
 
 // The one string this repo's markdown stack ships that nothing else in the

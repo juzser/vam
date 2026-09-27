@@ -40,7 +40,13 @@
  */
 
 import { CircleUser } from 'lucide-react';
-import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from 'react';
+import {
+  type KeyboardEvent as ReactKeyboardEvent,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import type { CodexUsageSnapshot, CodexWindowDisplay } from '../../shared/codex-usage.js';
 import { clockTime, describeCodexUsage } from '../../shared/codex-usage.js';
 import { PROVIDERS } from '../../shared/providers.js';
@@ -275,19 +281,74 @@ function CodexSection({ snapshot }: { readonly snapshot: CodexUsageSnapshot }) {
 }
 
 /**
- * NO `phone` PROP. The panel's own width is clamped in CSS --
- * `w-[min(320px,calc(100vw-24px))]` -- so it fits a 390px screen the same way
- * it fits a desktop one, with no branch here; and the 44px touch floor is
- * already the avatar bar's own rule (`[data-avatar-bar] button` in
- * `styles.css`), inherited by the toggle just by living inside it. Both are
- * the responsive pattern the task brief asked this popover to match at
- * 390px, and neither needed a second code path.
+ * 12px, matching the width cap's own gutter (`calc(100vw-24px)` is 12px each
+ * side) -- the panel never sits flush against a screen edge.
+ */
+const USAGE_PANEL_GUTTER = 12;
+
+/**
+ * Where the panel's `left` should sit, in pixels relative to its own
+ * positioning context (the toggle's wrapping `<div>`, which is exactly as
+ * wide as the toggle itself) -- 0 (directly under the toggle, `left-0`'s own
+ * value) whenever that already fits, and pulled left just far enough to keep
+ * the panel's right edge inside the gutter otherwise. See `UsagePopover`'s
+ * own header for why this exists at all.
+ */
+export function usagePanelLeftOffset(
+  buttonLeft: number,
+  viewportWidth: number,
+  panelWidth: number,
+): number {
+  const upperBound = viewportWidth - USAGE_PANEL_GUTTER - panelWidth - buttonLeft;
+  const lowerBound = USAGE_PANEL_GUTTER - buttonLeft;
+  return Math.max(lowerBound, Math.min(0, upperBound));
+}
+
+/**
+ * NO `phone` PROP -- STILL. The panel's own WIDTH stays clamped in CSS
+ * (`w-[min(320px,calc(100vw-24px))]`), and the 44px touch floor is opted into
+ * by name now (`[data-usage-toggle]` under `data-phone-toolbar`,
+ * `styles.css`) rather than inherited from `[data-avatar-bar]`, but neither
+ * of those needed a branch here either.
+ *
+ * WHAT DOES, AND IS NOT PHONE-SPECIFIC: the panel's own LEFT edge. This
+ * toggle used to open only from the avatar bar's own left corner (`left-0`
+ * fit every time because the toggle was always the first thing in it). The
+ * Orca one-row pass relocated it into the middle of the phone's toolbar row
+ * (`SessionList.tsx`) -- and `left-0` there put the panel's right edge 172px
+ * past a 390px viewport (`e2e/usage-popover-shots.mjs`'s own phone check
+ * caught it: box `x:242, width:320` in a 390px window). The fix is not a
+ * phone branch: ANY trigger far enough right on ANY viewport hits the same
+ * wall, so `usagePanelLeftOffset` measures the toggle's own position and
+ * pulls the panel back just far enough to keep it on screen, on both shells.
  */
 export function UsagePopover() {
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const wasOpen = useRef(false);
+  const [leftOffset, setLeftOffset] = useState(0);
+
+  // Measured, not merely computed once: a resize (a rotated phone, a
+  // narrowed desktop window) can move the toggle without closing the panel
+  // first. `useLayoutEffect`, not `useEffect`, so the first measurement lands
+  // before the browser paints the still-unadjusted `left: 0` -- an `open`
+  // that starts off-screen for one frame is the exact defect this fixes.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const measure = () => {
+      const button = buttonRef.current;
+      if (button === null) return;
+      const viewportWidth = window.innerWidth;
+      const panelWidth = Math.min(320, viewportWidth - USAGE_PANEL_GUTTER * 2);
+      setLeftOffset(
+        usagePanelLeftOffset(button.getBoundingClientRect().left, viewportWidth, panelWidth),
+      );
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [open]);
 
   const claude = useLiveSnapshot(open, UNKNOWN_CLAUDE, window.api?.usage?.get);
   const codex = useLiveSnapshot(open, UNKNOWN_CODEX, window.api?.usage?.getCodex);
@@ -352,7 +413,8 @@ export function UsagePopover() {
           // focus effect below hand the panel the keyboard on open.
           tabIndex={-1}
           onKeyDown={onEscape}
-          className="absolute top-[32px] left-0 z-20 flex max-h-[min(480px,calc(100vh-96px))] w-[min(320px,calc(100vw-24px))] flex-col gap-3 overflow-y-auto rounded-[9px] border border-line-strong bg-card p-3 shadow-lg"
+          style={{ left: leftOffset }}
+          className="absolute top-[32px] z-20 flex max-h-[min(480px,calc(100vh-96px))] w-[min(320px,calc(100vw-24px))] flex-col gap-3 overflow-y-auto rounded-[9px] border border-line-strong bg-card p-3 shadow-lg"
         >
           {hasBridge ? (
             PROVIDERS.map((provider) =>

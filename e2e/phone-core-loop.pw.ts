@@ -872,6 +872,9 @@ test.describe('what the session screen no longer spends room on', () => {
     ).toHaveCount(0);
 
     await page.locator('[data-phone-back]').tap();
+    // Remote is one tap further in now, behind the toolbar's "more actions"
+    // overflow button (Orca one-row pass, follow-up to pull request 527).
+    await page.locator('[data-phone-shell] button[aria-label="more actions"]').first().tap();
     await page.locator('[data-phone-shell] button[aria-label="remote access"]').first().tap();
     await expect(page.locator('[data-settings-overlay]')).toBeVisible();
     const limits = page.locator('[data-settings-overlay] [data-remote-limits]');
