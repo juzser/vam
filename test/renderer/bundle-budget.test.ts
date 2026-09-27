@@ -321,6 +321,35 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * headroom, so this merge does not need to move it -- the Stats & Usage bump
  * above already covers it. `ENTRY_GZIP_BUDGET_BYTES` stays at 212,000: the
  * merged gzip figure (211,154 B) leaves 846 B of headroom under it.
+ *
+ * SETTINGS STEP 2B (Window & Sidebar: sidebar appearance, status-bar usage
+ * toggles; Agents: keep computer awake, auto tab titles, agent permissions
+ * Manual/Yolo, default agent) adds real eager logic, not only catalogue
+ * strings: `Canvas.tsx` gains the usage-mode/keep-awake wiring and
+ * `sessionArgv`/`resolveDefaultAgentSelection` calls, `prefs.ts` gains eight
+ * fields and `applyAutoTabTitles`, six new `prefs/*.ts` reader modules and
+ * `shared/providers.ts` / `shared/usage.ts` / `shared/codex-usage.ts` all
+ * grow -- all of it reachable from the eager entry the same way the
+ * catalogue strings are, none of it behind `SettingsOverlay`'s lazy
+ * boundary (only the JSX rows themselves are). `src/main/power/*` is
+ * main-process only and never reaches the renderer bundle at all. Measured
+ * with a merge-base worktree build (`git worktree add --detach` at this
+ * branch's own merge-base with `origin/main`, d2c54b66 -- HEAD and the
+ * merge-base are the same commit, so this is a clean before/after with no
+ * unrelated drift to account for) and this branch's own working tree, same
+ * `electron-vite build --mode production` both times:
+ *
+ *     entry, merge-base (d2c54b66, no step 2B)   700,444 B  (211,154 B gzip)
+ *     entry, this branch (with step 2B)          707,013 B  (212,880 B gzip)
+ *
+ * +6,569 B eager / +1,726 B gzip -- larger than a strings-only bump because
+ * this PR is several small features' worth of logic, not one row.
+ * `ENTRY_BUDGET_BYTES` moves 702,000 -> 709,500: the real measured figure
+ * (707,013 B) plus ~2.5 KB (~0.35%) of slack, the same small-headroom
+ * convention every bump above uses for measurement noise and an ordinary
+ * dependency patch bump -- not a fresh re-baseline off a number this PR did
+ * not earn. `ENTRY_GZIP_BUDGET_BYTES` moves 212,000 -> 213,500: the measured
+ * figure (212,880 B) plus ~0.6 KB (~0.3%) of the same slack.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -331,8 +360,8 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 // depends on is even present, decided BEFORE anything tries to build.
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
-const ENTRY_BUDGET_BYTES = 702_000;
-const ENTRY_GZIP_BUDGET_BYTES = 212_000;
+const ENTRY_BUDGET_BYTES = 709_500;
+const ENTRY_GZIP_BUDGET_BYTES = 213_500;
 
 // The one string this repo's markdown stack ships that nothing else in the
 // dependency graph or vam's own source does: `gfmTable`, the extension name

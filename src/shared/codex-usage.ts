@@ -30,6 +30,8 @@
  *     answers that window `{ state: 'reset' }` instead.
  */
 
+import type { UsageDisplayMode } from './usage.js';
+
 export type CodexRawWindow =
   | {
       readonly kind: 'known';
@@ -193,6 +195,43 @@ export type CodexUsageDisplay = {
  * The one function the popover calls for Codex's section: both windows,
  * labelled and dated, or a reason when there is nothing to show at all.
  */
+/** Mirrors `shared/usage.ts`'s `UsageDisplay` shape (`text`/`reason`/
+ *  `highUsage`), over Codex's own snapshot -- the status bar's Codex cell
+ *  reads this, never `describeCodexUsage`'s per-window shape directly. */
+export type CodexStatusUsageDisplay = {
+  readonly text: string;
+  readonly reason: string | null;
+  readonly highUsage: boolean;
+};
+
+function formatCodexWindow(window: CodexWindowDisplay, mode: UsageDisplayMode): string {
+  if (window.state !== 'known') return '—';
+  const percent = mode === 'remaining' ? 100 - window.percent : window.percent;
+  const word = mode === 'remaining' ? 'left' : 'used';
+  return `${Math.round(percent)}% ${word} · ${window.countdown}`;
+}
+
+/**
+ * The one function the status bar's Codex cell calls -- the settings row's
+ * `statusBarShowCodexUsage` gates whether it is drawn at all, and
+ * `statusBarUsageMode` (shared with Claude's own cell, `describeUsage`) is
+ * this function's own `mode`.
+ */
+export function describeCodexStatusUsage(
+  snapshot: CodexUsageSnapshot,
+  now: Date,
+  mode: UsageDisplayMode = 'used',
+): CodexStatusUsageDisplay {
+  const display = describeCodexUsage(snapshot, now);
+  if (display.reason !== null) return { text: '—', reason: display.reason, highUsage: false };
+  const high = (w: CodexWindowDisplay) => w.state === 'known' && w.percent >= 90;
+  return {
+    text: `${formatCodexWindow(display.primary, mode)} · ${formatCodexWindow(display.secondary, mode)}`,
+    reason: null,
+    highUsage: high(display.primary) || high(display.secondary),
+  };
+}
+
 export function describeCodexUsage(snapshot: CodexUsageSnapshot, now: Date): CodexUsageDisplay {
   if (snapshot.kind !== 'ok') {
     return {

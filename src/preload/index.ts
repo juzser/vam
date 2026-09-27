@@ -22,6 +22,7 @@ import {
   createLinkApi,
   createMainErrorsApi,
   createNotifyApi,
+  createPowerApi,
   createPrefsBridge,
   createPreloadApi,
   createPrsApi,
@@ -86,6 +87,10 @@ contextBridge.exposeInMainWorld('api', {
   // call, and what the OS answered lands in `mainErrors` above -- see
   // `src/main/notify/notify.ts` for why that is the whole point.
   notify: createNotifyApi(ipcRenderer),
+  // "Keep computer awake": one write, no answer -- the renderer decides the
+  // desired state, main's `KeepAwakeController` is the only code allowed to
+  // call `powerSaveBlocker`. See `src/main/power/ipc.ts`.
+  power: createPowerApi(ipcRenderer),
   // Preferences main needs a copy of. Exactly one today: where to ask GitHub
   // from, per project. Desktop-only by construction -- it is not a member of
   // the source API a phone implements over HTTP.

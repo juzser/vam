@@ -32,8 +32,15 @@ import {
 import { DEFAULT_SESSION_FILTERS, type SessionFilters } from '../domain/session-filter.js';
 import { type KeyBindings, MAX_BINDINGS, setActiveBindings } from '../keyboard/chords.js';
 import { setActiveProvider } from '../sources/provider.js';
+import {
+  type AgentPermissions,
+  DEFAULT_AGENT_PERMISSIONS,
+  readAgentPermissions,
+} from './agent-permissions.js';
+import { DEFAULT_AUTO_TAB_TITLES, readAutoTabTitles } from './auto-tab-titles.js';
 import { DEFAULT_CACHE_TIMER, readCacheTimer } from './cache-timer.js';
 import { DEFAULT_CONCISE_OUTPUT, readConciseOutput } from './concise-output.js';
+import { DEFAULT_AGENT_DEFAULT, type DefaultAgent, readDefaultAgent } from './default-agent.js';
 import {
   clampEditorIndent,
   DEFAULT_EDITOR_HIGHLIGHT,
@@ -48,9 +55,25 @@ import {
   setActiveFilesMarkdownView,
 } from './files-markdown-view.js';
 import { clampStoredTreeWidth } from './files-tree-width.js';
+import { DEFAULT_KEEP_AWAKE, type KeepAwakeMode, readKeepAwake } from './keep-awake.js';
 import { DEFAULT_NOTIFY_WAITING, readNotifyWaiting } from './notify.js';
 import { clampPaneWidth, DEFAULT_PANES, type Pane } from './panes.js';
 import { DEFAULT_FOCUS_VIEW, readFocusView, setActiveFocusView } from './progress.js';
+import {
+  applySidebarAppearance,
+  DEFAULT_SIDEBAR_APPEARANCE,
+  readSidebarAppearance,
+  type SidebarAppearance,
+} from './sidebar-appearance.js';
+import {
+  DEFAULT_STATUS_BAR_SHOW_CLAUDE_USAGE,
+  DEFAULT_STATUS_BAR_SHOW_CODEX_USAGE,
+  DEFAULT_USAGE_DISPLAY_MODE,
+  readStatusBarShowClaudeUsage,
+  readStatusBarShowCodexUsage,
+  readUsageDisplayMode,
+  type UsageDisplayMode,
+} from './status-bar-usage.js';
 import {
   DEFAULT_STREAMING_TERMINAL,
   readStreamingTerminal,
@@ -71,6 +94,7 @@ import {
 import {
   DEFAULT_TERMINAL_SCHEME_PREF,
   readTerminalSchemePref,
+  resolveTerminalScheme,
   setActiveTerminalScheme,
   type TerminalSchemePref,
 } from './terminal-scheme.js';
@@ -761,6 +785,58 @@ export type Prefs = {
    * `'needs-you'` -- including choosing it right back -- sticks.
    */
   readonly sortByMigrated: boolean;
+  /**
+   * How the sidebar's own surface paints -- `Default`/`Match Terminal`/
+   * `Tinted`. See `prefs/sidebar-appearance.ts` for the three and why
+   * `Tinted` is a fixed literal rather than a computed blend.
+   *
+   * GLOBAL and per device, like `narrowViews`: which surface a machine's own
+   * chrome wears is not a fact about a session.
+   */
+  readonly sidebarAppearance: SidebarAppearance;
+  /** `used` or `remaining` -- see `prefs/status-bar-usage.ts`. Governs both
+   *  Claude's and Codex's status-bar cell, and the popover neither. */
+  readonly statusBarUsageMode: UsageDisplayMode;
+  /** Whether the status bar draws Claude's usage cell at all. On by default:
+   *  see `prefs/status-bar-usage.ts` for why that direction is load-bearing. */
+  readonly statusBarShowClaudeUsage: boolean;
+  /** Whether the status bar draws Codex's usage cell. Off by default: a new
+   *  cell, and a new main-process poll, must not appear uninvited. */
+  readonly statusBarShowCodexUsage: boolean;
+  /**
+   * Whether vam holds the machine awake, and when -- `On`/`While an agent is
+   * running`/`Off`, via Electron's own `powerSaveBlocker`. `Off` by default;
+   * see `prefs/keep-awake.ts`. `main/power/power-save.ts`'s
+   * `KeepAwakeController` is the state machine this preference and the
+   * renderer's own "is anything running" signal both feed.
+   */
+  readonly keepAwake: KeepAwakeMode;
+  /**
+   * Whether a session tab draws the title vam already derives from the
+   * agent's own activity (Claude Code's `ai-title` transcript event, Codex's
+   * first-prompt preview line) or a neutral, content-free one instead. On by
+   * default -- both derivations already ship unconditionally; see
+   * `prefs/auto-tab-titles.ts`.
+   */
+  readonly autoTabTitles: boolean;
+  /**
+   * SECURITY-SENSITIVE. `Manual` (default) or `Yolo` -- whether a session vam
+   * starts is handed a flag that skips its provider's own permission prompts.
+   * See `prefs/agent-permissions.ts` for the whole argument: applied only at
+   * session creation, never reachable from the phone or the remote API, and
+   * the one setting in this file whose unreadable-value fallback is chosen
+   * for safety rather than for continuity.
+   */
+  readonly agentPermissions: AgentPermissions;
+  /**
+   * What a new session's Start screen highlights first -- `Auto` (today's
+   * behaviour: whatever `defaultProvider` already names), a specific
+   * provider forced regardless of `defaultProvider`, or `No agent`. See
+   * `prefs/default-agent.ts` and `resolveDefaultAgentSelection` below for why
+   * `No agent` is read as `preferNoAgent` rather than as a third pickable
+   * state.
+   */
+  readonly defaultAgent: DefaultAgent;
 };
 
 export const EMPTY_PREFS: Prefs = {
@@ -806,6 +882,14 @@ export const EMPTY_PREFS: Prefs = {
   // nothing left for the ratchet to do. Marked consumed on the same rule
   // `streamingTerminalMigrated` is.
   sortByMigrated: true,
+  sidebarAppearance: DEFAULT_SIDEBAR_APPEARANCE,
+  statusBarUsageMode: DEFAULT_USAGE_DISPLAY_MODE,
+  statusBarShowClaudeUsage: DEFAULT_STATUS_BAR_SHOW_CLAUDE_USAGE,
+  statusBarShowCodexUsage: DEFAULT_STATUS_BAR_SHOW_CODEX_USAGE,
+  keepAwake: DEFAULT_KEEP_AWAKE,
+  autoTabTitles: DEFAULT_AUTO_TAB_TITLES,
+  agentPermissions: DEFAULT_AGENT_PERMISSIONS,
+  defaultAgent: DEFAULT_AGENT_DEFAULT,
 };
 
 /**
@@ -1118,6 +1202,29 @@ function parsePrefs(
     // installation's payload carries `true` and takes `viewOptions`'s
     // `sortByMigrated` branch above rather than the forcing one.
     sortByMigrated: true,
+    sidebarAppearance: readSidebarAppearance(
+      (parsed as { sidebarAppearance?: unknown }).sidebarAppearance,
+    ),
+    statusBarUsageMode: readUsageDisplayMode(
+      (parsed as { statusBarUsageMode?: unknown }).statusBarUsageMode,
+    ),
+    statusBarShowClaudeUsage: readStatusBarShowClaudeUsage(
+      (parsed as { statusBarShowClaudeUsage?: unknown }).statusBarShowClaudeUsage,
+    ),
+    statusBarShowCodexUsage: readStatusBarShowCodexUsage(
+      (parsed as { statusBarShowCodexUsage?: unknown }).statusBarShowCodexUsage,
+    ),
+    keepAwake: readKeepAwake((parsed as { keepAwake?: unknown }).keepAwake),
+    autoTabTitles: readAutoTabTitles((parsed as { autoTabTitles?: unknown }).autoTabTitles),
+    // Normalised in the direction `agent-permissions.ts` argues at length: a
+    // payload this vam cannot read must fall back to `manual`, never to
+    // `yolo` -- the one preference in this file whose unreadable-value
+    // fallback is chosen for safety rather than for continuity with whatever
+    // was stored.
+    agentPermissions: readAgentPermissions(
+      (parsed as { agentPermissions?: unknown }).agentPermissions,
+    ),
+    defaultAgent: readDefaultAgent((parsed as { defaultAgent?: unknown }).defaultAgent),
   };
 }
 
@@ -1754,6 +1861,84 @@ export function setFilesMarkdownView(prefs: Prefs, view: unknown): Prefs {
   return { ...prefs, filesMarkdownView: readFilesMarkdownView(view) };
 }
 
+/** Normalised on the way in as well as on the way out, like every setter
+ *  above it. The one caller is the Window & Sidebar settings row's own
+ *  three-way choice. */
+export function setSidebarAppearance(prefs: Prefs, next: unknown): Prefs {
+  return { ...prefs, sidebarAppearance: readSidebarAppearance(next) };
+}
+
+/** Normalised on the way in as well as on the way out. The one caller is the
+ *  Window & Sidebar settings row's own two-way choice. */
+export function setStatusBarUsageMode(prefs: Prefs, next: unknown): Prefs {
+  return { ...prefs, statusBarUsageMode: readUsageDisplayMode(next) };
+}
+
+/** Normalised on the way in as well as on the way out, like `setNotifyWaiting`
+ *  above it. */
+export function setStatusBarShowClaudeUsage(prefs: Prefs, on: unknown): Prefs {
+  return { ...prefs, statusBarShowClaudeUsage: readStatusBarShowClaudeUsage(on) };
+}
+
+/** Normalised on the way in as well as on the way out, like `setNotifyWaiting`
+ *  above it. */
+export function setStatusBarShowCodexUsage(prefs: Prefs, on: unknown): Prefs {
+  return { ...prefs, statusBarShowCodexUsage: readStatusBarShowCodexUsage(on) };
+}
+
+/** Normalised on the way in as well as on the way out. The one caller is the
+ *  Agents settings row's own three-way choice; `activatePrefs` below crosses
+ *  the result, together with the renderer's own "is anything running" signal,
+ *  into main's `KeepAwakeController`. */
+export function setKeepAwake(prefs: Prefs, next: unknown): Prefs {
+  return { ...prefs, keepAwake: readKeepAwake(next) };
+}
+
+/** Normalised on the way in as well as on the way out, like `setNotifyWaiting`
+ *  above it. */
+export function setAutoTabTitles(prefs: Prefs, on: unknown): Prefs {
+  return { ...prefs, autoTabTitles: readAutoTabTitles(on) };
+}
+
+/**
+ * SECURITY-SENSITIVE, like the field it writes: normalised on the way in as
+ * well as on the way out, and in the direction `agent-permissions.ts` argues
+ * for -- an unreadable value lands on `manual`, never on `yolo`. The one
+ * caller is the Agents settings row's own confirmed Yolo switch
+ * (`SettingsOverlay.tsx`'s `AgentPermissionsRow`); nothing else in this file
+ * may set it.
+ */
+export function setAgentPermissions(prefs: Prefs, next: unknown): Prefs {
+  return { ...prefs, agentPermissions: readAgentPermissions(next) };
+}
+
+/** Normalised on the way in as well as on the way out. The one caller is the
+ *  Agents settings row's own four-way choice. */
+export function setDefaultAgent(prefs: Prefs, next: unknown): Prefs {
+  return { ...prefs, defaultAgent: readDefaultAgent(next) };
+}
+
+/**
+ * What `StartSession`/`TerminalOnlyStart`/`GettingStarted` seed their own
+ * `ProviderStartControls` picker with -- see `default-agent.ts`'s header for
+ * why `'none'` is not a third pickable provider: the picker always
+ * highlights one of the two known providers, by construction, so `'none'`
+ * resolves to the SAME id `'auto'` would and is read a second way,
+ * `preferNoAgent`, which the three screens use to swap which of their two
+ * affordances -- "open a shell" or "start an agent" -- reads as the
+ * screen's own primary one.
+ */
+export function resolveDefaultAgentSelection(prefs: Prefs): {
+  readonly providerId: ProviderId;
+  readonly preferNoAgent: boolean;
+} {
+  const { defaultAgent } = prefs;
+  if (defaultAgent === 'auto' || defaultAgent === 'none') {
+    return { providerId: prefs.defaultProvider, preferNoAgent: defaultAgent === 'none' };
+  }
+  return { providerId: defaultAgent, preferNoAgent: false };
+}
+
 /**
  * Put the theme on the document.
  *
@@ -1994,6 +2179,28 @@ export function setProjectPrRepo(
  *  "the session's own", which is what vam did before this existed. */
 export function prRepoFor(prefs: Prefs, sourceId: SourceId, projectId: string): string | null {
   return readRepoPath(prefs.prRepos[sourceId]?.[projectId]);
+}
+
+/**
+ * Gate the title vam already derives from an agent's own activity behind
+ * `autoTabTitles`. Run BEFORE `applyRenames` (see that function, and this
+ * field's own header on `Prefs`) so a manual rename always wins over either
+ * the derived title or this function's neutral fallback.
+ *
+ * ON is a no-op returning the SAME model reference, not a shallow copy --
+ * every caller and every memo downstream (`Canvas.tsx`'s `sourceModel`) is
+ * keyed on identity, and copying a model nothing changed would invalidate
+ * them for free every render.
+ */
+export function applyAutoTabTitles(model: CanvasModel, autoTabTitles: boolean): CanvasModel {
+  if (autoTabTitles) return model;
+  return {
+    ...model,
+    projects: model.projects.map((project) => ({
+      ...project,
+      sessions: project.sessions.map((session) => ({ ...session, title: session.id })),
+    })),
+  };
 }
 
 /**
@@ -2726,6 +2933,15 @@ export function activatePrefs(prefs: Prefs): Prefs {
   setActiveNarrowViews(prefs.narrowViews);
   setActiveFilesMarkdownView(prefs.filesMarkdownView);
   setActiveStreamingTerminal(prefs.streamingTerminal);
+  // Window & Sidebar's appearance row: a custom-property override on the
+  // root, the same mechanism `applyPalette`/`applyOutFontSize` above use.
+  // `match-terminal`'s own value is resolved HERE, for the theme ON SCREEN,
+  // the same `effectiveTheme` read the palette line above already takes --
+  // `sidebar-appearance.ts` itself has no opinion on which theme is showing.
+  applySidebarAppearance(
+    prefs.sidebarAppearance,
+    resolveTerminalScheme(prefs.terminalScheme, effectiveTheme(prefs.theme)).background,
+  );
   /**
    * ONE PREFERENCE CROSSES INTO MAIN, because what it changes happens there:
    * `gh` is spawned by `main/sources/claude-code/source.ts`, which has no

@@ -47,7 +47,9 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
-import { type ProviderId, resolveProvider } from '../../shared/providers.js';
+import { type CodexUsageSnapshot, describeCodexStatusUsage } from '../../shared/codex-usage.js';
+import type { KeepAwakeMode } from '../../shared/power.js';
+import { type ProviderId, resolveProvider, sessionArgv } from '../../shared/providers.js';
 import {
   describeUsage,
   POLL_INTERVAL_MS,
@@ -73,7 +75,12 @@ import {
 } from '../domain/optimistic.js';
 import { cycleMatch, searchMatches } from '../domain/search.js';
 import type { SessionEntry, ViewOptions } from '../domain/selectors.js';
-import { applyViewOrder, orderedPaneTabs, orderedSessions } from '../domain/selectors.js';
+import {
+  applyViewOrder,
+  orderedPaneTabs,
+  orderedSessions,
+  runningAgentTotal,
+} from '../domain/selectors.js';
 import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
 import {
   countHiddenByForeignFilter,
@@ -141,6 +148,7 @@ import { type FocusCandidate, resolveFocusNodeId } from '../prefs/focus.js';
 import { DEFAULT_PANES, PANE_RESIZE_STEP } from '../prefs/panes.js';
 import {
   addProjectToGroup,
+  applyAutoTabTitles,
   applyProjectIcons,
   applyRenames,
   browserStorage,
@@ -154,6 +162,7 @@ import {
   prRepoFor,
   removeProjectFromGroup,
   renameGroup,
+  resolveDefaultAgentSelection,
   restoreAllDismissedSessions,
   setDefaultProvider,
   setDetailTab,
@@ -769,16 +778,30 @@ function isGracefulCloseRefusal(cause: unknown): boolean {
 /** Neither `window.api` nor its `usage` member exists in the browser build. */
 const UNKNOWN_SNAPSHOT: UsageSnapshot = { kind: 'unknown', reason: 'unavailable' };
 
-/**
- * Polls `window.api.usage.get()` on `POLL_INTERVAL_MS` and clears the
- * interval on unmount. `getUsage` is `undefined` in the browser build --
- * there is no main process behind it and its CSP would refuse the call
- * regardless -- so this hook then makes no request at all and holds the
- * unknown snapshot forever, rather than trying and failing.
- */
-function useUsageSnapshot(getUsage: (() => Promise<UsageSnapshot>) | undefined): UsageSnapshot {
-  const [snapshot, setSnapshot] = useState<UsageSnapshot>(UNKNOWN_SNAPSHOT);
+/** Codex's own "nothing to read yet" -- `useUsageSnapshot`'s Codex call below
+ *  holds this forever wherever `window.api.usage.getCodex` is absent, the
+ *  same rule `UNKNOWN_SNAPSHOT` states for Claude's. */
+const UNKNOWN_CODEX_SNAPSHOT: CodexUsageSnapshot = { kind: 'unknown', reason: 'unavailable' };
 
+/**
+ * Polls `getUsage()` on `POLL_INTERVAL_MS` and clears the interval on
+ * unmount. `getUsage` is `undefined` in the browser build, or wherever a
+ * packaged preload predates the member (Codex's own, newer than Claude's) --
+ * either way there is no main process behind it, so this hook then makes no
+ * request at all and holds `unknownValue` forever, rather than trying and
+ * failing.
+ *
+ * GENERIC OVER THE SNAPSHOT TYPE so Claude's `UsageSnapshot` and Codex's
+ * `CodexUsageSnapshot` share one poll-and-race-guard implementation -- the
+ * TWO SHAPES differ (`shared/usage.ts`'s own header on why THAT split stays
+ * two files), but "ask again every five minutes, and only the newest
+ * in-flight answer may write" is one piece of logic, not two that could
+ * drift.
+ */
+function useUsageSnapshot<T>(getUsage: (() => Promise<T>) | undefined, unknownValue: T): T {
+  const [snapshot, setSnapshot] = useState<T>(unknownValue);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `unknownValue` is a fresh literal every render for both call sites below -- depending on it would restart the poll on every render. It is read only inside `.catch`, never compared, so a stale closure over it is not a bug: both callers' unknown snapshot is a constant value across the hook's whole lifetime.
   useEffect(() => {
     if (getUsage === undefined) {
       return;
@@ -799,7 +822,7 @@ function useUsageSnapshot(getUsage: (() => Promise<UsageSnapshot>) | undefined):
           if (mine()) setSnapshot(next);
         })
         .catch(() => {
-          if (mine()) setSnapshot(UNKNOWN_SNAPSHOT);
+          if (mine()) setSnapshot(unknownValue);
         });
     };
     poll();
@@ -811,6 +834,28 @@ function useUsageSnapshot(getUsage: (() => Promise<UsageSnapshot>) | undefined):
   }, [getUsage]);
 
   return snapshot;
+}
+
+/**
+ * Push "keep computer awake"'s desired state into main on every change --
+ * the mode (`prefs.keepAwake`, crossed here rather than through
+ * `activatePrefs` because this ALSO needs the renderer's own "is anything
+ * running" signal, which is not a preference) and whether any session's
+ * `runningAgents` is non-zero right now (`runningAgentTotal`,
+ * `domain/selectors.ts` -- the same count the title bar's `◐ N agents`
+ * reads). `main/power/power-save.ts`'s `KeepAwakeController` is what makes
+ * calling this on every render safe: `apply` is idempotent, so a redundant
+ * push with the same two values starts or stops nothing.
+ *
+ * ABSENT BRIDGE MEMBER IS SILENCE, NOT A THROW -- `window.api?.power` is
+ * `undefined` in the browser build and in a packaged desktop build whose
+ * preload predates this feature, the same optional-chaining rule every other
+ * bridge member in this file follows.
+ */
+function useKeepAwakeSync(mode: KeepAwakeMode, anyAgentRunning: boolean): void {
+  useEffect(() => {
+    window.api?.power?.setKeepAwake({ mode, anyAgentRunning });
+  }, [mode, anyAgentRunning]);
 }
 
 /**
@@ -1821,9 +1866,10 @@ function CanvasInner({
   source: CanvasSource;
 }) {
   // `window.api` exists only in the Electron shell (App.tsx); in the browser
-  // build `usage` is `undefined` and the hook below never calls anything.
-  const usageSnapshot = useUsageSnapshot(window.api?.usage?.get);
-  const usage = describeUsage(usageSnapshot, new Date());
+  // build `usage`/`getCodex` are `undefined` and the hook below never calls
+  // anything.
+  const usageSnapshot = useUsageSnapshot(window.api?.usage?.get, UNKNOWN_SNAPSHOT);
+  const codexUsageSnapshot = useUsageSnapshot(window.api?.usage?.getCodex, UNKNOWN_CODEX_SNAPSHOT);
 
   const storage = useMemo(() => browserStorage(), []);
   const {
@@ -1837,6 +1883,19 @@ function CanvasInner({
     onPaneChange,
     onPaneCommit,
   } = useCanvasPrefs(storage);
+  // The status bar's two usage cells -- gated by `statusBarShowClaudeUsage`/
+  // `statusBarShowCodexUsage` at the JSX below, both read through
+  // `statusBarUsageMode` (`used`/`remaining`) so the two providers cannot
+  // come to read the operator's own choice two different ways.
+  const usage = describeUsage(usageSnapshot, new Date(), prefs.statusBarUsageMode);
+  const codexUsage = describeCodexStatusUsage(
+    codexUsageSnapshot,
+    new Date(),
+    prefs.statusBarUsageMode,
+  );
+  // "Keep computer awake": pushed on every mode change and on every change to
+  // whether anything is running -- see `useKeepAwakeSync`'s own header.
+  useKeepAwakeSync(prefs.keepAwake, runningAgentTotal(factoryModel) > 0);
   /**
    * Which shell this viewport gets. `false` wherever `matchMedia` is missing,
    * so every environment without one -- jsdom, happy-dom, the tests -- keeps
@@ -1852,17 +1911,23 @@ function CanvasInner({
    * different than the rest of a session.
    */
   const sourceModel = useMemo(
-    // Renames after icons, and in the same one place, for the same reason:
-    // the sidebar, the tab strip and the detail panel all render `session.title`,
-    // and none of them should know a title can be vam's own rather than the
-    // source's.
+    // Icons, then the auto-tab-titles gate, then renames -- in that order and
+    // in the same one place, for the same reason: the sidebar, the tab strip
+    // and the detail panel all render `session.title`, and none of them
+    // should know a title can be vam's own, or content-free, rather than the
+    // source's. Renames LAST so a manual rename always wins over either the
+    // agent-derived title `applyAutoTabTitles` may have just erased or the
+    // one it left alone.
     () =>
       applyRenames(
-        applyProjectIcons(factoryModel, prefs.projectIcons),
+        applyAutoTabTitles(
+          applyProjectIcons(factoryModel, prefs.projectIcons),
+          prefs.autoTabTitles,
+        ),
         prefs.renames,
         prefs.projectNames,
       ),
-    [factoryModel, prefs.projectIcons, prefs.renames, prefs.projectNames],
+    [factoryModel, prefs.projectIcons, prefs.autoTabTitles, prefs.renames, prefs.projectNames],
   );
 
   /**
@@ -5329,7 +5394,17 @@ function CanvasInner({
       });
       setStatus(`starting ${provider.label} in "${title}"…`);
       try {
-        await sessionSource.write.recordPrompt(entry.session.id, provider.command.join(' '));
+        // SECURITY-SENSITIVE, and the one call site that may be: `sessionArgv`
+        // (`shared/providers.ts`) appends the permission-skipping flag as its
+        // own argv element, never a string concatenation, and ONLY here, at
+        // session CREATION -- `resumeInPane` below types
+        // `entry.session.resumeCommand` verbatim and never reads
+        // `agentPermissions` at all, so flipping this setting never touches
+        // an already-running or previously-run session.
+        await sessionSource.write.recordPrompt(
+          entry.session.id,
+          sessionArgv(providerId, prefs.agentPermissions).join(' '),
+        );
         setStatus(
           `started ${provider.label} in "${title}" — its session appears here once it registers`,
         );
@@ -5353,6 +5428,7 @@ function CanvasInner({
       beginStartingPane,
       clearStartingPane,
       setStatus,
+      prefs.agentPermissions,
     ],
   );
 
@@ -7486,6 +7562,11 @@ function CanvasInner({
        * build and the phone: `dialog` is a desktop bridge, and a control that
        * cannot open a picker is a control that cannot act.
        */
+      // Settings -> Agents -> Default agent: `auto`/a forced provider/`none`,
+      // resolved to the one `ProviderId` the start screen's picker seeds plus
+      // the `preferNoAgent` reading -- see `resolveDefaultAgentSelection`'s
+      // own header (`prefs.ts`) for the whole argument.
+      const defaultAgentSelection = resolveDefaultAgentSelection(prefs);
       const projectSource = entry?.project.source;
       const projectId = entry?.project.id;
       const choose = globalThis.window?.api?.dialog?.chooseDirectory;
@@ -7586,7 +7667,17 @@ function CanvasInner({
         // THIS session, only the next one created), the same reasoning
         // `delivers`/`terminal` above already read off `source` once for
         // every pane rather than per-session.
-        defaultProvider: prefs.defaultProvider,
+        //
+        // RESOLVED THROUGH `defaultAgent` NOW, NOT `defaultProvider` DIRECTLY:
+        // `resolveDefaultAgentSelection` (`prefs.ts`) is `auto` (today's exact
+        // behaviour -- `defaultProvider` verbatim), a specific provider
+        // FORCED regardless of `defaultProvider`, or `none` (the same
+        // provider `auto` would seed, plus `preferNoAgent` below). Picking a
+        // DIFFERENT provider on the screen still writes back through
+        // `onSetDefaultProvider` to `defaultProvider` unchanged -- `auto` is
+        // the only `defaultAgent` state that read affects.
+        defaultProvider: defaultAgentSelection.providerId,
+        preferNoAgent: defaultAgentSelection.preferNoAgent,
         onSetDefaultProvider: (id) => savePrefs(setDefaultProvider(prefs, id)),
         // THIS PANE'S ROW, when it is a pane with nothing in it: the start
         // screen's one act. Withdrawn (absent) where there is no session to
@@ -8336,32 +8427,75 @@ function CanvasInner({
             }
           />
 
-          <span className="h-3 w-px bg-line" />
-          {usage.reason === null ? (
-            <span data-usage className={usage.highUsage ? 'text-failed' : undefined}>
-              {usage.text}
-            </span>
-          ) : (
-            <Note text={usage.reason}>
-              {/* A tab stop for the same reason `StatusCell` takes one. This
-                  sentence is the explanation for a MISSING NUMBER -- on the
-                  web/Tailscale build it was keyboard-unreachable, and with no
-                  hover on touch it was unreachable at all. */}
-              <span
-                data-usage
-                // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see `StatusCell`.
-                tabIndex={0}
-              >
-                {usage.text}
-              </span>
-            </Note>
+          {/* Window & Sidebar settings' three status-bar toggles: whether
+              Claude's cell draws at all, whether Codex's does, and (shared
+              by both) whether either reads `used` or `remaining`. Claude
+              defaults ON (unchanged from before this switch existed) and
+              Codex defaults OFF (a brand-new cell, and a brand-new poll,
+              must not appear uninvited) -- see `prefs/status-bar-usage.ts`. */}
+          {prefs.statusBarShowClaudeUsage && (
+            <>
+              <span className="h-3 w-px bg-line" />
+              {usage.reason === null ? (
+                <span data-usage className={usage.highUsage ? 'text-failed' : undefined}>
+                  {usage.text}
+                </span>
+              ) : (
+                <Note text={usage.reason}>
+                  {/* A tab stop for the same reason `StatusCell` takes one. This
+                      sentence is the explanation for a MISSING NUMBER -- on the
+                      web/Tailscale build it was keyboard-unreachable, and with no
+                      hover on touch it was unreachable at all. */}
+                  <span
+                    data-usage
+                    // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see `StatusCell`.
+                    tabIndex={0}
+                  >
+                    {usage.text}
+                  </span>
+                </Note>
+              )}
+              {usage.windows !== null && (
+                <span className="flex items-center gap-2">
+                  {/* Five hours first: it is the window that moves minute to minute. */}
+                  <UsageBar
+                    label="5h"
+                    usageWindow={usage.windows.fiveHour}
+                    high={usage.highUsage}
+                  />
+                  <UsageBar
+                    label="7d"
+                    usageWindow={usage.windows.sevenDay}
+                    high={usage.highUsage}
+                  />
+                </span>
+              )}
+            </>
           )}
-          {usage.windows !== null && (
-            <span className="flex items-center gap-2">
-              {/* Five hours first: it is the window that moves minute to minute. */}
-              <UsageBar label="5h" usageWindow={usage.windows.fiveHour} high={usage.highUsage} />
-              <UsageBar label="7d" usageWindow={usage.windows.sevenDay} high={usage.highUsage} />
-            </span>
+          {prefs.statusBarShowCodexUsage && (
+            <>
+              <span className="h-3 w-px bg-line" />
+              {/* Text only, no bars: Codex's own windows (`CodexWindowDisplay`)
+                  are not `UsageWindow`s, and a second bar widget over a shape
+                  `describeCodexStatusUsage` already collapsed to one line is
+                  more than this cell earns -- the popover (`UsagePopover.tsx`)
+                  is where the per-window detail lives. */}
+              {codexUsage.reason === null ? (
+                <span data-codex-usage className={codexUsage.highUsage ? 'text-failed' : undefined}>
+                  {codexUsage.text}
+                </span>
+              ) : (
+                <Note text={codexUsage.reason}>
+                  <span
+                    data-codex-usage
+                    // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see `StatusCell`.
+                    tabIndex={0}
+                  >
+                    {codexUsage.text}
+                  </span>
+                </Note>
+              )}
+            </>
           )}
 
           {/* The session tallies and the project count are gone at the

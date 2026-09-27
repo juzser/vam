@@ -85,11 +85,22 @@ const ROWS = [
   ['the streaming terminal switch', '[data-switch="streaming-terminal"]', 'terminal', true],
 
   // WINDOW & SIDEBAR — new section; its first tenant moved from Behaviour.
+  // The sidebar-appearance and status-bar rows are this section's SECOND PR,
+  // landing where `settings.window.hint`'s own comment already named them.
   ['view width', '[data-switch="narrow-views"]', 'window', false],
+  ['sidebar appearance', '[data-sidebar-appearance-option]', 'window', false],
+  ['status bar usage mode', '[data-usage-display-mode-option]', 'window', false],
+  ['show Claude usage', '[data-switch="claude-usage"]', 'window', false],
+  ['show Codex usage', '[data-switch="codex-usage"]', 'window', false],
 
   // AGENTS — renamed from Sessions, and gained the ADHD skill card that used
-  // to sit in Behaviour.
+  // to sit in Behaviour. Keep-awake/auto-tab-titles/permissions/default-agent
+  // are this section's own second PR.
   ['the ADHD skill card', '[data-settings-block="adhd-skill"]', 'agents', false],
+  ['keep computer awake', '[data-keep-awake-option]', 'agents', false],
+  ['auto tab titles', '[data-switch="auto-tab-titles"]', 'agents', false],
+  ['agent permissions', '[data-agent-permissions-option]', 'agents', false],
+  ['default agent', '[data-default-agent-option]', 'agents', false],
 
   // BEHAVIOUR — smaller, not gone: focus view stays, and the file editor's
   // own two rows (moved from Appearance) join it as a "Files" sub-group.
@@ -109,8 +120,8 @@ const ROWS = [
 const ROW_FLOOR = {
   interface: 3,
   terminal: 6,
-  window: 1,
-  agents: 3,
+  window: 4,
+  agents: 6,
   behaviour: 3,
   notifications: 2,
 };

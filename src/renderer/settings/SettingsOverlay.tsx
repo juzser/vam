@@ -65,7 +65,10 @@ import {
 import { type BindingRow, buildBindingSheet } from '../keyboard/keysheet.js';
 import { ChordGlyphs } from '../keyboard/ShortcutTip.js';
 import { usePhoneViewport } from '../phone/viewport.js';
+import { type AgentPermissions } from '../prefs/agent-permissions.js';
+import { type DefaultAgent } from '../prefs/default-agent.js';
 import { EDITOR_INDENT_MAX, EDITOR_INDENT_MIN } from '../prefs/editor.js';
+import { type KeepAwakeMode } from '../prefs/keep-awake.js';
 import {
   applyPaletteTemplate,
   PALETTE_TEMPLATES,
@@ -81,23 +84,33 @@ import {
   type Prefs,
   paletteFor,
   paletteValue,
+  setAgentPermissions,
+  setAutoTabTitles,
   setCacheTimer,
+  setDefaultAgent,
   setDefaultProvider,
   setEditorHighlight,
   setEditorIndent,
   setFocusView,
+  setKeepAwake,
   setKeyBindings,
   setNarrowViews,
   setNotifyWaiting,
   setOutFontSize,
   setPaletteColor,
   setPromptSubmitKey,
+  setSidebarAppearance,
+  setStatusBarShowClaudeUsage,
+  setStatusBarShowCodexUsage,
+  setStatusBarUsageMode,
   setStreamingTerminal,
   setTerminalFontSize,
   setTheme,
   stylesheetPaletteValue,
   type Theme,
 } from '../prefs/prefs.js';
+import { type SidebarAppearance } from '../prefs/sidebar-appearance.js';
+import { type UsageDisplayMode } from '../prefs/status-bar-usage.js';
 import { type PromptSubmitKey, SUBMIT_KEY_LABELS } from '../prefs/submit-key.js';
 import { TERMINAL_FONT_SIZES } from '../prefs/terminal-font.js';
 import {
@@ -184,6 +197,35 @@ const THEMES: readonly Theme[] = ['dark', 'light', 'system'];
  * picker and the box cannot come to spell one key two ways.
  */
 const SUBMIT_KEYS: readonly PromptSubmitKey[] = ['enter', 'shift-enter'];
+
+/** Window & Sidebar's appearance row, shipped default first -- see
+ *  `prefs/sidebar-appearance.ts` for what each of the three does. */
+const SIDEBAR_APPEARANCES: readonly SidebarAppearance[] = ['default', 'match-terminal', 'tinted'];
+
+/** The status bar's own `used`/`remaining` toggle, shipped default first --
+ *  see `prefs/status-bar-usage.ts`. */
+const USAGE_DISPLAY_MODES: readonly UsageDisplayMode[] = ['used', 'remaining'];
+
+/** "Keep computer awake"'s three modes, shipped default (`off`) first --
+ *  see `prefs/keep-awake.ts`. */
+const KEEP_AWAKE_MODES: readonly KeepAwakeMode[] = ['off', 'while-running', 'on'];
+
+/** Agent permissions' two words, Manual first: it is the default, and the
+ *  only one of the two that may be picked with no confirmation -- see
+ *  `prefs/agent-permissions.ts`. */
+const AGENT_PERMISSIONS_CHOICES: readonly AgentPermissions[] = ['manual', 'yolo'];
+
+/**
+ * Default agent's four, Auto first -- see `prefs/default-agent.ts`.
+ * `PROVIDERS.map((p) => p.id)` rather than a hard-coded pair: the day a third
+ * provider joins `shared/providers.ts`, this row offers it with no edit here,
+ * the same promise `CAN_CHOOSE_PROVIDER` already keeps for the row above.
+ */
+const DEFAULT_AGENT_CHOICES: readonly DefaultAgent[] = [
+  'auto',
+  'none',
+  ...PROVIDERS.map((provider) => provider.id),
+];
 
 /** Which slot is listening for a keystroke, spelled as one value so opening a
  *  second capture box closes the first by construction. */
@@ -322,6 +364,14 @@ export function SettingsOverlay({
    */
   const [integrationsOpen, setIntegrationsOpen] = useState(true);
   const [remoteOpen, setRemoteOpen] = useState(true);
+  /**
+   * SECURITY-SENSITIVE. Whether the Agents card is mid-way through
+   * confirming a switch TO Yolo -- the one direction of `agentPermissions`
+   * that may never write on the first press. `false` on every mount and on
+   * every cancel, exactly like `GithubPanel`'s `confirmingLogout`, the
+   * pattern this reuses.
+   */
+  const [confirmingYolo, setConfirmingYolo] = useState(false);
   /** Read off the map on screen, not remembered from a write: the overlay can
    *  be OPENED over a contested map, which is the case no write path sees. */
   const clashes = bindingClashes(prefs.keyBindings);
@@ -788,6 +838,84 @@ export function SettingsOverlay({
                     off={t('settings.window.narrowViews.off')}
                   />
                 </SettingsRow>
+
+                <SettingsRow
+                  label={t('settings.window.sidebarAppearance.label')}
+                  hint={t('settings.window.sidebarAppearance.hint')}
+                >
+                  <div className="flex gap-1">
+                    {SIDEBAR_APPEARANCES.map((choice) => (
+                      <button
+                        key={choice}
+                        type="button"
+                        data-sidebar-appearance-option={choice}
+                        aria-pressed={prefs.sidebarAppearance === choice}
+                        onClick={() => onChange(setSidebarAppearance(prefs, choice))}
+                        className={`vam-tap flex h-[28px] cursor-pointer items-center rounded border px-3 text-control capitalize ${FOCUS_RING} ${
+                          prefs.sidebarAppearance === choice
+                            ? 'border-line-loudest bg-raised text-ink'
+                            : 'border-line text-ink-dim'
+                        }`}
+                      >
+                        {t(`settings.window.sidebarAppearance.${choice}` as const)}
+                      </button>
+                    ))}
+                  </div>
+                </SettingsRow>
+
+                <SettingsSubgroup title={t('settings.window.statusBar.title')}>
+                  <SettingsRow
+                    label={t('settings.window.statusBar.mode.label')}
+                    hint={t('settings.window.statusBar.mode.hint')}
+                  >
+                    <div className="flex gap-1">
+                      {USAGE_DISPLAY_MODES.map((mode) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          data-usage-display-mode-option={mode}
+                          aria-pressed={prefs.statusBarUsageMode === mode}
+                          onClick={() => onChange(setStatusBarUsageMode(prefs, mode))}
+                          className={`vam-tap flex h-[28px] cursor-pointer items-center rounded border px-3 text-control capitalize ${FOCUS_RING} ${
+                            prefs.statusBarUsageMode === mode
+                              ? 'border-line-loudest bg-raised text-ink'
+                              : 'border-line text-ink-dim'
+                          }`}
+                        >
+                          {t(`settings.window.statusBar.mode.${mode}` as const)}
+                        </button>
+                      ))}
+                    </div>
+                  </SettingsRow>
+
+                  <SettingsRow
+                    label={t('settings.window.statusBar.showClaude.label')}
+                    hint={t('settings.window.statusBar.showClaude.hint')}
+                  >
+                    <Switch
+                      name="claude-usage"
+                      label={t('settings.window.statusBar.showClaude.label')}
+                      checked={prefs.statusBarShowClaudeUsage}
+                      onChange={(next) => onChange(setStatusBarShowClaudeUsage(prefs, next))}
+                      on={t('settings.window.statusBar.showClaude.on')}
+                      off={t('settings.window.statusBar.showClaude.off')}
+                    />
+                  </SettingsRow>
+
+                  <SettingsRow
+                    label={t('settings.window.statusBar.showCodex.label')}
+                    hint={t('settings.window.statusBar.showCodex.hint')}
+                  >
+                    <Switch
+                      name="codex-usage"
+                      label={t('settings.window.statusBar.showCodex.label')}
+                      checked={prefs.statusBarShowCodexUsage}
+                      onChange={(next) => onChange(setStatusBarShowCodexUsage(prefs, next))}
+                      on={t('settings.window.statusBar.showCodex.on')}
+                      off={t('settings.window.statusBar.showCodex.off')}
+                    />
+                  </SettingsRow>
+                </SettingsSubgroup>
               </SettingsCard>
             ) : null}
 
@@ -881,6 +1009,144 @@ export function SettingsOverlay({
                   <p data-cache-timer-note className="mt-3 max-w-[52ch] text-control text-ink-dim">
                     {t('settings.agents.cacheTimer.note')}
                   </p>
+                </SettingsRow>
+
+                <SettingsRow
+                  label={t('settings.agents.keepAwake.label')}
+                  hint={t('settings.agents.keepAwake.hint')}
+                >
+                  <div className="flex gap-1">
+                    {KEEP_AWAKE_MODES.map((mode) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        data-keep-awake-option={mode}
+                        aria-pressed={prefs.keepAwake === mode}
+                        onClick={() => onChange(setKeepAwake(prefs, mode))}
+                        className={`vam-tap flex h-[28px] cursor-pointer items-center rounded border px-3 text-control capitalize ${FOCUS_RING} ${
+                          prefs.keepAwake === mode
+                            ? 'border-line-loudest bg-raised text-ink'
+                            : 'border-line text-ink-dim'
+                        }`}
+                      >
+                        {t(`settings.agents.keepAwake.${mode}` as const)}
+                      </button>
+                    ))}
+                  </div>
+                </SettingsRow>
+
+                <SettingsRow
+                  label={t('settings.agents.autoTabTitles.label')}
+                  hint={t('settings.agents.autoTabTitles.hint')}
+                >
+                  <Switch
+                    name="auto-tab-titles"
+                    label={t('settings.agents.autoTabTitles.label')}
+                    checked={prefs.autoTabTitles}
+                    onChange={(next) => onChange(setAutoTabTitles(prefs, next))}
+                    on={t('settings.agents.autoTabTitles.on')}
+                    off={t('settings.agents.autoTabTitles.off')}
+                  />
+                </SettingsRow>
+
+                {/* SECURITY-SENSITIVE. Manual writes at once, on either press
+                    -- it is the safe direction and the shipped default, so
+                    there is nothing to confirm about choosing it. Yolo does
+                    not write on the first press at all: it arms a
+                    confirmation, drawn immediately under this row (the same
+                    "the refusal is where the operator is looking" rule the
+                    keyboard editor's own clash notice already follows), that
+                    names the risk in the operator's own words before a
+                    second press commits it. */}
+                <SettingsRow
+                  label={t('settings.agents.permissions.label')}
+                  hint={t('settings.agents.permissions.hint')}
+                >
+                  <div className="flex gap-1">
+                    {AGENT_PERMISSIONS_CHOICES.map((choice) => (
+                      <button
+                        key={choice}
+                        type="button"
+                        data-agent-permissions-option={choice}
+                        aria-pressed={prefs.agentPermissions === choice}
+                        onClick={() => {
+                          if (choice === 'manual') {
+                            setConfirmingYolo(false);
+                            onChange(setAgentPermissions(prefs, choice));
+                            return;
+                          }
+                          setConfirmingYolo(true);
+                        }}
+                        className={`vam-tap flex h-[28px] cursor-pointer items-center rounded border px-3 text-control capitalize ${FOCUS_RING} ${
+                          prefs.agentPermissions === choice
+                            ? 'border-line-loudest bg-raised text-ink'
+                            : 'border-line text-ink-dim'
+                        }`}
+                      >
+                        {t(`settings.agents.permissions.${choice}` as const)}
+                      </button>
+                    ))}
+                  </div>
+                  <p data-permissions-note className="mt-3 max-w-[52ch] text-control text-ink-dim">
+                    {t('settings.agents.permissions.note')}
+                  </p>
+                  {confirmingYolo && prefs.agentPermissions !== 'yolo' ? (
+                    <div
+                      data-yolo-risk
+                      role="alertdialog"
+                      aria-label={t('settings.agents.permissions.yolo.confirmLabel')}
+                      className="mt-3 flex max-w-[52ch] flex-col gap-2 rounded border border-line-strong bg-sunken p-3"
+                    >
+                      <p className="text-control text-waiting">
+                        {t('settings.agents.permissions.yolo.risk')}
+                      </p>
+                      <div className="flex gap-2">
+                        <SmallButton
+                          label={t('settings.agents.permissions.yolo.confirm')}
+                          onPick={() => {
+                            setConfirmingYolo(false);
+                            onChange(setAgentPermissions(prefs, 'yolo'));
+                          }}
+                          hook="yolo-confirm-yes"
+                        />
+                        <SmallButton
+                          label={t('settings.agents.permissions.yolo.cancel')}
+                          onPick={() => setConfirmingYolo(false)}
+                          hook="yolo-confirm-cancel"
+                        />
+                      </div>
+                    </div>
+                  ) : null}
+                </SettingsRow>
+
+                <SettingsRow
+                  label={t('settings.agents.defaultAgent.label')}
+                  hint={t('settings.agents.defaultAgent.hint')}
+                >
+                  <div className="flex flex-wrap gap-1">
+                    {DEFAULT_AGENT_CHOICES.map((choice) => (
+                      <button
+                        key={choice}
+                        type="button"
+                        data-default-agent-option={choice}
+                        aria-pressed={prefs.defaultAgent === choice}
+                        onClick={() => onChange(setDefaultAgent(prefs, choice))}
+                        className={`vam-tap flex h-[28px] cursor-pointer items-center rounded border px-3 text-control ${FOCUS_RING} ${
+                          prefs.defaultAgent === choice
+                            ? 'border-line-loudest bg-raised text-ink'
+                            : 'border-line text-ink-dim'
+                        }`}
+                      >
+                        <span data-verbatim className="normal-case">
+                          {choice === 'auto'
+                            ? t('settings.agents.defaultAgent.auto')
+                            : choice === 'none'
+                              ? t('settings.agents.defaultAgent.none')
+                              : resolveProvider(choice).label}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
                 </SettingsRow>
 
                 <AdhdSkillCard prefs={prefs} onChange={onChange} api={desktopAdhdSkillApi()} />
@@ -1825,11 +2091,26 @@ function HexField({
   );
 }
 
-function SmallButton({ label, onPick }: { readonly label: string; readonly onPick: () => void }) {
+function SmallButton({
+  label,
+  onPick,
+  hook,
+}: {
+  readonly label: string;
+  readonly onPick: () => void;
+  /**
+   * A `data-{hook}` attribute for a guard or a test that has to tell TWO
+   * `SmallButton`s in the same row apart by more than their text -- the Yolo
+   * confirmation's own Yes/Cancel pair is the first caller that needs one.
+   * Optional: every existing caller is found by its label instead, unchanged.
+   */
+  readonly hook?: string;
+}) {
   return (
     <button
       type="button"
       onClick={onPick}
+      {...(hook === undefined ? {} : { [`data-${hook}`]: true })}
       className={`vam-tap cursor-pointer rounded border border-line px-2 py-0.5 text-ink-dim text-control ${FOCUS_RING}`}
     >
       {label}
