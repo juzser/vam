@@ -10757,9 +10757,13 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
               data-prompt-tools
               // PHONE: `gap-1` (4px), not `gap-2.5`'s old `gap-1.5` (6px) --
               // the operator's own follow-up ("shrink the spacing between
-              // the buttons to the right of the input"), so the pill beside
-              // this row keeps a few more pixels of the row's own width.
-              // Desktop is untouched, its own `gap-2` unchanged.
+              // the buttons to the right of the input"). This gap is
+              // between the three BOXES; `[data-composer-action]`'s own
+              // negative margin (`styles.css`) is what closes the rest of
+              // the distance down to a 4px PAINTED gap between the icons
+              // themselves -- see that rule's own comment for the whole
+              // arithmetic and its one trade-off. Desktop is untouched, its
+              // own `gap-2` unchanged.
               className={phone ? 'flex flex-none items-center gap-1' : 'flex items-center gap-2'}
             >
               {/* PHONE COMPOSER DIET (docs/design/phone-core-loop.md §3.4):
@@ -10779,26 +10783,29 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                   Send) inside `data-prompt-tools`, which is exactly where it
                   already sits in DOM order. */}
               {phone && (
-                // `w-[30px]`, not an auto `flex-none` width: this wrapper's
+                // `w-[26px]`, not an auto `flex-none` width: this wrapper's
                 // only child (the button) carries the negative horizontal
                 // margin `[data-composer-action]`'s own rule gives it
                 // (`styles.css`) to close the gap between the three composer
                 // buttons, and ANY AUTO-SIZED CONTAINER SHRINKS TO ITS
                 // CHILD'S MARGIN BOX, negative margins included -- measured
-                // directly: this wrapper's own `getBoundingClientRect()` read
-                // 34px (44 - 2*5, an earlier -5px margin) wide with an auto
-                // `flex-none` width, not the button's real 44px, which threw
-                // off the FIRST of the row's two gaps relative to the second
-                // (dictate/Send are bare flex items of `data-prompt-tools`
-                // already sized this same way, so they agreed with each
-                // other and only this wrapper disagreed). `30px` is the
-                // button's own 44px CONTENT box minus the same `2 * 7px`
-                // margin `styles.css`'s rule applies -- the same effective
-                // width a bare button contributes as a flex item -- so this
-                // wrapper now behaves exactly like its two siblings, and the
-                // button inside it overflows the wrapper's own (now
-                // explicit, not auto) box by 7px on each side rather than
-                // shrinking it.
+                // directly: this wrapper's own `getBoundingClientRect()`
+                // came back narrower than the button's real 44px with an
+                // auto `flex-none` width, throwing off the FIRST of the
+                // row's two gaps relative to the second (dictate/Send are
+                // bare flex items of `data-prompt-tools` already sized this
+                // same way, so they agreed with each other and only this
+                // wrapper disagreed). `26px` is tuned to the same measured
+                // target the margin itself is (`e2e/phone-composer
+                // -layout.pw.ts`'s 4px painted gap, both pairs, both
+                // widths) rather than derived from a clean formula -- the
+                // wrapper's own box-model quirks (a block parent around a
+                // flex child) do not reduce to the same arithmetic
+                // `styles.css`'s comment gives for two BARE buttons. The
+                // button inside still measures a real 44x44 of its own
+                // (`getBoundingClientRect()`, unaffected by an ancestor's
+                // width); only the WRAPPER's contribution to the row's own
+                // flex math changed.
                 <div
                   data-popover-root="phone-overflow"
                   className="flex w-[26px] flex-none items-center"

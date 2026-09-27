@@ -261,29 +261,47 @@ async function openWaiting(page: Page): Promise<void> {
 /**
  * THE COMPOSER'S TOOL ROW, AS A ROW RATHER THAN AS BOXES.
  *
- * `scrollWidth` vs `clientWidth`, and every child's right edge against the
- * 390px screen -- asked of the layout rather than of appearance, because
- * `vam-no-scrollbar` hides scrollbars in this app and an overflowing row looks
- * exactly like one that fits. The failure it catches is the one a per-control
- * 44px census cannot see at all: every box in the row can clear 44 while the
- * last of them sits off the side of the screen.
+ * Every actual CONTROL's right edge against the 390px screen -- asked of the
+ * layout rather than of appearance, because `vam-no-scrollbar` hides
+ * scrollbars in this app and an overflowing row looks exactly like one that
+ * fits. The failure it catches is the one a per-control 44px census cannot
+ * see at all: every box in the row can clear 44 while the last of them sits
+ * off the side of the screen. Reads every `.vam-tap` INSIDE the row rather
+ * than the row's own direct children, so the "+" (a `data-popover-root`
+ * wrapper around its own button) is checked by its actual tap target, not by
+ * a wrapper div that may not be the same size as what it wraps (composer
+ * follow-up, below).
+ *
+ * `scrollWidth` VS `clientWidth` USED TO BE PART OF THIS CHECK TOO, and no
+ * longer is: the composer follow-up that tightened the gap between these
+ * three buttons closes it with a negative `margin-left`/`margin-right` on
+ * each one (`[data-composer-action]`, `styles.css`), which makes two
+ * adjacent 44px boxes overlap by design -- the same 14px `scrollWidth`
+ * would have to count whether or not anything is actually off-screen.
+ * Measured directly: `scrollWidth` reads past `clientWidth` here now on
+ * every one of this suite's own scenarios, by the SAME small, bounded
+ * amount the margin rule introduces, never growing with how long the
+ * suggestion offer is -- which is what tells this apart from the DEFECT
+ * this function was written for (a row that overflows because its OWN
+ * total content is too wide for the space it has, which DOES grow with
+ * content and DOES eventually push a control off-screen). The per-control
+ * screen-edge check below is what actually answers "did anything end up off
+ * the screen", and it is unweakened.
  */
 async function toolsRowFits(page: Page, where: string): Promise<void> {
   const row = await page.evaluate(() => {
     const el = document.querySelector('[data-phone-shell] [data-prompt-tools]');
     if (el === null) return null;
     return {
-      scrollW: el.scrollWidth,
-      clientW: el.clientWidth,
-      offScreen: [...el.children]
-        .map((child) => {
-          const r = child.getBoundingClientRect();
+      offScreen: [...el.querySelectorAll('.vam-tap')]
+        .map((control) => {
+          const r = control.getBoundingClientRect();
           return {
             hooks:
-              [...child.attributes]
+              [...control.attributes]
                 .map((a) => a.name)
                 .filter((n) => n.startsWith('data-') && n !== 'data-state')
-                .join(',') || child.tagName,
+                .join(',') || control.tagName,
             right: Math.round(r.right),
             left: Math.round(r.left),
           };
@@ -292,10 +310,6 @@ async function toolsRowFits(page: Page, where: string): Promise<void> {
     };
   });
   expect(row, `the composer tool row, with ${where}`).not.toBeNull();
-  expect(
-    (row?.scrollW ?? 0) <= (row?.clientW ?? 0),
-    `the tool row overflows its own box with ${where}: scrollWidth ${row?.scrollW} into clientWidth ${row?.clientW}`,
-  ).toBe(true);
   expect(row?.offScreen, `controls off the 390px screen with ${where}`).toEqual([]);
 }
 

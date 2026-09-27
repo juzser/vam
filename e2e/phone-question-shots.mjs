@@ -48,6 +48,19 @@
  * carries the arithmetic; the bottom edge was never available to trim, it is
  * already floored to 12px by the safe-area rule (`styles.css`) regardless of
  * what padding class is written there.
+ *
+ * CLOSED FURTHER STILL, to **63px**, by the single-line/tight-group composer
+ * follow-up (the operator's own report, measured against a screenshot: "the
+ * input box is ~56px tall for one line... box height for single-line ≈
+ * 40-44px"). `data-prompt-input`'s own `py-1.5` (12px) was stacked ON TOP OF
+ * the textarea's own 44px `.vam-tap` floor -- the exact double-padding
+ * anti-pattern the composer bar's `py-2` → `pt-1` fix above already paid
+ * down once, for the OTHER edge. Removing it drops the pill itself from
+ * 56px to 46px (the 44px floor plus a 1px border on each side, unavoidable),
+ * and the whole composer bar with it, from 75px to 63px: `pt-1` (4px) + the
+ * pill (46px) + the safe-area's own fixed 12px floor (unchanged) = 62px,
+ * 1px of that a sub-pixel rounding remainder real Chromium reads the same
+ * in both themes.
  */
 import { chromium } from 'playwright-core';
 
@@ -168,17 +181,19 @@ for (const theme of ['light', 'dark']) {
   console.log(`  ${theme}: ${JSON.stringify(composer)}`);
   check(`${theme}: the composer bar is on screen`, composer !== null, JSON.stringify(composer));
   if (composer !== null) {
-    // AC-7's STRETCH target (≤76px), met -- recomputed from a real
-    // measurement (75px, both themes, see this file's own header), never
-    // loosened back toward the pre-merge 145px or the interim 95px. The
-    // lower bound is a regression trip-wire of its own -- a row that
-    // measured under 68px would mean a control silently stopped drawing (the
-    // textarea's own 44px floor plus the composer's chrome cannot go lower
-    // than this without losing one of them), not a further trim nobody
-    // chose.
+    // AC-7's STRETCH target, CLOSED FURTHER by the single-line/tight-group
+    // composer follow-up -- recomputed from a real measurement (63px, both
+    // themes, see this file's own header), never loosened back toward the
+    // pre-merge 145px, the interim 95px, or the previous stretch target's
+    // own 75px. The lower bound is a regression trip-wire of its own -- a
+    // row that measured under 60px would mean a control silently stopped
+    // drawing (`pt-1`'s 4px + the pill's own now-doubly-floored 46px [the
+    // textarea's 44px `.vam-tap` floor plus its 1px border on each side]
+    // + the safe-area's fixed 12px cannot go lower than 62px without losing
+    // one of those three), not a further trim nobody chose.
     check(
-      `${theme}: composer height meets AC-7's ≤76px stretch target (75px, from 95px, from 145px)`,
-      composer.height <= 76 && composer.height >= 68,
+      `${theme}: composer height meets the single-line follow-up's tighter target (63px, from 75px, from 95px, from 145px)`,
+      composer.height <= 64 && composer.height >= 60,
       `${composer.height}px`,
     );
     // Textarea + "+" + mic + Send: everything else (attach, provider, model,
