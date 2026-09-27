@@ -33,6 +33,12 @@
  * file's own header for why (it needs `terminal: true`, several sessions in
  * one project, and an open question with long unbroken text all at once,
  * which neither `?demo=1` nor `phone-core-loop.pw.ts`'s `STUB` states).
+ *
+ * `phone-cache-timer.pw.ts` runs here too, on its own FOURTH stub -- see that
+ * file's own header for why: seeding the cache-timer countdown's three
+ * phases onto `?demo=1`'s shared `DEMO_MODEL` was tried first and reverted,
+ * after it broke two unrelated desktop guards that generically iterate
+ * "every project" in the sidebar.
  */
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -43,7 +49,12 @@ const repoRoot = path.resolve(here, '..');
 
 export default defineConfig({
   testDir: '.',
-  testMatch: ['phone-shell.pw.ts', 'phone-core-loop.pw.ts', 'phone-overflow.pw.ts'],
+  testMatch: [
+    'phone-shell.pw.ts',
+    'phone-core-loop.pw.ts',
+    'phone-overflow.pw.ts',
+    'phone-cache-timer.pw.ts',
+  ],
   outputDir: path.join(here, 'test-results'),
   workers: 1,
   retries: 0,

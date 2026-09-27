@@ -362,6 +362,18 @@ const EN = {
   'settings.sessions.provider.label': 'default provider',
   'settings.sessions.sendKey.label': 'send key',
   'settings.sessions.sendKey.hint': 'which key sends the prompt you are typing to the session',
+  // Operator, translated from Orca's own Agents settings: "Claude caches your
+  // conversation to reduce costs. When idle too long the cache expires and
+  // the next message resends full context at higher cost. This shows a
+  // countdown so you know when to resume." The row and its note carry that
+  // same explanation in vam's own voice.
+  'settings.sessions.cacheTimer.label': 'cache timer',
+  'settings.sessions.cacheTimer.hint':
+    'a countdown on an idle Claude Code session, to when its prompt cache expires',
+  'settings.sessions.cacheTimer.on': 'on',
+  'settings.sessions.cacheTimer.off': 'off',
+  'settings.sessions.cacheTimer.note':
+    'Claude caches a session’s context for a few minutes to an hour after it last did anything; once that cache expires, the next message you send resends the whole context at the uncached price. The badge shows how long is left, beside the age, only while a session is idle or waiting on you.',
 
   // ── Integrations ─────────────────────────────────────────────────────────
   // Operator: "add an Integrations section in Settings, to connect a GitHub

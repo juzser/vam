@@ -32,6 +32,7 @@ import {
 import { DEFAULT_SESSION_FILTERS, type SessionFilters } from '../domain/session-filter.js';
 import { type KeyBindings, MAX_BINDINGS, setActiveBindings } from '../keyboard/chords.js';
 import { setActiveProvider } from '../sources/provider.js';
+import { DEFAULT_CACHE_TIMER, readCacheTimer } from './cache-timer.js';
 import { DEFAULT_CONCISE_OUTPUT, readConciseOutput } from './concise-output.js';
 import {
   clampEditorIndent,
@@ -679,6 +680,18 @@ export type Prefs = {
    */
   readonly notifyWaiting: boolean;
   /**
+   * Whether the sidebar draws a countdown to when a Claude Code session's
+   * prompt cache expires. `prefs/cache-timer.ts` carries the default and the
+   * operator's own ask; `domain/cache-timer.ts` is the rule this gates and
+   * `panels/CacheCountdown.tsx` the row it gates.
+   *
+   * GLOBAL and per device, the same fact `notifyWaiting` is: a countdown is
+   * a reading preference about the machine looking at the sidebar, not
+   * about the session it counts down for. Exempt from the icon TTL for the
+   * same reason.
+   */
+  readonly cacheTimer: boolean;
+  /**
    * Which face a `.md` file opens wearing in the Files tab: the rendered
    * document, or the raw text. `prefs/files-markdown-view.ts` carries the
    * default and the direction it is normalised in; this is the one field
@@ -780,6 +793,7 @@ export const EMPTY_PREFS: Prefs = {
   narrowViews: DEFAULT_NARROW_VIEWS,
   conciseOutput: DEFAULT_CONCISE_OUTPUT,
   notifyWaiting: DEFAULT_NOTIFY_WAITING,
+  cacheTimer: DEFAULT_CACHE_TIMER,
   filesMarkdownView: DEFAULT_FILES_MARKDOWN_VIEW,
   streamingTerminal: DEFAULT_STREAMING_TERMINAL,
   // A truly empty payload has nothing to migrate FROM -- it already reads
@@ -1073,6 +1087,9 @@ function parsePrefs(
     // Per field like every line above it; a boolean is a choice and anything
     // else is the default, which is ON (`./notify.ts` says why).
     notifyWaiting: readNotifyWaiting((parsed as { notifyWaiting?: unknown }).notifyWaiting),
+    // Per field like every line above it; a boolean is a choice and anything
+    // else is the default, which is ON (`./cache-timer.ts` says why).
+    cacheTimer: readCacheTimer((parsed as { cacheTimer?: unknown }).cacheTimer),
     // Per field like every line above it, and normalised in the direction
     // `files-markdown-view.ts` argues at length: unlike every sibling here,
     // the safe default for an UNREADABLE value is the NEW behaviour
@@ -1721,6 +1738,12 @@ export function setStreamingTerminal(prefs: Prefs, on: unknown): Prefs {
  *  banner, and a switch that is off makes no call at all. */
 export function setNotifyWaiting(prefs: Prefs, on: unknown): Prefs {
   return { ...prefs, notifyWaiting: readNotifyWaiting(on) };
+}
+
+/** Normalised on the way in as well as on the way out, like `setNotifyWaiting`
+ *  above it. The one caller is the Sessions settings row's own switch. */
+export function setCacheTimer(prefs: Prefs, on: unknown): Prefs {
+  return { ...prefs, cacheTimer: readCacheTimer(on) };
 }
 
 /** Normalised on the way in as well as on the way out, like every setter

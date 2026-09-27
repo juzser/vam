@@ -17,6 +17,7 @@ import {
   listLiveAgents,
   parseAgentRows,
 } from '../../src/main/sources/claude-code/agents.js';
+import { NO_CACHE_ACTIVITY } from '../../src/main/sources/claude-code/cache-activity.js';
 import {
   clearPrRepoOverrides,
   setPrRepoOverrides,
@@ -1246,6 +1247,7 @@ describe('loadClaudeCodeProjects', () => {
         activity: null,
         decisions: [],
         questions: [],
+        cache: NO_CACHE_ACTIVITY,
       },
       roster: { agents: [], running: 0 },
       mtimeMs: over.mtimeMs ?? null,
@@ -1885,6 +1887,65 @@ describe('loadClaudeCodeProjects', () => {
   });
 
   /**
+   * THE SIDEBAR'S CACHE-TIMER COUNTDOWN, end to end: a real transcript in, a
+   * `Session` carrying `lastCacheActivityAt`/`cacheTtlMs` out.
+   * `claude-code-cache-activity.test.ts` owns the reading rule itself; this
+   * only proves `loadClaudeCodeProjects` actually threads it through rather
+   * than dropping it on the way from `read.facts.cache` to the row.
+   */
+  describe('cache activity', () => {
+    const cacheWrite = (timestamp: string) => ({
+      type: 'assistant',
+      timestamp,
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'ok' }],
+        usage: {
+          cache_creation_input_tokens: 18687,
+          cache_read_input_tokens: 0,
+          cache_creation: { ephemeral_1h_input_tokens: 18687, ephemeral_5m_input_tokens: 0 },
+        },
+      },
+    });
+
+    it('carries the transcript’s own cache reading onto the session', async () => {
+      writeTranscript('proj', 'sess-1', jsonl(cacheWrite('2026-09-03T09:00:00.000Z')));
+      const [project] = await loadClaudeCodeProjects(root, [agent()], NOW);
+      const session = project?.sessions[0];
+      expect(session?.lastCacheActivityAt).toBe('2026-09-03T09:00:00.000Z');
+      expect(session?.cacheTtlMs).toBe(60 * 60 * 1000);
+    });
+
+    it('reports null, not absent, for a session with no cache-bearing line', async () => {
+      writeTranscript('proj', 'sess-1', jsonl(reply('no usage on this one')));
+      const [project] = await loadClaudeCodeProjects(root, [agent()], NOW);
+      const session = project?.sessions[0];
+      expect(session?.lastCacheActivityAt).toBeNull();
+      expect(session?.cacheTtlMs).toBeNull();
+    });
+
+    /**
+     * THE SOURCE'S OWN CLOCK, ALONGSIDE ITS OWN READING -- `model.ts`'s own
+     * header on `cacheSourceNowMs`: a paired device's clock can disagree
+     * with this machine's, so the renderer needs THIS poll's `nowMs` beside
+     * the activity it timed, not just the activity itself.
+     */
+    it('stamps the poll’s own nowMs onto the session when there is cache activity to time', async () => {
+      writeTranscript('proj', 'sess-1', jsonl(cacheWrite('2026-09-03T09:00:00.000Z')));
+      const [project] = await loadClaudeCodeProjects(root, [agent()], NOW);
+      const session = project?.sessions[0];
+      expect(session?.cacheSourceNowMs).toBe(NOW);
+    });
+
+    it('reports null, not the poll’s nowMs, when there is no cache activity to time', async () => {
+      writeTranscript('proj', 'sess-1', jsonl(reply('no usage on this one')));
+      const [project] = await loadClaudeCodeProjects(root, [agent()], NOW);
+      const session = project?.sessions[0];
+      expect(session?.cacheSourceNowMs).toBeNull();
+    });
+  });
+
+  /**
    * `loadClaudeCodeProjects` used to read each session's transcript inside a
    * sequential `for` loop, so a batch of N sessions cost N reads back to
    * back. The read seam (`readTranscriptOf`, the function's last parameter)
@@ -1893,7 +1954,14 @@ describe('loadClaudeCodeProjects', () => {
    */
   describe('concurrent transcript reads', () => {
     const emptyRead = (branch: string) => ({
-      facts: { aiTitle: null, branch, activity: null, decisions: [], questions: [] },
+      facts: {
+        aiTitle: null,
+        branch,
+        activity: null,
+        decisions: [],
+        questions: [],
+        cache: NO_CACHE_ACTIVITY,
+      },
       roster: { agents: [], running: 0 },
       mtimeMs: null,
       birthtimeMs: null,

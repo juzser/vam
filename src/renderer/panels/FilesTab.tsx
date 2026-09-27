@@ -541,9 +541,18 @@ export function FilesTab({
     root,
     read,
     write,
-    onNormalizedBeforeSave: useCallback((path: string, normalizedContent: string) => {
-      const caret = Math.min(textareaRef.current?.selectionStart ?? 0, normalizedContent.length);
-      pendingSelection.current = { path, start: caret, end: caret };
+    // S3 — a save that trims whitespace on a line ABOVE the caret must not
+    // let it jump: `mapOffset` is `files-save-normalize.ts`'s own map from an
+    // offset in the OLD text to the same logical position in the new one,
+    // shifted left by whatever was removed before it, rather than merely
+    // clamped to the new, shorter length. Both ends of a real selection are
+    // mapped (not just the caret collapsed to a point), so a highlighted
+    // range survives a save the same way a bare caret does.
+    onNormalizedBeforeSave: useCallback((path: string, mapOffset: (offset: number) => number) => {
+      const area = textareaRef.current;
+      const start = mapOffset(area?.selectionStart ?? 0);
+      const end = mapOffset(area?.selectionEnd ?? area?.selectionStart ?? 0);
+      pendingSelection.current = { path, start, end };
     }, []),
   });
 

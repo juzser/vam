@@ -100,18 +100,23 @@ describe.skipIf(!harnessInstalled)(
       ]);
     });
 
-    it('the phone config collects exactly its own three specs', () => {
-      // THREE, AND NONE OF THEM SHARE A FIXTURE. `phone-shell.pw.ts` runs
+    it('the phone config collects exactly its own four specs', () => {
+      // FOUR, AND NOT ALL OF THEM SHARE A FIXTURE. `phone-shell.pw.ts` runs
       // against `?demo=1`; `phone-core-loop.pw.ts` routes `/api/*` itself,
       // because demo declines nothing and the phone vam is used from is the
       // web build over a remote server that turns four capabilities off;
       // `phone-overflow.pw.ts` routes `/api/*` on a THIRD stub, because it
       // needs `terminal: true`, several sessions in one project and an open
       // question with long unbroken text all at once, which neither of the
-      // other two fixtures states (see that file's own header). All three
-      // serve from the same build on the same port, which is why one config
-      // runs all three.
+      // other two fixtures states (see that file's own header).
+      // `phone-cache-timer.pw.ts` is the fourth, and routes `/api/*` on a
+      // FOURTH stub of its own rather than `?demo=1`'s shared `DEMO_MODEL`:
+      // seeding the three cache-timer phases directly onto that shared
+      // fixture was tried first and reverted, after it broke two unrelated
+      // desktop guards that generically iterate "every project" in the
+      // sidebar (see `phone-cache-timer.pw.ts`'s own header).
       expect(collectedFiles('playwright.phone.config.ts')).toEqual([
+        'phone-cache-timer.pw.ts',
         'phone-core-loop.pw.ts',
         'phone-overflow.pw.ts',
         'phone-shell.pw.ts',

@@ -65,6 +65,10 @@ export function phoneSource(
      * test can hold the promise open and observe the in-flight `sending`
      * state before letting it settle. */
     recordPrompt?: (sessionId: string, text: string) => Promise<void>;
+    /** Present makes the source able to create a session in an existing
+     * project (`createSession` capability) and records what it was asked --
+     * the FAB's own route, and the per-project heading `+`'s. */
+    createSession?: (projectId: string, projectName: string) => Promise<void>;
   } = {},
 ): CanvasSource {
   const inner = {
@@ -78,7 +82,7 @@ export function phoneSource(
       slashCommands: false,
       renameSession: false,
       closeSession: over.closeSession !== undefined,
-      createSession: false,
+      createSession: over.createSession !== undefined,
       governance: false,
       pullRequests: false,
       terminal: false,
@@ -92,6 +96,7 @@ export function phoneSource(
     write: {
       recordPrompt: over.recordPrompt ?? (async () => {}),
       ...(over.closeSession === undefined ? {} : { closeSession: over.closeSession }),
+      ...(over.createSession === undefined ? {} : { createSession: over.createSession }),
     },
   };
   return { kind: 'session', source: inner as unknown as SessionSource, onWrote: () => {} };

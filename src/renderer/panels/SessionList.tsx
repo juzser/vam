@@ -59,7 +59,8 @@ import {
   useRef,
   useState,
 } from 'react';
-import type { Group, Project, SessionStatus } from '../domain/model.js';
+import { cacheTimerFor } from '../domain/cache-timer.js';
+import type { Group, Project, Session, SessionStatus, SourceId } from '../domain/model.js';
 import type {
   GroupBy,
   SessionEntry,
@@ -79,8 +80,10 @@ import {
 } from '../prefs/foreign-hidden-note.js';
 import type { EffectiveTheme } from '../prefs/prefs.js';
 import { markRegisterOf, SourceMark } from '../sources/provider-marks.js';
+import { CacheCountdown } from './CacheCountdown.js';
 import { ConfirmRemoveProject } from './ConfirmRemoveProject.js';
 import { ContextMenu, type ContextMenuItem } from './ContextMenu.js';
+import { useCacheTimerClockDriver } from './cache-timer-clock.js';
 import { GettingStarted } from './GettingStarted.js';
 import { IconMark, parseIcon } from './icon-value.js';
 import { Note } from './Note.js';
@@ -345,6 +348,31 @@ function splitBranch(branch: string): { head: string; tail: string } {
   return cut === -1
     ? { head: '', tail: branch }
     : { head: branch.slice(0, cut + 1), tail: branch.slice(cut + 1) };
+}
+
+/**
+ * Is there a cache timer worth MOUNTING `CacheCountdown` for on this row at
+ * all -- the gate at each render site, so a row this feature can say nothing
+ * about never subscribes to the shared clock (`cache-timer-clock.ts`'s own
+ * "cheap to render" argument: a subscription that never fires is still one
+ * more listener in the set every tick walks).
+ *
+ * DELIBERATELY NOT THE WHOLE OF `cacheTimerFor`'s OWN GATE: this never reads
+ * a clock, so it cannot answer "expired yet" -- only "could this row ever
+ * have an answer". `CacheCountdown` still runs `cacheTimerFor` itself on
+ * every tick for the live phase; this only decides whether that component
+ * exists in the tree at all.
+ */
+function hasCacheTimerData(
+  session: Pick<Session, 'status' | 'lastCacheActivityAt' | 'cacheTtlMs'>,
+  rowSource: SourceId | null,
+): boolean {
+  return (
+    rowSource === 'claude-code' &&
+    (session.status === 'idle' || session.status === 'waiting') &&
+    session.lastCacheActivityAt != null &&
+    session.cacheTtlMs != null
+  );
 }
 
 /**
@@ -1115,6 +1143,18 @@ export type SessionListProps = {
   readonly width?: number;
   /** `PaneResizer`, positioned by the caller — kept out of this file's own concerns. */
   readonly resizeHandle: ReactNode;
+  /**
+   * The Sessions settings switch (`prefs.cacheTimer`) -- draw a countdown to
+   * when a Claude Code session's prompt cache expires, beside its age.
+   * `CacheCountdown.tsx` is the row; `cache-timer-clock.ts` is the one shared
+   * `setInterval` every row's countdown ticks off, driven once by this pane
+   * regardless of how many rows carry one.
+   *
+   * Optional, defaulting to `false` — like every flag on this pane, most
+   * tests that render it are about something else, and a required prop would
+   * have edited every one of them for a feature they do not exercise.
+   */
+  readonly cacheTimerEnabled?: boolean;
 };
 
 /**
@@ -1366,7 +1406,32 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     onToggleTheme,
     width,
     resizeHandle,
+    cacheTimerEnabled = false,
   } = props;
+
+  // ONE DRIVER FOR THE WHOLE PANE, never one per row -- `cache-timer-
+  // clock.ts`'s own header. `enabled` is the setting COMPOSED WITH "does any
+  // visible row currently hold a live (not yet expired) countdown" --
+  // `anyLiveCountdown` below -- not the setting alone: a pane where every
+  // row has already expired has nothing left for a tick to redraw, and
+  // ticking one anyway was the running-forever defect this composition
+  // fixes. Recomputed each render off `entries`, which is exactly as often
+  // as a fresh poll can change the answer -- this never reads a live clock
+  // on every SECOND, only on every POLL, so it costs nothing on the ticks
+  // themselves and never re-renders this list off one (`cacheTimerFor`'s own
+  // read of `Date.now()` here is one call per poll, not per tick).
+  const anyLiveCountdown = useMemo(() => {
+    if (!cacheTimerEnabled) return false;
+    const now = Date.now();
+    for (const entry of entries) {
+      const rowSource = entry.session.source ?? entry.project.source ?? null;
+      if (!hasCacheTimerData(entry.session, rowSource)) continue;
+      const state = cacheTimerFor(entry.session, now, cacheTimerEnabled);
+      if (state !== null && state.phase !== 'expired') return true;
+    }
+    return false;
+  }, [entries, cacheTimerEnabled]);
+  useCacheTimerClockDriver(cacheTimerEnabled && anyLiveCountdown);
 
   /**
    * What a control wears while its own action is running: it cannot be pressed
@@ -2248,6 +2313,16 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     // in the words the session screen's IN region shows.
     // Newest first, which is the order `decisions` is in.
     const newestAsk = session.decisions[0]?.input ?? null;
+    // THE PHONE PREVIEW LINE'S OWN TEXT: what the session last SAID, preferred
+    // over what it was last ASKED -- `output` is `null` while a turn is still
+    // in flight, and `newestAsk` (the operator's own prompt) is the one honest
+    // thing left to show while it is. Drawn only on a row that is not
+    // `needsYou`: that row already carries `data-row-question` below, built
+    // from these same two fields (`waitingCause`, `newestAsk`) plus the reason
+    // it is waiting -- a second line repeating the same sentence would be the
+    // "invisible copy read twice" `StatusMark`'s own comment warns against,
+    // in prose rather than in ARIA.
+    const preview = session.decisions[0]?.output ?? newestAsk;
     // WHAT THE SESSION SAYS IT IS BLOCKED ON, or nothing.
     // Three states collapse to two here for the same reason
     // they do in `DetailPanel`: absent ("no surface reports
@@ -2574,6 +2649,9 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                       </span>
                     </>
                   )}
+                  {cacheTimerEnabled && hasCacheTimerData(session, rowSource) && (
+                    <CacheCountdown session={session} enabled={cacheTimerEnabled} />
+                  )}
                 </span>
               )}
               {/* The waiting row's third line: what is being
@@ -2608,6 +2686,30 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                     <span aria-hidden="true"> · </span>
                   )}
                   {newestAsk}
+                </span>
+              )}
+              {/* THE PREVIEW LINE: what a row not currently `needsYou` last
+                  said, so a row can be read without opening it -- the gap a
+                  mobile audit of Orca's own list named directly (its rows
+                  carry "the last message text", not only a status word). The
+                  provider mark opens it for the same reason the meta line
+                  above wears one: two rows sharing a title can still be told
+                  apart, and this is the line an operator is most likely to
+                  actually READ.
+                  NOT ON A WAITING ROW: `data-row-question` above already
+                  shows this session's newest turn (`waitingCause`, then
+                  `newestAsk`), and a second line built from the same
+                  `decisions[0]` would repeat it under a different name. NOT ON
+                  A ROW WITH NOTHING TO SHOW: `preview === null` is a session
+                  vam has no turn for yet (a fresh, `unstarted` pane), and an
+                  empty line is not information. */}
+              {phone && !needsYou && preview !== null && (
+                <span
+                  data-row-preview
+                  className="flex min-w-0 items-center gap-1 truncate text-control text-ink-dim"
+                >
+                  <ProviderLane source={rowSource} />
+                  <span className="min-w-0 flex-1 truncate">{preview}</span>
                 </span>
               )}
               {/* Branch on the left, time on the right, and nothing
@@ -2834,6 +2936,9 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                       </span>
                     )}
                   </span>
+                  {cacheTimerEnabled && hasCacheTimerData(session, rowSource) && (
+                    <CacheCountdown session={session} enabled={cacheTimerEnabled} />
+                  )}
                 </span>
               )}
             </button>
@@ -3723,7 +3828,24 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
           free space split it, which is the bug. */}
       {(!showGettingStarted || showStartingProvisional) && (
         <OverlayScroll
-          className="flex flex-1 flex-col gap-3.5 overflow-y-auto px-2.5 py-2.5"
+          className={[
+            'flex flex-1 flex-col gap-3.5 overflow-y-auto px-2.5 pt-2.5',
+            // PHONE ONLY: `PhoneShell.tsx`'s own floating "+" is `absolute`
+            // over THIS pane (56px tall, 16px off its bottom edge), and
+            // without this the last row's own bottom could sit UNDER it --
+            // a real defect, measured on the shipped screenshot
+            // (`phone-controls-list-dark-after.png`): the FAB covered the
+            // last row's own preview line. This reserves the FAB's full
+            // footprint (its height, its own margin, one more 16px of
+            // clearance so the row does not sit flush against its edge) plus
+            // the safe-area inset -- belt over what the footer below already
+            // handles, since this pane's padding cannot know whether a
+            // caller other than `PhoneShell.tsx` will ever draw a FAB over
+            // it without also reserving room. `e2e/phone-shell.pw.ts`'s own
+            // scroll-to-bottom check holds that the last row's rectangle
+            // never intersects the FAB's, in a real browser.
+            phone ? 'pb-[calc(56px+16px+16px+env(safe-area-inset-bottom))]' : 'pb-2.5',
+          ].join(' ')}
           scrollRef={(el) => {
             scrollerRef.current = el;
           }}
@@ -4308,7 +4430,20 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                           onClick={() => toggleCollapse(section.project)}
                           className={[
                             'vam-tap vam-hit-24 flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-[5px] text-ink-faint hover:text-ink focus:opacity-100',
-                            isRevealed || isCollapsed ? 'opacity-100' : 'opacity-0',
+                            // PHONE, ALWAYS REVEALED: `isRevealed` is
+                            // `onMouseEnter`/`onMouseLeave` state, and a touch
+                            // pointer has neither -- so before this line a
+                            // phone could reach the fold only on a project it
+                            // had ALREADY collapsed (`isCollapsed` forces the
+                            // chevron on), never the tap that collapses one in
+                            // the first place. `collapsedProjects` is already
+                            // wired to `prefs` for every surface
+                            // (`Canvas.tsx`'s own comment on the pair), so the
+                            // fold already persisted; it was simply unreachable
+                            // by finger. `styles.css` cannot answer this for a
+                            // JSX ternary, so the guard is a third disjunct, not
+                            // a new rule.
+                            isRevealed || isCollapsed || phone ? 'opacity-100' : 'opacity-0',
                           ].join(' ')}
                         >
                           {isCollapsed ? (
@@ -4338,7 +4473,11 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                           }
                           className={[
                             'vam-tap vam-hit-24 flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-full border border-transparent text-ink-faint hover:border-line-strong hover:text-ink focus:opacity-100',
-                            isRevealed || openMenu === section.project.id
+                            // Same reveal-on-phone rule as the fold beside it:
+                            // rename, icon and worktree all live behind this
+                            // trigger and a hover-only reveal put every one of
+                            // them out of a finger's reach.
+                            isRevealed || openMenu === section.project.id || phone
                               ? 'opacity-100'
                               : 'opacity-0',
                           ].join(' ')}
@@ -4376,7 +4515,10 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                             className={[
                               'vam-tap vam-hit-24 flex h-[19px] w-[19px] flex-none cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-quiet hover:border-line-strong hover:text-ink-dim focus:opacity-100',
                               isRevealed ||
-                              section.items.some((entry) => entry.session.id === focusedSessionId)
+                              section.items.some(
+                                (entry) => entry.session.id === focusedSessionId,
+                              ) ||
+                              phone
                                 ? 'opacity-100'
                                 : 'opacity-0',
                             ].join(' ')}
