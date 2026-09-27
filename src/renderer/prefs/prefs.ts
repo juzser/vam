@@ -22,6 +22,7 @@
  */
 
 import { DEFAULT_PROVIDER_ID, type ProviderId, readProviderId } from '../../shared/providers.js';
+import { clampUiZoomPercent, DEFAULT_UI_ZOOM } from '../../shared/ui-zoom.js';
 import type { CanvasModel, SourceId } from '../domain/model.js';
 import {
   DEFAULT_VIEW_OPTIONS,
@@ -92,12 +93,18 @@ import {
   setActiveTerminalFontSize,
 } from './terminal-font.js';
 import {
+  DEFAULT_TERMINAL_FONT_FAMILY,
+  readTerminalFontFamily,
+  setActiveTerminalFontFamily,
+} from './terminal-font-family.js';
+import {
   DEFAULT_TERMINAL_SCHEME_PREF,
   readTerminalSchemePref,
   resolveTerminalScheme,
   setActiveTerminalScheme,
   type TerminalSchemePref,
 } from './terminal-scheme.js';
+import { applyUiFontFamily, DEFAULT_UI_FONT_FAMILY, readUiFontFamily } from './ui-font-family.js';
 import { DEFAULT_NARROW_VIEWS, readNarrowViews, setActiveNarrowViews } from './view-width.js';
 import { readYoloStart, type YoloStartMark } from './yolo-starts.js';
 
@@ -479,6 +486,38 @@ export type Prefs = {
    *  this root, so storing the root moves them all and cannot flatten them. */
   readonly outFontSize: number;
   /**
+   * THE APP CHROME'S OWN FONT -- the sidebar, the settings dialog, every
+   * label and button -- separate from `terminalFontFamily` above, which is a
+   * different face for a different surface entirely. `''` means "the shipped
+   * face, untouched" (`ui-font-family.ts`'s own header carries the whole
+   * argument, including why this is a plain DOM write rather than a store).
+   *
+   * Exempt from the icon TTL like `theme` and `panes`: it describes the
+   * person, not a session that stopped existing.
+   */
+  readonly uiFontFamily: string;
+  /**
+   * THE APP CHROME'S OWN ZOOM, 80..150%, reversing issue 281 (`main/zoom.ts`'s own
+   * header carries the whole story; `shared/ui-zoom.ts` carries the range and
+   * the clamp both processes hold this to). ONE PREFERENCE THAT CROSSES INTO
+   * MAIN, like `prRepos` -- `activatePrefs` pushes it to `webContents.
+   * setZoomFactor` on every read and write, because what it changes happens
+   * in main, which has no access to this store.
+   *
+   * DESKTOP ONLY IN EFFECT, NOT IN STORAGE: the phone/web build stores and
+   * reads this preference exactly like every other field -- it is still
+   * `localStorage`, per browser, per person -- but there is no `window.api.
+   * prefs.setUiZoom` for `activatePrefs` to call there (`window.api` has no
+   * `prefs` member at all outside the desktop bridge), and Electron's own
+   * `webContents.setZoomFactor` has no equivalent in a plain browser tab. A
+   * paired phone's own Settings therefore has no zoom row at all
+   * (`sections.ts`'s `PHONE_SECTIONS`).
+   *
+   * Exempt from the icon TTL like `theme` and `panes`: it describes the
+   * person, not a session that stopped existing.
+   */
+  readonly uiZoom: number;
+  /**
    * The provider a new session is started with, chosen in settings.
    *
    * Stored as an id rather than a command: the command belongs to the provider
@@ -634,6 +673,21 @@ export type Prefs = {
    * person, not a session that stopped existing.
    */
   readonly terminalFontSize: number;
+  /**
+   * The tmux screen's own FONT FAMILY, alongside its already-shipped size
+   * directly above -- one family name, or `''` for "the shipped stack,
+   * untouched" (`terminal-font-family.ts`'s own header carries the whole
+   * argument, including why this is a store with a subscription like the
+   * size beside it rather than a custom property).
+   *
+   * GLOBAL, not per pane and not per session, for `terminalFontSize`'s own
+   * reason: `Canvas.tsx` mounts one `TerminalStreamTab` per split leaf with
+   * no dialogue in which a pane opened by a keystroke could be asked.
+   *
+   * Exempt from the icon TTL like `theme` and `panes`: it describes the
+   * person, not a session that stopped existing.
+   */
+  readonly terminalFontFamily: string;
   /**
    * The colours the tmux screen is drawn in: a named theme per APP theme,
    * the colours moved off each, and how opaque the ground is painted.
@@ -866,6 +920,8 @@ export const EMPTY_PREFS: Prefs = {
   palette: { dark: {}, light: {} },
   keyBindings: {},
   outFontSize: DEFAULT_OUT_FONT_SIZE,
+  uiFontFamily: DEFAULT_UI_FONT_FAMILY,
+  uiZoom: DEFAULT_UI_ZOOM,
   defaultProvider: DEFAULT_PROVIDER_ID,
   lastFocus: null,
   detailTab: null,
@@ -875,6 +931,7 @@ export const EMPTY_PREFS: Prefs = {
   editorIndent: DEFAULT_EDITOR_INDENT,
   filesTreeWidth: null,
   terminalFontSize: DEFAULT_TERMINAL_FONT_SIZE,
+  terminalFontFamily: DEFAULT_TERMINAL_FONT_FAMILY,
   terminalScheme: DEFAULT_TERMINAL_SCHEME_PREF,
   narrowViews: DEFAULT_NARROW_VIEWS,
   conciseOutput: DEFAULT_CONCISE_OUTPUT,
@@ -1113,6 +1170,13 @@ function parsePrefs(
     // Per field like the focus share above it, and clamped here rather than
     // only in the setter: this is the read a hand-edited file arrives by.
     outFontSize: readOutFontSize((parsed as { outFontSize?: unknown }).outFontSize),
+    // Per field like every line above it: a payload from a vam that predates
+    // this field has no key at all and reads back as unset -- the shipped
+    // face, untouched.
+    uiFontFamily: readUiFontFamily((parsed as { uiFontFamily?: unknown }).uiFontFamily),
+    // Per field like every line above it, and clamped rather than merely
+    // defaulted: a hand-edited payload never passed the stepper.
+    uiZoom: clampUiZoomPercent((parsed as { uiZoom?: unknown }).uiZoom),
     // Per field like everything above it, and normalised rather than merely
     // defaulted: an id an older vam stored for a provider that no longer
     // exists, or a hand-edited one, must read back as the working default. A
@@ -1167,6 +1231,12 @@ function parsePrefs(
     // back as the size the pane ships at.
     terminalFontSize: readTerminalFontSize(
       (parsed as { terminalFontSize?: unknown }).terminalFontSize,
+    ),
+    // Per field like every line above it: a payload from a vam that predates
+    // this field has no key at all and reads back as unset -- the shipped
+    // stack, untouched.
+    terminalFontFamily: readTerminalFontFamily(
+      (parsed as { terminalFontFamily?: unknown }).terminalFontFamily,
     ),
     // Per field like every line above it -- and per field INSIDE it as well:
     // `readTerminalSchemePref` lets an unknown theme id cost the id, a bad
@@ -1789,6 +1859,20 @@ export function setOutFontSize(prefs: Prefs, size: number): Prefs {
   return { ...prefs, outFontSize: clampOutFontSize(size) };
 }
 
+/** Normalised on the way in as well as on the way out, like every setter in
+ *  this file: a caller that stored something unreadable must not put a
+ *  corrupted "font" on `body`'s own style attribute. */
+export function setUiFontFamily(prefs: Prefs, family: unknown): Prefs {
+  return { ...prefs, uiFontFamily: readUiFontFamily(family) };
+}
+
+/** Clamped on the way in as well, like `setOutFontSize`: the stepper and the
+ *  chord handler both already clamp, but a future caller -- or a hand-edited
+ *  payload -- could send anything. */
+export function setUiZoom(prefs: Prefs, percent: unknown): Prefs {
+  return { ...prefs, uiZoom: clampUiZoomPercent(percent) };
+}
+
 /** Normalised on the way in as well as on the way out, so no caller can store
  *  a provider vam has no command for. */
 export function setDefaultProvider(prefs: Prefs, id: unknown): Prefs {
@@ -1828,6 +1912,13 @@ export function setEditorIndent(prefs: Prefs, width: unknown): Prefs {
  *  dialog shows nobody having chosen. */
 export function setTerminalFontSize(prefs: Prefs, size: unknown): Prefs {
   return { ...prefs, terminalFontSize: readTerminalFontSize(size) };
+}
+
+/** Normalised on the way in as well as on the way out, like every setter
+ *  above it: a caller that stored something unreadable must not splice a
+ *  corrupted family name into xterm's own `fontFamily` option. */
+export function setTerminalFontFamily(prefs: Prefs, family: unknown): Prefs {
+  return { ...prefs, terminalFontFamily: readTerminalFontFamily(family) };
 }
 
 /** Normalised on the way in as well as on the way out, like every setter above
@@ -2636,6 +2727,31 @@ export type ThemePalettes = Readonly<Record<EffectiveTheme, PaletteOverrides>>;
  * map that preceded it, and was wrong: one map applied to both themes froze
  * the other theme on the first pick.)
  */
+/**
+ * THE SPLIT-PANE DIVIDER, ADDED HERE FOR STORAGE AND APPLICATION ALONE.
+ *
+ * It rides `PALETTE_TOKENS`'s own machinery -- per-theme storage, `applyPalette`'s
+ * document write, the per-token reset -- because that machinery is exactly
+ * right for one more colour token, and inventing a second one for a single
+ * swatch would be the "two lists of sizes" hazard `terminal-font.ts` warns
+ * against, paid again. WHAT IS DIFFERENT is where the swatch is DRAWN:
+ * `SettingsOverlay.tsx` filters this one token out of the generic grid below
+ * (`INTERFACE_PALETTE_TOKENS`) and gives it its own row inside the Terminal
+ * section instead, because that is where the operator asked for a pane
+ * divider colour to live -- next to the terminal's own colour rows, not
+ * folded into the app-wide "colours" grid where nobody drawing a splitter
+ * would think to look for it.
+ *
+ * NOT `--vam-line-loudest`, THE COLOUR THE DIVIDER PAINTED BEFORE THIS FIELD
+ * EXISTED. That token is shared by a dozen call sites across the app (file
+ * tree hovers, the worktree list, the pairing panel's buttons) -- moving it
+ * would repaint all of them for a setting that asked about one splitter.
+ * `styles.css` gives this token the SAME default value `--vam-line-loudest`
+ * already has in both themes, so shipping the field moves nobody's screen
+ * until they actually pick a colour.
+ */
+export const PANE_DIVIDER_TOKEN = '--vam-pane-divider';
+
 export const PALETTE_TOKENS: readonly { readonly token: string; readonly label: string }[] = [
   { token: '--vam-pane', label: 'pane' },
   { token: '--vam-panel', label: 'panel' },
@@ -2664,7 +2780,24 @@ export const PALETTE_TOKENS: readonly { readonly token: string; readonly label: 
   { token: '--vam-idle', label: 'idle' },
   { token: '--vam-done', label: 'done' },
   { token: '--vam-failed', label: 'failed' },
+  // See `PANE_DIVIDER_TOKEN`'s own comment just above this table: it rides
+  // this machinery but is deliberately drawn in the Terminal section, not in
+  // the grid this array otherwise feeds.
+  { token: PANE_DIVIDER_TOKEN, label: 'pane divider' },
 ];
+
+/**
+ * The grid `SettingsOverlay.tsx`'s Interface section actually draws: every
+ * offered token EXCEPT the pane divider, which has its own row elsewhere
+ * (`PANE_DIVIDER_TOKEN`'s own comment). `applyPalette`, `TEMPLATE_TOKENS` and
+ * the per-theme reset all still walk the FULL `PALETTE_TOKENS` -- only the
+ * grid's own rendering is narrower, so a whole-theme reset still clears this
+ * token along with every other one.
+ */
+export const INTERFACE_PALETTE_TOKENS: readonly {
+  readonly token: string;
+  readonly label: string;
+}[] = PALETTE_TOKENS.filter((entry) => entry.token !== PANE_DIVIDER_TOKEN);
 
 /**
  * THE DEEPEST SURFACE, WHICH IS NOT A SWATCH AND IS NOT UNSETTABLE EITHER.
@@ -2990,6 +3123,8 @@ export function applyOutFontSize(
 export function activatePrefs(prefs: Prefs): Prefs {
   applyPalette(paletteFor(prefs.palette, effectiveTheme(prefs.theme)));
   applyOutFontSize(prefs.outFontSize);
+  applyUiFontFamily(prefs.uiFontFamily);
+  setActiveTerminalFontFamily(prefs.terminalFontFamily);
   setActiveBindings(prefs.keyBindings);
   setActiveProvider(prefs.defaultProvider);
   setActiveFocusView(prefs.focusView);
@@ -3013,11 +3148,12 @@ export function activatePrefs(prefs: Prefs): Prefs {
     resolveTerminalScheme(prefs.terminalScheme, effectiveTheme(prefs.theme)).background,
   );
   /**
-   * ONE PREFERENCE CROSSES INTO MAIN, because what it changes happens there:
-   * `gh` is spawned by `main/sources/claude-code/source.ts`, which has no
-   * access to this store.
+   * TWO PREFERENCES CROSS INTO MAIN, because what each one changes happens
+   * there: `gh` is spawned by `main/sources/claude-code/source.ts`, and
+   * `webContents.setZoomFactor` is a main-process call — neither has access
+   * to this store.
    *
-   * A SECOND CROSSING LIVED HERE ONCE, pushing `conciseOutput` to
+   * A THIRD CROSSING LIVED HERE ONCE, pushing `conciseOutput` to
    * `main/terminal/concise.ts` on every read and write. That module is
    * deleted -- see `src/shared/adhd-skill.ts`'s header for what replaced it --
    * and nothing in main reads this preference any more, so there is nothing
@@ -3040,6 +3176,15 @@ export function activatePrefs(prefs: Prefs): Prefs {
    * has no `prefs` at all and this must simply not happen.
    */
   globalThis.window?.api?.prefs?.setPrRepos?.(prefs.prRepos)?.catch?.(() => {});
+  /**
+   * issue 281's REVERSAL, THE SECOND CROSSING. Same fire-and-forget bargain as
+   * `setPrRepos` above, for the identical reason: absent in the browser
+   * build, where `window.api` has no `prefs` at all -- Electron's own
+   * `webContents.setZoomFactor` has no equivalent there regardless, so this
+   * is not merely swallowed but genuinely inapplicable outside the desktop
+   * app (`shared/ui-zoom.ts`, `main/zoom-ipc.ts`).
+   */
+  globalThis.window?.api?.prefs?.setUiZoom?.(prefs.uiZoom)?.catch?.(() => {});
   return prefs;
 }
 

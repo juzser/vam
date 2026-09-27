@@ -107,6 +107,19 @@ const EN = {
   'settings.interface.outText.label': 'out text',
   'settings.interface.outText.hint':
     "how large the agent's answer is drawn, in every response pane",
+  // THE APP CHROME'S OWN FONT, separate from `settings.terminal.fontFamily`
+  // below — a different face for a different surface. Free text only: there
+  // is no "detected sans fonts" scan the way the terminal's own picker has.
+  'settings.interface.uiFontFamily.label': 'UI font',
+  'settings.interface.uiFontFamily.hint':
+    "the app's own chrome — separate from the terminal's font",
+  // UI ZOOM — reverses issue 281 ("zoom to be gone"), at the operator's later,
+  // explicit request. The chords are printed here through `chordSymbols`,
+  // the exact rendering the keyboard editor uses, so this row and
+  // `docs/keyboard.md` cannot drift from what `chords.ts` actually binds.
+  'settings.interface.uiZoom.label': 'UI zoom',
+  'settings.interface.uiZoom.hint': '80–150% in steps — {in} in, {out} out',
+  'settings.interface.uiZoom.reset': 'reset to 100%',
 
   // ── Terminal ─────────────────────────────────────────────────────────────
   // SPLIT OUT OF APPEARANCE: everything about the terminal PANE's own paint,
@@ -129,6 +142,15 @@ const EN = {
   'settings.terminal.text.label': 'terminal text',
   'settings.terminal.text.hint':
     'how large the terminal screen is drawn — a bigger size fits fewer columns, and a running screen re-wraps',
+  // THE TERMINAL'S OWN FONT FAMILY, alongside its already-shipped size just
+  // above. A chip per font `main/fonts/list-monospace.ts` detected on this
+  // machine, plus the free-text field every chip fills — never the other
+  // way round, so there is one value and one way to set it.
+  'settings.terminal.fontFamily.label': 'terminal font',
+  'settings.terminal.fontFamily.hint': 'tried first, before the shipped fallback below it',
+  'settings.terminal.fontFamily.noneDetected': 'no monospace fonts detected — type one',
+  'settings.terminal.preview.label': 'preview',
+  'settings.terminal.preview.hint': 'the font, size and colours above, together',
   'settings.terminal.themes.title': 'Themes',
   // THE TERMINAL'S OWN SCHEME, in four rows. One theme row per APP theme
   // rather than one for the theme on screen, because a scheme is a published
@@ -172,6 +194,12 @@ const EN = {
   'settings.terminal.streamingTerminal.hint': 'a live xterm.js pane instead of periodic capture',
   'settings.terminal.streamingTerminal.on': 'on',
   'settings.terminal.streamingTerminal.off': 'off',
+  // THE SPLIT-PANE DIVIDER'S OWN COLOUR. Rides the same per-theme storage as
+  // the Interface grid's swatches (`PANE_DIVIDER_TOKEN`), drawn here instead
+  // — see that constant's own comment in `prefs.ts` for why.
+  'settings.terminal.paneDivider.label': 'pane divider',
+  'settings.terminal.paneDivider.hint':
+    'between two split panes, in {theme} — unset follows the app’s own',
 
   // ── Window & Sidebar ─────────────────────────────────────────────────────
   // NEW. For now it holds only `view width`, moved from Behaviour for the
@@ -536,6 +564,12 @@ const EN = {
   // its own size is the fold this whole surface exists to refuse.
   'steps.failed': 'failed',
   'steps.more': '+{count} more, not shown',
+
+  // ── Shared across more than one section's row ────────────────────────────
+  // `FontFamilyField`'s placeholder, read by both the terminal and the UI
+  // font rows — one control, one string, rather than a copy each row could
+  // drift from.
+  'settings.fontFamily.placeholder': 'system default',
 
   // ── Exercised by the catalogue's own tests, and by nothing else ──────────
   // Kept HERE rather than in the test file so that the shape a test asserts

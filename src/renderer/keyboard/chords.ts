@@ -736,6 +736,26 @@ export type KeyAction =
       belongs to whatever is being typed into. These two are gestures for
       READING, so Control is where a vim user's hand goes. */
   | { readonly kind: 'scrollHalf'; readonly delta: 1 | -1 }
+  /**
+   * `Mod-=` / `Mod-+` / `Mod--` — THE APP CHROME'S OWN ZOOM, 80..150% in 10%
+   * steps, reversing issue 281 (`main/zoom.ts`'s own header carries the whole
+   * story of what "reverse" means here and what stays refused).
+   *
+   * `Mod-0` IS ALREADY `focusList` AND STAYS THAT WAY — the operator's own
+   * constraint, and the reason there is no reset chord: a real
+   * `Cmd+Shift+0` cannot exist either (`normalizeKey`'s own header: "NOTHING
+   * IS BOUND UNDER `Mod-Shift-<digit>`, and nothing can be" — macOS
+   * screenshot keys own that whole row). The Settings row's own reset button
+   * is the way back to 100%.
+   *
+   * TWO CHORDS FOR "IN", NOT ONE. `=` and `+` share a physical key on a US
+   * layout, and Shift already changes which character `event.key` reports
+   * (`normalizeKey`'s "a shifted CHARACTER is already itself" rule) — so
+   * `Mod-=` and `Mod-+` are two distinct STRINGS this grammar has to bind
+   * separately for either spelling of the gesture to work, exactly the
+   * `?`/`Shift+/` shape the same rule already covers.
+   */
+  | { readonly kind: 'zoom'; readonly delta: 1 | -1 }
   | { readonly kind: 'cancel' };
 
 type ChordStep = {
@@ -910,6 +930,19 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   'Mod-7': { kind: 'selectTab', digit: 7 },
   'Mod-8': { kind: 'selectTab', digit: 8 },
   'Mod-9': { kind: 'selectTab', digit: 9 },
+  // THE APP CHROME'S OWN ZOOM — issue 281's reversal, `main/zoom.ts`'s own header
+  // carries the whole story. `Mod-0` two lines up is `focusList` and stays
+  // that way, so there is no reset chord here: a real `Cmd+Shift+0` cannot
+  // exist either (`normalizeKey`'s own header names the whole digit row as
+  // unreachable under Shift, macOS's screenshot keys), and the Settings
+  // row's own reset button is the nearer way back to 100%. `Mod-=` and
+  // `Mod-+` are the SAME physical key, unshifted and shifted — `normalizeKey`
+  // hands back a genuinely different string for each (Shift already changes
+  // `event.key` for a non-letter), so both are bound to the same act rather
+  // than leaving the shifted spelling dead.
+  'Mod-=': { kind: 'zoom', delta: 1 },
+  'Mod-+': { kind: 'zoom', delta: 1 },
+  'Mod--': { kind: 'zoom', delta: -1 },
   // THE SAME LIST, STEPPED — and the reason the digit row can afford to stop
   // at nine. `Mod-Shift-[`/`]` is the previous/next tab gesture macOS
   // browsers already teach, and it is app-level: nothing native answers it,
@@ -1403,6 +1436,14 @@ export function actionId(action: KeyAction): string {
       return `stepSplit:${action.delta}`;
     case 'scrollHalf':
       return `scrollHalf:${action.delta}`;
+    // MEASURED, not assumed -- `stepTab`'s own comment names the exact
+    // defect a bare `action.kind` would reintroduce here: `Mod-=`/`Mod-+`
+    // (delta 1) and `Mod--` (delta -1) would collapse onto one id and
+    // `defaultBindings` would merge them into a single three-chord entry
+    // whose action is whichever delta the table happened to see FIRST --
+    // silently making `Mod--` zoom IN.
+    case 'zoom':
+      return `zoom:${action.delta}`;
     default:
       return action.kind;
   }

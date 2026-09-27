@@ -36,6 +36,7 @@ import { recordMainFailure } from './errors/log.js';
 import { registerFilesIpc } from './files/ipc.js';
 import { registerFilesListIpc } from './files/list-ipc.js';
 import { registerFilesResolveIpc } from './files/resolve-ipc.js';
+import { registerFontsIpc } from './fonts/ipc.js';
 import { readGithubAuthPane, startGithubAuthPane } from './integrations/github-pane.js';
 import { readProjectRemotes } from './integrations/github-remotes.js';
 import {
@@ -95,6 +96,8 @@ import { runGitViaCli } from './worktrees/git-run.js';
 import { registerWorktreesIpc } from './worktrees/ipc.js';
 import { resolveProjectDirectoryFrom } from './worktrees/resolve-directory.js';
 import { lockZoom } from './zoom.js';
+import { registerZoomIpc } from './zoom-ipc.js';
+import { currentZoomFactor } from './zoom-state.js';
 
 /**
  * FIRST, BEFORE ANYTHING ELSE TOUCHES `app`: a test/fixture launch gets its
@@ -239,10 +242,15 @@ app.on('web-contents-created', (_event, contents) => {
   // a static presence scan cannot see, so the harness opens a window instead.
   contents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
-  // No page zoom, on this contents and on every later one. Bound here rather
-  // than in `createWindow` for the same reason the navigation policy is: a
-  // second `webContents` created after startup must obey the same rule.
-  lockZoom(contents);
+  // No INCIDENTAL page zoom -- pinch stays refused and a stray wheel zoom is
+  // undone -- but a DELIBERATE one now survives it: `currentZoomFactor` is
+  // read LIVE, on every reset, so the operator's own choice (Settings, or the
+  // `zoom` chord — `main/zoom-ipc.ts`, `keyboard/chords.ts`) is what a second
+  // window, or a reload of this one, resets onto. Bound here rather than in
+  // `createWindow` for the same reason the navigation policy is: a second
+  // `webContents` created after startup must obey the same rule. See
+  // `main/zoom.ts`'s own header for the whole reversal (issue 281).
+  lockZoom(contents, currentZoomFactor);
 
   // Nothing navigates this window away from its own origin. A renderer that is
   // talked into setting `location.href` must not take the app with it.
@@ -834,6 +842,12 @@ void app.whenReady().then(async () => {
   // `clipboard-sanitized-write`, so a renderer-side write is refused in the
   // packaged app. See `./clipboard/ipc.ts`.
   registerClipboardIpc(ipcMain, clipboard);
+  // The operator's UI zoom preference, pushed from the renderer's `prefs` on
+  // every read and write. See `./zoom-ipc.ts` and `./zoom-state.ts`.
+  registerZoomIpc(ipcMain);
+  // The Terminal font-family picker's "installed monospace fonts" list. See
+  // `./fonts/list-monospace.ts` and `./fonts/ipc.ts`.
+  registerFontsIpc(ipcMain);
   // The route to github.com the error log never had. It takes a TITLE and a
   // BODY and builds the address itself (`src/shared/issue.ts`), so the
   // renderer names no destination -- the same bargain `remoteOpenLink` makes.

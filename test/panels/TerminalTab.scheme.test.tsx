@@ -248,6 +248,12 @@ describe('the seven term tokens are the two terminal tabs’ alone', () => {
     // `backgroundOpacity` default -- see this file's own header and
     // `docs/design/terminal-streaming.md`'s frame-parity section.
     'renderer/panels/terminal-stream/TerminalStreamTab.tsx',
+    // THE SETTINGS TERMINAL SECTION'S OWN LIVE PREVIEW CARD (settings step
+    // 2A). Same reason as the streaming tab above: it calls the identical
+    // `terminalSchemeStyle(scheme)` so the swatch shows the chosen scheme's
+    // real colours, not the app's own palette -- see `TerminalPreview.tsx`'s
+    // own header for why a third reader here is not a leak.
+    'renderer/settings/TerminalPreview.tsx',
     'renderer/prefs/terminal-scheme.ts',
     'renderer/prefs/prefs.ts',
     'renderer/styles.css',

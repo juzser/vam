@@ -24,6 +24,12 @@ import { buildKeySheet } from '../../src/renderer/keyboard/keysheet.js';
 import { DEFAULT_PANES, SIDEBAR_MAX, SIDEBAR_MIN } from '../../src/renderer/prefs/panes.js';
 import type { SessionSource } from '../../src/renderer/sources/port.js';
 import type { CanvasSource } from '../../src/renderer/sources/source.js';
+import {
+  DEFAULT_UI_ZOOM,
+  UI_ZOOM_MAX,
+  UI_ZOOM_MIN,
+  UI_ZOOM_STEP,
+} from '../../src/shared/ui-zoom.js';
 
 function decision(id: string, over: Partial<Decision> = {}): Decision {
   return { id, label: id, input: `in-${id}`, output: `out-${id}`, commands: [], ...over };
@@ -1869,6 +1875,58 @@ const activeTab = () =>
   document.querySelector(
     '[data-split-pane][data-split-focused="true"] [data-session-tab][data-active="true"] [data-tab-select]',
   )?.textContent ?? null;
+
+/** The one field this suite reads back from storage rather than the DOM —
+ *  a zoom factor has no pixels an Electron-less test could measure. */
+const storedUiZoom = (): number | undefined =>
+  (JSON.parse(localStorage.getItem('vam.prefs.v1') ?? '{}') as { uiZoom?: number }).uiZoom;
+
+describe('#281’s reversal: Mod-=/Mod-+/Mod-- zoom the whole app (AC carried by chords.zoom.test.ts)', () => {
+  it('Mod-= steps the stored zoom up by UI_ZOOM_STEP, twice, persisting each press', () => {
+    render(<Canvas model={MODEL} />);
+    // Mounting itself writes the shipped default back (Canvas's own
+    // migrate-on-read posture) — the baseline is THAT write, not "nothing
+    // stored at all".
+    expect(storedUiZoom()).toBe(DEFAULT_UI_ZOOM);
+    press('=', { metaKey: true });
+    expect(storedUiZoom()).toBe(DEFAULT_UI_ZOOM + UI_ZOOM_STEP);
+    press('=', { metaKey: true });
+    expect(storedUiZoom()).toBe(DEFAULT_UI_ZOOM + UI_ZOOM_STEP * 2);
+  });
+
+  it('Mod-+ (the shifted spelling of the same key) reaches the identical action', () => {
+    render(<Canvas model={MODEL} />);
+    press('+', { metaKey: true, shiftKey: true });
+    expect(storedUiZoom()).toBe(DEFAULT_UI_ZOOM + UI_ZOOM_STEP);
+  });
+
+  it('Mod-- steps it down, and both directions clamp at the offered range', () => {
+    render(<Canvas model={MODEL} />);
+    press('-', { metaKey: true });
+    expect(storedUiZoom()).toBe(DEFAULT_UI_ZOOM - UI_ZOOM_STEP);
+    for (let i = 0; i < 20; i++) {
+      press('-', { metaKey: true });
+    }
+    expect(storedUiZoom()).toBe(UI_ZOOM_MIN);
+    for (let i = 0; i < 40; i++) {
+      press('=', { metaKey: true });
+    }
+    expect(storedUiZoom()).toBe(UI_ZOOM_MAX);
+  });
+
+  it('Mod-0 is still focusList, untouched — the reversal did not take the session-list key back', () => {
+    render(<Canvas model={MODEL} />);
+    press('j');
+    expect(focused()).toBe('alpha/a2');
+    press('I');
+    expect(actionPane()).toBe('active');
+    press('0', { metaKey: true });
+    expect(actionPane()).toBe('idle');
+    // And it did not also zoom — the stored value is still the mount-time
+    // default, never having moved.
+    expect(storedUiZoom()).toBe(DEFAULT_UI_ZOOM);
+  });
+});
 
 describe('Cmd-number selects a tab in the pane the operator is looking at', () => {
   it('lands on the first tab from wherever the cursor was', () => {
