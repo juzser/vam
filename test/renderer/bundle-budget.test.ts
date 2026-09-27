@@ -321,6 +321,26 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * headroom, so this merge does not need to move it -- the Stats & Usage bump
  * above already covers it. `ENTRY_GZIP_BUDGET_BYTES` stays at 212,000: the
  * merged gzip figure (211,154 B) leaves 846 B of headroom under it.
+ *
+ * SETTINGS STEP 2A: terminal font family + live preview + pane-divider
+ * colour, UI font family, and UI zoom (reversing #281, `main/zoom.ts`'s own
+ * header carries that story). All five rows are eager -- Settings itself has
+ * no lazy boundary here, so their `i18n/strings.ts` copy, `TerminalPreview.
+ * tsx` and the new `FontFamilyField`/stepper markup all land in the entry
+ * chunk regardless of which card the operator opens. Measured with a
+ * detached worktree build at this branch's own merge-base with `main`
+ * (d2c54b66, "Restructure Settings into collapsible cards (step 1: layout
+ * only)", #528 -- `main` had not moved since) and at this branch's tip, same
+ * code and chunks both times, `electron-vite build --mode production`:
+ *
+ *     entry, merge-base (step 1 layout only, no step 2A)   700,444 B  (210,619 B gzip)
+ *     entry, this branch (step 2A)                         703,011 B  (211,393 B gzip)
+ *
+ * +2,567 B eager / +774 B gzip. `ENTRY_BUDGET_BYTES` moves 702,000 -> 704,500:
+ * the real figure (703,011 B) plus ~1.5 KB (~0.21%) of slack, the same
+ * small-headroom convention every bump above uses. `ENTRY_GZIP_BUDGET_BYTES`
+ * stays at 212,000: this branch's gzip figure (211,393 B) still leaves 607 B
+ * of headroom under it.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -331,7 +351,7 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 // depends on is even present, decided BEFORE anything tries to build.
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
-const ENTRY_BUDGET_BYTES = 702_000;
+const ENTRY_BUDGET_BYTES = 704_500;
 const ENTRY_GZIP_BUDGET_BYTES = 212_000;
 
 // The one string this repo's markdown stack ships that nothing else in the

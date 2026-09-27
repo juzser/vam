@@ -48,6 +48,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { type ProviderId, resolveProvider } from '../../shared/providers.js';
+import { UI_ZOOM_STEP } from '../../shared/ui-zoom.js';
 import {
   describeUsage,
   POLL_INTERVAL_MS,
@@ -173,6 +174,7 @@ import {
   setSessionDismissed,
   setSessionFilters,
   setTheme,
+  setUiZoom,
   setViewOptions,
 } from '../prefs/prefs.js';
 import { isTabIndicatorOn, type TabIndicatorId } from '../prefs/tab-indicators.js';
@@ -6635,6 +6637,19 @@ function CanvasInner({
             ),
           );
           return;
+        case 'zoom': {
+          // issue 281's REVERSAL. `setUiZoom` clamps on the way in (`shared/
+          // ui-zoom.ts`), so a press at either end of the range is a no-op
+          // rather than an out-of-bounds write — the same "commit whatever
+          // the arithmetic proposes, let the setter own the floor and the
+          // ceiling" shape `resizePane` already uses one case up.
+          // `savePrefs` is what reaches `activatePrefs`, which is what pushes
+          // the new percent into main over `window.api.prefs.setUiZoom`
+          // (`prefs.ts`'s own "two preferences cross into main" paragraph) —
+          // there is no second, more direct route to `webContents` from here.
+          savePrefs(setUiZoom(prefs, prefs.uiZoom + action.delta * UI_ZOOM_STEP));
+          return;
+        }
         case 'toggleFocusView': {
           // THE SAME WRITE THE SETTINGS SWITCH MAKES, through `savePrefs` --
           // not a second path that sets the module store directly. A keystroke

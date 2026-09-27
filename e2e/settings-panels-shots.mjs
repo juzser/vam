@@ -72,7 +72,14 @@ const EXPECTED_NAV = [
 const ROWS = [
   // INTERFACE — the app's own paint, split out of the old Appearance panel.
   ['the colour templates', '[data-palette-template]', 'interface', false],
-  ['the colour swatches', '[data-palette-swatch]', 'interface', true],
+  // EXCLUDES THE PANE-DIVIDER SWATCH (settings step 2A): `[data-palette-
+  // swatch]` now also matches ONE row homed in `terminal`, not `interface`
+  // -- see that row just below, in the terminal group. Without the
+  // `:not(...)` here this entry's own "every match is under the same card"
+  // check would fail the moment that row existed, which is the whole
+  // pattern this file's own header already documents for a multi-match
+  // selector; this is just the first row to actually split across two.
+  ['the colour swatches', '[data-palette-swatch]:not([data-palette-swatch="--vam-pane-divider"])', 'interface', true],
   ['out text', 'input[aria-label="out text size"]', 'interface', false],
 
   // TERMINAL — split out of Appearance too: typography and the theme lists
@@ -80,9 +87,18 @@ const ROWS = [
   // behind Terminal's own Advanced (the streaming switch coming from
   // Behaviour, not from Appearance).
   ['terminal text', '[data-terminal-size-option]', 'terminal', false],
+  ['terminal font family', '[data-font-family-field="terminal font family"]', 'terminal', false],
+  ['the terminal preview', '[data-terminal-preview]', 'terminal', false],
   ['the terminal colours', '[data-terminal-swatch]', 'terminal', true],
   ['terminal background opacity', '[data-terminal-opacity]', 'terminal', true],
   ['the streaming terminal switch', '[data-switch="streaming-terminal"]', 'terminal', true],
+  // THE PANE-DIVIDER COLOUR (settings step 2A). Rides the SAME
+  // `[data-palette-swatch]` selector the Interface grid's own swatches use
+  // (`PANE_DIVIDER_TOKEN`'s own comment in `prefs.ts` says why), drawn here
+  // instead behind Terminal's own Advanced -- deliberately its own row, not
+  // folded into "the colour swatches" above, because that row's home is
+  // `interface` and this one's is not.
+  ['the pane-divider colour swatch', '[data-palette-swatch="--vam-pane-divider"]', 'terminal', true],
 
   // WINDOW & SIDEBAR — new section; its first tenant moved from Behaviour.
   ['view width', '[data-switch="narrow-views"]', 'window', false],

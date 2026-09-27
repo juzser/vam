@@ -49,4 +49,43 @@ describe('lockZoom', () => {
     expect(r.levels).toEqual([0, 0]);
     expect(r.factors).toEqual([1, 1]);
   });
+
+  /**
+   * #281's reversal: an operator-chosen UI zoom (`prefs/ui-zoom.ts`) now has
+   * to survive the exact reset this file exists to run. `getFactor` is read
+   * LIVE -- called again on every reset, never snapshotted once at
+   * registration -- because the operator can change the setting after a
+   * window already has a `zoom-changed` listener attached to it, and that
+   * listener has to reset to the NEW value, not the one in force when the
+   * window opened. A plain `factor` parameter, captured by `lockZoom`'s own
+   * closure, would freeze the first value forever.
+   */
+  describe('with an operator-chosen factor', () => {
+    it('resets to it, immediately and on both events', () => {
+      const r = recorder();
+      let factor = 1.1;
+      lockZoom(r.contents, () => factor);
+      expect(r.factors).toEqual([1.1]);
+      r.listeners.get('zoom-changed')?.[0]?.();
+      expect(r.factors).toEqual([1.1, 1.1]);
+      // The level is still always 0 -- only the FACTOR carries the zoom; a
+      // stray level would double it (electron composes the two).
+      expect(r.levels).toEqual([0, 0]);
+    });
+
+    it('reads the getter again on every reset, never a value snapshotted once', () => {
+      const r = recorder();
+      let factor = 1;
+      lockZoom(r.contents, () => factor);
+      factor = 1.25;
+      r.listeners.get('did-finish-load')?.[0]?.();
+      expect(r.factors).toEqual([1, 1.25]);
+    });
+
+    it('still pins the pinch limits to exactly 1, whatever the factor is', () => {
+      const r = recorder();
+      lockZoom(r.contents, () => 1.25);
+      expect(r.limits).toEqual([[1, 1]]);
+    });
+  });
 });

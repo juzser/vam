@@ -78,12 +78,21 @@ describe('the sheet is generated from the binding tables', () => {
  *
  * "Absent, not dimmed" is the codebase's rule, so the bindings are gone
  * rather than relabelled, and the keys are free for a real meaning.
+ *
+ * #281's REVERSAL GAVE THE WORD "ZOOM" A REAL MEANING BACK, on genuinely
+ * different keys (`Mod-=`/`Mod-+`/`Mod--`, never the bare `+`/`-`/`Z` the
+ * canvas held) — so the check below is narrowed to the one phrase that could
+ * ONLY ever describe the deleted canvas view, `fit the whole canvas`, rather
+ * than the bare word "zoom" a live, working setting is now allowed to use.
+ * `it('leaves the keys it used to hold unbound')` below is what still holds
+ * the canvas's own THREE KEYS retired, which is the guarantee this file
+ * actually needs.
  */
 describe('nothing survives that names the deleted canvas view', () => {
   it('captions no row for a view vam no longer has', () => {
     for (const row of sheetRows()) {
       expect(row.label.toLowerCase(), `sheet row "${row.keys}"`).not.toMatch(
-        /zoom|fit the whole canvas/,
+        /fit the whole canvas/,
       );
     }
   });

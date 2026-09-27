@@ -82,6 +82,26 @@ export const CHANNELS = {
    */
   setPrRepos: 'vam:source:set-pr-repos',
   /**
+   * DESKTOP-ONLY, the same standing as `setPrRepos` above and for the
+   * identical reason: it carries the operator's UI zoom preference from the
+   * renderer's `prefs` into main, where `webContents.setZoomFactor` lives.
+   * Never a member of `PreloadSourceApi` — a paired phone has no window of
+   * main's to zoom, and Electron's own zoom factor is a desktop-only concept
+   * to begin with (`docs/keyboard.md`'s "In a browser tab" section carries
+   * the phone/web half of this reversal). See `main/zoom-ipc.ts` and
+   * `main/zoom-state.ts`.
+   */
+  setUiZoom: 'vam:zoom:set-ui',
+  /**
+   * DESKTOP-ONLY, the same standing as `setUiZoom` just above: the terminal
+   * font-family picker's "installed monospace fonts" list, read off this
+   * machine's own font directories (`main/fonts/list-monospace.ts`). Never a
+   * member of `PreloadSourceApi` — a paired phone has no filesystem of
+   * main's to enumerate, and the picker's free-text field is the fallback
+   * there, same as everywhere this list comes back empty.
+   */
+  fontsListMonospace: 'vam:fonts:list-monospace',
+  /**
    * Settings -> Integrations -> GitHub, six channels, ALL DESKTOP-ONLY and
    * none of them a member of `PreloadSourceApi` -- `remote/server.ts`
    * registers no route for any of them, the same standing as `setPrRepos`

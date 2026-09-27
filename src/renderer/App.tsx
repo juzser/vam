@@ -21,6 +21,7 @@ import type {
   DesktopSourceApi,
   DialogApi,
   FilesApi,
+  FontsApi,
   IssueApi,
   LinkApi,
   MainErrorsApi,
@@ -151,22 +152,24 @@ declare global {
        */
       readonly notify?: NotifyApi;
       /**
-       * PREFERENCES MAIN NEEDS A COPY OF -- one: where to ask GitHub from, per
-       * project. Desktop-only, and OPTIONAL in this type rather than merely
-       * absent at runtime, because `activatePrefs` runs in the browser build
-       * too and must be able to see that it is not there.
+       * PREFERENCES MAIN NEEDS A COPY OF -- two: where to ask GitHub from, per
+       * project, and the operator's UI zoom (issue 281's reversal,
+       * `shared/ui-zoom.ts`). Desktop-only, and OPTIONAL in this type rather
+       * than merely absent at runtime, because `activatePrefs` runs in the
+       * browser build too and must be able to see that it is not there.
        *
-       * THE MEMBER IS OPTIONAL AS WELL AS THE OBJECT, which the browser build
-       * alone would not justify: a test or a packaged app whose bridge predates
-       * it has the object with no members on it. Optional-call syntax at the
-       * call site is what makes that a no-op rather than a `TypeError` on
-       * every prefs write.
+       * THE MEMBERS ARE OPTIONAL AS WELL AS THE OBJECT, which the browser
+       * build alone would not justify: a test or a packaged app whose bridge
+       * predates one of them has the object with the other member only.
+       * Optional-call syntax at the call site is what makes that a no-op
+       * rather than a `TypeError` on every prefs write.
        *
-       * A SECOND MEMBER LIVED HERE ONCE, `setConciseOutput` -- retired along
+       * A THIRD MEMBER LIVED HERE ONCE, `setConciseOutput` -- retired along
        * with the switch it fed; see `adhdSkill` below for what replaced it.
        */
       readonly prefs?: {
         setPrRepos?(map: unknown): Promise<void>;
+        setUiZoom?(percent: unknown): Promise<void>;
       };
       /**
        * THE ADHD SKILL CARD'S BRIDGE: status, install, remove. Desktop-only,
@@ -174,6 +177,13 @@ declare global {
        * preload, and `AdhdSkillCard.tsx` must be able to see that.
        */
       readonly adhdSkill?: AdhdSkillApi;
+      /**
+       * The Terminal font-family picker's own member: installed monospace
+       * fonts, off this machine's font directories. OPTIONAL for the reason
+       * `adhdSkill` above is -- the browser build has no preload, and the
+       * picker must be able to see that and fall back to free text alone.
+       */
+      readonly fonts?: FontsApi;
     };
   }
 }

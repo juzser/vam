@@ -57,6 +57,14 @@ import { BINDING_TABLES, RESERVED_KEYS } from '../../src/renderer/keyboard/chord
 const CONTESTED: Readonly<Record<string, 'reserved' | 'cancelable'>> = {
   // Zoom. The one that started this.
   'Mod-0': 'reserved',
+  // #281's reversal gave zoom a real, deliberate binding again (`Mod-=` /
+  // `Mod-+` / `Mod--`) — and Ctrl/Cmd + Plus/Minus/Equal is the identical
+  // browser-chrome zoom gesture `Mod-0` already is, reserved for the same
+  // reason: it is the browser acting on the keystroke directly rather than a
+  // page-level default `preventDefault()` could cancel.
+  'Mod-=': 'reserved',
+  'Mod-+': 'reserved',
+  'Mod--': 'reserved',
   // Select tab N, and `Mod-9` is "the last tab" rather than the ninth.
   'Mod-1': 'reserved',
   'Mod-2': 'reserved',
@@ -96,6 +104,11 @@ function boundModChords(): string[] {
   for (const key of RESERVED_KEYS) {
     if (key.startsWith('Mod-')) found.add(key);
   }
+  // Sorted by UTF-16 code unit, same as `[...found].sort()`'s default -- `+`
+  // (0x2B) and `-` (0x2D) both sort BEFORE the digit row (0x30-0x39), and `=`
+  // (0x3D) sorts between the digits and `Shift` (0x53). Written out because
+  // the census below reads oddly next to a plain alphabetic expectation
+  // otherwise.
   return [...found].sort();
 }
 
@@ -131,6 +144,8 @@ describe('the chords a browser also wants', () => {
     // moment of the decision, instead of on an operator's screen.
     const reserved = boundModChords().filter((key) => CONTESTED[key] === 'reserved');
     expect(reserved).toEqual([
+      'Mod-+',
+      'Mod--',
       'Mod-0',
       'Mod-1',
       'Mod-2',
@@ -141,6 +156,7 @@ describe('the chords a browser also wants', () => {
       'Mod-7',
       'Mod-8',
       'Mod-9',
+      'Mod-=',
       'Mod-Shift-[',
       'Mod-Shift-]',
       'Mod-n',
@@ -159,7 +175,10 @@ describe('the chords a browser also wants', () => {
     // second is how a caveat outlives the binding it was written for, which is
     // the same defect as a hint that outlives its behaviour.
     const section = docSection('## In a browser tab');
-    const named = [...section.matchAll(/`(Mod-[A-Za-z0-9[\]-]*)`/g)].map((m) => m[1] as string);
+    // `+` and `=` joined the character class for #281's reversal: the zoom
+    // chords are the first `Mod-` bindings this file has ever held that are
+    // not a letter, a digit, a bracket or a second hyphen.
+    const named = [...section.matchAll(/`(Mod-[A-Za-z0-9+=[\]-]*)`/g)].map((m) => m[1] as string);
     const reserved = boundModChords().filter((key) => CONTESTED[key] === 'reserved');
     expect([...new Set(named)].sort()).toEqual(reserved);
   });

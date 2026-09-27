@@ -861,12 +861,25 @@ console.log('\n=== the settings case ladder');
           // between. `data-settings-advanced` marks the toggle itself, so
           // `closest` (which matches the element against itself too) is
           // enough with no wrapper needed.
+          // AND A SAMPLE TERMINAL LINE IS NOT A CONTROL OR A NAME EITHER
+          // (settings step 2A's live preview card, `TerminalPreview.tsx`).
+          // `terminalSchemeStyle` wraps its four sample lines' runs in
+          // `<span>`s with their own direct text nodes -- exactly this
+          // rank's own test for "is a control" -- but "operator", "@vam ",
+          // "error:" and the rest are a swatch of raw terminal bytes, the
+          // same rank the real Terminal tab's own runs would be in had this
+          // sweep ever reached inside a terminal pane (it never has: the
+          // pane lives outside `[data-settings-rows]` everywhere else).
+          // `data-terminal-preview` marks the whole card, so `closest`
+          // drops every span inside it from this sweep the same way
+          // `data-settings-keys` drops a chord glyph.
           return (
             el.closest('[data-settings-unit]') === null &&
             el.closest('[data-binding-label]') === null &&
             el.closest('[data-verbatim]') === null &&
             el.closest('[data-settings-keys]') === null &&
-            el.closest('[data-settings-advanced]') === null
+            el.closest('[data-settings-advanced]') === null &&
+            el.closest('[data-terminal-preview]') === null
           );
         })
         .map(read),

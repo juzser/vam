@@ -70,14 +70,15 @@ describe('the default is off, because the rules cost the operator tokens', () =>
 
 describe('migration: this value has no reader left in main', () => {
   it('is never pushed by activatePrefs -- there is no bridge member left to push to', async () => {
-    // `createPrefsBridge()` (`src/preload/api.ts`) carries exactly one member
-    // now, `setPrRepos`; `setConciseOutput` is not one of its keys any more.
-    // This is a type-level fact as much as a runtime one -- there is no
-    // `window.api.prefs.setConciseOutput` for `activatePrefs` to call, so the
-    // only way this could regress is a NEW crossing being added, which this
-    // assertion would not survive either.
+    // `createPrefsBridge()` (`src/preload/api.ts`) carries exactly two members
+    // now, `setPrRepos` and `setUiZoom` (#281's reversal); `setConciseOutput`
+    // is not one of its keys any more. This is a type-level fact as much as a
+    // runtime one -- there is no `window.api.prefs.setConciseOutput` for
+    // `activatePrefs` to call, so the only way this could regress is a NEW
+    // crossing being added for THIS value specifically, which this assertion
+    // would not survive either.
     const { createPrefsBridge } = await import('../../src/preload/api.js');
     const bridge = createPrefsBridge({ invoke: async () => ({ ok: true, value: undefined }) });
-    expect(Object.keys(bridge)).toEqual(['setPrRepos']);
+    expect(Object.keys(bridge)).toEqual(['setPrRepos', 'setUiZoom']);
   });
 });
