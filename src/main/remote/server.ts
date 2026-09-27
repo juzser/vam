@@ -35,8 +35,10 @@
  * route sends ONE key from a FIXED SIX-KEY ALLOWLIST -- Escape, Tab, Enter,
  * Shift-Tab, Space, Backspace, never free text -- into a session's own tmux
  * pane, resolved the same confined way `recordPrompt` resolves one (exact
- * `=name` tmux targets, never a client-supplied pane name). Same auth,
- * same pairing, same rate limit as every other write route here; it proves
+ * `=name` tmux targets, never a client-supplied pane name). Same auth and
+ * same pairing as every other write route here -- and, like them, no
+ * per-request rate limit: the only limit this server enforces is the
+ * pairing-code lockout (`pairing.ts`), which guards pairing, not writes. It proves
  * its pairing fresh on every call rather than caching one, unlike the
  * desktop aim-cache (`terminal/ipc.ts`'s `AIM_TTL_MS`). `UNSERVED.terminal`,
  * below, still means what it always meant for everything else the terminal
@@ -787,8 +789,9 @@ function routesFor(options: RemoteServerOptions): Map<string, { method: string; 
        * -- see `send-key.ts`'s own header for the whole argument (root cause,
        * resolution, and why an arrow-free six-key allowlist is the entire
        * surface). Registered here, under the SAME `allowWrites` gate every
-       * other write is, with the SAME auth, pairing and rate limits `write()`
-       * already gives `/api/record-prompt` -- nothing about this route is a
+       * other write is, with the SAME auth and pairing `write()` already gives
+       * `/api/record-prompt` -- and, like it, no per-request rate limit (none
+       * of the write routes has one) -- nothing about this route is a
        * new decision at the transport layer, only a new, narrow ACT at the
        * source layer.
        *

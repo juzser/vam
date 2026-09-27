@@ -905,6 +905,13 @@
   --vam-header: #1e1e1e;
   --vam-well: #191919;
   --vam-sidebar: #232323;
+  /* Window & Sidebar settings' `Tinted` appearance: a fixed, modest literal
+     step off `--vam-sidebar` above, never computed -- see
+     `prefs/sidebar-appearance.ts`'s own header for why a one-row preference
+     does not earn `palette-templates.ts`'s CIE L* ladder. Applied by setting
+     `--vam-sidebar` to `var(--vam-sidebar-tinted)` at runtime, never by a
+     hex literal outside this file (13.1). */
+  --vam-sidebar-tinted: #26232b;
   /* The same value as `sidebar`, deliberately: see `--color-pane` above.
 
      AT THE FLOOR, like `panel` below which it sits one rung: #222222 would
@@ -1549,6 +1556,8 @@ html.light {
   --vam-header: #f4f4f2;
   --vam-well: #eeece7;
   --vam-sidebar: #f0eeea;
+  /* See the dark theme's own comment on this token, above. */
+  --vam-sidebar-tinted: #eeeaf3;
   --vam-pane: #f0eeea;
 
   /* `panel`'s own white, and the point is that it is UNCHANGED: this theme's

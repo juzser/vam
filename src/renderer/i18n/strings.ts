@@ -232,6 +232,28 @@ const EN = {
   'settings.window.narrowViews.on': 'narrowed',
   'settings.window.narrowViews.off': 'full pane',
 
+  // THE SIDEBAR-APPEARANCE AND STATUS-BAR ROWS `settings.window.hint`'s own
+  // comment named as "a later PR adds" -- this is that PR.
+  'settings.window.sidebarAppearance.label': 'sidebar appearance',
+  'settings.window.sidebarAppearance.hint': 'shipped, matching the terminal, or tinted',
+  'settings.window.sidebarAppearance.default': 'default',
+  'settings.window.sidebarAppearance.match-terminal': 'match terminal',
+  'settings.window.sidebarAppearance.tinted': 'tinted',
+
+  'settings.window.statusBar.title': 'status bar',
+  'settings.window.statusBar.mode.label': 'usage numbers',
+  'settings.window.statusBar.mode.hint': 'read as used, or as remaining',
+  'settings.window.statusBar.mode.used': 'used',
+  'settings.window.statusBar.mode.remaining': 'remaining',
+  'settings.window.statusBar.showClaude.label': 'show Claude usage',
+  'settings.window.statusBar.showClaude.hint': 'in the status bar',
+  'settings.window.statusBar.showClaude.on': 'on',
+  'settings.window.statusBar.showClaude.off': 'off',
+  'settings.window.statusBar.showCodex.label': 'show Codex usage',
+  'settings.window.statusBar.showCodex.hint': 'in the status bar',
+  'settings.window.statusBar.showCodex.on': 'on',
+  'settings.window.statusBar.showCodex.off': 'off',
+
   // ── Agents (renamed from Sessions) ───────────────────────────────────────
   // EVERY ROW HERE IS ABOUT THE AGENT A SESSION DRIVES, which is what earned
   // the rename: which one starts, which key sends it a prompt, how long its
@@ -255,6 +277,48 @@ const EN = {
   'settings.agents.cacheTimer.off': 'off',
   'settings.agents.cacheTimer.note':
     'Claude caches a session’s context for a few minutes to an hour after it last did anything; once that cache expires, the next message you send resends the whole context at the uncached price. The badge shows how long is left, beside the age, only while a session is idle or waiting on you.',
+
+  // KEEP COMPUTER AWAKE, via Electron’s own `powerSaveBlocker`. Off by
+  // default -- see `prefs/keep-awake.ts` for why this direction, unlike
+  // `cacheTimer` above, is the safe one to ship silently.
+  'settings.agents.keepAwake.label': 'keep computer awake',
+  'settings.agents.keepAwake.hint': 'while vam is open, or only while an agent runs',
+  'settings.agents.keepAwake.on': 'on',
+  'settings.agents.keepAwake.while-running': 'while an agent is running',
+  'settings.agents.keepAwake.off': 'off',
+
+  // AUTO TAB TITLES -- gates logic that already ships unconditionally
+  // (Claude Code’s own `ai-title` transcript event, Codex’s first-prompt
+  // preview line); see `prefs/auto-tab-titles.ts` for the whole story and
+  // why the default is therefore on.
+  'settings.agents.autoTabTitles.label': 'auto tab titles',
+  'settings.agents.autoTabTitles.hint': 'from the agent’s own activity, not its id',
+  'settings.agents.autoTabTitles.on': 'on',
+  'settings.agents.autoTabTitles.off': 'off',
+
+  // AGENT PERMISSIONS -- SECURITY-SENSITIVE. Manual is the default and the
+  // only choice that writes with no confirmation; see `prefs/
+  // agent-permissions.ts` and this row’s own confirmation copy below.
+  'settings.agents.permissions.label': 'agent permissions',
+  'settings.agents.permissions.hint': 'skip the provider’s own permission prompts',
+  'settings.agents.permissions.manual': 'manual',
+  'settings.agents.permissions.yolo': 'yolo',
+  'settings.agents.permissions.note': 'only a session started after this change is affected',
+  'settings.agents.permissions.yolo.confirmLabel': 'confirm switching to Yolo',
+  'settings.agents.permissions.yolo.risk':
+    'Yolo starts every new session with permission checks turned off — it can read, write and run commands with nothing asking first. Only turn this on for work you would let run unattended.',
+  'settings.agents.permissions.yolo.confirm': 'turn on Yolo',
+  'settings.agents.permissions.yolo.cancel': 'cancel',
+
+  // DEFAULT AGENT -- what a NEW session’s Start screen highlights first; see
+  // `prefs/default-agent.ts` and `resolveDefaultAgentSelection` (`prefs.ts`)
+  // for why `No agent` is a second reading of this choice rather than a
+  // third provider.
+  'settings.agents.defaultAgent.label': 'default agent',
+  'settings.agents.defaultAgent.hint': 'highlighted first on a new session’s Start screen',
+  'settings.agents.defaultAgent.auto': 'auto',
+  'settings.agents.defaultAgent.none': 'no agent',
+
   // THE ADHD SKILL CARD -- what replaced the concise-output switch. Operator,
   // translated: "turn Concise output into a card [an Orca screenshot]. Talk
   // about the ADHD skill", and then, the design decision that followed:

@@ -101,11 +101,26 @@ const ROWS = [
   ['the pane-divider colour swatch', '[data-palette-swatch="--vam-pane-divider"]', 'terminal', true],
 
   // WINDOW & SIDEBAR — new section; its first tenant moved from Behaviour.
+  // The sidebar-appearance and status-bar rows are this section's SECOND PR,
+  // landing where `settings.window.hint`'s own comment already named them.
   ['view width', '[data-switch="narrow-views"]', 'window', false],
+  ['sidebar appearance', '[data-sidebar-appearance-option]', 'window', false],
+  ['status bar usage mode', '[data-usage-display-mode-option]', 'window', false],
+  ['show Claude usage', '[data-switch="claude-usage"]', 'window', false],
+  ['show Codex usage', '[data-switch="codex-usage"]', 'window', false],
 
   // AGENTS — renamed from Sessions, and gained the ADHD skill card that used
-  // to sit in Behaviour.
+  // to sit in Behaviour. Keep-awake/auto-tab-titles/permissions/default-agent
+  // are this section's own second PR. Agent permissions is NOT in this sweep
+  // — a security review found its own gate needs to be `isDesktopShell()`
+  // (`window.api` presence), not viewport width, so it never draws in THIS
+  // browser harness (no bridge) at all; the dedicated check right after this
+  // sweep asserts that absence explicitly rather than let the row silently
+  // read as "0 matches, trivially inside its own card".
   ['the ADHD skill card', '[data-settings-block="adhd-skill"]', 'agents', false],
+  ['keep computer awake', '[data-keep-awake-option]', 'agents', false],
+  ['auto tab titles', '[data-switch="auto-tab-titles"]', 'agents', false],
+  ['default agent', '[data-default-agent-option]', 'agents', false],
 
   // BEHAVIOUR — smaller, not gone: focus view stays, and the file editor's
   // own two rows (moved from Appearance) join it as a "Files" sub-group.
@@ -125,8 +140,8 @@ const ROWS = [
 const ROW_FLOOR = {
   interface: 3,
   terminal: 6,
-  window: 1,
-  agents: 3,
+  window: 4,
+  agents: 6,
   behaviour: 3,
   notifications: 2,
 };
@@ -230,6 +245,26 @@ console.log('\n=== every row lives in exactly one card, painted or not by its ow
         seen.onScreen === seen.inTree,
       );
     }
+  }
+
+  // AGENT PERMISSIONS, SEPARATELY, PROVING AN ABSENCE RATHER THAN LEAVING ONE
+  // UNPROVEN. This browser has no `window.api` (`vite preview` serves the
+  // pure web build, no Electron preload) — the same state a paired device
+  // over Tailscale is in at ANY viewport width, which is exactly the gap a
+  // security review found: an earlier version of this gate checked viewport
+  // width instead, so a paired browser at desktop width saw this row and
+  // could set Yolo in its own localStorage. `isDesktopShell()` now reads
+  // `window.api` presence, so the row (and its confirmation) must be
+  // ZERO matches here, not merely "0, and nobody checked".
+  {
+    const permissionsRow = await page.evaluate(
+      () => document.querySelectorAll('[data-agent-permissions-option]').length,
+    );
+    check(
+      'agent permissions: absent in this browser harness (no window.api) — the desktop-only gate',
+      permissionsRow === 0,
+      `found ${permissionsRow}`,
+    );
   }
 
   console.log('\n=== each card draws its own corpus of labelled rows');

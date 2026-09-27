@@ -130,6 +130,14 @@ export const CHANNELS = {
    */
   usageCodexGet: 'vam:usage:codex:get',
   /**
+   * "Keep computer awake" (`prefs/keep-awake.ts`), one-way and payload-free
+   * in return like `notifyShow` -- the renderer tells main the mode and
+   * whether anything is running, and `main/power/ipc.ts` applies it to
+   * `KeepAwakeController`. Answers `undefined`: there is nothing to report
+   * back, and no source to refuse anything in the words of.
+   */
+  powerSetKeepAwake: 'vam:power:set-keep-awake',
+  /**
    * The clipboard channel. Like `usageGet` it answers bare -- a `boolean`,
    * not an `IpcResult`: "did the text reach the clipboard" is the whole
    * answer, and there is no source to refuse anything in the words of.

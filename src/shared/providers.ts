@@ -104,3 +104,42 @@ export function resolveProvider(id: unknown): Provider {
 export function readProviderId(id: unknown): ProviderId {
   return resolveProvider(id).id;
 }
+
+/**
+ * SECURITY-SENSITIVE. The one extra argv element each provider takes to skip
+ * its own permission prompts entirely -- verified against each provider's
+ * real `--help` output rather than guessed (2026-09-27, `claude` 2.1.283,
+ * `codex-cli` 0.157.0; `test/shared/providers.yolo-argv.test.ts` pins both
+ * strings). NEVER READ THIS TABLE DIRECTLY TO BUILD A COMMAND -- `sessionArgv`
+ * below is the one function that may, and it appends the flag as a separate
+ * array element, never by concatenating a string.
+ */
+const YOLO_FLAGS: Readonly<Record<ProviderId, string>> = {
+  'claude-code': '--dangerously-skip-permissions',
+  codex: '--dangerously-bypass-approvals-and-sandbox',
+};
+
+/** The flag named above, for one provider. */
+export function yoloFlagFor(id: ProviderId): string {
+  return YOLO_FLAGS[id];
+}
+
+/**
+ * THE ONE FUNCTION THAT MAY APPEND A PERMISSION-SKIPPING FLAG to a provider's
+ * command. `manual` (the default `agentPermissions` ships with) returns the
+ * table's own `command` array, untouched -- the provider runs exactly as it
+ * always has. `yolo` returns a NEW array, `[...command, flag]`: a fresh
+ * array literal, so the provider table's own `command` is never mutated, and
+ * the flag is a separate element from the moment it exists -- there is no
+ * point in this function, or in any caller of it, where the two are ever one
+ * string.
+ *
+ * CALLED FROM EXACTLY ONE PLACE: `Canvas.tsx`'s `startSessionIn`, which types
+ * the result (`.join(' ')`, same as it always has) into a FRESH pane at
+ * session creation. Nothing re-types a running session's command, so this
+ * function is never called for one.
+ */
+export function sessionArgv(id: ProviderId, permissions: 'manual' | 'yolo'): readonly string[] {
+  const command = resolveProvider(id).command;
+  return permissions === 'yolo' ? [...command, yoloFlagFor(id)] : command;
+}

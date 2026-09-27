@@ -55,6 +55,7 @@ import type {
 import type { HistoryCursor, TranscriptPage } from '../shared/history.js';
 import type { LinkOutcome } from '../shared/link.js';
 import type { NotifyVerdict } from '../shared/notify.js';
+import type { KeepAwakeMode } from '../shared/power.js';
 import type { PrAction, PrActionOutcome } from '../shared/pr-action.js';
 import type { PrLinkOutcome } from '../shared/pr-link.js';
 import type { PreloadSourceApi, SourceDescriptor } from '../shared/preload-api.js';
@@ -310,6 +311,25 @@ export function createUsageApi(ipc: InvokerLike): UsageApi {
   return {
     get: () => ipc.invoke(CHANNELS.usageGet) as Promise<UsageSnapshot>,
     getCodex: () => ipc.invoke(CHANNELS.usageCodexGet) as Promise<CodexUsageSnapshot>,
+  };
+}
+
+/**
+ * The bridge's power member: one write, no read, no answer -- "keep computer
+ * awake" (`prefs/keep-awake.ts`). The renderer decides WHAT the desired state
+ * is (it owns the preference and the "is anything running" signal both);
+ * this forwarder decides nothing, the same rule every other member here
+ * follows.
+ */
+export type PowerApi = {
+  setKeepAwake(input: { readonly mode: KeepAwakeMode; readonly anyAgentRunning: boolean }): void;
+};
+
+export function createPowerApi(ipc: InvokerLike): PowerApi {
+  return {
+    setKeepAwake: (input) => {
+      void ipc.invoke(CHANNELS.powerSetKeepAwake, input);
+    },
   };
 }
 

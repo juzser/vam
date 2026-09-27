@@ -20,6 +20,7 @@ import {
   dialog,
   ipcMain,
   Notification,
+  powerSaveBlocker,
   session,
   shell,
 } from 'electron';
@@ -53,6 +54,8 @@ import { applyApplicationMenu } from './menu.js';
 import { notifyActivationRoute, registerNotifyIpc } from './notify/ipc.js';
 import { createNotifier } from './notify/notify.js';
 import { isSameOrigin } from './origin.js';
+import { registerPowerIpc } from './power/ipc.js';
+import { KeepAwakeController } from './power/power-save.js';
 import { registerPrIpc } from './pr/ipc.js';
 import { createQuitGuard, registerUnsavedIpc } from './quit/guard.js';
 import { unsavedQuitPrompt } from './quit/unsaved.js';
@@ -346,6 +349,15 @@ let terminalTmuxRunner: ReturnType<typeof createControlTmuxRunner> | null = null
  * reason `registerStreamIpc` below is registered there and not here).
  */
 let terminalStreamRegistration: ReturnType<typeof registerTerminalStreamIpc> | null = null;
+
+/**
+ * "Keep computer awake"'s whole state, module-scoped like `terminalTmuxRunner`
+ * above -- one process, one blocker, so there is exactly one place that may
+ * ever call `powerSaveBlocker.start`/`.stop`. Created eagerly (unlike the two
+ * above, it needs no window and no `webContents`) so `registerPowerIpc` below
+ * has something to hand the very first renderer call.
+ */
+const keepAwakeController = new KeepAwakeController(powerSaveBlocker);
 
 /**
  * THE GUARD ON CMD-Q, and the one piece of renderer state main keeps a copy of.
@@ -788,6 +800,12 @@ void app.whenReady().then(async () => {
   // never on a floor the renderer itself controls (`codex-reader.ts`,
   // `usage/ipc.ts`).
   registerCodexUsageIpc(ipcMain, () => readCodexUsage());
+  // "Keep computer awake" (`prefs/keep-awake.ts`): the renderer owns both the
+  // preference and the "is anything running" signal (main never polls, the
+  // same reasoning `notify/waiting.ts` gives for its own signal) and pushes
+  // both here on every change; `keepAwakeController` is the only code in this
+  // process allowed to call `powerSaveBlocker`.
+  registerPowerIpc(ipcMain, keepAwakeController);
   // The Stats & Usage screen's one channel. The scan itself runs in a real
   // `node:worker_threads` worker (`stats/worker.ts`, bundled as its own
   // entry -- `electron.vite.config.ts`'s `statsWorker` input), never on
@@ -1065,6 +1083,12 @@ app.on('before-quit', (event) => {
   // Every open streaming connection, closed the same best-effort way --
   // see `terminalStreamRegistration`'s own note.
   terminalStreamRegistration?.dispose();
+  // A running blocker must not outlive the app -- Electron stops every
+  // outstanding one on quit regardless, but releasing it here keeps this
+  // process's own idea of "is a blocker active" in step with reality up to
+  // the moment it actually exits, the same hygiene `dispose()` gives every
+  // other resource on this line.
+  keepAwakeController.dispose();
 });
 
 app.on('window-all-closed', () => {

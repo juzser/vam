@@ -26,6 +26,7 @@ import type {
   LinkApi,
   MainErrorsApi,
   NotifyApi,
+  PowerApi,
   PrsApi,
   StatsApi,
   TerminalApi,
@@ -114,6 +115,15 @@ declare global {
        * without it, and the pref must be able to see that rather than throw.
        */
       readonly terminalStream?: TerminalStreamApi;
+      /**
+       * "Keep computer awake" (`prefs/keep-awake.ts`): one write, no read
+       * and no argument answered back -- the renderer pushes `{mode,
+       * anyAgentRunning}` and main's `KeepAwakeController` does the rest.
+       * OPTIONAL for the reason `stats`/`terminalStream` are: a packaged
+       * build whose preload predates this member has the bridge without it,
+       * and the hook that calls it must see that rather than throw.
+       */
+      readonly power?: PowerApi;
       /** Electron's `showOpenDialog`; the browser build has no picker at all. */
       readonly dialog: DialogApi;
       /**
