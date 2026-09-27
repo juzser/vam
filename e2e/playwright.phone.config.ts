@@ -54,6 +54,8 @@ export default defineConfig({
     'phone-core-loop.pw.ts',
     'phone-overflow.pw.ts',
     'phone-cache-timer.pw.ts',
+    'phone-composer-layout.pw.ts',
+    'phone-composer-keys.pw.ts',
   ],
   outputDir: path.join(here, 'test-results'),
   workers: 1,

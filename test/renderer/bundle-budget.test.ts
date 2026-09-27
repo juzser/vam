@@ -234,6 +234,51 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * dependency patch bump" -- not the three features' own separate margins
  * stacked on top of each other. `ENTRY_GZIP_BUDGET_BYTES` stays at 212,000:
  * unaffected by this merge, still comfortably clear of the combined figure.
+ *
+ * THE PHONE COMPOSER'S LAYOUT FIX (the operator's own report: "the buttons
+ * in the prompt input on mobile... cover most of the input box"). The
+ * textarea's wrapper became its own real card (`data-prompt-input`), the
+ * "+"/dictate/Send trio became a real, `flex-none` box of their own
+ * (`data-prompt-tools`, no longer `display: contents`) instead of three
+ * items flattened into the same row as the textarea, and Send gained the
+ * inset `[data-tap-skin]` span every OTHER composer icon already wore --
+ * three real DOM nodes and their class lists that did not exist before, none
+ * of them behind a lazy boundary (the composer is eager on every session
+ * screen). Measured, `electron-vite build --mode production`, this
+ * worktree's own before/after with only `DetailPanel.tsx` and `styles.css`
+ * reverted to `main`'s tip (3eb46bbb) for "before":
+ *
+ *     entry, before (main's tip)         699,300 B
+ *     entry, after (this fix)            699,722 B  (+422 B, +0.06%)
+ *
+ * `ENTRY_BUDGET_BYTES` moves 699,500 -> 703,300: the real figure (699,722 B)
+ * plus ~3.6 KB (~0.5%) of slack, the same small-headroom convention every
+ * bump above uses. `ENTRY_GZIP_BUDGET_BYTES` stays at 212,000: gzip
+ * compresses the three controls' near-identical class-list strings well,
+ * and the gzip check passed unmodified against this same build.
+ *
+ * THE PHONE'S OWN CHANNEL INTO A PANE (the operator's own second report: "I
+ * don't see the quick buttons above the prompt input"). `KEY_STRIP` gained
+ * an eighth entry (`tab`, reusing `space`'s own literal-text path) and a
+ * dual-channel render (`hasLocalTerminalChannel`/`canSendKeysRemotely`, both
+ * new, each carrying its own explanatory comment); the strip itself gained
+ * four buttons Orca's own layout puts beside the six keys (a keyboard-toggle,
+ * a screen icon, a "»" overflow and Paste); and `typePaneStrokes` gained the
+ * `/api/send-key` fallback (`send-key-remote.ts`) for the one build with no
+ * `window.api` at all. All of it is eager: the strip draws on every phone
+ * session screen, the same as the composer it sits above. Measured,
+ * `electron-vite build --mode production`, this worktree's own before/after
+ * with only `DetailPanel.tsx` and `styles.css` reverted to this branch's own
+ * merge-base for "before":
+ *
+ *     entry, before (merge-base, composer fix only)   699,722 B
+ *     entry, after (this fix)                          704,094 B  (+4,372 B, +0.62%)
+ *
+ * `ENTRY_BUDGET_BYTES` moves 703,300 -> 707,700: the real figure (704,094 B)
+ * plus ~3.6 KB (~0.5%) of slack, the same small-headroom convention every
+ * bump above uses. `ENTRY_GZIP_BUDGET_BYTES` stays at 212,000: the new
+ * strings and class lists compress well, and the gzip check passed
+ * unmodified against this same build.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -244,7 +289,7 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 // depends on is even present, decided BEFORE anything tries to build.
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
-const ENTRY_BUDGET_BYTES = 699_500;
+const ENTRY_BUDGET_BYTES = 707_700;
 const ENTRY_GZIP_BUDGET_BYTES = 212_000;
 
 // The one string this repo's markdown stack ships that nothing else in the

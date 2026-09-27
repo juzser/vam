@@ -76,10 +76,12 @@ import {
   ChevronsUp,
   Circle,
   CircleSlash,
+  ClipboardPaste,
   FileText,
   GitPullRequest,
   Hand,
   Image as ImageIcon,
+  KeyboardOff,
   ListChecks,
   LoaderCircle,
   MessageSquare,
@@ -118,6 +120,7 @@ import {
   type ProviderId,
   resolveProvider,
 } from '../../shared/providers.js';
+import { paneKeyToRemoteKeyId } from '../../shared/remote-key.js';
 import type { StartScreenKind } from '../../shared/start-screen.js';
 import type {
   ModelSwitchResult,
@@ -200,6 +203,7 @@ import { Note } from './Note.js';
 import { type OutActionResult, OutActionsProvider } from './out-actions.js';
 import { OUT_MARKDOWN, OUT_URL_TRANSFORM } from './out-markdown.js';
 import { newestSet, toolUseOf } from './question-set.js';
+import { sendKeyRemote } from './send-key-remote.js';
 import { GLYPH_PX, MARK_LANE_PX } from './status-mark.js';
 import { hasContentAbove, hasContentBelow, isAtBottom, shouldStick } from './stick-to-bottom.js';
 import { drawsComposer, narrowsAsProse, TABS, type Tab, visibleTabs } from './tabs.js';
@@ -827,6 +831,16 @@ export type DetailPanelProps = {
    * asking twice for the same tab an ask, which `Tab | null` could not say.
    */
   readonly tabRequest?: { readonly tab: Tab } | null;
+  /**
+   * Ask the shell to switch this pane to a given tab -- the phone key
+   * strip's own "screen" icon, Orca's own shortcut to jump from the
+   * transcript to the live terminal view without leaving the composer.
+   * Outbound, the opposite direction of `tabRequest`: that prop tells this
+   * panel which tab something ELSE picked; this one lets the panel ask the
+   * shell to make a pick. Optional, and the icon is absent wherever it is
+   * not wired (the phone shell's own `PhoneShell.tsx` is the only caller).
+   */
+  readonly onRequestTab?: (tab: Tab) => void;
   /**
    * What the last view shortcut REFUSED, drawn as a `role="status"` line
    * beside the icons — or null at rest.
@@ -4237,21 +4251,35 @@ function modelSwitchNote(result: ModelSwitchResult, title: string, choice: strin
 }
 
 /**
- * The phone keystroke strip's seven keys -- vam's real `PaneKey` shapes, not
- * orca's five: there is no `PaneKey` kind for a plain Tab (`terminal.ts`), so
- * it is refused outright rather than drawn as a button that always fails.
+ * The phone keystroke strip -- eight `PaneKey` shapes reachable by tap:
+ * Escape, Tab, Enter, Shift-Tab, Space, Backspace, with vam's own two-key
+ * addition (Up/Down, below) trailing after rather than breaking that order.
  * `id` is the strip's own attribute name, distinct from `PaneKey['kind']`
- * only for `space` (a `text` key rather than a kind of its own) and for
- * `up`/`down` (both `nav`, distinguished by `PaneKey.nav` the way `space`
- * is distinguished by `PaneKey.text`).
+ * only for `space`/`tab` (both `text` keys rather than a kind of their own)
+ * and for `up`/`down` (both `nav`, distinguished by `PaneKey.nav` the way
+ * `space` is distinguished by `PaneKey.text`).
  *
- * UP/DOWN ARE THE ADDITION, vam/terminal-arrows: a phone has no arrow keys at
- * all, and Claude Code's own option pickers -- `AskUserQuestion`, a
+ * `tab` IS THE ADDITION OVER THIS STRIP'S OWN PRIOR SEVEN. There is no
+ * dedicated `PaneKey` kind for a plain Tab, and there does not need to be
+ * one: MEASURED against a real tmux 3.7b, private `-L` socket, `send-keys
+ * Tab` (the symbolic press) and `send-keys -l -- <the literal tab byte>`
+ * (`sendTextArgv`, the same path `space` already takes on this strip) both
+ * deliver the identical single 0x09 byte -- unlike Escape/Enter/Backspace,
+ * where the literal and the symbolic forms measurably differ (`tmux/
+ * argv.ts`'s own measurements). So `tab` reuses `space`'s own, already-tested
+ * text path (`shared/remote-key.ts` holds the same mapping the remote route
+ * validates against, so the two can never drift).
+ *
+ * UP/DOWN ARE VAM'S OWN ADDITION, vam/terminal-arrows: a phone has no arrow
+ * keys at all, and Claude Code's own option pickers -- `AskUserQuestion`, a
  * permission prompt, `/model`, `/config`, plan approval -- are walked with
  * exactly them, the same report the Terminal tab's own keyboard fix answers.
  * Left/Right are not here: nothing on this strip is a line of text to move a
  * caret through, and every picker this strip exists for walks its rows with
- * Up/Down alone.
+ * Up/Down alone. THEY ARE NOT SERVED REMOTELY -- `paneKeyToRemoteKeyId`
+ * (`shared/remote-key.ts`) answers `null` for both, Orca's own phone layout
+ * carries neither, and the strip filters them out of its own render wherever
+ * `hasLocalTerminalChannel` is false (see the render site).
  *
  * Escape and Enter carry a visible caption naming a different destination
  * than their textarea siblings already claim (`Esc → sidebar`, the send
@@ -4284,18 +4312,18 @@ const KEY_STRIP: readonly {
     ariaLabel: 'press Escape in the session',
   },
   {
+    id: 'tab',
+    key: { kind: 'text', text: '\t' },
+    chord: 'Tab',
+    suffix: '',
+    ariaLabel: 'press Tab in the session',
+  },
+  {
     id: 'enter',
     key: { kind: 'enter', shift: false },
     chord: 'Enter',
     suffix: ' → agent',
     ariaLabel: 'press Enter in the session',
-  },
-  {
-    id: 'backspace',
-    key: { kind: 'backspace' },
-    chord: 'Backspace',
-    suffix: '',
-    ariaLabel: 'press Backspace in the session',
   },
   {
     id: 'back-tab',
@@ -4310,6 +4338,13 @@ const KEY_STRIP: readonly {
     chord: ' ',
     suffix: '',
     ariaLabel: 'press Space in the session',
+  },
+  {
+    id: 'backspace',
+    key: { kind: 'backspace' },
+    chord: 'Backspace',
+    suffix: '',
+    ariaLabel: 'press Backspace in the session',
   },
   {
     id: 'up',
@@ -6533,7 +6568,9 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
    * three not three listings).
    *
    * `window.api` exists only in the Electron shell, and its absence is
-   * reported rather than made into a no-op.
+   * reported rather than made into a no-op -- UNLESS the phone's own remote
+   * channel (`/api/send-key`, `send-key-remote.ts`) can carry this exact
+   * stroke instead. See that comment just below.
    */
   const typePaneStrokes = async (
     strokes: readonly PaneKey[],
@@ -6543,7 +6580,21 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
     if (entry === null) return;
     if (cycleNote?.kind === 'busy') return;
     const send = globalThis.window?.api?.terminal?.send;
-    if (send === undefined) {
+    // THE REMOTE FALLBACK: `window.api` exists only in the Electron shell,
+    // and a phone reached over Tailscale Serve has none at all -- but it may
+    // still have `/api/send-key` (`send-key-remote.ts`), a much narrower
+    // channel than the desktop's own `terminal.send`. It only ever carries a
+    // SINGLE stroke (every caller of this function passes one -- `sendKey`,
+    // `cycleMode`, the composer's own Escape -- `pressPaneKey`'s own doc),
+    // and only one of the six allowlisted ids `paneKeyToRemoteKeyId` answers
+    // for (`shared/remote-key.ts`); `up`/`down` and any multi-stroke run
+    // answer `null` and fall through to the same refusal the desktop build
+    // without `window.api` has always shown.
+    const remoteId =
+      send === undefined && strokes.length === 1 && strokes[0] !== undefined
+        ? paneKeyToRemoteKeyId(strokes[0])
+        : null;
+    if (send === undefined && remoteId === null) {
       setCycleNote({
         kind: 'refused',
         text: 'not sent — this build has no keyboard into a session’s pane',
@@ -6555,12 +6606,19 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
     const mine = cycleAbout;
     let landed: PaneSendResult = 'sent';
     let typed = 0;
-    for (const stroke of strokes) {
-      landed = await send(entry.project.id, stroke, entry.session.id).catch(
+    if (send === undefined && remoteId !== null) {
+      landed = await sendKeyRemote(entry.session.id, remoteId).catch(
         (): PaneSendResult => 'refused',
       );
-      if (landed !== 'sent') break;
-      typed += 1;
+      if (landed === 'sent') typed += 1;
+    } else if (send !== undefined) {
+      for (const stroke of strokes) {
+        landed = await send(entry.project.id, stroke, entry.session.id).catch(
+          (): PaneSendResult => 'refused',
+        );
+        if (landed !== 'sent') break;
+        typed += 1;
+      }
     }
     // Thirty seconds is long enough to move on, and an answer about the
     // session that was here then says nothing about the one that is here now.
@@ -8065,18 +8123,84 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
   /** The caller's verdict on the last send here, or null. See the prop. */
   const sendFailure = props.sendFailure ?? null;
   /**
-   * The phone keystroke strip's own gate -- structurally the SAME boolean
-   * `canCycleMode` already is, shared rather than re-derived, AND the card
-   * must not be live: `newestQuestion === null || !openQuestion` is
-   * `WaitingNote`'s own "no card, or the card has nothing open" test
-   * (below), reused rather than re-derived a second time. `composerHidden`
-   * ALONE is not this test -- `chattingAbout` un-hides the composer the
-   * moment "Chat about this" is tapped, while `QuestionCard` keeps drawing
-   * the very card that press was about, which would put a structured pick
-   * and a raw keypress live over the one question at once. `phone` is
-   * checked separately at the render site.
+   * IS THERE A LOCAL CHANNEL AT ALL -- `window.api` exists only in the
+   * Electron shell, never in a browser build. Read once per render rather
+   * than inside `typePaneStrokes` alone, because the STRIP now needs the
+   * same fact to decide which of its own buttons to draw at all (a phone
+   * cannot offer Up/Down, which this channel never carries -- see the
+   * strip's own comment below).
    */
-  const canSendKeys = canCycleMode && (newestQuestion === null || !openQuestion);
+  const hasLocalTerminalChannel = globalThis.window?.api?.terminal?.send !== undefined;
+  /**
+   * THE PHONE'S REMOTE CHANNEL -- vam controls this session's tmux pane
+   * (same half `canCycleMode` requires), and there is no LOCAL channel to
+   * prefer over it. Deliberately NOT gated on `terminal !== false`, unlike
+   * `canCycleMode`: the remote server's own `UNSERVED.terminal` means
+   * `terminal` reads `false` for every phone client by design (full pane
+   * read/write is not served), which is exactly the case this channel
+   * exists for -- see `/api/send-key`'s own doc (`main/remote/send-key.ts`)
+   * for the narrower promise it makes instead.
+   */
+  const canSendKeysRemotely =
+    entry !== null && entry.session.vamControlled === true && !hasLocalTerminalChannel;
+  /**
+   * The phone keystroke strip's own gate -- `canCycleMode` (the LOCAL,
+   * Electron-only channel) OR `canSendKeysRemotely` (the phone's own,
+   * allowlist-only channel), AND the card must not be live:
+   * `newestQuestion === null || !openQuestion` is `WaitingNote`'s own "no
+   * card, or the card has nothing open" test (below), reused rather than
+   * re-derived a second time. `composerHidden` ALONE is not this test --
+   * `chattingAbout` un-hides the composer the moment "Chat about this" is
+   * tapped, while `QuestionCard` keeps drawing the very card that press was
+   * about, which would put a structured pick and a raw keypress live over
+   * the one question at once. `phone` is checked separately at the render
+   * site.
+   */
+  const canSendKeys =
+    (canCycleMode || canSendKeysRemotely) && (newestQuestion === null || !openQuestion);
+  /**
+   * Real DOM focus on the prompt textarea -- NOT `composing`, which stays
+   * true across a blur (it means "this pane is the one being typed into",
+   * the panel's own broader claim, not "the keyboard is up right now"). The
+   * key strip's own keyboard-toggle icon needs the narrower fact: there is
+   * nothing to hide the keyboard FROM unless the box itself holds focus.
+   */
+  const [composerFocused, setComposerFocused] = useState(false);
+  /** Whether this browser can even attempt a clipboard read -- checked once,
+   *  not on every render: the API's presence does not change mid-session. */
+  const [clipboardReadAvailable] = useState(
+    () => typeof navigator !== 'undefined' && typeof navigator.clipboard?.readText === 'function',
+  );
+  /** The last clipboard read was denied -- disables Paste and says why,
+   *  rather than a button that silently does nothing on every tap. */
+  const [pasteDenied, setPasteDenied] = useState(false);
+  /** Scrolled to reach a chip `overflow-x-auto` already made reachable by
+   *  drag -- see the strip's own "»" button. */
+  const keyStripRef = useRef<HTMLElement>(null);
+  /**
+   * PASTE, OVER THE EXISTING PROMPT PATH -- never `/api/send-key`, which
+   * stays allowlist-only. `navigator.clipboard.readText()` needs a secure
+   * context (Tailscale Serve is HTTPS) and a real user gesture, which a tap
+   * on this very button supplies. A denial (no permission, or the browser
+   * refusing outside a gesture it recognises) sets `pasteDenied` rather than
+   * throwing past this handler -- the button's own `Note` reads that flag to
+   * say why, instead of a tap that does nothing and explains nothing.
+   */
+  const onPasteFromClipboard = async () => {
+    if (clipboardReadAvailable === false) return;
+    let text: string;
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      setPasteDenied(true);
+      return;
+    }
+    setPasteDenied(false);
+    if (text === '') return;
+    const next = spliceDraft(draft, caret, caret, text);
+    onDraftChange(next);
+    setCaret(caret + text.length);
+  };
   const startChat = () => {
     if (newestQuestion !== null) setChattingAbout(setId);
     onCompose();
@@ -9770,9 +9894,134 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
             <nav
               aria-label="press a key in the session"
               data-key-strip
+              ref={keyStripRef}
               className="vam-no-scrollbar flex flex-none items-center gap-1.5 overflow-x-auto overscroll-x-contain"
             >
-              {KEY_STRIP.map((item) => (
+              {/* THE KEYBOARD-TOGGLE, Orca's own leading icon and shown only
+                  while there is a keyboard to hide (`composerFocused`, above
+                  -- real DOM focus, not `composing`). `inputRef.current
+                  ?.blur()` is the exact release the composer's own Escape/
+                  `Mod-[` handler already uses a few lines down; this is a
+                  second door to the same act, for a device with no Escape
+                  key of its own. */}
+              {composerFocused && (
+                <button
+                  type="button"
+                  data-key-strip-hide-keyboard
+                  aria-label="hide the keyboard"
+                  onClick={() => inputRef.current?.blur()}
+                  className="vam-tap flex flex-none items-center justify-center"
+                >
+                  <span
+                    data-tap-skin
+                    className="flex h-[30px] w-[30px] items-center justify-center rounded-[8px] border border-line-strong bg-card text-ink-quiet active:bg-line-strong"
+                  >
+                    <KeyboardOff size={14} strokeWidth={1.7} />
+                  </span>
+                </button>
+              )}
+              {/* THE SCREEN ICON: Orca's own terminal-view shortcut, offered
+                  only where there IS a terminal view to jump to
+                  (`terminal !== false` -- the exact test `visibleTabs` itself
+                  applies to decide whether `PhoneShell`'s own view row draws
+                  one at all). On the phone build this composer strip
+                  actually ships to -- served remotely, where `terminal`
+                  reads `false` by design (`UNSERVED.terminal`,
+                  `remote/server.ts`) -- there is no Terminal tab anywhere on
+                  this screen, so this icon is honestly absent rather than a
+                  button that opens nowhere; a source that DOES carry a
+                  terminal (a desktop Electron window narrow enough to draw
+                  the phone shell) still gets it. */}
+              {terminal !== false && props.onRequestTab !== undefined && (
+                <button
+                  type="button"
+                  data-key-strip-screen
+                  aria-label="show the terminal view"
+                  onClick={() => props.onRequestTab?.('Terminal')}
+                  className="vam-tap flex flex-none items-center justify-center"
+                >
+                  <span
+                    data-tap-skin
+                    className="flex h-[30px] w-[30px] items-center justify-center rounded-[8px] border border-line-strong bg-card text-ink-quiet active:bg-line-strong"
+                  >
+                    <SquareTerminal size={14} strokeWidth={1.7} />
+                  </span>
+                </button>
+              )}
+              {/* THE "»" OVERFLOW: this row already scrolls
+                  (`overflow-x-auto`, this nav's own comment above) --
+                  Up/Down, vam's own addition over Orca's six, sit at its
+                  far end. This is a shortcut TO that end, a `scrollTo`
+                  rather than a second, hidden state to keep in step with
+                  the real one: nothing here is ever hidden that a drag
+                  could not already reach. */}
+              <button
+                type="button"
+                data-key-strip-more
+                aria-label="scroll to more keys"
+                onClick={() =>
+                  keyStripRef.current?.scrollTo({
+                    left: keyStripRef.current.scrollWidth,
+                    behavior: 'smooth',
+                  })
+                }
+                className="vam-tap flex flex-none items-center justify-center"
+              >
+                <span
+                  data-tap-skin
+                  className="flex h-[30px] w-[30px] items-center justify-center rounded-[8px] border border-line-strong bg-card font-mono text-control text-ink-quiet active:bg-line-strong"
+                >
+                  »
+                </span>
+              </button>
+              {/* PASTE: reads the phone's OWN clipboard and types the result
+                  through the EXISTING prompt path (`onPasteFromClipboard`,
+                  above) -- never through `sendKey`/the remote route, which
+                  stays allowlist-only. Disabled, with its `Note` explaining
+                  why, wherever the read cannot work: no
+                  `navigator.clipboard.readText` at all (`clipboardReadAvailable`),
+                  or the last attempt was denied (`pasteDenied`) -- the
+                  operator's own instruction: "if clipboard read is
+                  unavailable or denied, disable the key and explain why in
+                  its tooltip or title". */}
+              <Note
+                text={
+                  !clipboardReadAvailable
+                    ? 'paste needs a browser clipboard API this build does not have'
+                    : pasteDenied
+                      ? 'clipboard access was denied — check this browser’s site permissions and try again'
+                      : 'pastes the phone’s own clipboard into the prompt'
+                }
+              >
+                <button
+                  type="button"
+                  data-key-strip-paste
+                  aria-label="paste from the clipboard"
+                  disabled={!clipboardReadAvailable || pasteDenied}
+                  onClick={() => void onPasteFromClipboard()}
+                  className="vam-tap flex flex-none items-center justify-center disabled:opacity-40"
+                >
+                  <span
+                    data-tap-skin
+                    className="flex h-[30px] w-[30px] items-center justify-center rounded-[8px] border border-line-strong bg-card text-ink-quiet active:bg-line-strong"
+                  >
+                    <ClipboardPaste size={14} strokeWidth={1.7} />
+                  </span>
+                </button>
+              </Note>
+              {/* THE KEYS THEMSELVES, FILTERED TO WHAT THE ACTIVE CHANNEL CAN
+                  ACTUALLY CARRY. `hasLocalTerminalChannel` (the Electron-only
+                  `window.api.terminal.send`) reaches every one of the eight;
+                  the phone's own remote channel (`send-key-remote.ts`) only
+                  ever reaches the six `paneKeyToRemoteKeyId` answers for
+                  (`shared/remote-key.ts`) -- Up/Down are withdrawn from the
+                  strip itself rather than drawn as two buttons that always
+                  fail, the same "absent, not disabled" rule this app applies
+                  everywhere else a control cannot act. */}
+              {(hasLocalTerminalChannel
+                ? KEY_STRIP
+                : KEY_STRIP.filter((item) => paneKeyToRemoteKeyId(item.key) !== null)
+              ).map((item) => (
                 <button
                   key={item.id}
                   type="button"
@@ -9930,261 +10179,303 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
             {...insertStopMark}
             tabIndex={-1}
             className={[
-              'flex rounded-[10px] border bg-card outline-none',
+              // PHONE: no border/bg of its own any more -- `data-prompt-input`
+              // below carries them now, on its own card. Desktop is untouched.
+              phone ? 'flex outline-none' : 'flex rounded-[10px] border bg-card outline-none',
               // PHONE: ONE row, not two (docs/design/phone-core-loop.md §3.4
               // PR 1's own follow-up, §4.1's postmortem). `flex-row flex-wrap
-              // items-end` turns this box into the merged control row's own
-              // flex context -- the textarea's wrapper and `data-prompt-tools`
-              // both go `display: contents` below so their children (the "+",
-              // the box, mic, Send) become direct items of THIS row instead of
-              // two stacked ones. `items-end` anchors the fixed-size controls
-              // to the textarea's OWN baseline as it grows upward, the same
-              // shape iMessage/Claude's own composer draws. Desktop keeps the
-              // original two-row `flex-col`, untouched.
+              // items-end` is still the merged control row's own flex
+              // context, but its main line now holds exactly TWO items --
+              // the input pill (`data-prompt-input`, `flex-1`) and the
+              // button group (`data-prompt-tools`, `flex-none`) -- rather
+              // than the bare textarea and every button flattened into it
+              // individually. `items-end` still anchors the button group to
+              // the pill's OWN baseline as it grows upward, the same shape
+              // iMessage/Claude's own composer draws; what changed is that
+              // the pill now paints its OWN card, so growing text never
+              // shares a background with the buttons beside it -- the
+              // operator's own report ("the buttons... cover most of the
+              // input box") was true of the one shared card this replaces,
+              // not of two separate ones with a gap between them. Desktop
+              // keeps the original two-row `flex-col`, untouched.
               phone
                 ? 'flex-row flex-wrap items-end gap-x-2 gap-y-1.5 px-2.5 py-1.5'
                 : 'flex-col gap-2.5 px-3 py-2.5',
-              active && actionIndex === 0 ? 'border-waiting' : 'border-line-loud',
+              // PHONE: the focus ring moves to the pill, which is the thing
+              // it is a ring FOR (Orca draws it on the input alone, never on
+              // the buttons beside it). Desktop keeps it here, unchanged.
+              phone ? '' : active && actionIndex === 0 ? 'border-waiting' : 'border-line-loud',
             ].join(' ')}
           >
-            {/* Multiline, because a prompt is prose and a one-line slot hides
+            {/* THE INPUT PILL (PHONE ONLY): its own rounded card, its own
+              background, its own focus ring, `flex-1 min-w-0` so it takes
+              every pixel the button group beside it does not -- Orca's
+              shape, and the operator's own fix ("the textarea gets its own
+              flex column with the full remaining width... the buttons...
+              never sit on top of the text area"). `min-w-0` is load-bearing:
+              a flex item defaults to `min-width: auto` (its content's own
+              width), and a textarea's content can be arbitrarily long --
+              without this the pill would refuse to shrink and push the
+              button group off a 360px screen. `contents` on desktop, which
+              already draws ONE card around the whole row (this div's own
+              `border bg-card` two levels up) -- a second one nested inside
+              it would be a border around a border, so desktop's own wrapper
+              one line down keeps its unchanged `flex items-start gap-2`. */}
+            <div
+              data-prompt-input
+              className={
+                phone
+                  ? [
+                      'flex min-w-0 flex-1 items-end gap-2 rounded-[10px] border bg-card px-3 py-1.5',
+                      active && actionIndex === 0 ? 'border-waiting' : 'border-line-loud',
+                    ].join(' ')
+                  : 'contents'
+              }
+            >
+              {/* Multiline, because a prompt is prose and a one-line slot hides
             everything but the tail of it. The mockup's own composer is a
             104px-tall block of 12.5px/1.55 text, not an input. PHONE: this
             wrapper contributes no box of its own (`display: contents`) so its
-            one child -- the textarea -- becomes a direct item of the merged
-            row `data-prompt-box` now lays out; see that div's own comment. */}
-            <div className={phone ? 'contents' : 'flex items-start gap-2'}>
-              <textarea
-                ref={inputRef}
-                rows={phone ? 1 : 2}
-                value={draft}
-                readOnly={!composing}
-                onFocus={onCompose}
-                onChange={(event) => {
-                  setCaret(event.target.selectionStart ?? event.target.value.length);
-                  // Typing is how a dismissed list comes back, and how the
-                  // highlight returns to the top of a freshly filtered one.
-                  setDismissed(false);
-                  setPick(0);
-                  onDraftChange(event.target.value);
-                }}
-                onPaste={(event) => {
-                  // A paste event carries its own `DataTransfer`, so this needs
-                  // no permission and no trip through main -- unlike
-                  // `navigator.clipboard`, which Electron's deny-all policy
-                  // breaks (`src/main/clipboard/ipc.ts` exists for that).
-                  const data = event.clipboardData;
-                  const outcome = readPastedImages(data, images.length + 1);
-                  if (outcome.kind === 'text') return;
-                  event.preventDefault();
-                  const box = event.currentTarget;
-                  onDraftChange(
-                    spliceDraft(draft, box.selectionStart, box.selectionEnd, outcome.text),
-                  );
-                  setImages([...images, ...outcome.images]);
-                }}
-                onKeyDown={(event) => {
-                  // AN ENTER THAT ONLY COMMITS AN IME CANDIDATE IS NOT A SEND,
-                  // and this is the first thing the box asks because EVERY
-                  // Enter branch below would otherwise answer it -- the send,
-                  // and both typeahead accepts.
-                  //
-                  // MEASURED in Chromium, the engine vam ships on, by driving
-                  // a real composition through CDP `Input.imeSetComposition`:
-                  // the commit key arrives as `{ key: 'Enter', keyCode: 13,
-                  // isComposing: true }`, which no handler reading `key` alone
-                  // can tell from a send. The operator types Vietnamese; every
-                  // accented syllable ends in that keystroke, and each one was
-                  // filing a half-typed prompt into a running agent.
-                  //
-                  // `event.nativeEvent.isComposing`, NOT `event.isComposing`.
-                  // React's synthetic keyboard event does not carry the
-                  // property at all -- its `KeyboardEventInterface` lists key,
-                  // code, location, the four modifiers, repeat, locale,
-                  // getModifierState, charCode, keyCode, which -- and
-                  // `@types/react` omits it, so the plain spelling is
-                  // `undefined` at runtime and the guard would be dead while
-                  // looking exactly like a live one.
-                  //
-                  // RETURN, NOT `preventDefault`: the composition is mid-flight
-                  // and this keystroke is what commits it. Claiming the event
-                  // would leave the operator unable to finish the syllable.
-                  // Scoped to Enter, so Escape and Tab still work for someone
-                  // typing a non-Latin script.
-                  if (event.key === 'Enter' && event.nativeEvent.isComposing) return;
-                  // THE ENTER COLLISION, decided here. With the suggestion list
-                  // open Enter ACCEPTS and sends nothing; only a closed list
-                  // lets Enter through to `onSubmit`. Since the reply PR a send
-                  // really delivers — into a tmux pane for a session vam
-                  // started, with a CLI fallback — so an Enter that completed
-                  // the word and shipped it as well would put a half-typed
-                  // command into a running agent. Escape closes the list and NOT the composer,
-                  // and leaves the typed `!` where it is: the operator may be
-                  // writing a command of their own, and a second Escape still
-                  // hands the keyboard back to the sidebar.
-                  const suggestion = suggesting ? matches[picked] : undefined;
-                  if (suggestion !== undefined) {
-                    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-                      event.preventDefault();
-                      const delta = event.key === 'ArrowDown' ? 1 : -1;
-                      // Clamped, not wrapped, like every other cursor in this app.
-                      setPick(Math.min(Math.max(0, picked + delta), matches.length - 1));
-                      return;
-                    }
-                    // ENTER, IN BOTH MODES, AND DELIBERATELY NOT `submitsPrompt`.
-                    // The send key is the operator's to swap (`prefs/submit-key.ts`);
-                    // this is not the send. Accepting a completion does not
-                    // deliver anything, Enter-accepts is the idiom every
-                    // typeahead an operator has ever used follows, and a list
-                    // that followed the pref would have NO accept key at all in
-                    // `shift-enter` mode -- Shift+Enter would be the send there.
-                    // `test/panels/DetailPanel.submit-key.test.tsx` holds this.
-                    if (event.key === 'Enter' && !event.shiftKey) {
-                      event.preventDefault();
-                      acceptSuggestion(suggestion);
-                      return;
-                    }
-                    if (event.key === 'Escape') {
-                      event.preventDefault();
-                      setDismissed(true);
-                      return;
-                    }
-                  }
-                  // Same collision, same three keys, for the `/` list -- see the
-                  // comment above `slashCommandQuery` for why this can never be
-                  // open at the same time as the `!` block above.
-                  const slashSuggestion = slashSuggesting ? slashMatches[slashPicked] : undefined;
-                  if (slashSuggestion !== undefined) {
-                    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-                      event.preventDefault();
-                      const delta = event.key === 'ArrowDown' ? 1 : -1;
-                      setPick(Math.min(Math.max(0, slashPicked + delta), slashMatches.length - 1));
-                      return;
-                    }
-                    // Enter accepts here in both modes too, for the three
-                    // reasons spelled out over the `!` branch above.
-                    if (event.key === 'Enter' && !event.shiftKey) {
-                      event.preventDefault();
-                      acceptSlashSuggestion(slashSuggestion);
-                      return;
-                    }
-                    if (event.key === 'Escape') {
-                      event.preventDefault();
-                      setDismissed(true);
-                      return;
-                    }
-                  }
-                  // The window listener ignores keys typed in a textarea, so this
-                  // box binds the ones it needs itself. WHICH of Enter and
-                  // Shift+Enter sends is the operator's (`prefs/submit-key.ts`);
-                  // whichever one does not is left alone, because it is the
-                  // newline the box became multiline to allow.
-                  //
-                  // Shift+Tab is bound HERE, and deliberately not in the chord
-                  // tables (`keyboard/chords.ts`), for two reasons that both
-                  // decide it: that listener never sees a key typed in this
-                  // box, which is where this one is pressed — the same place a
-                  // person presses it in the session's own terminal — and
-                  // `normalizeKey` gives Shift no token, so a table entry for
-                  // `Tab` would answer a PLAIN Tab as well. Plain Tab is left
-                  // alone: it is how a keyboard gets out of a textarea.
-                  // THE OFFER, ACCEPTED -- and only while there is one, which
-                  // is what keeps plain Tab the exit the rest of the time.
-                  // See `promptSuggestion` for the whole rule.
-                  if (event.key === 'Tab' && !event.shiftKey && promptSuggestion !== null) {
+            one child -- the textarea -- becomes the pill's own flex item;
+            see `data-prompt-input` just above for that pill's own comment. */}
+              <div className={phone ? 'contents' : 'flex items-start gap-2'}>
+                <textarea
+                  ref={inputRef}
+                  rows={phone ? 1 : 2}
+                  value={draft}
+                  readOnly={!composing}
+                  onFocus={() => {
+                    onCompose();
+                    setComposerFocused(true);
+                  }}
+                  onBlur={() => setComposerFocused(false)}
+                  onChange={(event) => {
+                    setCaret(event.target.selectionStart ?? event.target.value.length);
+                    // Typing is how a dismissed list comes back, and how the
+                    // highlight returns to the top of a freshly filtered one.
+                    setDismissed(false);
+                    setPick(0);
+                    onDraftChange(event.target.value);
+                  }}
+                  onPaste={(event) => {
+                    // A paste event carries its own `DataTransfer`, so this needs
+                    // no permission and no trip through main -- unlike
+                    // `navigator.clipboard`, which Electron's deny-all policy
+                    // breaks (`src/main/clipboard/ipc.ts` exists for that).
+                    const data = event.clipboardData;
+                    const outcome = readPastedImages(data, images.length + 1);
+                    if (outcome.kind === 'text') return;
                     event.preventDefault();
-                    onDraftChange(promptSuggestion);
-                    return;
-                  }
-                  if (event.key === 'Tab' && event.shiftKey && canCycleMode) {
-                    event.preventDefault();
-                    void cycleMode();
-                  } else if (submitsPrompt(submitKey, event)) {
-                    event.preventDefault();
-                    onSubmit();
-                    // NOTE WHAT HAS NO BRANCH: the Enter that does NOT send.
-                    // It has to fall out of this chain untouched so the
-                    // textarea inserts the newline itself -- a
-                    // `preventDefault()` on that path would hand the operator a
-                    // box with no send AND no newline.
-                  } else if (event.key === 'Escape') {
-                    // THE INTERRUPT. With both typeahead lists closed (they
-                    // answered Escape above and still do), Escape goes into the
-                    // agent rather than out of the box -- Claude Code's own
-                    // default, at the operator's request. `preventDefault` is
-                    // what keeps `Canvas`'s `cancel` comment true: "an Escape
-                    // typed INSIDE the composer never reaches here".
+                    const box = event.currentTarget;
+                    onDraftChange(
+                      spliceDraft(draft, box.selectionStart, box.selectionEnd, outcome.text),
+                    );
+                    setImages([...images, ...outcome.images]);
+                  }}
+                  onKeyDown={(event) => {
+                    // AN ENTER THAT ONLY COMMITS AN IME CANDIDATE IS NOT A SEND,
+                    // and this is the first thing the box asks because EVERY
+                    // Enter branch below would otherwise answer it -- the send,
+                    // and both typeahead accepts.
                     //
-                    // The draft is NOT cleared and the keyboard is NOT moved.
-                    // Claude does neither, and an interrupt that also cost the
-                    // operator their half-typed prompt would be a worse trade
-                    // than pressing nothing at all.
-                    event.preventDefault();
-                    // A popover opened from the tools row can still be up while
-                    // the keyboard is in the box. It is a dialog, so it takes
-                    // this Escape and the agent does not.
-                    if (closeOpenPopover()) return;
-                    interruptRun();
-                  } else if (normalizeKey(event) === 'Mod-[') {
-                    // AND THE WAY OUT, which Escape used to be. `Ctrl-[` IS
-                    // Escape in vim and in a terminal, and `Mod` folds Ctrl and
-                    // Cmd (`chords.ts`), so this is `Cmd+[` on the keyboard the
-                    // operator has. Bound HERE rather than in the chord tables,
-                    // for the reason Shift+Tab above is and for one more:
-                    // `focusList` already holds `MAX_BINDINGS` chords
-                    // (`Mod-Shift-h`, `Mod-0`), and a third would be invisible in the shortcut
-                    // editor -- which draws exactly `MAX_BINDINGS` slots -- and
-                    // destroyed by the first rebind of either. It is in
-                    // `RESERVED_KEYS` instead, so nothing else can take it.
+                    // MEASURED in Chromium, the engine vam ships on, by driving
+                    // a real composition through CDP `Input.imeSetComposition`:
+                    // the commit key arrives as `{ key: 'Enter', keyCode: 13,
+                    // isComposing: true }`, which no handler reading `key` alone
+                    // can tell from a send. The operator types Vietnamese; every
+                    // accented syllable ends in that keystroke, and each one was
+                    // filing a half-typed prompt into a running agent.
                     //
-                    // BLUR, not just `composing = false`. Clearing the flag only
-                    // makes this box read-only; while it still holds DOM focus
-                    // the window key listener returns early on every keystroke
-                    // (it ignores keys aimed at an INPUT or a TEXTAREA), so
-                    // `j`/`k` land here and vanish and the sidebar is
-                    // unreachable without a mouse. Releasing focus is what hands
-                    // the keyboard back.
-                    event.preventDefault();
-                    inputRef.current?.blur();
-                    onStopComposing();
+                    // `event.nativeEvent.isComposing`, NOT `event.isComposing`.
+                    // React's synthetic keyboard event does not carry the
+                    // property at all -- its `KeyboardEventInterface` lists key,
+                    // code, location, the four modifiers, repeat, locale,
+                    // getModifierState, charCode, keyCode, which -- and
+                    // `@types/react` omits it, so the plain spelling is
+                    // `undefined` at runtime and the guard would be dead while
+                    // looking exactly like a live one.
+                    //
+                    // RETURN, NOT `preventDefault`: the composition is mid-flight
+                    // and this keystroke is what commits it. Claiming the event
+                    // would leave the operator unable to finish the syllable.
+                    // Scoped to Enter, so Escape and Tab still work for someone
+                    // typing a non-Latin script.
+                    if (event.key === 'Enter' && event.nativeEvent.isComposing) return;
+                    // THE ENTER COLLISION, decided here. With the suggestion list
+                    // open Enter ACCEPTS and sends nothing; only a closed list
+                    // lets Enter through to `onSubmit`. Since the reply PR a send
+                    // really delivers — into a tmux pane for a session vam
+                    // started, with a CLI fallback — so an Enter that completed
+                    // the word and shipped it as well would put a half-typed
+                    // command into a running agent. Escape closes the list and NOT the composer,
+                    // and leaves the typed `!` where it is: the operator may be
+                    // writing a command of their own, and a second Escape still
+                    // hands the keyboard back to the sidebar.
+                    const suggestion = suggesting ? matches[picked] : undefined;
+                    if (suggestion !== undefined) {
+                      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                        event.preventDefault();
+                        const delta = event.key === 'ArrowDown' ? 1 : -1;
+                        // Clamped, not wrapped, like every other cursor in this app.
+                        setPick(Math.min(Math.max(0, picked + delta), matches.length - 1));
+                        return;
+                      }
+                      // ENTER, IN BOTH MODES, AND DELIBERATELY NOT `submitsPrompt`.
+                      // The send key is the operator's to swap (`prefs/submit-key.ts`);
+                      // this is not the send. Accepting a completion does not
+                      // deliver anything, Enter-accepts is the idiom every
+                      // typeahead an operator has ever used follows, and a list
+                      // that followed the pref would have NO accept key at all in
+                      // `shift-enter` mode -- Shift+Enter would be the send there.
+                      // `test/panels/DetailPanel.submit-key.test.tsx` holds this.
+                      if (event.key === 'Enter' && !event.shiftKey) {
+                        event.preventDefault();
+                        acceptSuggestion(suggestion);
+                        return;
+                      }
+                      if (event.key === 'Escape') {
+                        event.preventDefault();
+                        setDismissed(true);
+                        return;
+                      }
+                    }
+                    // Same collision, same three keys, for the `/` list -- see the
+                    // comment above `slashCommandQuery` for why this can never be
+                    // open at the same time as the `!` block above.
+                    const slashSuggestion = slashSuggesting ? slashMatches[slashPicked] : undefined;
+                    if (slashSuggestion !== undefined) {
+                      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                        event.preventDefault();
+                        const delta = event.key === 'ArrowDown' ? 1 : -1;
+                        setPick(
+                          Math.min(Math.max(0, slashPicked + delta), slashMatches.length - 1),
+                        );
+                        return;
+                      }
+                      // Enter accepts here in both modes too, for the three
+                      // reasons spelled out over the `!` branch above.
+                      if (event.key === 'Enter' && !event.shiftKey) {
+                        event.preventDefault();
+                        acceptSlashSuggestion(slashSuggestion);
+                        return;
+                      }
+                      if (event.key === 'Escape') {
+                        event.preventDefault();
+                        setDismissed(true);
+                        return;
+                      }
+                    }
+                    // The window listener ignores keys typed in a textarea, so this
+                    // box binds the ones it needs itself. WHICH of Enter and
+                    // Shift+Enter sends is the operator's (`prefs/submit-key.ts`);
+                    // whichever one does not is left alone, because it is the
+                    // newline the box became multiline to allow.
+                    //
+                    // Shift+Tab is bound HERE, and deliberately not in the chord
+                    // tables (`keyboard/chords.ts`), for two reasons that both
+                    // decide it: that listener never sees a key typed in this
+                    // box, which is where this one is pressed — the same place a
+                    // person presses it in the session's own terminal — and
+                    // `normalizeKey` gives Shift no token, so a table entry for
+                    // `Tab` would answer a PLAIN Tab as well. Plain Tab is left
+                    // alone: it is how a keyboard gets out of a textarea.
+                    // THE OFFER, ACCEPTED -- and only while there is one, which
+                    // is what keeps plain Tab the exit the rest of the time.
+                    // See `promptSuggestion` for the whole rule.
+                    if (event.key === 'Tab' && !event.shiftKey && promptSuggestion !== null) {
+                      event.preventDefault();
+                      onDraftChange(promptSuggestion);
+                      return;
+                    }
+                    if (event.key === 'Tab' && event.shiftKey && canCycleMode) {
+                      event.preventDefault();
+                      void cycleMode();
+                    } else if (submitsPrompt(submitKey, event)) {
+                      event.preventDefault();
+                      onSubmit();
+                      // NOTE WHAT HAS NO BRANCH: the Enter that does NOT send.
+                      // It has to fall out of this chain untouched so the
+                      // textarea inserts the newline itself -- a
+                      // `preventDefault()` on that path would hand the operator a
+                      // box with no send AND no newline.
+                    } else if (event.key === 'Escape') {
+                      // THE INTERRUPT. With both typeahead lists closed (they
+                      // answered Escape above and still do), Escape goes into the
+                      // agent rather than out of the box -- Claude Code's own
+                      // default, at the operator's request. `preventDefault` is
+                      // what keeps `Canvas`'s `cancel` comment true: "an Escape
+                      // typed INSIDE the composer never reaches here".
+                      //
+                      // The draft is NOT cleared and the keyboard is NOT moved.
+                      // Claude does neither, and an interrupt that also cost the
+                      // operator their half-typed prompt would be a worse trade
+                      // than pressing nothing at all.
+                      event.preventDefault();
+                      // A popover opened from the tools row can still be up while
+                      // the keyboard is in the box. It is a dialog, so it takes
+                      // this Escape and the agent does not.
+                      if (closeOpenPopover()) return;
+                      interruptRun();
+                    } else if (normalizeKey(event) === 'Mod-[') {
+                      // AND THE WAY OUT, which Escape used to be. `Ctrl-[` IS
+                      // Escape in vim and in a terminal, and `Mod` folds Ctrl and
+                      // Cmd (`chords.ts`), so this is `Cmd+[` on the keyboard the
+                      // operator has. Bound HERE rather than in the chord tables,
+                      // for the reason Shift+Tab above is and for one more:
+                      // `focusList` already holds `MAX_BINDINGS` chords
+                      // (`Mod-Shift-h`, `Mod-0`), and a third would be invisible in the shortcut
+                      // editor -- which draws exactly `MAX_BINDINGS` slots -- and
+                      // destroyed by the first rebind of either. It is in
+                      // `RESERVED_KEYS` instead, so nothing else can take it.
+                      //
+                      // BLUR, not just `composing = false`. Clearing the flag only
+                      // makes this box read-only; while it still holds DOM focus
+                      // the window key listener returns early on every keystroke
+                      // (it ignores keys aimed at an INPUT or a TEXTAREA), so
+                      // `j`/`k` land here and vanish and the sidebar is
+                      // unreachable without a mouse. Releasing focus is what hands
+                      // the keyboard back.
+                      event.preventDefault();
+                      inputRef.current?.blur();
+                      onStopComposing();
+                    }
+                  }}
+                  // The ghost, in the placeholder's own faint ink: unmistakably
+                  // not a draft yet, and naming the key that would make it one.
+                  //
+                  // NOT ON A PHONE, AND THE CAPTION IS ONLY HALF THE REASON. A
+                  // touchscreen has no Tab, so `— Tab to use` named a key that is
+                  // not there; worse, a placeholder holds ONE string, so printing
+                  // the ghost cost the sentence that says what the box is for at
+                  // the exact moment a phone operator has just opened it. Both
+                  // halves are fixed in one place: the phone keeps the sentence,
+                  // and the offer moves to `data-prompt-suggestion-use` in the
+                  // tools row below -- a control a finger can take, in a row that
+                  // is already 44px tall, so it costs no height at all. The
+                  // attribute stays on both, because it is what says an offer is
+                  // standing at all.
+                  data-prompt-suggestion={promptSuggestion ?? undefined}
+                  placeholder={
+                    entry === null
+                      ? 'Pick a session first'
+                      : promptSuggestion !== null && !phone
+                        ? `${promptSuggestion} — Tab to use`
+                        : phone
+                          ? // PHONE ONLY, SHORTER: the desktop sentence wraps to
+                            // three lines at the merged row's own width, cramped
+                            // inside a box now pinned to one line's height
+                            // (docs/design/phone-core-loop.md §4.7's own
+                            // postmortem closed that height, which is what
+                            // exposed this). Measured to fit one line at 390px
+                            // with the "+"/mic/Send buttons still in the row
+                            // (`e2e/phone-shell.pw.ts`'s hidden-probe check).
+                            // Drops "paste a plan" -- the one function this
+                            // shorter copy does not name -- pasting itself is
+                            // unaffected; only the hint is gone.
+                            'Reply or answer 1–9'
+                          : 'Reply to agent, answer with a number, or paste a plan…'
                   }
-                }}
-                // The ghost, in the placeholder's own faint ink: unmistakably
-                // not a draft yet, and naming the key that would make it one.
-                //
-                // NOT ON A PHONE, AND THE CAPTION IS ONLY HALF THE REASON. A
-                // touchscreen has no Tab, so `— Tab to use` named a key that is
-                // not there; worse, a placeholder holds ONE string, so printing
-                // the ghost cost the sentence that says what the box is for at
-                // the exact moment a phone operator has just opened it. Both
-                // halves are fixed in one place: the phone keeps the sentence,
-                // and the offer moves to `data-prompt-suggestion-use` in the
-                // tools row below -- a control a finger can take, in a row that
-                // is already 44px tall, so it costs no height at all. The
-                // attribute stays on both, because it is what says an offer is
-                // standing at all.
-                data-prompt-suggestion={promptSuggestion ?? undefined}
-                placeholder={
-                  entry === null
-                    ? 'Pick a session first'
-                    : promptSuggestion !== null && !phone
-                      ? `${promptSuggestion} — Tab to use`
-                      : phone
-                        ? // PHONE ONLY, SHORTER: the desktop sentence wraps to
-                          // three lines at the merged row's own width, cramped
-                          // inside a box now pinned to one line's height
-                          // (docs/design/phone-core-loop.md §4.7's own
-                          // postmortem closed that height, which is what
-                          // exposed this). Measured to fit one line at 390px
-                          // with the "+"/mic/Send buttons still in the row
-                          // (`e2e/phone-shell.pw.ts`'s hidden-probe check).
-                          // Drops "paste a plan" -- the one function this
-                          // shorter copy does not name -- pasting itself is
-                          // unaffected; only the hint is gone.
-                          'Reply or answer 1–9'
-                        : 'Reply to agent, answer with a number, or paste a plan…'
-                }
-                /* `vam-tap` IS THE TOUCH FLOOR, and the box you type in is a
+                  /* `vam-tap` IS THE TOUCH FLOOR, and the box you type in is a
                    touch target like any other: measured at 390px it came back
                    335x40, four pixels under the AAA figure the rest of this
                    shell keeps -- and it is the one control on the screen that
@@ -10199,26 +10490,33 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                    for the real-browser measurement this closes. `rows={1}`
                    (not 2) and `max-h-[132px]` (not 120) are the two figures
                    that still differ from desktop. */
-                className={[
-                  'vam-no-scrollbar vam-tap min-w-0 flex-1 resize-none overflow-y-auto bg-transparent text-body text-ink outline-none placeholder:text-ink-faint',
-                  phone ? 'max-h-[132px]' : 'max-h-[120px]',
-                ].join(' ')}
-                aria-label="prompt to session"
-              />
+                  className={[
+                    'vam-no-scrollbar vam-tap min-w-0 flex-1 resize-none overflow-y-auto bg-transparent text-body text-ink outline-none placeholder:text-ink-faint',
+                    phone ? 'max-h-[132px]' : 'max-h-[120px]',
+                  ].join(' ')}
+                  aria-label="prompt to session"
+                />
+              </div>
             </div>
 
-            {/* PHONE: `basis-full` on each of these three -- and on the chips
-              and the mode caption further down -- so a rare message forces
-              its OWN line in the merged row's `flex-wrap` rather than
-              cramming in beside the textarea; see `data-prompt-box`'s own
-              comment for the row these now belong to. Desktop is untouched,
-              still `flex-col`, where a bare block already took its own line
-              for free. */}
+            {/* PHONE: `order-10 basis-full` on each of these three -- and on
+              the suggestion offer and the mode caption further down -- so a
+              rare message forces its OWN line in the merged row's
+              `flex-wrap` rather than cramming in beside the textarea, AND
+              always trails the pill and the button group rather than
+              splitting them onto separate lines: `order-10` is what keeps
+              `data-prompt-input` and `data-prompt-tools` -- the row's only
+              two order-0 items now -- adjacent in FLEX order regardless of
+              where a conditional caption like this sits in DOM order between
+              them. Desktop is untouched, still `flex-col`, where a bare
+              block already took its own line for free. */}
             {images.length > 0 && (
               <p
                 data-pasted-images
                 className={
-                  phone ? 'basis-full text-control text-ink-dim' : 'text-control text-ink-dim'
+                  phone
+                    ? 'order-10 basis-full text-control text-ink-dim'
+                    : 'text-control text-ink-dim'
                 }
               >
                 {images.length === 1 ? '1 image' : `${images.length} images`} pasted and kept here —
@@ -10231,7 +10529,9 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
               <p
                 data-attach-error
                 className={
-                  phone ? 'basis-full text-control text-waiting' : 'text-control text-waiting'
+                  phone
+                    ? 'order-10 basis-full text-control text-waiting'
+                    : 'text-control text-waiting'
                 }
               >
                 {attachError}
@@ -10247,108 +10547,128 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
               <p
                 data-dictate-error
                 className={
-                  phone ? 'basis-full text-control text-waiting' : 'text-control text-waiting'
+                  phone
+                    ? 'order-10 basis-full text-control text-waiting'
+                    : 'text-control text-waiting'
                 }
               >
                 {dictateError}
               </p>
             )}
 
-            {/* The tools row: attach, provider, model, mode — everything the
-              prompt carries besides its text, on one line under the box.
-              PHONE: this contributes no box of its own either (`display:
-              contents`) -- its children (the "+", the mic, Send, and the rare
-              chip/caption rows) become direct items of the SAME merged row
-              the textarea now sits in, ordered by `data-composer-overflow`'s
-              own `order-first` and the rare rows' own `order-10 basis-full`
-              below. The hook is what lets a test say "beside the model field"
-              without a layout engine, on desktop, where this is still a real
-              flex row of its own. */}
-            <div data-prompt-tools className={phone ? 'contents' : 'flex items-center gap-2'}>
-              {/* THE OFFER, AS A CONTROL, because on a phone `Tab` is not one.
-                See the placeholder above for the whole rule. Three things
-                decide the shape:
+            {/* THE OFFER, AS A CONTROL, because on a phone `Tab` is not one.
+              See the placeholder above for the whole rule. Three things
+              decide the shape:
 
-                  - IT IS THE PHONE'S ONLY ROUTE to `promptSuggestion`, so it
-                    is drawn exactly where the key is missing and nowhere else.
-                    The desktop keeps the caption and the key; a second control
-                    there would be a second way to do a thing that already has
-                    one.
-                  - IT SAYS WHAT IT WOULD WRITE. A pill rather than a glyph:
-                    "Use" alone is a control whose object is invisible once the
-                    ghost has left the placeholder. `data-tap-pill` is the
-                    existing opt-out of the 30x30 square for a skin holding
-                    TEXT (`styles.css`).
-                  - AND IT IS THE ROW'S FLEXIBLE ITEM, which is the part that
-                    was measured rather than reasoned. Every other control
-                    here is fixed at 44 or 65 and none of them will give way,
-                    so a pill sized to its own content pushes the LAST one --
-                    Record -- off the screen: driven at 390px with a
-                    multi-select's three marks joined, the row overflowed its
-                    335px and Record's right edge landed at 397. So this one
-                    shrinks and clips with an ellipsis, down to the 44px floor
-                    `vam-tap` gives it, and the whole label is the accessible
-                    name, which is the channel that cannot be clipped. `max-w`
-                    is the other end: an offer does not get to own half a row
-                    it is only suggesting something into.
-                  - IT IS WITHDRAWN THE MOMENT IT IS TAKEN, because
-                    `promptSuggestion` is null over a non-empty draft: the same
-                    trade the Tab binding already refuses -- an accept that
-                    could only overwrite what the operator has written. */}
-              {phone && promptSuggestion !== null && (
-                <button
-                  type="button"
-                  data-prompt-suggestion-use
-                  aria-label={`use the suggested reply: ${promptSuggestion}`}
-                  onClick={() => onDraftChange(promptSuggestion)}
-                  // `order-10 basis-full`: this offer is rare enough (a
-                  // draft-less focus) that it earns its own line below the
-                  // merged [+, textarea, mic, Send] row rather than crowding
-                  // it -- see `data-prompt-box`'s own comment.
-                  className="vam-tap order-10 flex min-w-0 shrink basis-full cursor-pointer items-center justify-start"
+                - IT IS THE PHONE'S ONLY ROUTE to `promptSuggestion`, so it
+                  is drawn exactly where the key is missing and nowhere else.
+                  The desktop keeps the caption and the key; a second control
+                  there would be a second way to do a thing that already has
+                  one.
+                - IT SAYS WHAT IT WOULD WRITE. A pill rather than a glyph:
+                  "Use" alone is a control whose object is invisible once the
+                  ghost has left the placeholder. `data-tap-pill` is the
+                  existing opt-out of the 30x30 square for a skin holding
+                  TEXT (`styles.css`).
+                - AND IT IS THE ROW'S FLEXIBLE ITEM, which is the part that
+                  was measured rather than reasoned. Every other control
+                  here is fixed at 44 or 65 and none of them will give way,
+                  so a pill sized to its own content pushes the LAST one --
+                  Record -- off the screen: driven at 390px with a
+                  multi-select's three marks joined, the row overflowed its
+                  335px and Record's right edge landed at 397. So this one
+                  shrinks and clips with an ellipsis, down to the 44px floor
+                  `vam-tap` gives it, and the whole label is the accessible
+                  name, which is the channel that cannot be clipped. `max-w`
+                  is the other end: an offer does not get to own half a row
+                  it is only suggesting something into.
+                - IT IS WITHDRAWN THE MOMENT IT IS TAKEN, because
+                  `promptSuggestion` is null over a non-empty draft: the same
+                  trade the Tab binding already refuses -- an accept that
+                  could only overwrite what the operator has written.
+
+              MOVED OUT OF `data-prompt-tools` (D1, the composer-layout fix):
+              this is a RARE, full-width row, a sibling of the pasted-image/
+              attach-error captions above it rather than a member of the
+              button GROUP those buttons now form -- see `data-prompt-tools`'s
+              own comment below for why that group is a real box now. */}
+            {phone && promptSuggestion !== null && (
+              <button
+                type="button"
+                data-prompt-suggestion-use
+                aria-label={`use the suggested reply: ${promptSuggestion}`}
+                onClick={() => onDraftChange(promptSuggestion)}
+                // `order-10 basis-full`: this offer is rare enough (a
+                // draft-less focus) that it earns its own line below the
+                // input pill and button group rather than crowding either,
+                // and always trails them in flex order -- see
+                // `data-prompt-box`'s own comment.
+                className="vam-tap order-10 flex min-w-0 shrink basis-full cursor-pointer items-center justify-start"
+              >
+                <span
+                  aria-hidden="true"
+                  data-tap-skin
+                  data-tap-pill
+                  className="flex h-[30px] min-w-0 max-w-[132px] items-center gap-1 rounded-[8px] border border-line-strong bg-card px-1.5 text-control text-ink-quiet active:bg-line-strong"
                 >
-                  <span
-                    aria-hidden="true"
-                    data-tap-skin
-                    data-tap-pill
-                    className="flex h-[30px] min-w-0 max-w-[132px] items-center gap-1 rounded-[8px] border border-line-strong bg-card px-1.5 text-control text-ink-quiet active:bg-line-strong"
-                  >
-                    {/* THE `truncate` IS ON THIS INNER SPAN AND NOT ON THE
-                      SKIN, and the difference is visible rather than
-                      pedantic: `text-overflow: ellipsis` does nothing on a
-                      FLEX container -- the text becomes an anonymous flex
-                      item and is clipped with no mark at all. Caught on a
-                      screenshot, not by a guard: the chip read `Server-sent
-                      eve`, which is not a shortened label, it is a wrong one.
-                      `data-model-label` two controls over already does it
-                      this way for the same reason. */}
-                    <span data-prompt-suggestion-label className="truncate">
-                      {promptSuggestion}
-                    </span>
+                  {/* THE `truncate` IS ON THIS INNER SPAN AND NOT ON THE
+                    SKIN, and the difference is visible rather than
+                    pedantic: `text-overflow: ellipsis` does nothing on a
+                    FLEX container -- the text becomes an anonymous flex
+                    item and is clipped with no mark at all. Caught on a
+                    screenshot, not by a guard: the chip read `Server-sent
+                    eve`, which is not a shortened label, it is a wrong one.
+                    `data-model-label` two controls over already does it
+                    this way for the same reason. */}
+                  <span data-prompt-suggestion-label className="truncate">
+                    {promptSuggestion}
                   </span>
-                </button>
-              )}
+                </span>
+              </button>
+            )}
+
+            {/* THE BUTTON GROUP: attach ("+"), dictate, Send -- Orca's
+              "outside the input, to the right" column, and now a REAL box on
+              phone rather than a `contents` pass-through: before the
+              composer-layout fix these three were flattened, with the
+              textarea, into ONE wrapping row, and a growing draft could push
+              a solid, unskinned Send button to sit beside the wrapped text's
+              own last line with no gap and no separate background --
+              measured on the operator's own report ("the buttons... cover
+              most of the input box"). Grouped here they are ONE flex item
+              beside `data-prompt-input`'s pill (`data-prompt-box`'s own
+              comment), so they can never sit inside or over the textarea's
+              own card, whatever the draft's height. Provider/model/mode stay
+              reachable through the "+" sheet unchanged (docs/design/
+              phone-core-loop.md §3.4); this is a layout fix, not a feature
+              cut. Desktop keeps its own unchanged `flex items-center gap-2`
+              row -- see the `phone ? … : …` below. */}
+            <div
+              data-prompt-tools
+              className={phone ? 'flex flex-none items-center gap-1.5' : 'flex items-center gap-2'}
+            >
               {/* PHONE COMPOSER DIET (docs/design/phone-core-loop.md §3.4):
                   one "+" replaces FIVE resident icons (attach, attach-image,
-                  provider, model, mode) with ONE, leaving the phone row at
-                  textarea + "+" + mic + Send -- 4 controls, not 6..9. Nothing
-                  each row does is new: every action below is the SAME
-                  handler/state the desktop's own resident control already
-                  calls (`fileRef.current?.click()`, `pickImage()`,
+                  provider, model, mode) with ONE, leaving the phone's button
+                  group at "+" + mic + Send -- three controls, not five to
+                  nine. Nothing each row does is new: every action below is
+                  the SAME handler/state the desktop's own resident control
+                  already calls (`fileRef.current?.click()`, `pickImage()`,
                   `setOpenPopover('provider' | 'model' | 'mode')`), reached
                   through one extra tap instead of a resident icon. Desktop is
                   untouched -- this whole block is `phone &&`.
 
-                  `order-first` (docs/design/phone-core-loop.md §4.1's
-                  follow-up): the merged row's ONE reorder -- everything else
-                  keeps its natural DOM order, which already reads textarea,
-                  mic, Send, so only the "+" needs pulling to the front of the
-                  row it used to open alone. */}
+                  NO `order-first` ANY MORE: that reorder existed to pull the
+                  "+" ahead of the TEXTAREA when both were flattened into one
+                  row; now it only has to lead its own two siblings (mic,
+                  Send) inside `data-prompt-tools`, which is exactly where it
+                  already sits in DOM order. */}
               {phone && (
-                <div data-popover-root="phone-overflow" className="order-first flex-none">
+                <div data-popover-root="phone-overflow" className="flex-none">
                   <button
                     type="button"
                     data-composer-overflow
+                    data-composer-action
                     onKeyDown={dismissPopoverOnEscape}
                     aria-haspopup="menu"
                     aria-expanded={phoneOverflowOpen}
@@ -10359,7 +10679,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                     <span
                       aria-hidden="true"
                       data-tap-skin
-                      className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-card hover:bg-line-strong"
+                      className="flex h-6 w-6 items-center justify-center rounded-full border border-line-strong bg-card hover:bg-line-strong"
                     >
                       <Plus size={12} strokeWidth={1.7} />
                     </span>
@@ -11366,21 +11686,23 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
 
               Drawn only when there is something to say (the resting caption
               moved into the icon's accessible name), so it costs no width at
-              rest and the row does not reflow for a caption nobody reads. */}
-              {cycleNote !== null && (
+              rest and the row does not reflow for a caption nobody reads.
+
+              DESKTOP ONLY (`!phone &&`) here now: `data-prompt-tools` is a
+              real, `flex-none` button GROUP on phone (see its own comment),
+              with no room for an arbitrary-length caption -- the phone copy
+              of this same span is a sibling of `data-prompt-input` and
+              `data-prompt-tools` instead, below both, where `order-10
+              basis-full` can give it a full line of its own. Same data, same
+              words, two homes -- one caption is never rendered twice at
+              once, since `phone` never changes mid-render. */}
+              {!phone && cycleNote !== null && (
                 <span
                   data-mode-cycle
                   data-mode-cycle-state={cycleNote.kind}
                   data-mode-refusal={cycleNote.kind === 'refused' ? 'true' : undefined}
-                  // PHONE: same rare-row treatment as the chips/suggestion
-                  // above -- `order-10 basis-full` earns its own line rather
-                  // than fighting the merged row's own `min-w-0 flex-1`
-                  // textarea for space. Desktop keeps `flex-1`, which is what
-                  // pushes it against the spacer beside the plain `<span>`
-                  // below.
                   className={[
-                    'truncate whitespace-nowrap font-mono text-meta',
-                    phone ? 'order-10 basis-full' : 'min-w-0 flex-1',
+                    'truncate whitespace-nowrap font-mono text-meta min-w-0 flex-1',
                     cycleNote.kind === 'refused' ? 'text-waiting' : 'text-ink-dim',
                   ].join(' ')}
                   /*
@@ -11437,6 +11759,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                     type="button"
                     data-prompt-dictate
                     data-prompt-dictate-on={listening ? 'true' : undefined}
+                    data-composer-action
                     aria-pressed={listening}
                     aria-label={listening ? 'stop dictating' : 'dictate the prompt'}
                     onClick={toggleDictation}
@@ -11446,7 +11769,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                       aria-hidden="true"
                       data-tap-skin
                       className={[
-                        'flex h-6 w-6 items-center justify-center rounded-[6px] border',
+                        'flex h-6 w-6 items-center justify-center rounded-full border',
                         listening
                           ? 'border-running bg-running/15 text-running'
                           : 'border-line-strong bg-card hover:bg-line-strong',
@@ -11480,39 +11803,78 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                      read: the word is copy and may be rewritten, this is the
                      claim. */
                   data-prompt-delivers={delivers === true ? 'true' : undefined}
+                  data-composer-action
                   onClick={onSubmit}
                   disabled={sending}
                   aria-busy={sending}
                   aria-label={composerClaim.label}
-                  className={[
-                    `flex h-7 w-7 flex-none items-center justify-center rounded-[7px] bg-line-strong text-control text-ink ${FOCUS_RING}`,
-                    sending ? 'cursor-progress opacity-60' : 'cursor-pointer hover:bg-line-loud',
-                  ].join(' ')}
+                  // THE HIT BOX ONLY, now -- no background, no size of its
+                  // own. `data-tap-skin` below carries both, the same
+                  // inset-paint split every other composer button already
+                  // wears (`.vam-tap > [data-tap-skin]`, `styles.css`).
+                  // Before this, Send's own background sat directly on this
+                  // 44px-floored button with no inner skin to shrink it, so
+                  // it painted as a solid 44x44 slab beside its neighbours'
+                  // 30px insets -- the operator's own report, translated:
+                  // "the buttons... are big". Desktop is unaffected: the
+                  // skin below carries the identical `h-7 w-7 rounded-[7px]`
+                  // it used to paint here, and `.vam-phone`-scoped rules are
+                  // the only thing that ever resize it further.
+                  className={`vam-tap flex flex-none items-center justify-center ${FOCUS_RING} ${sending ? 'cursor-progress' : 'cursor-pointer'}`}
                 >
-                  {/* THE GLYPH ALONE. Operator: "drop the Send label from the
-                      button, the icon is enough."
-
-                      WHAT THE WORD WAS CARRYING has to go somewhere, and it
-                      does: the delivers/records distinction is two different
-                      GLYPHS (`ArrowUp` against `NotepadText`), the
-                      `aria-label` above says which act in words, and `Note`
-                      carries the whole sentence on focus and hover. WCAG 2.5.3
-                      (label in name) stops applying the moment there is no
-                      visible label; 1.1.1 takes over, and the name is what
-                      satisfies it.
-
-                      The claim's `word` went with the label: see
-                      `composerClaim` above for why a field nothing paints is
-                      deleted rather than left computed. */}
-                  <ComposerGlyph
-                    size={14}
-                    strokeWidth={1.7}
+                  <span
                     aria-hidden="true"
-                    className={sending ? 'vam-breathe' : ''}
-                  />
+                    data-tap-skin
+                    className={[
+                      'flex h-7 w-7 items-center justify-center rounded-[7px] bg-line-strong text-control text-ink',
+                      sending ? 'opacity-60' : 'hover:bg-line-loud',
+                    ].join(' ')}
+                  >
+                    {/* THE GLYPH ALONE. Operator: "drop the Send label from the
+                        button, the icon is enough."
+
+                        WHAT THE WORD WAS CARRYING has to go somewhere, and it
+                        does: the delivers/records distinction is two different
+                        GLYPHS (`ArrowUp` against `NotepadText`), the
+                        `aria-label` above says which act in words, and `Note`
+                        carries the whole sentence on focus and hover. WCAG 2.5.3
+                        (label in name) stops applying the moment there is no
+                        visible label; 1.1.1 takes over, and the name is what
+                        satisfies it.
+
+                        The claim's `word` went with the label: see
+                        `composerClaim` above for why a field nothing paints is
+                        deleted rather than left computed. */}
+                    <ComposerGlyph
+                      size={14}
+                      strokeWidth={1.7}
+                      aria-hidden="true"
+                      className={sending ? 'vam-breathe' : ''}
+                    />
+                  </span>
                 </button>
               </Note>
             </div>
+            {/* THE PHONE TWIN OF THE `⇧Tab` CAPTION ABOVE, moved out here for
+              the reason `data-prompt-tools`'s own comment gives: that box is
+              a small `flex-none` button group now, with no room for a
+              sentence, so this copy is a sibling of the pill and the button
+              group instead -- `order-10 basis-full` gives it the same rare,
+              full-width line every other caption on this row gets. */}
+            {phone && cycleNote !== null && (
+              <span
+                data-mode-cycle
+                data-mode-cycle-state={cycleNote.kind}
+                data-mode-refusal={cycleNote.kind === 'refused' ? 'true' : undefined}
+                className={[
+                  'order-10 basis-full truncate whitespace-nowrap font-mono text-meta',
+                  cycleNote.kind === 'refused' ? 'text-waiting' : 'text-ink-dim',
+                ].join(' ')}
+                title={cycleNote.text}
+              >
+                {cycleNote.text}
+              </span>
+            )}
             {/* THE KEY ROW IS GONE, AND THIS IS THE END OF A SEQUENCE RATHER
             THAN A DELETION. The operator narrowed it four times, each time
             after living with the last one, and the reasoning is kept here

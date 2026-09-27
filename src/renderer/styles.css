@@ -2857,6 +2857,26 @@ html {
   width: auto;
 }
 
+/* THE COMPOSER'S OWN BUTTONS, ROUND AND A HAIR BIGGER THAN THE 30px SQUARE
+ * ABOVE -- Orca's own shape (the operator's own report: "look again at how
+ * Orca lays out its mobile screen"). `data-composer-action` marks exactly
+ * the three controls beside the prompt input ("+", dictate, Send); the
+ * generic 30px square above still governs every OTHER phone icon (the view
+ * row, the key strip, the "+" sheet's own rows), which this selector's extra
+ * attribute -- and therefore higher specificity -- leaves untouched.
+ *
+ * 36px sits inside the `.vam-tap` 44px hit floor (`styles.css`, above) with
+ * 4px to spare on every side, and `border-radius: 9999px` is what makes a
+ * square skin a circle regardless of which corner radius its own component
+ * asked for -- the Send button's `rounded-[7px]` and the "+"'s `rounded-full`
+ * among them, both overridden here on phone alone; neither is touched on
+ * desktop, where `.vam-phone` never matches. */
+.vam-phone .vam-tap[data-composer-action] > [data-tap-skin] {
+  height: 36px;
+  width: 36px;
+  border-radius: 9999px;
+}
+
 /* A COLOUR SWATCH CANNOT HOLD A `[data-tap-skin]`, so its paint comes inward
  * from the other side. `input[type=color]` has no children to mark, and the
  * disc it paints fills the control -- so at the 44 the phone floor asks for, a

@@ -69,9 +69,21 @@ const TOUCH_MIN = 44;
  * keystroke strip is withdrawn unless the source has a terminal, and `?demo=1`
  * has none. The prompt suggestion's accept chip is the first pill this census
  * has ever seen.
+ *
+ * A THIRD FAMILY, AND A DECLARED WIDENING RATHER THAN A DRIFT: the composer's
+ * own "+"/dictate/Send, marked `data-composer-action`, paint at Orca's own
+ * 36x36 round rather than the 30x30 square every other icon skin keeps
+ * (`styles.css`'s `[data-composer-action] > [data-tap-skin]` rule, scoped to
+ * exactly these three) -- the operator's own instruction ("about 36px
+ * painted"), not an unnoticed regression. `ACTION_MAX_W` is that control's
+ * own ceiling, `data-tap-pill`'s reason kept apart from theirs: a pill grows
+ * WIDE to hold text, these grow both ways to hold a bigger circle, and only
+ * naming the attribute this guard actually measured keeps a control that
+ * SHOULD stay at 30x30 from sneaking past it wearing the wrong exemption.
  */
 const SKIN_MAX_W = 32;
 const SKIN_MAX_H = 36;
+const ACTION_MAX_W = 36;
 
 type Box = {
   readonly label: string;
@@ -198,6 +210,8 @@ async function readSkins(page: Page): Promise<
     label: string;
     /** `data-tap-pill` -- the declared opt-out of the fixed square. */
     pill: boolean;
+    /** `data-composer-action` -- the composer's own 36x36 round opt-out. */
+    action: boolean;
     w: number;
     h: number;
     ownerW: number;
@@ -212,6 +226,7 @@ async function readSkins(page: Page): Promise<
       return {
         label: (owner?.getAttribute('aria-label') ?? el.textContent ?? '').trim().slice(0, 30),
         pill: el.hasAttribute('data-tap-pill'),
+        action: owner?.hasAttribute('data-composer-action') === true,
         w: Math.round(r.width * 10) / 10,
         h: Math.round(r.height * 10) / 10,
         ownerW: Math.round(o.width * 10) / 10,
@@ -404,8 +419,14 @@ test.describe('the phone shell at 390px', () => {
     expect(
       skins.length === 0
         ? ['no [data-tap-skin] on either phone screen -- this guard measured nothing']
-        : skins.filter((s) => (s.pill ? false : s.w > SKIN_MAX_W) || s.h > SKIN_MAX_H).map(fmt),
-      `skins painting larger than ${SKIN_MAX_W}x${SKIN_MAX_H} (a data-tap-pill is exempt on WIDTH only)`,
+        : skins
+            .filter((s) => {
+              const tooWide = s.action ? s.w > ACTION_MAX_W : s.pill ? false : s.w > SKIN_MAX_W;
+              return tooWide || s.h > SKIN_MAX_H;
+            })
+            .map(fmt),
+      `skins painting larger than ${SKIN_MAX_W}x${SKIN_MAX_H} (data-tap-pill exempt on width; ` +
+        `data-composer-action exempt up to ${ACTION_MAX_W}x${SKIN_MAX_H})`,
     ).toEqual([]);
     expect(
       skins.length === 0
@@ -1867,17 +1888,24 @@ test.describe('the session tab strip and the keystroke strip at 390px', () => {
     await expect(waitingTab.locator('[data-phone-session-waiting-badge]')).toBeVisible();
   });
 
-  test('the keystroke strip draws seven 44px controls that fit inside 390px', async ({ page }) => {
-    // vam/terminal-arrows: Up/Down joined the five (a phone has no arrow
-    // keys, and Claude Code's own option pickers need them) -- see
-    // `KEY_STRIP` in `DetailPanel.tsx`.
+  test('the keystroke strip draws six 44px controls that fit inside 390px', async ({ page }) => {
+    // vam/terminal-arrows added Up/Down to `KEY_STRIP` (a phone has no arrow
+    // keys, and Claude Code's own option pickers need them), and the phone's
+    // own remote channel (`/api/send-key`, `shared/remote-key.ts`) later
+    // added `tab` -- eight keys in `KEY_STRIP` now, not seven. This page has
+    // no `window.api` at all (`?demo=1` is a plain browser build, not
+    // Electron), so `hasLocalTerminalChannel` is false and the strip filters
+    // itself down to the six `paneKeyToRemoteKeyId` answers for -- Up/Down
+    // are withdrawn here for the same reason they are on a real phone served
+    // over Tailscale: absent, not disabled, because this page has no channel
+    // for them either.
     await stubSource(page);
     await openFirstAlphaSession(page);
 
     const strip = page.locator('[data-key-strip]');
     await expect(strip).toBeVisible();
     const keys = strip.locator('[data-key-strip-key]');
-    await expect(keys).toHaveCount(7);
+    await expect(keys).toHaveCount(6);
 
     const geometry = await strip.evaluate((el) => {
       const r = el.getBoundingClientRect();

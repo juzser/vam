@@ -253,20 +253,37 @@ describe("AC-7's height half: the phone row is merged, not stacked (docs/design/
     expect(box?.className).not.toContain('flex-col');
   });
 
-  it('the textarea row and the tools row both disclaim their own box (display: contents), so their children join ONE row', () => {
+  it('the textarea row disclaims its own box (display: contents), so its own pill carries the paint instead', () => {
     draw();
     const textareaRow = q<HTMLElement>('textarea[aria-label="prompt to session"]')?.parentElement;
+    const pill = q<HTMLElement>('[data-prompt-input]');
+    // UPDATED (composer-layout fix): `data-prompt-tools` is no longer
+    // `contents` on phone -- it is now the button GROUP's own real box, a
+    // single flex-none item beside the pill, so the "+"/dictate/Send trio
+    // can never be crowded by a growing draft the way a flattened row let
+    // them be (see `data-prompt-tools`'s own comment in `DetailPanel.tsx`).
+    // The textarea's OWN wrapper is still `contents`: it is the PILL
+    // (`data-prompt-input`) that now carries the card this test used to
+    // expect on the outer `data-prompt-box`.
     const toolsRow = q<HTMLElement>('[data-prompt-tools]');
     expect(textareaRow?.className).toBe('contents');
-    expect(toolsRow?.className).toBe('contents');
+    expect(pill?.className).toContain('flex-1');
+    expect(pill?.className).toContain('rounded-[10px]');
+    expect(toolsRow?.className).not.toContain('contents');
+    expect(toolsRow?.className).toContain('flex-none');
   });
 
-  it('the "+" is pulled to the front of the merged row (order-first), the textarea keeps growing (flex-1)', () => {
+  it('the button group ("+", dictate, Send) is its own flex-none item beside the pill; the pill keeps growing (flex-1)', () => {
     draw();
+    // UPDATED (composer-layout fix): the "+" no longer needs `order-first`
+    // -- that reorder existed to pull it ahead of a flattened textarea; now
+    // it only has to lead its own two siblings inside `data-prompt-tools`,
+    // which is already where it sits in DOM order (see that box's own
+    // comment).
     const plus = q<HTMLElement>('[data-popover-root="phone-overflow"]');
-    const textarea = q<HTMLTextAreaElement>('textarea[aria-label="prompt to session"]');
-    expect(plus?.className).toContain('order-first');
-    expect(textarea?.className).toContain('flex-1');
+    const pill = q<HTMLElement>('[data-prompt-input]');
+    expect(plus?.className).not.toContain('order-first');
+    expect(pill?.className).toContain('flex-1');
   });
 
   /**

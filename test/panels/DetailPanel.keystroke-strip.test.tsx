@@ -1,18 +1,27 @@
 // @vitest-environment happy-dom
 
 /**
- * The phone keystroke strip -- vam's real seven `PaneKey` shapes (Escape,
- * Enter, Backspace, Shift-Tab, Space, and now Up/Down -- vam/terminal-arrows,
- * a phone has no arrow keys and Claude Code's own pickers need them),
- * reachable by tap.
+ * The phone keystroke strip -- eight `PaneKey` shapes reachable by tap:
+ * Escape, Tab, Enter, Back-Tab (Shift-Tab), Space, Backspace, and Up/Down
+ * (vam/terminal-arrows -- a phone has no arrow keys and Claude Code's own
+ * pickers need them).
  *
- * Gated on the SAME predicate as the mode row's `canCycleMode`
- * (`vamControlled === true && terminal !== false`), and placed first inside
- * `data-composer-bar` so it inherits `composerHidden` -- a `QuestionCard`
- * open makes it disappear with the rest of the composer, for free.
+ * Gated on `canSendKeys`: `canCycleMode` (the mode row's own predicate,
+ * `vamControlled === true && terminal !== false`, for the LOCAL
+ * `window.api.terminal.send` channel) OR'd with `canSendKeysRemotely`
+ * (`vamControlled === true` alone -- deliberately NOT `terminal !== false`,
+ * since the remote server reports `terminal: false` for every phone client
+ * by design; see that constant's own comment in `DetailPanel.tsx`). WHICH
+ * keys actually render is a separate question, answered by
+ * `hasLocalTerminalChannel` alone: all eight where `window.api` exists, the
+ * six `paneKeyToRemoteKeyId` answers for otherwise (`shared/remote-key.ts`).
+ *
+ * Placed first inside `data-composer-bar` so it inherits `composerHidden` --
+ * a `QuestionCard` open makes it disappear with the rest of the composer, for
+ * free.
  */
 
-import { act, cleanup, fireEvent, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
@@ -101,25 +110,41 @@ describe('the keystroke strip is drawn only where a key can actually be sent', (
     expect(strip()).toBeNull();
   });
 
-  it('is absent where the source has no terminal surface at all', () => {
+  it('is drawn even where the source reports no terminal at all -- the phone’s own real case', () => {
+    // `terminal: false` used to mean "nothing here to send a key into", full
+    // stop. It no longer does: the remote server marks EVERY phone client
+    // this way on purpose (`UNSERVED.terminal`, `remote/server.ts`), and this
+    // is exactly the state `/api/send-key` exists to answer instead of
+    // leaving silent -- `canSendKeysRemotely`'s own comment in
+    // `DetailPanel.tsx` says so. Gating this on `terminal !== false`, the way
+    // `canCycleMode` does for the local channel, would make the strip never
+    // draw on the one surface it was built for.
     draw({}, { terminal: false });
-    expect(strip()).toBeNull();
+    expect(strip()).not.toBeNull();
   });
 
   it('is drawn for a session vam started, on a source with a terminal, on phone', () => {
     draw({}, { terminal: true });
     expect(strip()).not.toBeNull();
-    expect(keys()).toHaveLength(7);
+    // Six, not eight: no `window.api` is mocked in this test, so
+    // `hasLocalTerminalChannel` is false and the strip filters itself down to
+    // the six `paneKeyToRemoteKeyId` answers for. `sends Up/Down as real
+    // navigation keys` below mocks `window.api` and gets all eight.
+    expect(keys()).toHaveLength(6);
   });
 
-  it('never draws a plain Tab key: there is no PaneKey behind it', () => {
+  it('draws a plain Tab key now, over the same literal-text path Space already proved', () => {
+    // `KEY_STRIP`'s own header explains why Tab needed no new `PaneKey` kind
+    // (it reuses the one-character `text` path `space` already took), and
+    // why it is one of the six the remote channel carries too -- so it shows
+    // up here even with no `window.api` mocked (the default `draw()` below).
     draw();
-    expect(document.querySelector('[data-key-strip-key="tab"]')).toBeNull();
+    expect(document.querySelector('[data-key-strip-key="tab"]')).not.toBeNull();
     expect(
       keys()
         .map((k) => k.getAttribute('data-key-strip-key'))
         .sort(),
-    ).toEqual(['back-tab', 'backspace', 'enter', 'escape', 'space', 'up', 'down'].sort());
+    ).toEqual(['back-tab', 'backspace', 'enter', 'escape', 'space', 'tab'].sort());
   });
 
   it('sends Up/Down as real navigation keys, so a phone can walk a picker too', async () => {
@@ -179,6 +204,7 @@ describe('the keystroke strip is drawn only where a key can actually be sent', (
   it('paints the platform’s own glyphs for every key, off chords.ts’s table', () => {
     const EXPECT: Readonly<Record<string, { chord: string; suffix: string }>> = {
       escape: { chord: 'Escape', suffix: ' → agent' },
+      tab: { chord: 'Tab', suffix: '' },
       enter: { chord: 'Enter', suffix: ' → agent' },
       backspace: { chord: 'Backspace', suffix: '' },
       'back-tab': { chord: 'Shift-Tab', suffix: '' },
@@ -186,6 +212,15 @@ describe('the keystroke strip is drawn only where a key can actually be sent', (
       up: { chord: 'ArrowUp', suffix: '' },
       down: { chord: 'ArrowDown', suffix: '' },
     };
+    // `window.api` mocked here, for all eight -- Up/Down only ever paint over
+    // the local channel (`hasLocalTerminalChannel`), and this test's whole
+    // point is that every key on the strip reads `chords.ts`'s table, not
+    // just the six the remote channel also carries.
+    const send = vi.fn(async (): Promise<PaneSendResult> => 'sent');
+    Object.defineProperty(window, 'api', {
+      configurable: true,
+      value: { terminal: { send } },
+    });
     onBothPlatforms((mac) => {
       draw({}, { terminal: true });
       for (const [id, { chord, suffix }] of Object.entries(EXPECT)) {
@@ -194,6 +229,7 @@ describe('the keystroke strip is drawn only where a key can actually be sent', (
       }
       cleanup();
     });
+    Reflect.deleteProperty(window, 'api');
   });
 
   it('disappears with the composer while a QuestionCard is open', () => {
@@ -289,6 +325,22 @@ describe('the keystroke strip is drawn only where a key can actually be sent', (
     Reflect.deleteProperty(window, 'api');
   });
 
+  it('sends Tab as one character of literal text, not a key name', async () => {
+    const send = vi.fn(async (): Promise<PaneSendResult> => 'sent');
+    Object.defineProperty(window, 'api', {
+      configurable: true,
+      value: { terminal: { send } },
+    });
+    draw({}, { terminal: true });
+    const tabKey = document.querySelector('[data-key-strip-key="tab"]') as HTMLElement;
+    await act(async () => {
+      fireEvent.click(tabKey);
+      await Promise.resolve();
+    });
+    expect(send).toHaveBeenCalledWith('p1', { kind: 'text', text: '\t' }, 's1');
+    Reflect.deleteProperty(window, 'api');
+  });
+
   /**
    * THE S2 REGRESSION. `sendKey` used to call `terminal.send` directly, with
    * no busy-guard, no refusal caption and no missing-bridge report -- the
@@ -320,17 +372,40 @@ describe('the keystroke strip is drawn only where a key can actually be sent', (
     Reflect.deleteProperty(window, 'api');
   });
 
-  it('reports a missing bridge instead of sending nothing silently', async () => {
-    // No `window.api` at all -- the browser build, or Electron before preload
-    // has run.
+  it('falls back to the remote channel with no window.api at all, and reports what it answers', async () => {
+    // No `window.api` -- the browser build, served over Tailscale, with no
+    // Electron preload ever running. Escape is one of the six
+    // `paneKeyToRemoteKeyId` answers for, so this no longer refuses
+    // instantly the way it used to for every key: it takes the exact path
+    // `send-key-remote.ts`'s own tests already cover end to end
+    // (`test/panels/send-key-remote.test.ts`), and this test only checks
+    // `DetailPanel` wires that path's refusal onto the same caption the
+    // local channel already uses.
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => ({
+      json: async () => ({
+        ok: false,
+        error: { kind: 'refused', code: 'no-terminal', message: 'no pane for this session' },
+      }),
+    })) as unknown as typeof fetch;
     draw({}, { terminal: true });
     const escapeKey = document.querySelector('[data-key-strip-key="escape"]') as HTMLElement;
+    // The fetch chain here is several microtasks deeper than the desktop
+    // channel's own single `await send(...)` (`fetch` itself, then
+    // `response.json()`, then `sendKeyRemote`'s own await) -- `waitFor`
+    // polls rather than counting ticks, the same reason `DetailPanel.
+    // file-ref.test.tsx` already gives for using it.
     await act(async () => {
       fireEvent.click(escapeKey);
     });
-    expect(document.querySelector('[data-mode-cycle]')?.textContent).toContain(
-      'no keyboard into a session',
+    await waitFor(() => {
+      expect(document.querySelector('[data-mode-cycle]')?.textContent).toContain('not sent');
+    });
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      '/api/send-key',
+      expect.objectContaining({ method: 'POST' }),
     );
+    globalThis.fetch = originalFetch;
   });
 
   it('does not queue a second press while the first is still in flight', async () => {

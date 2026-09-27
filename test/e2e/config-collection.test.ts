@@ -100,8 +100,8 @@ describe.skipIf(!harnessInstalled)(
       ]);
     });
 
-    it('the phone config collects exactly its own four specs', () => {
-      // FOUR, AND NOT ALL OF THEM SHARE A FIXTURE. `phone-shell.pw.ts` runs
+    it('the phone config collects exactly its own six specs', () => {
+      // SIX, AND NOT ALL OF THEM SHARE A FIXTURE. `phone-shell.pw.ts` runs
       // against `?demo=1`; `phone-core-loop.pw.ts` routes `/api/*` itself,
       // because demo declines nothing and the phone vam is used from is the
       // web build over a remote server that turns four capabilities off;
@@ -115,8 +115,15 @@ describe.skipIf(!harnessInstalled)(
       // fixture was tried first and reverted, after it broke two unrelated
       // desktop guards that generically iterate "every project" in the
       // sidebar (see `phone-cache-timer.pw.ts`'s own header).
+      // `phone-composer-layout.pw.ts` is the fifth: the textarea-vs-buttons
+      // geometry fix, against the same remote-server descriptor
+      // `phone-core-loop.pw.ts` uses. `phone-composer-keys.pw.ts` is the
+      // sixth: the remote key route and the phone-visible key strip, on its
+      // own stub with `sendKey: true` (see that file's own header).
       expect(collectedFiles('playwright.phone.config.ts')).toEqual([
         'phone-cache-timer.pw.ts',
+        'phone-composer-keys.pw.ts',
+        'phone-composer-layout.pw.ts',
         'phone-core-loop.pw.ts',
         'phone-overflow.pw.ts',
         'phone-shell.pw.ts',
