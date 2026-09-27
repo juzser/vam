@@ -2,8 +2,9 @@
 
 /**
  * The two operator-facing halves of this feature, at the surface the operator
- * touches: an Appearance section that can adjust colours, and a keyboard
- * reference that can be edited by pressing the key you want.
+ * touches: the Interface section that can adjust colours (Appearance's own
+ * split, since the cards restructure -- `settings/sections.ts`), and a
+ * keyboard reference that can be edited by pressing the key you want.
  *
  * The binding half is asserted end to end in the last block — a captured key
  * has to FIRE, not merely land in `prefs`, which is the difference between a
@@ -88,6 +89,19 @@ function open(prefs: Prefs = EMPTY_PREFS, theme: EffectiveTheme = 'dark') {
   return { onChange, onClose, view };
 }
 
+/**
+ * THE PER-TOKEN SWATCHES ARE BEHIND ADVANCED NOW (the cards restructure:
+ * most operators pick a template and never open this). `getByLabelText` is
+ * testing-library's own accessibility-aware query, and it excludes anything
+ * under an ancestor carrying the plain HTML `hidden` attribute -- which is
+ * exactly what an unopened `AdvancedDisclosure` leaves on its content -- so
+ * every test that reaches a swatch or its reset button has to open Interface's
+ * Advanced disclosure first, the same way an operator would have to click it.
+ */
+function openInterfaceAdvanced(): void {
+  fireEvent.click(document.querySelector('[data-settings-advanced="interface"]') as HTMLElement);
+}
+
 /** The swatch for the first offered token, in the theme the overlay is
  *  editing. The theme is part of the accessible name on purpose: "overridden"
  *  is a per-theme fact, and a name that omitted it would describe two
@@ -114,25 +128,30 @@ const slot = (id: string, index: number) =>
 const capture = () => document.querySelector<HTMLInputElement>('[data-binding-capture]');
 const message = () => document.querySelector('[data-binding-message]')?.textContent ?? '';
 
-describe('the appearance section adjusts colours', () => {
+describe('the interface section adjusts colours', () => {
   it('groups the visual settings under one heading', () => {
     open();
-    // "Appearance", not "appearance": the panel heading draws the SECTION'S
-    // LABEL now -- the same string the nav tab beside it draws -- where it
+    // "Interface", not "interface": the card heading draws the SECTION'S
+    // LABEL now -- the same string the nav item beside it draws -- where it
     // used to draw the raw `id`. One destination, one spelling, which is why
-    // this can no longer be `getByText`: the tab and the heading say the same
+    // this can no longer be `getByText`: the nav and the heading say the same
     // thing, and that agreement is the point. The capitals on screen are a CSS
     // transform and do not reach `textContent`.
-    const heading = document.querySelector('[data-settings-panel="appearance"] h3');
-    expect(heading, 'the appearance panel drew no heading at all').not.toBeNull();
-    expect(heading?.textContent).toBe('Appearance');
+    const heading = document.querySelector('[data-settings-panel="interface"] h3');
+    expect(heading, 'the interface panel drew no heading at all').not.toBeNull();
+    expect(heading?.textContent).toBe('Interface');
     const section = heading?.closest('section');
     expect(section?.textContent).toContain('dark');
+    // The per-token swatches sit behind Advanced now and carry the `hidden`
+    // attribute while it is closed -- still in the tree, which is exactly
+    // what this corpus check is about (`querySelectorAll` does not filter by
+    // visibility the way `getByRole` does).
     expect(section?.querySelectorAll('input[type="color"]').length).toBeGreaterThan(3);
   });
 
   it('writes the picked colour into prefs as an override', () => {
     const { onChange } = open();
+    openInterfaceAdvanced();
     fireEvent.change(swatch('dark'), { target: { value: BLUE } });
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(changed(onChange, 0).palette.dark[FIRST.token]).toBe(BLUE);
@@ -140,6 +159,7 @@ describe('the appearance section adjusts colours', () => {
 
   it('resets one colour by clearing the override, not by writing a value back', () => {
     const { onChange } = open(dark({ [FIRST.token]: BLUE }));
+    openInterfaceAdvanced();
     fireEvent.click(resetOne('dark'));
     const next = onChange.mock.calls[0]?.[0] as Prefs;
     expect(Object.hasOwn(next.palette.dark, FIRST.token)).toBe(false);
@@ -147,11 +167,13 @@ describe('the appearance section adjusts colours', () => {
 
   it('offers no per-colour reset for a colour that was never overridden', () => {
     open();
+    openInterfaceAdvanced();
     expect(screen.queryByLabelText(`reset ${FIRST.label} colour, dark`)).toBeNull();
   });
 
   it('resets every colour at once', () => {
     const { onChange } = open(dark({ [FIRST.token]: BLUE }));
+    openInterfaceAdvanced();
     fireEvent.click(screen.getByRole('button', { name: 'reset dark colours' }));
     expect(changed(onChange, 0).palette.dark).toEqual({});
   });
@@ -166,11 +188,13 @@ describe('the appearance section adjusts colours', () => {
 describe('the colours section edits the theme in force', () => {
   it('names the theme it is editing in the heading', () => {
     open(EMPTY_PREFS, 'light');
+    openInterfaceAdvanced();
     expect(screen.getByText('colours — light')).toBeTruthy();
   });
 
   it('writes into the bucket for the theme on screen', () => {
     const { onChange } = open(EMPTY_PREFS, 'light');
+    openInterfaceAdvanced();
     fireEvent.change(swatch('light'), { target: { value: BLUE } });
     const next = changed(onChange, 0);
     expect(next.palette.light[FIRST.token]).toBe(BLUE);
@@ -179,6 +203,7 @@ describe('the colours section edits the theme in force', () => {
 
   it('shows the other theme’s override as neither set nor resettable', () => {
     open(dark({ [FIRST.token]: BLUE }), 'light');
+    openInterfaceAdvanced();
     expect(screen.queryByLabelText(`reset ${FIRST.label} colour, light`)).toBeNull();
     expect(swatch('light').className, 'the ring must not claim light is overridden').toContain(
       'ring-1',
@@ -187,6 +212,7 @@ describe('the colours section edits the theme in force', () => {
 
   it('offers no bulk reset when only the other theme has colours', () => {
     open(dark({ [FIRST.token]: BLUE }), 'light');
+    openInterfaceAdvanced();
     expect(screen.queryByRole('button', { name: /reset .* colours/ })).toBeNull();
   });
 
@@ -196,6 +222,7 @@ describe('the colours section edits the theme in force', () => {
       palette: { dark: { [FIRST.token]: BLUE }, light: { [FIRST.token]: BLUE } },
     };
     const { onChange } = open(both, 'dark');
+    openInterfaceAdvanced();
     fireEvent.click(screen.getByRole('button', { name: 'reset dark colours' }));
     const next = changed(onChange, 0);
     expect(next.palette.dark).toEqual({});
@@ -215,6 +242,7 @@ describe('the override reaches the document', () => {
     await waitFor(() => {
       expect(document.querySelector('[data-settings-overlay]')).not.toBeNull();
     });
+    openInterfaceAdvanced();
     fireEvent.change(swatch('dark'), { target: { value: BLUE } });
     expect(document.documentElement.style.getPropertyValue(FIRST.token)).toBe(BLUE);
     fireEvent.click(resetOne('dark'));
@@ -266,7 +294,10 @@ describe('a binding is edited by pressing the key', () => {
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', bubbles: true }));
     });
-    fireEvent.click(screen.getByRole('tab', { name: 'Keyboard' }));
+    // NOT `getByRole('button', { name: 'Keyboard' })`: the card's own
+    // header is a button with the same accessible name now, so the query
+    // is ambiguous. The nav item's own hook stays unique.
+    fireEvent.click(document.querySelector('[data-settings-nav-item="keyboard"]') as HTMLElement);
     fireEvent.click(slot('rename', 0) as HTMLElement);
 
     // The whole bug in one assertion: without it the capture box is armed with
@@ -285,7 +316,10 @@ describe('a binding is edited by pressing the key', () => {
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', bubbles: true }));
     });
-    fireEvent.click(screen.getByRole('tab', { name: 'Keyboard' }));
+    // NOT `getByRole('button', { name: 'Keyboard' })`: the card's own
+    // header is a button with the same accessible name now, so the query
+    // is ambiguous. The nav item's own hook stays unique.
+    fireEvent.click(document.querySelector('[data-settings-nav-item="keyboard"]') as HTMLElement);
     fireEvent.click(slot('rename', 0) as HTMLElement);
     act(() => {
       (document.activeElement as HTMLElement).dispatchEvent(
@@ -351,7 +385,10 @@ describe('a binding is edited by pressing the key', () => {
     // The overlay opens on Appearance, and the three panels it is not showing
     // carry the HTML `hidden` attribute — which `getByRole` respects, unlike
     // the `querySelector` above. Navigating is what an operator does anyway.
-    fireEvent.click(screen.getByRole('tab', { name: 'Keyboard' }));
+    // NOT `getByRole('button', { name: 'Keyboard' })`: the card's own
+    // header is a button with the same accessible name now, so the query
+    // is ambiguous. The nav item's own hook stays unique.
+    fireEvent.click(document.querySelector('[data-settings-nav-item="keyboard"]') as HTMLElement);
     fireEvent.click(screen.getByRole('button', { name: 'reset shortcuts' }));
     expect(changed(onChange, 1).keyBindings).toEqual({});
   });
@@ -413,9 +450,9 @@ describe('the captured key is really in force', () => {
 describe('the out text size is an appearance setting', () => {
   const control = () => screen.getByLabelText('out text size');
 
-  it('lives in Appearance, beside the theme and the colours', () => {
+  it('lives in Interface, beside the theme and the colours', () => {
     open();
-    expect(control().closest('section')?.querySelector('h2, h3')?.textContent).toBe('Appearance');
+    expect(control().closest('section')?.querySelector('h2, h3')?.textContent).toBe('Interface');
   });
 
   it('shows the size in force and writes the one you pick', () => {
@@ -454,7 +491,7 @@ describe('the out text size is an appearance setting', () => {
     expect(hint).not.toMatch(NAMES_A_PANE);
     // And the section's own caption, one level up, must not either.
     const caption =
-      document.querySelector('[data-settings-panel="appearance"] [data-settings-panel-hint]')
+      document.querySelector('[data-settings-panel="interface"] [data-settings-panel-hint]')
         ?.textContent ?? '';
     expect(caption.length).toBeGreaterThan(20);
     expect(caption).not.toMatch(NAMES_A_PANE);
@@ -475,11 +512,11 @@ describe('the out text size is an appearance setting', () => {
 describe('the terminal text size is an appearance setting', () => {
   const option = (size: number) => screen.getByLabelText(`terminal text ${size}px`);
 
-  it('lives in Appearance, beside the theme and the colours', () => {
+  it('lives in Terminal, beside the terminal theme', () => {
     open();
     expect(
       option(DEFAULT_TERMINAL_FONT_SIZE).closest('section')?.querySelector('h2, h3')?.textContent,
-    ).toBe('Appearance');
+    ).toBe('Terminal');
   });
 
   it('offers every size the pane can be drawn at, and no other', () => {
@@ -515,12 +552,14 @@ describe('the terminal text size is an appearance setting', () => {
  * pair in Appearance (translated: "if needed, add settings of its own for that
  * tab under appearance") and then split along with everything else in that
  * panel (translated: "can you separate the appearance and colour settings from
- * the feature settings?").
+ * the feature settings?") -- the colour switch into Behaviour, beside the
+ * indent that was already there.
  *
- * SO THE PAIR IS IN TWO PANELS NOW, and that is the assertion rather than an
- * exception to one. `settings/sections.ts` carries the rule that decides a
- * row: the colour switch is a colour and stayed, the indent is a count of
- * spaces written into the operator's own file and moved.
+ * SO THE PAIR IS TOGETHER AGAIN NOW, one card further along: the cards
+ * restructure moved `file editor colours` a second time, out of the old
+ * Appearance (split into Interface and Terminal) and into Behaviour, in a
+ * small "Files" sub-group beside the indent it always belonged with.
+ * `settings/sections.ts` carries the rule that decided it.
  * `test/settings/behaviour-section.test.tsx` holds the same claim from the
  * other side, in both directions.
  *
@@ -531,16 +570,17 @@ describe('the terminal text size is an appearance setting', () => {
  * write the pref the other two read. A setting nobody can reach is the
  * storage-shaped version of a control that changes nothing.
  */
-describe('the file editor has its own settings, one per panel', () => {
+describe('the file editor has its own settings, together now under Behaviour', () => {
   const highlight = () => document.querySelector<HTMLElement>('[data-switch="editor-highlight"]');
   const indent = () => screen.getByLabelText('editor indent') as HTMLInputElement;
 
-  it('keeps the colour switch in Appearance and puts the indent under Behaviour', () => {
+  it('keeps both rows together under Behaviour, in a small Files sub-group', () => {
+    // MOVED, both of them: `file editor colours` joined `file editor indent`
+    // in Behaviour when the cards restructure split Appearance into
+    // Interface and Terminal (`settings/sections.ts` carries the rule).
     open();
     expect(highlight()).not.toBeNull();
-    expect(highlight()?.closest('section')?.querySelector('h2, h3')?.textContent).toBe(
-      'Appearance',
-    );
+    expect(highlight()?.closest('section')?.querySelector('h2, h3')?.textContent).toBe('Behaviour');
     expect(indent().closest('section')?.querySelector('h2, h3')?.textContent).toBe('Behaviour');
   });
 

@@ -249,7 +249,33 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * stacked on top of each other. `ENTRY_GZIP_BUDGET_BYTES` stays at 212,000:
  * unaffected by this merge, still comfortably clear of the combined figure.
  *
- * THIS STATS & USAGE PR THEN MERGED `main` AGAIN, and `main` had grown on
+ * THE SETTINGS CARDS RESTRUCTURE (Appearance split into Interface, Terminal
+ * and Window & Sidebar; Sessions renamed Agents; four new primitives)
+ * TOUCHES NEITHER BUDGET, and is the first entry here that does not. It is a
+ * pure re-layout of code and strings already behind `SettingsOverlay`'s own
+ * lazy boundary -- no new eager import, no new eager component -- so its
+ * whole cost lands in the `SettingsOverlay-*.js` chunk this file does not
+ * budget (lazy chunks are checked for existence and for the entry's absence
+ * from them, never for size). Measured with a merge-base worktree build at
+ * this PR's own merge-base (`main`, 3ea57e75) and at this branch's tip, same
+ * code and chunks both times, `electron-vite build --mode production`:
+ *
+ *     entry, merge-base       695,970 B  (209,465 B gzip)
+ *     entry, this PR          696,124 B  (209,544 B gzip)  (+154 B, +0.02%)
+ *     SettingsOverlay chunk, merge-base    76,458 B
+ *     SettingsOverlay chunk, this PR       80,171 B  (lazy; unbudgeted)
+ *
+ * +154 B eager / +79 B gzip -- the new icons (`PanelLeft`, `SquareTerminal`)
+ * `sections.ts` now imports, which is also reachable eagerly from
+ * `SessionList.tsx`/`canvas-overlays.ts` (the same reason the Integrations
+ * bump above measured `sections.ts`'s own nav metadata as eager cost). Both
+ * budgets keep the headroom the Integrations/cache-timer bump left them
+ * (699,500 - 696,124 = 3,376 B eager; 212,000 - 209,544 = 2,456 B gzip), so
+ * neither constant moves -- "bump only by the measured need," and the
+ * measured need here is comfortably inside what is already there.
+ *
+ * MEANWHILE, IN PARALLEL, `main` ALSO GREW: THIS STATS & USAGE PR THEN
+ * MERGED `main` AGAIN, and `main` had grown on
  * its own in the meantime (`phone: FAB project picker, touch-reachable
  * project controls, session preview line`, #527, 3eb46bbb) -- eager because
  * the FAB and its icons draw in the phone shell chrome, no lazy boundary to
@@ -271,6 +297,30 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * same small-headroom convention every bump above uses -- not a fresh
  * re-baseline. `ENTRY_GZIP_BUDGET_BYTES` stays at 212,000: this merge's gzip
  * figure does not approach it.
+ *
+ * THE SETTINGS CARDS BRANCH AND THIS STATS & USAGE TREE (which already
+ * carries #527) THEN MERGED INTO EACH OTHER, each having budgeted for its
+ * own delta alone (696,124 B measured, no bump vs. 700,155 B measured,
+ * bumped to 702,000) -- neither figure accounted for the other landing too,
+ * so the merge needed a real remeasurement rather than trusting either
+ * arithmetic in isolation, the same lesson the ADHD-card/Integrations merge
+ * above already drew. Measured with a worktree build at the true common
+ * ancestor of both trees (810e9e06, before either the settings-cards round 2
+ * work or the #527/Stats & Usage work landed) and at this merge commit
+ * carrying all of it, same code and chunks both times, `electron-vite build
+ * --mode production`:
+ *
+ *     entry, common ancestor (neither tree's own further work)   699,332 B  (210,827 B gzip)
+ *     entry, merged (settings cards + #527 + Stats & Usage)      700,444 B  (211,154 B gzip)
+ *
+ * +1,112 B eager / +327 B gzip combined -- both trees' own work above this
+ * common ancestor was already accounted for in each side's separate
+ * "before/after" pairs; this remeasurement is the two SIDES combining from
+ * that shared point, not a third source of growth. `ENTRY_BUDGET_BYTES`
+ * stays at 702,000: the real merged figure (700,444 B) leaves 1,556 B of
+ * headroom, so this merge does not need to move it -- the Stats & Usage bump
+ * above already covers it. `ENTRY_GZIP_BUDGET_BYTES` stays at 212,000: the
+ * merged gzip figure (211,154 B) leaves 846 B of headroom under it.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');

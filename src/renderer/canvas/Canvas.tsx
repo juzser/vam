@@ -6549,7 +6549,7 @@ function CanvasInner({
           void newProject();
           return;
         case 'settings':
-          setSettingsSection('appearance');
+          setSettingsSection('interface');
           setSettingsOpen(true);
           return;
         case 'remote':
@@ -7242,7 +7242,7 @@ function CanvasInner({
   );
 
   const onSidebarSettings = useCallback(() => {
-    setSettingsSection('appearance');
+    setSettingsSection('interface');
     setSettingsOpen(true);
   }, [setSettingsSection, setSettingsOpen]);
   const onSidebarRemote = useCallback(() => {

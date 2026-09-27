@@ -84,7 +84,7 @@ function open(prefs: Prefs = EMPTY_PREFS) {
       theme="dark"
       onChange={onChange}
       onClose={onClose}
-      initialSection="sessions"
+      initialSection="agents"
     />,
   );
   return { onChange, onClose };
@@ -100,7 +100,7 @@ function changed(onChange: { mock: { calls: unknown[][] } }, index = 0): Prefs {
   return (call ?? [])[0] as Prefs;
 }
 
-describe('the sessions section offers the two keys', () => {
+describe('the agents section offers the two keys', () => {
   it('draws both, with the one in force pressed', () => {
     open();
     expect(option('enter')?.getAttribute('aria-pressed')).toBe('true');

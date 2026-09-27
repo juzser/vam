@@ -1126,6 +1126,20 @@ if (editorOpen) {
         ? null
         : { x: bar.x + 8, y: bar.y + 1, width: Math.max(bar.width - 16, 1), height: bar.height - 2 };
     });
+    // RELATIVE TO WHERE THE PANEL ALREADY IS, not two absolute constants.
+    // Those were calibrated for the single-panel overlay this replaced, where
+    // Keyboard was the only content the scrollport held and 240/420 always
+    // fell inside it. The cards restructure stacks Keyboard behind nine
+    // other open cards in the SAME scrollport, so an absolute 240 or 420 now
+    // lands in Interface or Terminal — a real scroll, just not one that
+    // moves any row behind THIS bar, which is what made two unrelated frames
+    // read as a false "not opaque". A small delta off the bar's own current
+    // position keeps both shots inside the sticky bar's own containing
+    // block, where scrolling is guaranteed to move the rows under it rather
+    // than wander into a different card entirely.
+    const baseTop = await page.evaluate(
+      () => document.querySelector('[data-settings-scroll]')?.scrollTop ?? 0,
+    );
     const shotAt = async (top) => {
       await page.evaluate((y) => {
         const scroller = document.querySelector('[data-settings-scroll]');
@@ -1137,7 +1151,7 @@ if (editorOpen) {
     if (strip === null) {
       check('the pinned refusal can be photographed', false, 'no bar to measure');
     } else {
-      const [low, high] = [await shotAt(240), await shotAt(420)];
+      const [low, high] = [await shotAt(Math.max(baseTop - 90, 0)), await shotAt(baseTop + 90)];
       check(
         'and it is opaque — two scroll offsets photograph the same strip',
         low.equals(high),

@@ -123,12 +123,27 @@ const resetAll = (theme: EffectiveTheme) =>
 const slider = () => document.querySelector<HTMLInputElement>('[data-terminal-opacity]');
 const printed = () => document.querySelector<HTMLElement>('[data-terminal-opacity-value]');
 
+/**
+ * The colour grid, the opacity row and their bulk reset all sit behind
+ * Terminal's own Advanced disclosure now (the cards restructure). Every
+ * helper above reaches its element with a plain `querySelector`, which does
+ * not care whether an ancestor carries `hidden` -- so most of this file needs
+ * no change at all. `resetAll`'s `getByRole`/`queryByRole` is the one
+ * exception: testing-library's role queries are accessibility-tree aware and
+ * exclude anything under a `hidden` ancestor by default, so the two tests
+ * that call it open Advanced first, the same way an operator would have to
+ * click it. Persisted per section (`card-collapse.ts`), so within one test a
+ * second `open()` after a `cleanup()` starts already open -- no need to call
+ * this again.
+ */
+function openTerminalAdvanced(): void {
+  fireEvent.click(document.querySelector('[data-settings-advanced="terminal"]') as HTMLElement);
+}
+
 describe('the terminal theme rows', () => {
-  it('live in Appearance, beside the terminal text size', () => {
+  it('live in Terminal, beside the terminal text size', () => {
     open();
-    expect(chip('hans')?.closest('section')?.querySelector('h2, h3')?.textContent).toBe(
-      'Appearance',
-    );
+    expect(chip('hans')?.closest('section')?.querySelector('h2, h3')?.textContent).toBe('Terminal');
   });
 
   it('offer every dark theme in the dark row and every light theme in the light row, by name', () => {
@@ -203,11 +218,15 @@ describe('the terminal theme rows', () => {
     // "{default} unless you choose another" from the string: 24 tests green
     // with the sentence gone from the screen. Scoped to the `<p>` it reddens.
     open();
+    // NOT `.closest('[data-settings-rows] > *')` any more: the cards
+    // restructure put both theme rows inside one "Themes" `SettingsSubgroup`,
+    // so that ancestor is now the SAME element for dark and light alike, and
+    // `.querySelector('p')` from it always found the first (dark) row's own
+    // hint -- silently, for both calls. `TerminalThemeRow`'s own
+    // `data-settings-block="terminal-theme-${on}"` names the row directly.
     const hintOf = (on: EffectiveTheme) =>
-      document
-        .querySelector(`[data-terminal-theme-row="${on}"]`)
-        ?.closest('[data-settings-rows] > *')
-        ?.querySelector('p')?.textContent ?? '';
+      document.querySelector(`[data-settings-block="terminal-theme-${on}"]`)?.querySelector('p')
+        ?.textContent ?? '';
     const label = (id: string) => TERMINAL_THEMES.find((t) => t.id === id)?.label ?? '';
     expect(hintOf('dark')).toContain(label(DEFAULT_TERMINAL_THEME.dark));
     expect(hintOf('light')).toContain(label(DEFAULT_TERMINAL_THEME.light));
@@ -339,6 +358,7 @@ describe('the terminal colour grid', () => {
 
   it('offers a bulk reset only while the mode on screen has overrides, and clears only that mode', () => {
     open();
+    openTerminalAdvanced();
     expect(resetAll('dark')).toBeNull();
     cleanup();
     // Only LIGHT has colours and the overlay is open in dark: no reset here.
@@ -457,6 +477,9 @@ describe('a change in the overlay reaches a Terminal tab that is already open', 
     );
     const rerender = () =>
       swap(<SettingsOverlay prefs={prefs} theme="dark" onChange={onChange} onClose={() => {}} />);
+    // `resetAll` below is `getByRole`-based, and the colour grid/reset sit
+    // behind Advanced now (`openTerminalAdvanced`'s own note).
+    openTerminalAdvanced();
 
     act(() => {
       fireEvent.click(chip('dracula') as HTMLElement);

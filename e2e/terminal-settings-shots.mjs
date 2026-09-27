@@ -337,9 +337,29 @@ await page.addInitScript(
 );
 
 /**
+ * The colour grid, the opacity row and the bulk reset all sit behind
+ * Terminal's own Advanced disclosure now (the cards restructure,
+ * `settings/sections.ts` + `primitives.tsx`'s `AdvancedDisclosure`) --
+ * closed by default, open once clicked, and PERSISTED
+ * (`card-collapse.ts`'s `localStorage`, which a `page.goto` reload does not
+ * clear). Idempotent on purpose: `openSettingsOverTerminal` calls this on
+ * every one of its own calls, most of which are a fresh reload that already
+ * carries the previous call's open state forward, and a click on an already
+ * -open disclosure would fold it shut again.
+ */
+async function ensureTerminalAdvancedOpen() {
+  const toggle = page.locator('[data-settings-advanced="terminal"]');
+  await toggle.waitFor({ state: 'attached', timeout: 5_000 });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') {
+    await toggle.click();
+  }
+}
+
+/**
  * Put a prefs payload in the store, open the Terminal tab on it, then open
- * Settings over it and scroll the colour grid into the dialog's scrollport.
- * An init script rather than an `evaluate` + `reload`, for the race
+ * Settings over it, jump to the Terminal card, open its Advanced disclosure,
+ * and scroll the colour grid into the dialog's scrollport. An init script
+ * rather than an `evaluate` + `reload`, for the race
  * `terminal-chrome-shots.mjs` records.
  */
 async function openSettingsOverTerminal(prefs) {
@@ -363,6 +383,9 @@ async function openSettingsOverTerminal(prefs) {
   await page.locator('[data-view="terminal"]').click();
   await page.waitForSelector('[data-terminal-cursor]', { timeout: 5_000 });
   await page.locator('button[aria-label="settings"]').first().click();
+  await page.waitForSelector('[data-settings-nav]', { timeout: 5_000 });
+  await page.locator('[data-settings-nav-item="terminal"]').click();
+  await ensureTerminalAdvancedOpen();
   await page.waitForSelector('[data-settings-block="terminal-colours"]', { timeout: 5_000 });
   // The BLOCK, not a `.grid` inside it: the rows are grids too, so that
   // selector matched twenty-three elements and Playwright's strict mode

@@ -122,7 +122,10 @@ describe('the reset that could steal a key', () => {
     // The escape hatch, and the reason it can be one: the shipped grammar
     // contests nothing, so restoring all of it can never mint a clash.
     const { onChange } = open(CONTESTED);
-    fireEvent.click(screen.getByRole('tab', { name: 'Keyboard' }));
+    // NOT `getByRole('button', { name: 'Keyboard' })`: the card's own header
+    // is a button with the same accessible name now, so the query is
+    // ambiguous. The nav item's own hook stays unique.
+    fireEvent.click(document.querySelector('[data-settings-nav-item="keyboard"]') as HTMLElement);
     fireEvent.click(screen.getByRole('button', { name: 'reset shortcuts' }));
     expect(changed(onChange).keyBindings).toEqual({});
   });

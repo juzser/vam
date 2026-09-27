@@ -1485,13 +1485,14 @@ check(
 await openSession(foldedPage, 'factory-sse-1');
 await foldedPage.locator('button[aria-label="settings"]').first().click();
 await foldedPage.waitForSelector('[data-settings-nav]');
-// AND THE NAV STEP IS PART OF THAT PATH NOW. The overlay opens on Appearance
-// and focus view lives under Behaviour since the look/behaviour split
-// (`settings/sections.ts`). Every panel stays MOUNTED, so the selectors below
-// went on matching while the row was unreachable -- `innerText()` on a
-// `hidden` subtree answers the empty string, and `.click()` waits for a
-// visibility that never comes. Navigating is what keeps the four checks below
-// about a control a person could actually have pressed.
+// AND THE NAV STEP IS PART OF THAT PATH NOW. Focus view lives under Behaviour
+// (`settings/sections.ts`), one of ten cards the cards restructure mounts all
+// at once and open by default -- so the nav click below is for the scroll
+// and the screenshot's own framing, not for reachability the way it once
+// was: a card only goes `hidden` if an operator folds it themselves, which a
+// fresh dialog never has. Left in rather than dropped, because a person
+// opening this dialog for real still has to find Behaviour before they find
+// this row, and the four checks below are about the path they actually walk.
 await foldedPage.locator('[data-settings-nav-item="behaviour"]').click();
 await foldedPage.waitForTimeout(150);
 const promised = await foldedPage
