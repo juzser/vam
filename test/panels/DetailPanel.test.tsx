@@ -14,7 +14,7 @@
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { act, cleanup, fireEvent, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // The real parser, not a hand-picked id -- see "a selected historical turn
@@ -1479,13 +1479,29 @@ describe('the mode control is drawn only where a mode can actually be chosen', (
     expect(q('[data-mode-cycle]')).toBeNull();
   });
 
-  it('says so when there is no bridge to press the key with', async () => {
-    // The browser build has no `window.api`. The row is drawn from the
-    // session's own facts, so this is the one case where it can be on screen
-    // with nothing behind it -- and it says so instead of doing nothing.
+  it('falls back to the remote channel with no window.api at all, and says so when it refuses', async () => {
+    // The browser build has no `window.api` -- but Shift-Tab is `back-tab`,
+    // one of the six `paneKeyToRemoteKeyId` answers for
+    // (`shared/remote-key.ts`), so this no longer refuses instantly the way
+    // it used to for every key without a bridge: it takes `/api/send-key`
+    // instead, the SAME fallback the composer's own Escape and the phone
+    // keystroke strip take (`typePaneStrokes`, `DetailPanel.tsx`) -- this row
+    // is drawn from the session's own facts, with no window.api check of its
+    // own, so it can be on screen with only the remote channel behind it,
+    // and it still says so rather than doing nothing.
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => ({
+      json: async () => ({
+        ok: false,
+        error: { kind: 'refused', code: 'no-terminal', message: 'no pane for this session' },
+      }),
+    })) as unknown as typeof fetch;
     draw();
     await press(true);
-    expect(q('[data-mode-refusal]')).not.toBeNull();
+    await waitFor(() => {
+      expect(q('[data-mode-refusal]')).not.toBeNull();
+    });
+    globalThis.fetch = originalFetch;
   });
 });
 
