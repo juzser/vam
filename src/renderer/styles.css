@@ -2857,23 +2857,28 @@ html {
   width: auto;
 }
 
-/* THE COMPOSER'S OWN BUTTONS, ROUND AND A HAIR BIGGER THAN THE 30px SQUARE
- * ABOVE -- Orca's own shape (the operator's own report: "look again at how
- * Orca lays out its mobile screen"). `data-composer-action` marks exactly
- * the three controls beside the prompt input ("+", dictate, Send); the
- * generic 30px square above still governs every OTHER phone icon (the view
- * row, the key strip, the "+" sheet's own rows), which this selector's extra
- * attribute -- and therefore higher specificity -- leaves untouched.
+/* THE COMPOSER'S OWN BUTTONS, ROUND -- Orca's own shape (the operator's own
+ * report: "look again at how Orca lays out its mobile screen").
+ * `data-composer-action` marks exactly the three controls beside the prompt
+ * input ("+", dictate, Send); the generic 30px square above still governs
+ * every OTHER phone icon (the view row, the key strip, the "+" sheet's own
+ * rows), which this selector's extra attribute -- and therefore higher
+ * specificity -- leaves untouched.
  *
- * 36px sits inside the `.vam-tap` 44px hit floor (`styles.css`, above) with
- * 4px to spare on every side, and `border-radius: 9999px` is what makes a
- * square skin a circle regardless of which corner radius its own component
- * asked for -- the Send button's `rounded-[7px]` and the "+"'s `rounded-full`
- * among them, both overridden here on phone alone; neither is touched on
- * desktop, where `.vam-phone` never matches. */
+ * 30px, NOT 36 -- SHRUNK BACK TO THE GENERIC SIZE (PR #530 follow-up,
+ * "~28-32px painted icons"): this used to sit "a hair bigger than the 30px
+ * square" on the argument that the row was its own separate button group
+ * beside the pill and could afford the extra 6px; the operator's own
+ * follow-up asked for the row tightened instead ("shrink the spacing between
+ * the buttons"), and a smaller painted circle is the other half of the same
+ * request. `border-radius: 9999px` still turns the square skin into a
+ * circle regardless of which corner radius its own component asked for --
+ * the Send button's `rounded-[7px]` and the "+"'s `rounded-full` among them,
+ * both overridden here on phone alone; neither is touched on desktop, where
+ * `.vam-phone` never matches. */
 .vam-phone .vam-tap[data-composer-action] > [data-tap-skin] {
-  height: 36px;
-  width: 36px;
+  height: 30px;
+  width: 30px;
   border-radius: 9999px;
 }
 

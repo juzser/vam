@@ -287,28 +287,47 @@ describe("AC-7's height half: the phone row is merged, not stacked (docs/design/
   });
 
   /**
-   * AC-7's stretch target, closed: `field-sizing: content` removed from the
-   * phone box, so growth is now the SAME `scrollHeight` effect the desktop
-   * box already had (`inputRef`'s own `useEffect`, below `pickImage` in
-   * `DetailPanel.tsx`) -- see that effect's own comment for the real-browser
-   * measurement this closes (docs/design/phone-core-loop.md §4.7's
-   * postmortem, followed up).
-   *
-   * NOT ASSERTED HERE VIA A MOCKED `scrollHeight`: tried first, and it does
-   * not distinguish the fix from its absence -- happy-dom does not implement
-   * `field-sizing` at all, so the shared effect's OWN `style.height` write
-   * reads back identically whether or not the class removed here is still
-   * present in the className string. The one thing a unit test CAN still pin
-   * is the className/attribute SHAPE; the actual pixel figure is only
-   * provable in a browser (`e2e/phone-question-shots.mjs`, updated
-   * alongside this).
+   * REVERSED BY THE OPERATOR (PR #530's second follow-up): "the mobile
+   * prompt input is single line only". An earlier draft of this same PR grew
+   * the phone box with the SAME `scrollHeight` effect desktop uses; this pins
+   * the shape that reversal left instead -- no cap needed because nothing
+   * grows, `rows={1}` plus `.vam-tap`'s own 44px floor is the whole of the
+   * box's height, and long text scrolls horizontally rather than wrapping
+   * onto a second line (`whitespace-nowrap overflow-x-auto`, not
+   * `overflow-y-auto`). The actual pixel height is only provable in a
+   * browser (`e2e/phone-question-shots.mjs`).
    */
-  it('grows by the shared scrollHeight effect, not field-sizing: content, and still caps at 132px', () => {
+  it('is single-line and non-growing: no field-sizing, no max-h cap, nowrap plus horizontal scroll', () => {
     draw();
     const textarea = q<HTMLTextAreaElement>('textarea[aria-label="prompt to session"]');
     expect(textarea?.className).not.toContain('field-sizing');
-    expect(textarea?.className).toMatch(/max-h-\[132px\]/);
+    expect(textarea?.className).not.toMatch(/max-h-\[\d+px\]/);
+    expect(textarea?.className).toContain('whitespace-nowrap');
+    expect(textarea?.className).toContain('overflow-x-auto');
+    expect(textarea?.className).not.toContain('overflow-y-auto');
     expect(textarea?.getAttribute('rows')).toBe('1');
+  });
+
+  /**
+   * THE GROW EFFECT NEVER RUNS ON PHONE, so a growing draft never sets
+   * `style.height` at all -- happy-dom would otherwise read back the write
+   * regardless of whether the phone box is meant to grow (it does not
+   * implement `scrollHeight`, so the effect's own arithmetic is inert either
+   * way); what a unit test CAN prove is that the effect's `useEffect`/
+   * `setInputRef` call sites gate on `phone` at all, by checking the DOM
+   * property the effect would otherwise have written.
+   */
+  it('never writes an inline height on the phone box, even as the draft grows', () => {
+    let draft = 'a';
+    const view = draw({
+      draft,
+      onDraftChange: (next) => {
+        draft = next;
+      },
+    });
+    const textarea = q<HTMLTextAreaElement>('textarea[aria-label="prompt to session"]');
+    view.rerender(<DetailPanel {...propsFor({ draft: 'a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl' })} />);
+    expect(textarea?.style.height).toBe('');
   });
 
   it('desktop never carried field-sizing either -- its own rows stay 2, untouched', () => {

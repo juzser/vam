@@ -39,8 +39,12 @@ for (const theme of ['light', 'dark']) {
     .click();
   await page.waitForSelector('[data-phone-shell="session"]');
   await page.locator('[data-phone-shell] [data-composer-bar] textarea').click();
+  // SINGLE LINE NOW (composer follow-up: "the mobile prompt input is single
+  // line only") -- a draft this long no longer grows the box; it scrolls
+  // horizontally inside the one line instead, which is the shape this shot
+  // now exists to show.
   await page.locator('[data-phone-shell] [data-composer-bar] textarea').fill(
-    'a reasonably long draft, long enough that the box has to grow past one line',
+    'a reasonably long draft, long enough to scroll past the edge of one line',
   );
   await page.waitForTimeout(400);
   await page.evaluate(() => {

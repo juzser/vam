@@ -28,8 +28,12 @@ const SHELL_H = 844;
 /** WCAG 2.2 SC 2.5.5 (AAA) and Apple's HIG figure. */
 const TOUCH_MIN = 44;
 
-/** Orca's own figure, and the operator's ("about 36px painted"). */
-const ACTION_PAINT = 36;
+/** Orca's own figure shrunk back to the app's generic icon size (composer
+ *  follow-up: "shrink the spacing between the buttons... ~28-32px painted
+ *  icons") -- it shipped at 36px first ("a hair bigger than the 30px square"
+ *  above it), then the operator asked for the row tightened, and a smaller
+ *  painted circle is the other half of that same ask. */
+const ACTION_PAINT = 30;
 
 const STUB = {
   id: 'remote',
@@ -165,12 +169,22 @@ for (const width of [360, 390, 430]) {
     await stubRemote(page);
     await openSession(page);
     await page.locator('[data-phone-shell] [data-composer-bar] textarea').click();
-    // A draft long enough to grow the box past one line -- the exact case
-    // the operator's screenshot showed the buttons crowding into.
-    await page.fill(
-      '[data-phone-shell] [data-composer-bar] textarea',
-      'a reasonably long draft, long enough that the box has to grow past one line and the buttons beside it have to hold their ground',
-    );
+    // A draft far longer than the box is wide -- the operator's OWN reversal
+    // ("the mobile prompt input is single line only") means this no longer
+    // grows the box past one line at all; the case worth proving now is the
+    // opposite one, that a long draft stays on ONE line (scrolling
+    // horizontally, `heightStaysFixed` below) rather than wrapping down onto
+    // the buttons beside it the way a plain multi-row textarea would.
+    const LONG_DRAFT =
+      'a reasonably long draft, long enough that a wrapping box would grow past one line and the buttons beside it would have to hold their ground';
+    const heightBefore = await page
+      .locator('[data-phone-shell] [data-composer-bar] textarea')
+      .evaluate((el) => el.getBoundingClientRect().height);
+    await page.fill('[data-phone-shell] [data-composer-bar] textarea', LONG_DRAFT);
+    const heightAfter = await page
+      .locator('[data-phone-shell] [data-composer-bar] textarea')
+      .evaluate((el) => el.getBoundingClientRect().height);
+    expect(heightAfter, `textarea height at ${width}px must not grow`).toBe(heightBefore);
 
     const { textarea, buttons, actionSkins, composer } = await composerRects(page);
     expect(buttons.length, 'the three composer buttons ("+", dictate, Send)').toBe(3);

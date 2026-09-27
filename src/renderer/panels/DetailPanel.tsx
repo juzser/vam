@@ -144,6 +144,7 @@ import type { SessionEntry } from '../domain/selectors.js';
 import { t } from '../i18n/strings.js';
 import { chordSymbols, normalizeKey } from '../keyboard/chords.js';
 import { insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
+import { PHONE_KEY_LABELS, phoneKeyLabelNodes } from '../keyboard/phone-key-labels.js';
 import { questionKeys, resolveQuestionKey } from '../keyboard/question-keys.js';
 import { ChordGlyphs, ShortcutTip } from '../keyboard/ShortcutTip.js';
 import {
@@ -4293,15 +4294,30 @@ function modelSwitchNote(result: ModelSwitchResult, title: string, choice: strin
  * with the first: `Esc` was a hard-coded WORD even on an iPhone, where every
  * other surface in this app paints `chords.ts`'s own `⎋`, and `⇧⇥` carried no
  * space where the rest of the app has painted one between every glyph since
- * the operator asked for it. `chord`/`suffix` let the button ask
- * `chordSymbols`/`ChordGlyphs` the same question every other chord in the
- * app asks, so this strip can no longer drift from that one table.
+ * the operator asked for it. `chord`/`suffix` still answer that question for
+ * `stripCaption` below (the sent/sending banner text, which nobody asked to
+ * change) -- but they are gone from the BUTTON's own caption now:
+ *
+ * `label` IS A NEW FIELD, PLAIN AND HARD-CODED, because `chordSymbols` is
+ * PLATFORM-READ (`applePlatform()`, `chords.ts`'s own comment) and this strip
+ * is not: it ships to whatever phone reads a Tailscale URL, so the same
+ * button painted `⎋ → agent` on an iPhone and `Esc → agent` on an Android
+ * one, and the operator's report ("the quick buttons row" -- read together
+ * with the follow-up that named the wording directly) asked for ONE short,
+ * plain caption regardless of which glyph table the visiting phone happens
+ * to read: `Esc`, `Tab`, `⇧Tab`, `↵`, `Space`, `⌫`, `↑`, `↓`. Four of the
+ * eight are still glyphs (`↵ ⌫ ↑ ↓`) -- a single recognisable pictogram reads
+ * faster than a word in a 30px chip and none of the four has the "which
+ * platform" problem the removed `chordSymbols` call did, being nobody's menu
+ * shortcut. `data-tap-pill` (`styles.css`) is what lets the word-labelled
+ * four opt out of the fixed 30px square without spilling into the next chip.
  */
 const KEY_STRIP: readonly {
   readonly id: string;
   readonly key: PaneKey;
   readonly chord: string;
   readonly suffix: string;
+  readonly label: string;
   readonly ariaLabel: string;
 }[] = [
   {
@@ -4309,6 +4325,7 @@ const KEY_STRIP: readonly {
     key: { kind: 'escape' },
     chord: 'Escape',
     suffix: ' → agent',
+    label: PHONE_KEY_LABELS.escape,
     ariaLabel: 'press Escape in the session',
   },
   {
@@ -4316,6 +4333,7 @@ const KEY_STRIP: readonly {
     key: { kind: 'text', text: '\t' },
     chord: 'Tab',
     suffix: '',
+    label: PHONE_KEY_LABELS.tab,
     ariaLabel: 'press Tab in the session',
   },
   {
@@ -4323,6 +4341,7 @@ const KEY_STRIP: readonly {
     key: { kind: 'enter', shift: false },
     chord: 'Enter',
     suffix: ' → agent',
+    label: PHONE_KEY_LABELS.enter,
     ariaLabel: 'press Enter in the session',
   },
   {
@@ -4330,6 +4349,7 @@ const KEY_STRIP: readonly {
     key: { kind: 'back-tab' },
     chord: 'Shift-Tab',
     suffix: '',
+    label: PHONE_KEY_LABELS['back-tab'],
     ariaLabel: 'press Shift-Tab in the session',
   },
   {
@@ -4337,6 +4357,7 @@ const KEY_STRIP: readonly {
     key: { kind: 'text', text: ' ' },
     chord: ' ',
     suffix: '',
+    label: PHONE_KEY_LABELS.space,
     ariaLabel: 'press Space in the session',
   },
   {
@@ -4344,6 +4365,7 @@ const KEY_STRIP: readonly {
     key: { kind: 'backspace' },
     chord: 'Backspace',
     suffix: '',
+    label: PHONE_KEY_LABELS.backspace,
     ariaLabel: 'press Backspace in the session',
   },
   {
@@ -4351,6 +4373,7 @@ const KEY_STRIP: readonly {
     key: { kind: 'nav', nav: 'up' },
     chord: 'ArrowUp',
     suffix: '',
+    label: PHONE_KEY_LABELS.up,
     ariaLabel: 'press the up arrow in the session',
   },
   {
@@ -4358,6 +4381,7 @@ const KEY_STRIP: readonly {
     key: { kind: 'nav', nav: 'down' },
     chord: 'ArrowDown',
     suffix: '',
+    label: PHONE_KEY_LABELS.down,
     ariaLabel: 'press the down arrow in the session',
   },
 ];
@@ -7373,28 +7397,22 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
   // `resizeTextareaToContent` (above `DetailPanel` itself) is the resize
   // logic; this effect is its draft-change trigger.
   //
-  // THIS IS ALSO THE PHONE COMPOSER'S OWN GROWTH NOW, and it did not used to
-  // be: phone wore `field-sizing: content` (`data-prompt-box`'s own comment
-  // used to explain it), which -- per spec -- has the UA size the box off its
-  // OWN intrinsic content, ignoring an author-set `height` such as the one
-  // this effect writes; the two mechanisms were both running, and only the
-  // native one was ever visible. Verified by hand, in real Chromium:
-  // `field-sizing: content` computes an EMPTY, single-row textarea's own
-  // intrinsic content height at ~60px (three lines' worth at the phone's
-  // forced 16px/20px font/line-height) regardless of `rows` or removing the
-  // attribute entirely, while `field-sizing: fixed` (the property's own
-  // default -- what phone is left with now) with the identical `rows={1}`
-  // measures 44px, the `vam-tap` floor, for the same box
-  // (`e2e/phone-question-shots.mjs` holds the real-browser figures). The
-  // 16-19px this closed was that property's own sizing algorithm for an
-  // EMPTY box, not padding, a control, or a border this file could still
-  // trim -- and closing it needed exactly the JS resize handler this effect
-  // already was, not a second one kept in step with it.
+  // DESKTOP ONLY NOW. This used to be the phone composer's own growth too --
+  // phone wore `field-sizing: content` before that (`data-prompt-box`'s own
+  // comment used to explain it), which this effect's write replaced -- but
+  // the operator reversed that design entirely: "the mobile prompt input is
+  // single line only". A box that never grows has nothing for this effect to
+  // measure, so calling it on phone would be dead code kept in step with
+  // nothing; `!phone` is the whole of the gate, and the phone box is left at
+  // `rows={1}` plus `.vam-tap`'s own 44px floor -- fixed, the same as any
+  // other tap target on this shell, not a special case of this effect's
+  // sizing.
   useEffect(() => {
+    if (phone) return;
     const box = inputRef.current;
     if (box === null) return;
     resizeTextareaToContent(box, draft);
-  }, [draft]);
+  }, [draft, phone]);
   /**
    * THE SAME RESIZE, RUN ON MOUNT TOO -- not only when `draft` changes.
    *
@@ -7416,10 +7434,14 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
    * this same bug self-inflicted continuously rather than only on a real
    * remount.
    */
-  const setInputRef = useCallback((box: HTMLTextAreaElement | null) => {
-    inputRef.current = box;
-    if (box !== null) resizeTextareaToContent(box, draftRef.current);
-  }, []);
+  const setInputRef = useCallback(
+    (box: HTMLTextAreaElement | null) => {
+      inputRef.current = box;
+      // PHONE NEVER RESIZES -- see the draft-change effect's own comment.
+      if (box !== null && !phone) resizeTextareaToContent(box, draftRef.current);
+    },
+    [phone],
+  );
 
   /**
    * THE DOCUMENT IS THE SESSION NOW, not the turn.
@@ -9932,15 +9954,68 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
               aria-label="press a key in the session"
               data-key-strip
               ref={keyStripRef}
-              className="vam-no-scrollbar flex flex-none items-center gap-1.5 overflow-x-auto overscroll-x-contain"
+              // `gap-1` (4px), not `gap-1.5` (6px): the operator's own
+              // follow-up ("reduce the spacing between the quick buttons
+              // above the prompt input"), the same tightening
+              // `data-prompt-tools` gets below -- more of the eight keys fit
+              // before the row's own edge, so fewer live behind the "»"
+              // overflow at 360px.
+              className="vam-no-scrollbar flex flex-none items-center gap-1 overflow-x-auto overscroll-x-contain"
             >
+              {/* THE KEYS THEMSELVES COME FIRST NOW (the composer follow-up:
+                  "put the keys first, then keyboard-toggle, paste and »" --
+                  Esc, the most-used key, must be reachable with no overflow
+                  at 360px, and the only position that guarantees it
+                  regardless of screen width is the row's own FIRST child,
+                  visible at `scrollLeft: 0` before any scroll happens at
+                  all. `hasLocalTerminalChannel`/`paneKeyToRemoteKeyId`
+                  filter which of the eight actually reach a channel, exactly
+                  as before -- only the ORDER moved, not the filter. */}
+              {(hasLocalTerminalChannel
+                ? KEY_STRIP
+                : KEY_STRIP.filter((item) => paneKeyToRemoteKeyId(item.key) !== null)
+              ).map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  data-key-strip-key={item.id}
+                  aria-label={item.ariaLabel}
+                  onClick={() => void sendKey(item)}
+                  className="vam-tap flex flex-none items-center justify-center"
+                >
+                  <span
+                    data-tap-skin
+                    // `data-tap-pill` (`styles.css`): the shared
+                    // `.vam-phone .vam-tap > [data-tap-skin]` rule pins every
+                    // skin to a 30x30 SQUARE, which is correct for the icon
+                    // skins it was written for and wrong for a skin holding
+                    // TEXT. This opts out of the square into a
+                    // width-to-content pill, hit still 44, paint still 30
+                    // tall. `px-1` (4px), not `px-1.5` (6px): the operator's
+                    // own follow-up ("compact chips sized to their short
+                    // labels") -- `item.label` below is at most five
+                    // characters (`⇧Tab`, `Space`) now rather than a
+                    // `chordSymbols` caption plus a " → agent" suffix, so the
+                    // chip needs less breathing room to read cleanly, and the
+                    // narrower padding is what lets more of the eight fit
+                    // before the row's own edge.
+                    data-tap-pill
+                    className="flex h-[30px] min-w-[30px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-line-strong bg-card px-1 font-mono text-control text-ink-quiet active:bg-line-strong"
+                  >
+                    {phoneKeyLabelNodes(item.label)}
+                  </span>
+                </button>
+              ))}
               {/* THE KEYBOARD-TOGGLE, Orca's own leading icon and shown only
                   while there is a keyboard to hide (`composerFocused`, above
                   -- real DOM focus, not `composing`). `inputRef.current
                   ?.blur()` is the exact release the composer's own Escape/
                   `Mod-[` handler already uses a few lines down; this is a
                   second door to the same act, for a device with no Escape
-                  key of its own. */}
+                  key of its own. MOVED AFTER THE KEYS (the composer follow-up):
+                  this and the three icons below it are reached-for less
+                  often than any of the eight keys, so they now trail rather
+                  than lead the row a drag has to cross to reach them. */}
               {composerFocused && (
                 <button
                   type="button"
@@ -9985,32 +10060,6 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                   </span>
                 </button>
               )}
-              {/* THE "»" OVERFLOW: this row already scrolls
-                  (`overflow-x-auto`, this nav's own comment above) --
-                  Up/Down, vam's own addition over Orca's six, sit at its
-                  far end. This is a shortcut TO that end, a `scrollTo`
-                  rather than a second, hidden state to keep in step with
-                  the real one: nothing here is ever hidden that a drag
-                  could not already reach. */}
-              <button
-                type="button"
-                data-key-strip-more
-                aria-label="scroll to more keys"
-                onClick={() =>
-                  keyStripRef.current?.scrollTo({
-                    left: keyStripRef.current.scrollWidth,
-                    behavior: 'smooth',
-                  })
-                }
-                className="vam-tap flex flex-none items-center justify-center"
-              >
-                <span
-                  data-tap-skin
-                  className="flex h-[30px] w-[30px] items-center justify-center rounded-[8px] border border-line-strong bg-card font-mono text-control text-ink-quiet active:bg-line-strong"
-                >
-                  »
-                </span>
-              </button>
               {/* PASTE: reads the phone's OWN clipboard and types the result
                   through the EXISTING prompt path (`onPasteFromClipboard`,
                   above) -- never through `sendKey`/the remote route, which
@@ -10046,47 +10095,33 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                   </span>
                 </button>
               </Note>
-              {/* THE KEYS THEMSELVES, FILTERED TO WHAT THE ACTIVE CHANNEL CAN
-                  ACTUALLY CARRY. `hasLocalTerminalChannel` (the Electron-only
-                  `window.api.terminal.send`) reaches every one of the eight;
-                  the phone's own remote channel (`send-key-remote.ts`) only
-                  ever reaches the six `paneKeyToRemoteKeyId` answers for
-                  (`shared/remote-key.ts`) -- Up/Down are withdrawn from the
-                  strip itself rather than drawn as two buttons that always
-                  fail, the same "absent, not disabled" rule this app applies
-                  everywhere else a control cannot act. */}
-              {(hasLocalTerminalChannel
-                ? KEY_STRIP
-                : KEY_STRIP.filter((item) => paneKeyToRemoteKeyId(item.key) !== null)
-              ).map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  data-key-strip-key={item.id}
-                  aria-label={item.ariaLabel}
-                  onClick={() => void sendKey(item)}
-                  className="vam-tap flex flex-none items-center justify-center"
+              {/* THE "»" OVERFLOW: this row already scrolls
+                  (`overflow-x-auto`, this nav's own comment above) --
+                  Up/Down, vam's own addition over Orca's six, sit at its
+                  far end. This is a shortcut TO that end, a `scrollTo`
+                  rather than a second, hidden state to keep in step with
+                  the real one: nothing here is ever hidden that a drag
+                  could not already reach. TRAILS EVERYTHING NOW, its own
+                  natural place once the keys it points past lead the row. */}
+              <button
+                type="button"
+                data-key-strip-more
+                aria-label="scroll to more keys"
+                onClick={() =>
+                  keyStripRef.current?.scrollTo({
+                    left: keyStripRef.current.scrollWidth,
+                    behavior: 'smooth',
+                  })
+                }
+                className="vam-tap flex flex-none items-center justify-center"
+              >
+                <span
+                  data-tap-skin
+                  className="flex h-[30px] w-[30px] items-center justify-center rounded-[8px] border border-line-strong bg-card font-mono text-control text-ink-quiet active:bg-line-strong"
                 >
-                  <span
-                    data-tap-skin
-                    // `data-tap-pill` (`styles.css`): the shared
-                    // `.vam-phone .vam-tap > [data-tap-skin]` rule pins every
-                    // skin to a 30x30 SQUARE, which is correct for the icon
-                    // skins it was written for and wrong for a skin holding
-                    // TEXT -- "Esc → agent" measured 72px wide and, clamped to
-                    // 30, spilled into the next chip on a real render (caught
-                    // only by a screenshot; `getBoundingClientRect()` on the
-                    // 44px hit box stays green regardless). This opts out of
-                    // the square into a width-to-content pill, hit still 44,
-                    // paint still 30 tall.
-                    data-tap-pill
-                    className="flex h-[30px] min-w-[30px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-line-strong bg-card px-1.5 font-mono text-control text-ink-quiet active:bg-line-strong"
-                  >
-                    <ChordGlyphs chord={item.chord} />
-                    {item.suffix}
-                  </span>
-                </button>
-              ))}
+                  »
+                </span>
+              </button>
             </nav>
           )}
           {suggestOpen && (
@@ -10220,29 +10255,25 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
               // below carries them now, on its own card. Desktop is untouched.
               phone ? 'flex outline-none' : 'flex rounded-[10px] border bg-card outline-none',
               // PHONE: ONE row, not two (docs/design/phone-core-loop.md §3.4
-              // PR 1's own follow-up, §4.1's postmortem). `flex-row flex-wrap
-              // items-end` is still the merged control row's own flex
-              // context, but its main line now holds exactly TWO items --
-              // the input pill (`data-prompt-input`, `flex-1`) and the
-              // button group (`data-prompt-tools`, `flex-none`) -- rather
-              // than the bare textarea and every button flattened into it
-              // individually. `items-end` still anchors the button group to
-              // the pill's OWN baseline as it grows upward, the same shape
-              // iMessage/Claude's own composer draws; what changed is that
-              // the pill now paints its OWN card, so growing text never
-              // shares a background with the buttons beside it -- the
-              // operator's own report ("the buttons... cover most of the
-              // input box") was true of the one shared card this replaces,
-              // not of two separate ones with a gap between them. Desktop
+              // PR 1's own follow-up, §4.1's postmortem, and the operator's
+              // OWN REVERSAL of the stacked-pill layout this replaces: "the
+              // mobile prompt input is single line only; shrink the spacing
+              // between the buttons to the right of the input" -- a
+              // single-line input with the button group beside it, not a
+              // growing pill with the buttons stacked underneath. `flex-row
+              // flex-wrap items-center` is the merged control row's own flex
+              // context, its main line holding exactly TWO items -- the
+              // input pill (`data-prompt-input`, `flex-1`) and the button
+              // group (`data-prompt-tools`, `flex-none`) -- with any rare
+              // caption (`order-10 basis-full`, below) wrapping onto its own
+              // line rather than cramming in beside either. `items-center`,
+              // not `items-end`: the pill no longer grows upward with typed
+              // text (`resizeTextareaToContent`'s own comment covers why),
+              // so there is no baseline left to anchor the buttons to --
+              // both are now fixed-height, single-line siblings. Desktop
               // keeps the original two-row `flex-col`, untouched.
-              // NO `py-*` OF ITS OWN ON PHONE, unlike before this pill
-              // existed: `data-prompt-input` below carries its own `py-1.5`
-              // now, on its own card, and this row stacking a second one on
-              // top of that pushed AC-7's 75px target to 87px (measured,
-              // `phone-question-shots.mjs`) -- the row's job is only to lay
-              // its two items out, not to pad them a second time.
               phone
-                ? 'flex-row flex-wrap items-end gap-x-2 gap-y-1.5 px-2.5'
+                ? 'flex-row flex-wrap items-center gap-x-2 gap-y-1.5 px-2.5'
                 : 'flex-col gap-2.5 px-3 py-2.5',
               // PHONE: the focus ring moves to the pill, which is the thing
               // it is a ring FOR (Orca draws it on the input alone, never on
@@ -10252,24 +10283,29 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
           >
             {/* THE INPUT PILL (PHONE ONLY): its own rounded card, its own
               background, its own focus ring, `flex-1 min-w-0` so it takes
-              every pixel the button group beside it does not -- Orca's
-              shape, and the operator's own fix ("the textarea gets its own
-              flex column with the full remaining width... the buttons...
-              never sit on top of the text area"). `min-w-0` is load-bearing:
-              a flex item defaults to `min-width: auto` (its content's own
-              width), and a textarea's content can be arbitrarily long --
-              without this the pill would refuse to shrink and push the
-              button group off a 360px screen. `contents` on desktop, which
-              already draws ONE card around the whole row (this div's own
-              `border bg-card` two levels up) -- a second one nested inside
-              it would be a border around a border, so desktop's own wrapper
-              one line down keeps its unchanged `flex items-start gap-2`. */}
+              every pixel the button group beside it does not -- the
+              operator's OWN single-line layout ("shrink the spacing between
+              the buttons to the right of the input", reversing an earlier
+              stacked-pill draft this file briefly carried). `items-center`
+              replaces the growing pill's old `items-end`: with the textarea
+              no longer resizing (`resizeTextareaToContent`'s own comment),
+              both this pill and the button group beside it are fixed-height,
+              so there is no baseline left to anchor to. `min-w-0` is
+              load-bearing: a flex item defaults to `min-width: auto` (its
+              content's own width), and a textarea's content can be
+              arbitrarily long -- without this the pill would refuse to
+              shrink and push the button group off a 360px screen. `contents`
+              on desktop, which already draws ONE card around the whole row
+              (this div's own `border bg-card` two levels up) -- a second one
+              nested inside it would be a border around a border, so
+              desktop's own wrapper one line down keeps its unchanged `flex
+              items-start gap-2`. */}
             <div
               data-prompt-input
               className={
                 phone
                   ? [
-                      'flex min-w-0 flex-1 items-end gap-2 rounded-[10px] border bg-card px-3 py-1.5',
+                      'flex min-w-0 flex-1 items-center gap-2 rounded-[10px] border bg-card px-3 py-1.5',
                       active && actionIndex === 0 ? 'border-waiting' : 'border-line-loud',
                     ].join(' ')
                   : 'contents'
@@ -10524,18 +10560,31 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                    shell keeps -- and it is the one control on the screen that
                    exists to be tapped. The class is `.vam-phone`-scoped
                    (`styles.css`), so the desktop box is untouched, and
-                   `max-h-[120px]` still caps the grown height.
+                   `max-h-[120px]` still caps the grown height there.
 
-                   PHONE ONLY: no more `[field-sizing:content]` -- grown by
-                   the SAME `scrollHeight` effect the desktop box already
-                   used (below `pickImage`), which this property used to
-                   override/ignore per spec; see that effect's own comment
-                   for the real-browser measurement this closes. `rows={1}`
-                   (not 2) and `max-h-[132px]` (not 120) are the two figures
-                   that still differ from desktop. */
+                   PHONE: SINGLE LINE, NOT GROWING -- the operator's own
+                   reversal ("the mobile prompt input is single line only;
+                   shrink the spacing between the buttons to the right of the
+                   input"), over an earlier draft of this same PR that grew
+                   the box with `scrollHeight` the way desktop still does.
+                   `resizeTextareaToContent` is never called for a phone box
+                   any more (its own call sites gate on `phone`), so `rows={1}`
+                   plus `.vam-tap`'s own 44px floor is the WHOLE of this box's
+                   height -- fixed, not measured against a cap, which is why
+                   there is no `max-h-*` on the phone branch at all any more.
+                   `whitespace-nowrap overflow-x-auto` is the other half: a
+                   textarea wraps long text onto a second visual line by
+                   default regardless of height, which a fixed one-line box
+                   would then clip; `nowrap` keeps every typed character on
+                   ONE line and `overflow-x-auto` makes the overrun a
+                   horizontal scroll instead -- the operator's own description
+                   ("long text scrolls horizontally... inside the one line").
+                   Desktop is unaffected: both classes are phone-only. */
                   className={[
-                    'vam-no-scrollbar vam-tap min-w-0 flex-1 resize-none overflow-y-auto bg-transparent text-body text-ink outline-none placeholder:text-ink-faint',
-                    phone ? 'max-h-[132px]' : 'max-h-[120px]',
+                    'vam-no-scrollbar vam-tap min-w-0 flex-1 resize-none bg-transparent text-body text-ink outline-none placeholder:text-ink-faint',
+                    phone
+                      ? 'overflow-x-auto overflow-y-hidden whitespace-nowrap'
+                      : 'overflow-y-auto max-h-[120px]',
                   ].join(' ')}
                   aria-label="prompt to session"
                 />
@@ -10688,7 +10737,12 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
               row -- see the `phone ? … : …` below. */}
             <div
               data-prompt-tools
-              className={phone ? 'flex flex-none items-center gap-1.5' : 'flex items-center gap-2'}
+              // PHONE: `gap-1` (4px), not `gap-2.5`'s old `gap-1.5` (6px) --
+              // the operator's own follow-up ("shrink the spacing between
+              // the buttons to the right of the input"), so the pill beside
+              // this row keeps a few more pixels of the row's own width.
+              // Desktop is untouched, its own `gap-2` unchanged.
+              className={phone ? 'flex flex-none items-center gap-1' : 'flex items-center gap-2'}
             >
               {/* PHONE COMPOSER DIET (docs/design/phone-core-loop.md §3.4):
                   one "+" replaces FIVE resident icons (attach, attach-image,

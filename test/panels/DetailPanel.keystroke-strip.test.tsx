@@ -25,7 +25,6 @@ import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
-import { chordSymbols } from '../../src/renderer/keyboard/chords.js';
 import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/DetailPanel.js';
 import type { PaneSendResult } from '../../src/shared/terminal.js';
 import { onBothPlatforms } from '../support/platform.js';
@@ -173,14 +172,22 @@ describe('the keystroke strip is drawn only where a key can actually be sent', (
     Reflect.deleteProperty(window, 'api');
   });
 
-  it('labels Escape and Enter distinctly from their textarea siblings', () => {
+  it('labels Escape and Enter with short, plain captions -- no confusion with the textarea possible', () => {
+    // REVERSED (PR #530 follow-up): this used to assert the OPPOSITE --
+    // that the caption said MORE than the bare key name (`Esc → agent`),
+    // to read as distinct from a key row the textarea itself used to
+    // print. That row is long gone (the paragraph below), and the operator
+    // asked for the reverse of the added wording too: "short plain
+    // labels... instead of '⟲→ agent' / '↩→ agent' style captions" -- so
+    // the strip's own caption is now exactly `Esc` and exactly `↵`, nothing
+    // appended, on every platform (`chordSymbols` used to vary this by
+    // `navigator.platform`; see the platform test below for why that had to
+    // go too).
     draw({}, { composing: true });
     const escapeKey = document.querySelector('[data-key-strip-key="escape"]');
     const enterKey = document.querySelector('[data-key-strip-key="enter"]');
-    expect(escapeKey?.textContent).toContain('agent');
-    expect(escapeKey?.textContent).not.toBe('Esc');
-    expect(enterKey?.textContent).toContain('agent');
-    expect(enterKey?.textContent).not.toBe('Enter');
+    expect(escapeKey?.textContent).toBe('Esc');
+    expect(enterKey?.textContent).toBe('↵');
     // AND THE TEXTAREA NAMES NO KEY AT ALL TO BE CONFUSED WITH. The strip's
     // button is now the only thing under the composer that says "Esc" on any
     // route: the key row beneath the input is gone entirely, at the operator's
@@ -192,40 +199,44 @@ describe('the keystroke strip is drawn only where a key can actually be sent', (
   });
 
   /**
-   * THE STRIP PAINTS chords.ts's OWN TABLE, NOT A SECOND ONE HAND-TYPED
-   * BESIDE IT. It shipped with `⏎`, `⌫`, `⇧⇥` and `␣` written straight into
-   * `KEY_STRIP`'s captions — Apple's own glyphs, painted on every platform
-   * unconditionally, including the Android phone this same bundle is served
-   * to over Tailscale (`test/support/platform.ts`'s whole reason for
-   * existing). `chordSymbols` was already the one function this app trusts
-   * to answer that question; the strip now asks it, per key, like every
-   * other chord in the app.
+   * THE STRIP NO LONGER PAINTS chords.ts's PLATFORM-READ TABLE (PR #530
+   * follow-up, reversing what this test used to pin). It shipped once with
+   * seven glyphs hand-typed straight into `KEY_STRIP`'s captions, then moved
+   * to `chordSymbols`/`ChordGlyphs` so it could not drift from the app's one
+   * table of platform glyphs -- but `chordSymbols` is `navigator.platform`-
+   * read (`chords.ts`'s own comment), so the SAME button painted `⎋ → agent`
+   * on an iPhone and `Esc → agent` on the Android phone this same bundle is
+   * served to over Tailscale. The operator asked for one short, plain label
+   * instead, independent of which phone is reading it: `KEY_STRIP.label` is
+   * now a hard-coded string, and this test's whole point is that it reads
+   * the SAME on both platform branches `onBothPlatforms` still drives --
+   * proving the platform-dependence is gone, not merely relocated.
    */
-  it('paints the platform’s own glyphs for every key, off chords.ts’s table', () => {
-    const EXPECT: Readonly<Record<string, { chord: string; suffix: string }>> = {
-      escape: { chord: 'Escape', suffix: ' → agent' },
-      tab: { chord: 'Tab', suffix: '' },
-      enter: { chord: 'Enter', suffix: ' → agent' },
-      backspace: { chord: 'Backspace', suffix: '' },
-      'back-tab': { chord: 'Shift-Tab', suffix: '' },
-      space: { chord: ' ', suffix: '' },
-      up: { chord: 'ArrowUp', suffix: '' },
-      down: { chord: 'ArrowDown', suffix: '' },
+  it('paints the same short, plain label on every key regardless of platform', () => {
+    const EXPECT: Readonly<Record<string, string>> = {
+      escape: 'Esc',
+      tab: 'Tab',
+      enter: '↵',
+      backspace: '⌫',
+      'back-tab': '⇧Tab',
+      space: 'Space',
+      up: '↑',
+      down: '↓',
     };
     // `window.api` mocked here, for all eight -- Up/Down only ever paint over
     // the local channel (`hasLocalTerminalChannel`), and this test's whole
-    // point is that every key on the strip reads `chords.ts`'s table, not
+    // point is that every key on the strip reads the same fixed label, not
     // just the six the remote channel also carries.
     const send = vi.fn(async (): Promise<PaneSendResult> => 'sent');
     Object.defineProperty(window, 'api', {
       configurable: true,
       value: { terminal: { send } },
     });
-    onBothPlatforms((mac) => {
+    onBothPlatforms(() => {
       draw({}, { terminal: true });
-      for (const [id, { chord, suffix }] of Object.entries(EXPECT)) {
+      for (const [id, label] of Object.entries(EXPECT)) {
         const el = document.querySelector(`[data-key-strip-key="${id}"]`);
-        expect(el?.textContent, id).toBe(`${chordSymbols(chord, mac)}${suffix}`);
+        expect(el?.textContent, id).toBe(label);
       }
       cleanup();
     });
