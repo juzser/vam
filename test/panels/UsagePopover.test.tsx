@@ -92,6 +92,38 @@ describe('the usage popover trigger', () => {
     expect(panel()).toBeNull();
   });
 
+  it('paints the desktop toggle exactly as before -- a filled circle at rest', () => {
+    // NO PROP AT ALL, matching `SessionList.tsx`'s own desktop call site
+    // (`{!phone && <UsagePopover />}`) -- this is the untouched half of the
+    // operator's own request: "the account button" complaint was about the
+    // PHONE toolbar's after-shot, not the sidebar's avatar bar, which keeps
+    // its filled circle.
+    render(<UsagePopover />);
+    expect(toggle().className).toContain('bg-line-strong');
+  });
+
+  it('drops the phone toggle’s background at rest, at the operator’s own request', () => {
+    // "Remove the account button's background so it looks less big" -- the
+    // grey filled circle at REST, on the phone toolbar's own after-shot.
+    // `phone` is the one prop this component takes now, and only its own
+    // toolbar call site (`SessionList.tsx`, `{phone && <UsagePopover phone
+    // />}`) passes it.
+    render(<UsagePopover phone />);
+    const button = toggle();
+    // TOKEN equality, not substring: `hover:bg-line-strong` legitimately
+    // CONTAINS the string "bg-line-strong" and is exactly the class this
+    // test wants to see -- only the bare, unprefixed token paints at rest.
+    expect(button.className.split(/\s+/), 'no filled circle at rest').not.toContain(
+      'bg-line-strong',
+    );
+    // "Keep a hover/pressed/focus-visible state" -- a phone has no hover,
+    // so `:active` (the press) carries the same weight `hover:` does on
+    // desktop, and `focus-visible:` is what a hardware keyboard still gets.
+    expect(button.className, 'a hover fill').toMatch(/hover:bg-line-strong/);
+    expect(button.className, 'a pressed fill').toMatch(/active:bg-line-strong/);
+    expect(button.className, 'a focus-visible fill').toMatch(/focus-visible:bg-line-strong/);
+  });
+
   it('opens the panel on click, and closes it again on a second click', async () => {
     serve(claudeSnapshot(), codexSnapshot());
     render(<UsagePopover />);

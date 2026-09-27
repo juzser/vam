@@ -321,8 +321,23 @@ export function usagePanelLeftOffset(
  * phone branch: ANY trigger far enough right on ANY viewport hits the same
  * wall, so `usagePanelLeftOffset` measures the toggle's own position and
  * pulls the panel back just far enough to keep it on screen, on both shells.
+ *
+ * `phone` TAKES A PROP NOW, and only for the toggle's OWN paint, at rest --
+ * the operator's follow-up request, after looking at the shipped
+ * screenshot: "remove the account button's background so it looks less
+ * big", meaning the filled grey circle the desktop avatar bar has always
+ * painted here, which reads heaviest of all seven controls once this same
+ * button sits in the phone's dense one-row toolbar beside six borderless
+ * glyphs. Desktop's own call site (`SessionList.tsx`, `{!phone &&
+ * <UsagePopover />}`) passes nothing and keeps the exact className string
+ * this component always rendered -- the operator's complaint was about the
+ * phone toolbar's after-shot, not the sidebar. Only the phone call site
+ * (`{phone && <UsagePopover phone />}`) opts in. "Keep a hover/pressed/
+ * focus-visible state" is the other half of the same sentence: the circle
+ * still fills on `hover:`/`active:`/`focus-visible:`, so the toggle is never
+ * silently unmarked as interactive, only quiet until it is touched.
  */
-export function UsagePopover() {
+export function UsagePopover({ phone = false }: { readonly phone?: boolean } = {}) {
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -397,7 +412,11 @@ export function UsagePopover() {
           aria-label="usage"
           onKeyDown={onEscape}
           onClick={() => setOpen((o) => !o)}
-          className="flex h-[24px] w-[24px] flex-none cursor-pointer items-center justify-center rounded-full bg-line-strong text-ink-dim hover:text-ink"
+          className={
+            phone
+              ? 'flex h-[24px] w-[24px] flex-none cursor-pointer items-center justify-center rounded-full text-ink-faint hover:bg-line-strong hover:text-ink active:bg-line-strong focus-visible:bg-line-strong'
+              : 'flex h-[24px] w-[24px] flex-none cursor-pointer items-center justify-center rounded-full bg-line-strong text-ink-dim hover:text-ink'
+          }
         >
           <CircleUser size={14} strokeWidth={1.5} />
         </button>

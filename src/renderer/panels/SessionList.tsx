@@ -4041,17 +4041,25 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
             they no longer sit inside `[data-avatar-bar]`, whose own CSS rule
             gave them the same 44px floor for free.
 
-            `UsagePopover` TAKES NO `phone` PROP (its own header states why:
-            its 24px button used to inherit the floor the same free way,
-            living inside `[data-avatar-bar]`). Wrapping it in a `vam-tap`
-            span here would size THAT span to 44 and leave the real `<button
-            data-usage-toggle>` inside it unsized -- `test/phone/touch-
-            targets.test.tsx` reads `getComputedStyle` off the actual
+            `UsagePopover` TAKES NO `vam-tap` WRAPPER (its own header states
+            why: its 24px button used to inherit the 44px floor the same
+            free way, living inside `[data-avatar-bar]`). Wrapping it in a
+            `vam-tap` span here would size THAT span and leave the real
+            `<button data-usage-toggle>` inside it unsized -- `test/phone/
+            touch-targets.test.tsx` reads `getComputedStyle` off the actual
             control, not a decorative ancestor, and caught exactly that.
             `styles.css` enumerates `[data-usage-toggle]` under this row
             instead, the same "opt in by name, not by a blanket selector"
-            rule every other enumeration in that file already follows. */}
-        {phone && <UsagePopover />}
+            rule every other enumeration in that file already follows --
+            its floor is now the row's own 30px, folded into that same
+            rule (see its comment for why).
+
+            `phone` IS PASSED NOW, for the toggle's OWN paint only (see
+            `UsagePopover`'s own header): the operator's follow-up request
+            to drop this button's filled circle at rest, after looking at
+            the shipped screenshot. Desktop's call site three thousand
+            lines up stays `<UsagePopover />`, no prop, unchanged. */}
+        {phone && <UsagePopover phone />}
         {/* REMOTE AND THE THEME TOGGLE, BEHIND ONE "MORE" BUTTON. Drawn bare
             (each its own `vam-tap` icon, same as every other control in this
             row) this row measured 460px of content in a 389px box at 390px --
@@ -4166,6 +4174,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
               <span className="flex-none font-mono text-meta text-ink-faint">{entries.length}</span>
               <button
                 type="button"
+                data-search-cancel
                 onClick={onFilterCancel}
                 aria-label="cancel search"
                 className="vam-tap flex flex-none cursor-pointer items-center justify-center text-ink-faint"
@@ -4177,6 +4186,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
             <ShortcutTip label="Search sessions" action={SEARCH_ACTION}>
               <button
                 type="button"
+                data-search-toggle
                 onClick={() => {
                   if (filterMenuOpen) onFilterMenuToggle(false);
                   onOpenFilter();
