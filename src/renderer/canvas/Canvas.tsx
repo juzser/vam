@@ -1126,6 +1126,12 @@ export const TAB_MARK_LANE_PX = 12;
  *  needs, and `status-mark.tsx` for why the sidebar does. */
 export const TAB_MARK_GLYPH_PX = TAB_MARK_LANE_PX;
 
+/** One string, read by both the `Note` tooltip and the mark's own
+ *  `aria-label` (`TabStrip` below) -- named once so the two never drift
+ *  apart, and so the entry bundle carries the sentence once rather than
+ *  twice. */
+const YOLO_TAB_MARK_LABEL = 'permission prompts are skipped for this session';
+
 /** A status that may earn a mark. `idle` is not in it, by construction: the
  *  type is the indicator vocabulary narrowed to the statuses, and idle is a
  *  status that is not an indicator. */
@@ -1543,11 +1549,11 @@ function TabStrip({
                  without a mouse. `role="img"` names it for a screen reader
                  too, same as the draft pencil, so the fact is not carried by
                  the tooltip alone. */
-              <Note text="permission prompts are skipped for this session">
+              <Note text={YOLO_TAB_MARK_LABEL}>
                 <span
                   data-tab-mark="yolo"
                   role="img"
-                  aria-label="permission prompts are skipped for this session"
+                  aria-label={YOLO_TAB_MARK_LABEL}
                   // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS how the note stays reachable -- see `SourceReadout`.
                   tabIndex={0}
                   className="flex flex-none text-ink-dim"
