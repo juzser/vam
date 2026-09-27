@@ -31,7 +31,7 @@
  * that same id again.
  */
 
-import { Pencil, Plus, ShieldOff } from 'lucide-react';
+import { Pencil, Plus } from 'lucide-react';
 import {
   type ComponentProps,
   lazy,
@@ -153,7 +153,6 @@ import {
   applyAutoTabTitles,
   applyProjectIcons,
   applyRenames,
-  applyYoloStarts,
   browserStorage,
   countDismissedSessions,
   createGroup,
@@ -163,7 +162,6 @@ import {
   isProjectHidden,
   isSessionDismissed,
   prRepoFor,
-  recordYoloStart,
   removeProjectFromGroup,
   renameGroup,
   resolveDefaultAgentSelection,
@@ -1126,12 +1124,6 @@ export const TAB_MARK_LANE_PX = 12;
  *  needs, and `status-mark.tsx` for why the sidebar does. */
 export const TAB_MARK_GLYPH_PX = TAB_MARK_LANE_PX;
 
-/** One string, read by both the `Note` tooltip and the mark's own
- *  `aria-label` (`TabStrip` below) -- named once so the two never drift
- *  apart, and so the entry bundle carries the sentence once rather than
- *  twice. */
-const YOLO_TAB_MARK_LABEL = 'permission prompts are skipped for this session';
-
 /** A status that may earn a mark. `idle` is not in it, by construction: the
  *  type is the indicator vocabulary narrowed to the statuses, and idle is a
  *  status that is not an indicator. */
@@ -1533,35 +1525,6 @@ function TabStrip({
                 ●{agents}
               </span>
             )}
-            {entry.session.startedWithYolo === true && (
-              /* SECURITY-ADJACENT, SHOWN UNCONDITIONALLY -- unlike the three
-                 marks above, this one is never behind `isTabIndicatorOn`: it
-                 reads a fact vam recorded ONCE at session creation
-                 (`prefs/yolo-starts.ts`'s own header), never the live
-                 `agentPermissions` pref, and an operator hiding the optional
-                 marks must not also lose the one mark that says a session is
-                 running with permission prompts skipped.
-
-                 `Note`, not a bare `title`, for the reason `SourceReadout`
-                 above already gives one: a tooltip that opens only on hover
-                 is unreachable from the keyboard, and this is the one mark on
-                 this strip an operator most needs to be able to ask about
-                 without a mouse. `role="img"` names it for a screen reader
-                 too, same as the draft pencil, so the fact is not carried by
-                 the tooltip alone. */
-              <Note text={YOLO_TAB_MARK_LABEL}>
-                <span
-                  data-tab-mark="yolo"
-                  role="img"
-                  aria-label={YOLO_TAB_MARK_LABEL}
-                  // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS how the note stays reachable -- see `SourceReadout`.
-                  tabIndex={0}
-                  className="flex flex-none text-ink-dim"
-                >
-                  <ShieldOff size={TAB_MARK_GLYPH_PX} strokeWidth={1.8} />
-                </span>
-              </Note>
-            )}
             <button
               type="button"
               data-tab-close
@@ -1958,31 +1921,16 @@ function CanvasInner({
     // source's. Renames LAST so a manual rename always wins over either the
     // agent-derived title `applyAutoTabTitles` may have just erased or the
     // one it left alone.
-    // Yolo starts OUTERMOST: it stamps `startedWithYolo`, a field none of the
-    // three calls inside it read or write, so its position relative to them
-    // is a no-op either way -- outermost keeps this call site the one place
-    // that changed when the indicator was added, rather than threading a
-    // fourth argument through calls that have nothing to do with it.
     () =>
-      applyYoloStarts(
-        applyRenames(
-          applyAutoTabTitles(
-            applyProjectIcons(factoryModel, prefs.projectIcons),
-            prefs.autoTabTitles,
-          ),
-          prefs.renames,
-          prefs.projectNames,
+      applyRenames(
+        applyAutoTabTitles(
+          applyProjectIcons(factoryModel, prefs.projectIcons),
+          prefs.autoTabTitles,
         ),
-        prefs.yoloStarts,
+        prefs.renames,
+        prefs.projectNames,
       ),
-    [
-      factoryModel,
-      prefs.projectIcons,
-      prefs.autoTabTitles,
-      prefs.renames,
-      prefs.projectNames,
-      prefs.yoloStarts,
-    ],
+    [factoryModel, prefs.projectIcons, prefs.autoTabTitles, prefs.renames, prefs.projectNames],
   );
 
   /**
@@ -5448,41 +5396,25 @@ function CanvasInner({
         screen: null,
       });
       setStatus(`starting ${provider.label} in "${title}"…`);
-      // SECURITY-SENSITIVE, and the one call site that may be: `sessionArgv`
-      // (`shared/providers.ts`) appends the permission-skipping flag as its
-      // own argv element, never a string concatenation, and ONLY here, at
-      // session CREATION -- `resumeInPane` below types
-      // `entry.session.resumeCommand` verbatim and never reads
-      // `agentPermissions` at all, so flipping this setting never touches
-      // an already-running or previously-run session. `isDesktopShell()`
-      // (`prefs/agent-permissions.ts`) is the SECOND gate: a paired browser
-      // tab has no `window.api` at any viewport width, so a `'yolo'` value
-      // sitting in THAT tab's own `localStorage` is treated as `'manual'`
-      // here regardless -- viewport width alone was never the right check.
-      // Computed once, ahead of the write, so the argv and the persistent
-      // mark below can never disagree about what actually happened.
-      const usingYolo = isDesktopShell() && prefs.agentPermissions === 'yolo';
       try {
+        // SECURITY-SENSITIVE, and the one call site that may be: `sessionArgv`
+        // (`shared/providers.ts`) appends the permission-skipping flag as its
+        // own argv element, never a string concatenation, and ONLY here, at
+        // session CREATION -- `resumeInPane` below types
+        // `entry.session.resumeCommand` verbatim and never reads
+        // `agentPermissions` at all, so flipping this setting never touches
+        // an already-running or previously-run session. `isDesktopShell()`
+        // (`prefs/agent-permissions.ts`) is the SECOND gate: a paired browser
+        // tab has no `window.api` at any viewport width, so a `'yolo'` value
+        // sitting in THAT tab's own `localStorage` is treated as `'manual'`
+        // here regardless -- viewport width alone was never the right check.
         await sessionSource.write.recordPrompt(
           entry.session.id,
-          sessionArgv(providerId, usingYolo ? 'yolo' : 'manual').join(' '),
+          sessionArgv(providerId, isDesktopShell() ? prefs.agentPermissions : 'manual').join(' '),
         );
         setStatus(
           `started ${provider.label} in "${title}" — its session appears here once it registers`,
         );
-        // THE PERSISTENT YOLO MARK -- recorded ONLY on an actual yolo start,
-        // never on a manual one (`applyYoloStarts` reads an absent key as
-        // exactly that), keyed by the same `paneKey` this function already
-        // uses to survive the unstarted-row -> real-session identity handoff
-        // (`prefs/yolo-starts.ts`'s own header). `entry.session.source ??
-        // entry.project.source` is the identical fallback `applyYoloStarts`
-        // resolves a session's source with; no source at all (a fixture or a
-        // future adapter that never stamps one) leaves nothing to key the
-        // mark under, so recording is skipped rather than guessed at.
-        const yoloSource = entry.session.source ?? entry.project.source;
-        if (usingYolo && yoloSource !== undefined) {
-          savePrefs(recordYoloStart(prefs, yoloSource, paneKey, new Date()));
-        }
         source.onWrote();
       } catch (cause) {
         // NOTHING IS LEFT SPINNING -- `createSession`'s own discipline, a
@@ -5503,8 +5435,7 @@ function CanvasInner({
       beginStartingPane,
       clearStartingPane,
       setStatus,
-      prefs,
-      savePrefs,
+      prefs.agentPermissions,
     ],
   );
 

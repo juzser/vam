@@ -974,26 +974,6 @@ export type Session = {
    * two it is looking at rather than offering a control that will refuse.
    */
   readonly waitingFor?: string | null;
-  /**
-   * WAS THIS SESSION STARTED WITH THE PERMISSION-SKIP FLAG -- a fact recorded
-   * ONCE, at the moment vam started it (`canvas/Canvas.tsx`'s `startSessionIn`,
-   * `prefs/agent-permissions.ts`'s `agentPermissions`), never re-derived from
-   * whatever the LIVE preference currently reads. Changing the preference
-   * afterwards must not repaint an existing session's mark -- that is the
-   * whole reason this rides on the session rather than being computed from
-   * the pref at render time.
-   *
-   * NOT A SOURCE FACT. No adapter sets this; `prefs/prefs.ts`'s
-   * `applyYoloStarts` is the one place that stamps it, from a renderer-local
-   * record keyed by `pane ?? id` (the same pairing hint `pane`'s own comment
-   * documents), the moment before the model reaches anything that reads it.
-   *
-   * `true` only, on the same rule `vamControlled`/`isAgentWorktree` already
-   * use for a fact that either happened or did not: absent means "not
-   * recorded", never "recorded as false" -- there is no "started with
-   * Manual" entry to distinguish it from.
-   */
-  readonly startedWithYolo?: boolean;
 };
 
 /**

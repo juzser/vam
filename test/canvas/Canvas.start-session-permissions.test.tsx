@@ -99,19 +99,6 @@ function seed(prefs: Record<string, unknown>): void {
   localStorage.setItem('vam.prefs.v1', JSON.stringify(prefs));
 }
 
-/** The persistent Yolo indicator's own bucket, read back out of the same
- *  storage key `seed`/`savePrefs` write -- `undefined` when nothing has ever
- *  been saved (the happy-dom `localStorage` starts empty, and a render that
- *  never calls `savePrefs` never creates the key). */
-function savedYoloStarts(): Record<string, Record<string, { at: string }>> | undefined {
-  const raw = localStorage.getItem('vam.prefs.v1');
-  if (raw === null) {
-    return undefined;
-  }
-  return (JSON.parse(raw) as { yoloStarts?: Record<string, Record<string, { at: string }>> })
-    .yoloStarts;
-}
-
 const startButton = () =>
   document.querySelector('[data-start-session-button]') as HTMLButtonElement | null;
 const resumeButton = () =>
@@ -202,38 +189,6 @@ describe('agentPermissions: yolo is INERT outside the real desktop shell', () =>
       startButton()?.click();
     });
     expect(recorded).toEqual([[UNSTARTED.id, 'claude']]);
-  });
-
-  it('never records a Yolo start either, in that same paired-browser-tab state', async () => {
-    seed({ agentPermissions: 'yolo' });
-    const { source } = sourceWith();
-    render(<Canvas model={modelWith(UNSTARTED)} source={source} />);
-    await act(async () => {
-      startButton()?.click();
-    });
-    expect(savedYoloStarts()?.['claude-code']).toBeUndefined();
-  });
-});
-
-describe('the persistent Yolo indicator: recorded once, at session creation', () => {
-  it('records the pane under yoloStarts on a real Yolo start, inside the desktop shell', async () => {
-    markDesktopShell();
-    seed({ agentPermissions: 'yolo' });
-    const { source } = sourceWith();
-    render(<Canvas model={modelWith(UNSTARTED)} source={source} />);
-    await act(async () => {
-      startButton()?.click();
-    });
-    expect(savedYoloStarts()?.['claude-code']?.[PANE]?.at).toEqual(expect.any(String));
-  });
-
-  it('records nothing for a manual start', async () => {
-    const { source } = sourceWith();
-    render(<Canvas model={modelWith(UNSTARTED)} source={source} />);
-    await act(async () => {
-      startButton()?.click();
-    });
-    expect(savedYoloStarts()?.['claude-code']).toBeUndefined();
   });
 });
 
