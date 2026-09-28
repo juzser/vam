@@ -17,7 +17,9 @@
 
 import type { Project, Session } from '../domain/model.js';
 
-function sessionWithoutObservationClocks(session: Session): Omit<Session, 'age' | 'cacheSourceNowMs'> {
+function sessionWithoutObservationClocks(
+  session: Session,
+): Omit<Session, 'age' | 'cacheSourceNowMs'> {
   const { age: _age, cacheSourceNowMs: _cacheSourceNowMs, ...rest } = session;
   return rest;
 }
