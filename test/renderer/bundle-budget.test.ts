@@ -615,6 +615,40 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * zlib) plus ~350 B (~0.16%) of the same slack. The next PR to land here
  * should expect to remeasure rather than assume either number still has
  * room.
+ *
+ * A SEVENTH, SMALL, ORDINARY GROWTH: the sidebar's worktree-row filters
+ * gained the one exception #504 always meant them to have -- a WAITING
+ * session's own worktree row now stays reachable regardless of either the
+ * agent-worktree or the external-worktree toggle (`WorktreesSection.tsx`'s
+ * own `holdsWaitingSession`) -- eager code, since `WorktreesSection` is
+ * never behind a lazy boundary.
+ *
+ * Measured with a merge-base worktree build (`git worktree add --detach` at
+ * `origin/main`'s own tip, 73abe90b -- the confirm-before-close PR, i.e.
+ * WITHOUT this PR's own three fixes), same code and chunks both times,
+ * `electron-vite build`:
+ *
+ *     entry, main (73abe90b, no waiting exception)   723,443 B  (216,662 B gzip, THIS machine's zlib)
+ *     entry, merged (+ this PR's three fixes)         723,545 B  (216,736 B gzip)  (+102 B / +0.014%, +74 B gzip / +0.034%)
+ *
+ * `main`'s OWN tip landed with only ~57 B of the previous bump's headroom
+ * left (723,500 - 723,443) -- #545 (confirm-before-close, merged the same
+ * session as this PR) already spent nearly all of it; this PR's own delta
+ * is genuinely small (the three fixes' real new logic -- a per-worktree
+ * `entries.some(...)` waiting check, referenced at each of the three
+ * row-filter call sites -- is the entire +102 B; `hasAgentWorktreeSegment`
+ * itself shrank, one regex literal in place of four chained `indexOf`/
+ * `slice`/`split`/`startsWith` calls, after an earlier measurement here
+ * caught the hand-chained version costing MORE than this one net delta by
+ * itself) but the shared budget had no room left for it regardless of size.
+ *
+ * `ENTRY_BUDGET_BYTES` moves 723,500 -> 725,000: the real merged figure
+ * (723,545 B) plus ~1.5 KB (~0.2%) of slack, the same small-headroom
+ * convention every bump above uses. `ENTRY_GZIP_BUDGET_BYTES` moves
+ * 216,700 -> 217,200: the merged gzip figure (216,736 B, THIS machine's
+ * zlib) plus ~460 B (~0.21%) of the same slack. The next PR to land here
+ * should expect to remeasure rather than assume either number still has
+ * room.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -625,8 +659,8 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 // depends on is even present, decided BEFORE anything tries to build.
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
-const ENTRY_BUDGET_BYTES = 723_500;
-const ENTRY_GZIP_BUDGET_BYTES = 216_700;
+const ENTRY_BUDGET_BYTES = 725_000;
+const ENTRY_GZIP_BUDGET_BYTES = 217_200;
 
 // The one string this repo's markdown stack ships that nothing else in the
 // dependency graph or vam's own source does: `gfmTable`, the extension name
