@@ -85,7 +85,7 @@ describe('WorktreesSection — the external/locked filter defaults to hidden', (
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -104,7 +104,7 @@ describe('WorktreesSection — the external/locked filter defaults to hidden', (
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -125,7 +125,7 @@ describe('WorktreesSection — the external/locked filter defaults to hidden', (
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -145,7 +145,7 @@ describe('WorktreesSection — the external/locked filter defaults to hidden', (
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -168,7 +168,7 @@ describe('WorktreesSection — shown, as a compact nested tree', () => {
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -196,7 +196,7 @@ describe('WorktreesSection — shown, as a compact nested tree', () => {
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -225,7 +225,7 @@ describe('WorktreesSection — shown, as a compact nested tree', () => {
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -258,7 +258,7 @@ describe('WorktreesSection — shown, as a compact nested tree', () => {
     const first = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -282,7 +282,7 @@ describe('WorktreesSection — shown, as a compact nested tree', () => {
     const second = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -310,7 +310,7 @@ describe('WorktreesSection — the badge poll skips hidden/collapsed worktrees',
     render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -335,7 +335,7 @@ describe('WorktreesSection — the badge poll skips hidden/collapsed worktrees',
     render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -360,7 +360,7 @@ describe('WorktreesSection — the badge poll skips hidden/collapsed worktrees',
     render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -395,7 +395,7 @@ describe('WorktreesSection — the external tree hangs under the main session ro
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -422,7 +422,7 @@ describe('WorktreesSection — the external tree hangs under the main session ro
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -444,7 +444,7 @@ describe('WorktreesSection — the external tree hangs under the main session ro
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -482,7 +482,7 @@ describe('WorktreesSection — the external tree hangs under the main session ro
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -502,7 +502,7 @@ describe('WorktreesSection — the external tree hangs under the main session ro
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}

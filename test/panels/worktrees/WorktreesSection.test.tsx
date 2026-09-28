@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SessionEntry } from '../../../src/renderer/domain/selectors.js';
 import { WorktreesSection } from '../../../src/renderer/panels/worktrees/WorktreesSection.js';
 import type { WorktreeInfo } from '../../../src/shared/worktree.js';
-import { makeProject } from '../session-list-props.js';
+import { makeProject, makeSession } from '../session-list-props.js';
 
 /**
  * A STAND-IN for `SessionList.tsx`'s real `renderSessionRow` -- this file
@@ -70,7 +70,7 @@ describe('WorktreesSection — visibility', () => {
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -84,7 +84,7 @@ describe('WorktreesSection — visibility', () => {
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -98,7 +98,7 @@ describe('WorktreesSection — visibility', () => {
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={true}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -109,10 +109,14 @@ describe('WorktreesSection — visibility', () => {
     );
   });
 
-  it('draws rows once the api answers with worktrees', async () => {
+  it('draws rows once the api answers with worktrees, and shows a branch that differs from the name', async () => {
     installApi({
       worktrees: {
-        list: vi.fn().mockResolvedValue([worktree()]),
+        // `branch` deliberately differs from the directory name ('feat')
+        // here -- the default `worktree()` fixture no longer does (see the
+        // dedup describe block below), and this test's own point is that a
+        // REAL difference still draws.
+        list: vi.fn().mockResolvedValue([worktree({ branch: 'feature/feat-2' })]),
         create: vi.fn(),
         remove: vi.fn(),
       },
@@ -120,7 +124,7 @@ describe('WorktreesSection — visibility', () => {
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -129,7 +133,99 @@ describe('WorktreesSection — visibility', () => {
     await waitFor(() =>
       expect(container.querySelector('[data-worktree-row]')?.textContent).toContain('feat'),
     );
-    expect(container.querySelector('[data-worktree-branch]')?.textContent).toBe('feat');
+    expect(container.querySelector('[data-worktree-branch]')?.textContent).toBe('feature/feat-2');
+  });
+});
+
+/**
+ * THE OPERATOR'S OWN REPORT on PR 547's own screenshot
+ * (`docs/pr-evidence/sidebar-worktree-filters-after-dark.png`): the branch
+ * repeated the worktree's own name twice -- once as `data-worktree-name`,
+ * once again one line down as `data-worktree-branch`, whenever the two
+ * happen to be identical (the common case: `git worktree add <name>` names
+ * the branch after the directory unless told otherwise). A nested SESSION
+ * row repeated it a THIRD time, via its own `data-session-branch` chip --
+ * that half is `SessionList.tsx`'s own `renderSessionRow` and is proven in
+ * `Canvas.worktree-nested-rows.filtered.test.tsx` (a real render, unlike
+ * this file's `fakeRenderSessionRow` stand-in); this describe block covers
+ * only the WORKTREE ROW'S OWN two lines, and proves `renderRow` passes the
+ * worktree's branch down as `suppressBranch` for the session-row half.
+ */
+describe('WorktreesSection — a worktree row never repeats its own name as its branch', () => {
+  it('omits the branch line when it equals the worktree name (the default fixture, now)', async () => {
+    installApi({
+      worktrees: { list: vi.fn().mockResolvedValue([worktree()]) },
+    });
+    const { container } = render(
+      <WorktreesSection
+        project={project}
+        entries={[]}
+        forceOpenCreate={false}
+        onCloseCreate={vi.fn()}
+        renderSessionRow={fakeRenderSessionRow}
+      />,
+    );
+    await waitFor(() => expect(container.querySelector('[data-worktree-row]')).not.toBeNull());
+    expect(container.querySelector('[data-worktree-name]')?.textContent).toBe('feat');
+    expect(container.querySelector('[data-worktree-branch]')).toBeNull();
+  });
+
+  it('shows the branch line when it genuinely differs from the worktree name', async () => {
+    installApi({
+      worktrees: {
+        list: vi.fn().mockResolvedValue([worktree({ branch: 'feature/something-else' })]),
+      },
+    });
+    const { container } = render(
+      <WorktreesSection
+        project={project}
+        entries={[]}
+        forceOpenCreate={false}
+        onCloseCreate={vi.fn()}
+        renderSessionRow={fakeRenderSessionRow}
+      />,
+    );
+    await waitFor(() =>
+      expect(container.querySelector('[data-worktree-branch]')?.textContent).toBe(
+        'feature/something-else',
+      ),
+    );
+  });
+
+  it("passes the worktree's own branch to renderSessionRow as suppressBranch, for every nested session", async () => {
+    installApi({
+      worktrees: { list: vi.fn().mockResolvedValue([worktree({ branch: 'feature/x' })]) },
+    });
+    const received: (string | null | undefined)[] = [];
+    const { container } = render(
+      <WorktreesSection
+        project={project}
+        entries={[
+          {
+            project: makeProject({ id: 'claude-code:feat-00000000', name: 'feat' }),
+            session: {
+              id: 's1',
+              title: 'a session in the worktree',
+              epic: null,
+              branch: 'feature/x',
+              status: 'running',
+              runningAgents: 0,
+              activity: null,
+              age: null,
+              decisions: [],
+            },
+          },
+        ]}
+        forceOpenCreate={false}
+        onCloseCreate={vi.fn()}
+        renderSessionRow={(entry, opts) => {
+          received.push(opts?.suppressBranch);
+          return fakeRenderSessionRow(entry);
+        }}
+      />,
+    );
+    await waitFor(() => expect(container.querySelector('[data-session-row="s1"]')).not.toBeNull());
+    expect(received).toEqual(['feature/x']);
   });
 });
 
@@ -139,7 +235,7 @@ describe('WorktreesSection — create', () => {
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         // The entry point SessionList's own "New worktree…" menu item uses
         // for a project with no worktrees yet.
         forceOpenCreate={true}
@@ -180,7 +276,7 @@ describe('WorktreesSection — create', () => {
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={true}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -213,7 +309,7 @@ describe('WorktreesSection — delete', () => {
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -245,7 +341,7 @@ describe('WorktreesSection — delete', () => {
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -294,7 +390,7 @@ describe('WorktreesSection — delete a DETACHED worktree (S1 data-loss fix)', (
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -332,7 +428,7 @@ describe('WorktreesSection — delete a DETACHED worktree (S1 data-loss fix)', (
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -361,7 +457,7 @@ describe('WorktreesSection — delete a DETACHED worktree (S1 data-loss fix)', (
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -390,7 +486,7 @@ describe('WorktreesSection — start a session here', () => {
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -405,7 +501,7 @@ describe('WorktreesSection — start a session here', () => {
     );
   });
 
-  it('draws a nested row through renderSessionRow, once per session, when allEntries already has sessions for that worktree (UI1)', async () => {
+  it('draws a nested row through renderSessionRow, once per session, when entries already has sessions for that worktree (UI1)', async () => {
     installApi({
       worktrees: {
         list: vi.fn().mockResolvedValue([worktree()]),
@@ -418,7 +514,7 @@ describe('WorktreesSection — start a session here', () => {
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[
+        entries={[
           {
             project: childProject,
             session: {
@@ -483,7 +579,7 @@ describe('WorktreesSection — the agent-worktree filter (phase 2a)', () => {
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -507,7 +603,7 @@ describe('WorktreesSection — the agent-worktree filter (phase 2a)', () => {
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -528,7 +624,7 @@ describe('WorktreesSection — the agent-worktree filter (phase 2a)', () => {
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -536,6 +632,48 @@ describe('WorktreesSection — the agent-worktree filter (phase 2a)', () => {
     );
     await waitFor(() =>
       expect(container.querySelector('[data-worktree-row="/repo-worktrees/other"]')).not.toBeNull(),
+    );
+    expect(
+      container.querySelector('[data-worktree-row="/repo/.claude/worktrees/agent-a1"]'),
+    ).toBeNull();
+  });
+
+  /**
+   * S2, CROSS-PROVIDER REVIEW: `hasAgentWorktreeSegment` used to match ANY
+   * path under `/.claude/worktrees/`, not only Claude Code's own
+   * `agent-<id>` dirs -- so a worktree a person made by hand (or with
+   * `claude --worktree <name>`) in that same container directory was hidden
+   * right alongside a real agent one, with no way to get it back (the
+   * default is ON). Both rows are listed together, the same "never just the
+   * one row" shape this describe block's own header explains.
+   */
+  it('keeps a HUMAN-NAMED worktree under .claude/worktrees/ visible, while still hiding a real agent one', async () => {
+    const humanWorktree = worktree({
+      worktreeId: '/repo/.claude/worktrees/feature-x',
+      path: '/repo/.claude/worktrees/feature-x',
+      branch: 'feature-x',
+      external: false,
+    });
+    installApi({
+      worktrees: {
+        list: vi.fn().mockResolvedValue([agentWorktree, humanWorktree]),
+      },
+    });
+    const { container } = render(
+      <WorktreesSection
+        project={project}
+        entries={[]}
+        forceOpenCreate={false}
+        onCloseCreate={vi.fn()}
+        renderSessionRow={fakeRenderSessionRow}
+        hideAgentWorktrees={true}
+        hideExternalWorktrees={false}
+      />,
+    );
+    await waitFor(() =>
+      expect(
+        container.querySelector('[data-worktree-row="/repo/.claude/worktrees/feature-x"]'),
+      ).not.toBeNull(),
     );
     expect(
       container.querySelector('[data-worktree-row="/repo/.claude/worktrees/agent-a1"]'),
@@ -553,7 +691,7 @@ describe('WorktreesSection — locked, prunable and detached markers', () => {
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -586,7 +724,7 @@ describe('WorktreesSection — locked, prunable and detached markers', () => {
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -605,7 +743,7 @@ describe('WorktreesSection — locked, prunable and detached markers', () => {
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -634,7 +772,7 @@ describe('WorktreesSection — dirty / ahead-behind badges (phase 2a)', () => {
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -656,7 +794,7 @@ describe('WorktreesSection — dirty / ahead-behind badges (phase 2a)', () => {
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -682,7 +820,7 @@ describe('WorktreesSection — dirty / ahead-behind badges (phase 2a)', () => {
     const { container } = render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -702,7 +840,7 @@ describe('WorktreesSection — dirty / ahead-behind badges (phase 2a)', () => {
     render(
       <WorktreesSection
         project={project}
-        allEntries={[]}
+        entries={[]}
         forceOpenCreate={true}
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
@@ -711,5 +849,96 @@ describe('WorktreesSection — dirty / ahead-behind badges (phase 2a)', () => {
     );
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(status).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * S2, CROSS-PROVIDER REVIEW (PR 504's own rule, "stands down for a `waiting`
+ * session ... must stay reachable regardless of the toggle"): a session
+ * asking the operator something must never vanish from the sidebar
+ * entirely. `session-filter.ts`'s own `isHiddenByAgentWorktreeFilter`
+ * already stands down for `status === 'waiting'` -- but that is a SESSION-
+ * level rule, and it never reaches the WORKTREE-ROW filters this file owns.
+ * Before this fix, `hideAgentWorktrees` (agent dir/branch) and
+ * `hideExternalWorktrees` (an agent worktree also counts as `external`,
+ * `worktrees.ts`'s own rule) both dropped the ROW outright, with no waiting
+ * exception of their own -- so the row a waiting session needed to nest
+ * under was never drawn, and the session was reachable nowhere at all, even
+ * though the session-level rule had already, correctly, decided to keep it.
+ */
+describe('WorktreesSection — the waiting exception carries to the row level', () => {
+  const waitingChildProject = makeProject({
+    id: 'claude-code:feat-00000000',
+    name: 'feat',
+  });
+
+  /** A REAL agent worktree, per BOTH row-level filters at once -- the exact
+   *  shape `main/worktrees/worktrees.ts` mints for one: an agent dir/branch
+   *  (`hideAgentWorktrees`'s own subject) that is ALSO `external` (it does
+   *  not live under vam's own `<repo>-worktrees` root, so `worktrees.ts`'s
+   *  own `external: dirname(realPath) !== realWorktreesRoot` reads `true`
+   *  for it) -- `hideExternalWorktrees`'s own subject too. */
+  const agentAndExternalWorktree = worktree({
+    worktreeId: '/repo/.claude/worktrees/agent-a1',
+    path: '/repo/.claude/worktrees/agent-a1',
+    branch: 'worktree-agent-a1',
+    projectId: 'claude-code:feat-00000000',
+    external: true,
+  });
+
+  it('draws the row exactly once, with the waiting session reachable, when BOTH filters are on (the shipped defaults)', async () => {
+    installApi({
+      worktrees: { list: vi.fn().mockResolvedValue([agentAndExternalWorktree]) },
+    });
+    const waitingSession = makeSession({ id: 'w1', title: 'needs you', status: 'waiting' });
+    const { container } = render(
+      <WorktreesSection
+        project={project}
+        entries={[{ project: waitingChildProject, session: waitingSession }]}
+        forceOpenCreate={false}
+        onCloseCreate={vi.fn()}
+        renderSessionRow={fakeRenderSessionRow}
+        // NEITHER PROP GIVEN -- both filters default `true`, the shipped
+        // configuration PR 504's own bug report was filed against.
+      />,
+    );
+    await waitFor(() => expect(container.querySelector('[data-session-row="w1"]')).not.toBeNull());
+    // EXACTLY ONE ROW -- never double-drawn between the plain list and the
+    // external/locked tree.
+    expect(
+      container.querySelectorAll('[data-worktree-row="/repo/.claude/worktrees/agent-a1"]'),
+    ).toHaveLength(1);
+    // The external group never even had to open for this -- proof the row
+    // is reachable without the operator also having to toggle "Show
+    // external worktrees" on.
+    expect(container.querySelector('[data-worktrees-external-group]')).toBeNull();
+  });
+
+  it('keeps the SAME worktree hidden when its session is not waiting, with both filters on', async () => {
+    installApi({
+      worktrees: { list: vi.fn().mockResolvedValue([agentAndExternalWorktree]) },
+    });
+    const runningSession = makeSession({ id: 'r1', title: 'still working', status: 'running' });
+    const { container } = render(
+      <WorktreesSection
+        project={project}
+        entries={[{ project: waitingChildProject, session: runningSession }]}
+        forceOpenCreate={false}
+        onCloseCreate={vi.fn()}
+        renderSessionRow={fakeRenderSessionRow}
+      />,
+    );
+    // No `waitFor` to a positive assertion here on purpose -- there is
+    // nothing that will ever appear to wait for. `useWorktrees`' own fetch
+    // still has to resolve first, so give it a real macrotask before
+    // asserting the negative -- the same pattern this file's own "never
+    // calls status when there are zero worktrees to badge" test uses.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    expect(container.querySelector('[data-session-row="r1"]')).toBeNull();
+    expect(
+      container.querySelector('[data-worktree-row="/repo/.claude/worktrees/agent-a1"]'),
+    ).toBeNull();
   });
 });

@@ -616,35 +616,88 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * should expect to remeasure rather than assume either number still has
  * room.
  *
- * A SEVENTH, SMALL, ORDINARY GROWTH: the question card's double-submit fix
- * and its phone preview-collapse fix, together. The double-submit fix adds
- * `sendingRef` (a `useRef` guard) plus a `try`/`finally` around `send`'s own
- * `await` -- a few lines, no new dependency. The preview-collapse fix adds
- * `usePhoneViewport()` (already imported elsewhere; this is a second CALLER,
- * not new code for it to pull in), one more piece of state
- * (`previewExpanded`), its own reset effect, and a second render branch for
- * the preview panel (a one-line `[data-question-preview-toggle]` disclosure
- * in place of the panel on phone, until tapped) -- category-consistent with
- * the picker/marker bumps already in this history, not a new dependency or a
- * new chunk.
+ * A SEVENTH, SMALL, ORDINARY GROWTH: the sidebar's worktree-row filters
+ * gained the one exception #504 always meant them to have -- a WAITING
+ * session's own worktree row now stays reachable regardless of either the
+ * agent-worktree or the external-worktree toggle (`WorktreesSection.tsx`'s
+ * own `holdsWaitingSession`) -- eager code, since `WorktreesSection` is
+ * never behind a lazy boundary.
+ *
+ * Measured with a merge-base worktree build (`git worktree add --detach` at
+ * `origin/main`'s own tip, 73abe90b -- the confirm-before-close PR, i.e.
+ * WITHOUT this PR's own three fixes), same code and chunks both times,
+ * `electron-vite build`:
+ *
+ *     entry, main (73abe90b, no waiting exception)   723,443 B  (216,662 B gzip, THIS machine's zlib)
+ *     entry, merged (+ this PR's three fixes)         723,545 B  (216,736 B gzip)  (+102 B / +0.014%, +74 B gzip / +0.034%)
+ *
+ * `main`'s OWN tip landed with only ~57 B of the previous bump's headroom
+ * left (723,500 - 723,443) -- #545 (confirm-before-close, merged the same
+ * session as this PR) already spent nearly all of it; this PR's own delta
+ * is genuinely small (the three fixes' real new logic -- a per-worktree
+ * `entries.some(...)` waiting check, referenced at each of the three
+ * row-filter call sites -- is the entire +102 B; `hasAgentWorktreeSegment`
+ * itself shrank, one regex literal in place of four chained `indexOf`/
+ * `slice`/`split`/`startsWith` calls, after an earlier measurement here
+ * caught the hand-chained version costing MORE than this one net delta by
+ * itself) but the shared budget had no room left for it regardless of size.
+ *
+ * `ENTRY_BUDGET_BYTES` moves 723,500 -> 725,000: the real merged figure
+ * (723,545 B) plus ~1.5 KB (~0.2%) of slack, the same small-headroom
+ * convention every bump above uses. `ENTRY_GZIP_BUDGET_BYTES` moves
+ * 216,700 -> 217,200: the merged gzip figure (216,736 B, THIS machine's
+ * zlib) plus ~460 B (~0.21%) of the same slack. The next PR to land here
+ * should expect to remeasure rather than assume either number still has
+ * room.
+ *
+ * AN EIGHTH, SMALL, ORDINARY GROWTH, ON A SIBLING BRANCH: the question
+ * card's double-submit fix and its phone preview-collapse fix, together.
+ * The double-submit fix adds `sendingRef` (a `useRef` guard) plus a
+ * `try`/`finally` around `send`'s own `await` -- a few lines, no new
+ * dependency. The preview-collapse fix adds `usePhoneViewport()` (already
+ * imported elsewhere; this is a second CALLER, not new code for it to pull
+ * in), one more piece of state (`previewExpanded`), its own reset effect,
+ * and a second render branch for the preview panel (a one-line
+ * `[data-question-preview-toggle]` disclosure in place of the panel on
+ * phone, until tapped) -- category-consistent with the picker/marker bumps
+ * already in this history, not a new dependency or a new chunk.
  *
  * Measured, `electron-vite build --mode production`, this PR's own branch
- * (forked from `origin/main` at 66ce28c7) -- this test's own failure is the
- * measurement, not a separate before/after build: it already reruns on
- * every `vitest run` and reported the real entry size the previous budget
- * had no room left for:
+ * (forked from `origin/main` at 66ce28c7, the SAME 723,500/216,700 ancestor
+ * the sidebar-filters paragraph above budgeted against):
  *
  *     entry, this branch (both fixes)   723,917 B  (216,836 B gzip)
  *
- * -- 417 B / 136 B gzip over the PREVIOUS `723,500` / `216,700` budget this
- * paragraph is replacing, not a fresh baseline.
+ * -- 417 B / 136 B gzip over the shared 723,500 / 216,700 ancestor, not a
+ * fresh baseline. This PR squash-merged to `main` BEFORE the sidebar-filters
+ * PR did, so `ENTRY_BUDGET_BYTES` moved 723,500 -> 725,500 (723,917 B plus
+ * ~1.6 KB / ~0.2% slack) and `ENTRY_GZIP_BUDGET_BYTES` moved 216,700 ->
+ * 217,200 (216,836 B plus ~364 B / ~0.17% slack) on `main` independently of
+ * the sidebar-filters PR's own 725,000/217,200 bump above -- neither side
+ * knew about the other.
  *
- * `ENTRY_BUDGET_BYTES` moves 723,500 -> 725,500: the measured figure
- * (723,917 B) plus ~1.6 KB (~0.2%) of slack, the same small-headroom
- * convention every bump above uses. `ENTRY_GZIP_BUDGET_BYTES` moves
- * 216,700 -> 217,200: the measured gzip figure (216,836 B) plus ~364 B
- * (~0.17%) of the same slack. The next PR to land here should expect to
- * remeasure rather than assume either number still has room.
+ * THE SIDEBAR-FILTERS BRANCH (above) AND THE QUESTION-CARD FIX (`main`'s
+ * tip once it merged, above) THEN MERGED INTO EACH OTHER, each having
+ * budgeted for its own delta alone against the SAME shared ancestor
+ * (723,500 / 216,700) -- neither figure accounted for the other landing
+ * too, the same gap every prior fan-in merge in this file has found.
+ * Measured, `electron-vite build --mode production`, on this merge commit
+ * (both fixes combined):
+ *
+ *     entry, merged (worktree filters + question-card fixes)   724,470 B  (216,999 B gzip)
+ *
+ * +970 B eager / +299 B gzip over the shared 723,500/216,700 ancestor --
+ * somewhat more than the simple sum of the two sides' own isolated deltas
+ * (102 + 417 = 519 B eager; 74 + 136 = 210 B gzip), so the merge is not
+ * perfectly additive, but well within either side's own headroom; this is a
+ * real remeasurement, not arithmetic stacked on top of either side's own
+ * number. `ENTRY_BUDGET_BYTES` moves 725,500 -> 725,900: the real merged
+ * figure (724,470 B) plus ~1.4 KB (~0.2%) of slack, the same small-headroom
+ * convention every bump above uses -- not either side's own margin kept
+ * as-is. `ENTRY_GZIP_BUDGET_BYTES` moves 217,200 -> 217,400: the merged gzip
+ * figure (216,999 B) plus ~400 B (~0.18%) of the same slack. The next PR to
+ * land here should expect to remeasure rather than assume either number
+ * still has room.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -655,8 +708,8 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 // depends on is even present, decided BEFORE anything tries to build.
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
-const ENTRY_BUDGET_BYTES = 725_500;
-const ENTRY_GZIP_BUDGET_BYTES = 217_200;
+const ENTRY_BUDGET_BYTES = 725_900;
+const ENTRY_GZIP_BUDGET_BYTES = 217_400;
 
 // The one string this repo's markdown stack ships that nothing else in the
 // dependency graph or vam's own source does: `gfmTable`, the extension name

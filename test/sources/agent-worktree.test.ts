@@ -49,6 +49,34 @@ describe('hasAgentWorktreeSegment', () => {
   it('does not match a bare ".claude/worktrees" with no trailing content, which is not a real row', () => {
     expect(hasAgentWorktreeSegment('/repo/.claude/worktrees')).toBe(false);
   });
+
+  /**
+   * S2, CROSS-PROVIDER REVIEW: the old check matched ANY path under
+   * `/.claude/worktrees/`, not only a Claude Code AGENT worktree
+   * (`agent-<id>`, the literal directory name Claude Code itself mints --
+   * confirmed against real worktree admin dirs on this machine, `git
+   * worktree list` in the maestro checkout: `.claude/worktrees/agent-<hex>`
+   * on branch `worktree-agent-<hex>`). `docs/design/workspace-options.md`
+   * only ever promised to hide THOSE -- a worktree a person makes under the
+   * same container directory by hand, or with `claude --worktree <name>`,
+   * is not one, and hiding it took away a worktree the operator asked vam to
+   * manage with no way to get it back (`hideAgentWorktrees` is on by
+   * default).
+   */
+  it('does NOT match a human-named worktree under the same container directory', () => {
+    expect(hasAgentWorktreeSegment('/repo/.claude/worktrees/feature-x')).toBe(false);
+  });
+
+  it('does NOT match a human-named worktree nested one level deeper', () => {
+    expect(hasAgentWorktreeSegment('/repo/.claude/worktrees/my-review/notes')).toBe(false);
+  });
+
+  it('matches "agent-" as a PREFIX of the first segment too, not only an exact worktree dir', () => {
+    // Claude Code's own dirs are `agent-<hex>`; this stays permissive on the
+    // prefix (rather than a fixed-length hex match) the same way
+    // `isAgentWorktreeBranch`'s own `startsWith` does for the branch signal.
+    expect(hasAgentWorktreeSegment('/repo/.claude/worktrees/agent-anything-else')).toBe(true);
+  });
 });
 
 describe('isAgentWorktreeBranch', () => {
