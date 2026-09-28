@@ -3210,17 +3210,40 @@ function CanvasInner({
             if (cancelled || view.kind !== 'ok' || startingPaneByKeyRef.current[key] !== wait) {
               return;
             }
-            if (view.screen === 'ready') {
+            // `view.provider === undefined` -- THE COORDINATOR'S OWN BUG
+            // REPORT (A): the pane's foreground is still a plain shell
+            // (`readStartScreen`'s own three-state header, `main/terminal/
+            // start-screen.ts`), which a starship/pure prompt can make
+            // `screen` read as `ready` on its own (an echoed `❯ claude` an
+            // operator has typed but not yet run) -- `detectStartScreen`'s
+            // READY_CARET is deliberately blind to the foreground command.
+            // NOTHING IS WRITTEN here on purpose: `key in current` above
+            // would freeze a false confirmation in place forever, and a
+            // LATER, genuine ready read (the operator actually presses
+            // Enter) would then find the key already "confirmed" and never
+            // correct it. Leaving the map untouched is what keeps this key
+            // pollable -- the ordinary "not yet confirmed" path every other
+            // unresolved wait already takes.
+            if (view.screen === 'ready' && view.provider !== undefined) {
+              // NARROWED HERE, in the outer closure, and read back through
+              // this binding rather than `view.provider` inside the updater
+              // below -- the identical reason `screen` a few lines down does
+              // the same: TypeScript does not carry a narrowing into a
+              // callback that may run later, so re-reading the union member
+              // through it would still widen back to `ProviderId | null |
+              // undefined`.
+              const provider: ProviderId | null = view.provider;
               setProviderRunningByKey((current) =>
                 key in current
                   ? current
                   : {
                       ...current,
-                      [key]: { provider: view.provider, confirmedAt: Date.now() },
+                      [key]: { provider, confirmedAt: Date.now() },
                     },
               );
               return;
             }
+            if (view.screen === 'ready') return;
             // Narrowed here, in the OUTER closure, and read back through this
             // binding rather than `view.screen` inside the updater below:
             // TypeScript does not carry a narrowing into a callback that may
@@ -7806,6 +7829,19 @@ function CanvasInner({
           entry === null
             ? null
             : (startingPaneByKey[entry.session.pane ?? entry.session.id] ?? null),
+        // `startingPane`'s OWN CLEAR -- a review-found S2
+        // (`onStartingPaneCleared`'s own header, `DetailPanel.tsx`): declining
+        // the trust dialog quits the CLI back to a bare shell, so neither of
+        // `clearStartingPane`'s two ordinary triggers (the row leaving
+        // `unstarted`/`terminal`, or a failed write) was ever going to fire,
+        // and Start stayed disabled for good. `DetailPanel` cannot call
+        // `clearStartingPane` itself -- only `Canvas.tsx` owns
+        // `startingPaneByKey` -- so this hands down the identical act, bound
+        // to THIS pane's own key.
+        onStartingPaneCleared:
+          entry === null
+            ? undefined
+            : () => clearStartingPane(entry.session.pane ?? entry.session.id),
         // CONFIRMED RUNNING, EVEN THOUGH THE ROW STILL READS `unstarted`/
         // `terminal` -- `runningProvider`'s own three-way computation just
         // above, and `DetailPanelProps.runningProvider`'s own header for the
@@ -7964,6 +8000,7 @@ function CanvasInner({
       hasOwnSession,
       sidebarLoading,
       pendingAction,
+      clearStartingPane,
     ],
   );
 

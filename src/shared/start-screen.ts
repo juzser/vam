@@ -27,11 +27,28 @@ export type StartScreenKind = 'trust' | 'update' | 'login' | 'onboarding' | 'rea
  * `2.1.282`, never the word `claude`) means the two providers cannot be told
  * apart by `screen` alone either. This is `pane_current_command`, classified
  * against the provider table (`identifyRunningProvider`,
- * `main/terminal/start-screen.ts`) -- `null` when the pane is a plain shell
- * or the command matches neither provider, never a guess.
+ * `main/terminal/start-screen.ts`) -- THREE STATES, not two, and collapsing
+ * them was an S2 (a starship/pure prompt echoes its OWN `❯` in front of a
+ * `claude` an operator has typed but not yet run, which `screen` alone reads
+ * as `ready`, READY_CARET being deliberately blind to the foreground command
+ * -- `sources/claude-code/start-screen.ts`'s own header):
+ *
+ *  - `undefined` -- the pane's foreground is still a plain SHELL (or
+ *    `readStartScreen` has no command to read at all). NOT a guess, and NOT
+ *    confirmed running: a caller polling for readiness must keep polling,
+ *    never treat this as "something is running, unidentified".
+ *  - `null` -- CONFIRMED running (the foreground is neither a shell nor
+ *    listed provider table entry): an `htop`, an editor, anything the
+ *    operator typed by hand that names neither table entry.
+ *  - a `ProviderId` -- the command matched the table directly, or `claude`'s
+ *    own bare-version-string quirk.
  */
 export type StartScreenView =
-  | { readonly kind: 'ok'; readonly screen: StartScreenKind; readonly provider: ProviderId | null }
+  | {
+      readonly kind: 'ok';
+      readonly screen: StartScreenKind;
+      readonly provider: ProviderId | null | undefined;
+    }
   | { readonly kind: 'unaimed' }
   | { readonly kind: 'unavailable' }
   | { readonly kind: 'mispaired' }

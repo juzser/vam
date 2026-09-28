@@ -70,6 +70,32 @@ describe('readStartScreen', () => {
     });
   });
 
+  /**
+   * THE S2 THIS PINS: a shell's OWN foreground command (`isShellCommand`,
+   * `sources/tmux/shell.ts`) is folded into the SAME `undefined`
+   * `identifyRunningProvider` also answers for "no command at all" -- but
+   * this reader has more information than that classifier alone: it just
+   * READ the pane's own text, and starship/pure prompts draw their OWN `❯`
+   * glyph before an operator has even pressed Enter on a typed `claude`,
+   * which `detectStartScreen`'s READY_CARET (measured against the real CLI,
+   * deliberately blind to `pane_current_command` -- that file's own header)
+   * reads as `ready`. `provider: undefined` here is the distinct signal a
+   * caller needs to know this is NOT actually ready -- `null` stays reserved
+   * for "confirmed running, command unrecognised", never a shell wearing a
+   * borrowed glyph.
+   */
+  it('answers an undefined provider, distinct from a confirmed-unidentified null, when the pane’s own foreground is a shell', async () => {
+    const { run } = runner({
+      'list-sessions': ok(`${ATLAS}\t\t${PANE}\tzsh\n`),
+      'capture-pane': ok('@vam-cursor 0 0 0\n❯ claude'),
+    });
+    expect(await readStartScreen(run, ATLAS, ROW, undefined)).toEqual({
+      kind: 'ok',
+      screen: 'ready',
+      provider: undefined,
+    });
+  });
+
   it('answers `unaimed` for a pane-row id naming a session that has since ended', async () => {
     const { run } = runner({ 'list-sessions': ok('') });
     expect(await readStartScreen(run, ATLAS, ROW, undefined)).toEqual({ kind: 'unaimed' });
