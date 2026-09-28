@@ -56,8 +56,9 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { privateTmuxSocket } from './support/tmux-socket.mjs';
 
-const SOCKET = 'vam-e2e-shellfirst';
+const SOCKET = privateTmuxSocket('vam-e2e-shellfirst');
 
 const which = spawnSync('tmux', ['-V'], { encoding: 'utf8' });
 if (which.error || which.status !== 0) {
