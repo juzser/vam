@@ -33,6 +33,7 @@ export default defineConfig({
       'test/electron/userdata-isolation.test.ts',
       'test/electron/getting-started-image.test.ts',
       'test/electron/stats-worker.test.ts',
+      'test/electron/settings-update.test.ts',
     ],
     environment: 'node',
     testTimeout: 60_000,

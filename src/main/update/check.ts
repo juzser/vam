@@ -23,9 +23,26 @@ import { compareVersions, parseVersion, type UpdateStatus } from '../../shared/u
 /** The public repository. A constant: no interpolation, no caller input. */
 export const LATEST_RELEASE_URL = 'https://api.github.com/repos/juzser/vam/releases/latest';
 
+/**
+ * HOW LONG A CHECK MAY GO UNANSWERED before it is reported as its own network
+ * fact rather than left open. A rejection or a status code both SETTLE the
+ * request already, with no help from this; what this bounds is the one shape
+ * neither `asRelease` nor the status codes above ever had to consider -- a
+ * connection that neither refuses nor answers (a captive portal, a firewall
+ * that drops packets instead of resetting the socket, a dead VPN tunnel).
+ * Without it, `UpdatePanel.tsx`'s button -- disabled for exactly the length
+ * of the request, on purpose, per `main/update/ipc.ts`'s own reasoning for
+ * having no separate throttle -- stays disabled and reading "checking…"
+ * forever. Ten seconds, the same figure this codebase already uses for a
+ * GitHub round trip elsewhere (`integrations/github-status.ts`'s
+ * `STATUS_TIMEOUT_MS`, `sources/claude-code/pull-requests.ts`'s
+ * `PR_TIMEOUT_MS`).
+ */
+export const UPDATE_CHECK_TIMEOUT_MS = 10_000;
+
 export type UpdateFetcher = (
   url: string,
-  init: { headers: Record<string, string> },
+  init: { headers: Record<string, string>; signal?: AbortSignal },
 ) => Promise<{
   readonly status: number;
   readonly ok: boolean;
@@ -34,6 +51,8 @@ export type UpdateFetcher = (
 
 export type UpdateCheckDeps = {
   readonly fetch: UpdateFetcher;
+  /** Overridable only for tests; production always gets `UPDATE_CHECK_TIMEOUT_MS`. */
+  readonly timeoutMs?: number;
 };
 
 export const DEFAULT_UPDATE_DEPS: UpdateCheckDeps = {
@@ -96,6 +115,11 @@ export async function checkForUpdate(
         // product and nothing else -- no version, no platform, no machine.
         'User-Agent': 'vam',
       },
+      // Bounded, so a connection that neither refuses nor answers cannot
+      // leave `UpdatePanel.tsx`'s button reading "checking…" forever -- see
+      // `UPDATE_CHECK_TIMEOUT_MS`. The abort surfaces here as a rejection
+      // like any other network failure, and is reported exactly the same way.
+      signal: AbortSignal.timeout(deps.timeoutMs ?? UPDATE_CHECK_TIMEOUT_MS),
     });
   } catch {
     return { kind: 'unknown', reason: 'network' };

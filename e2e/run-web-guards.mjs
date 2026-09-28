@@ -198,6 +198,7 @@ const GUARDS = [
   'composer-bar-shots',
   'settings-chrome-shots',
   'settings-panels-shots',
+  'settings-update-shots',
   // SETTINGS AND STATS & USAGE ARE THE SAME SIZE, MEASURED: the operator's
   // own ask ("Make the Settings popup bigger. The Stats & Usage screen
   // should be the same size"), asserted as pixel-identical
