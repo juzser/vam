@@ -30,13 +30,13 @@
  * of the explicit override directory, and the `toBe` assertion on the
  * resolved path fails. Still never the operator's real `vam` profile.
  */
-import { type ChildProcessWithoutNullStreams, execFileSync, spawn } from 'node:child_process';
+import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import { DEFAULT_REMOTE_PORT } from '../../src/main/remote/launch.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -148,13 +148,9 @@ function waitForReady(child: ChildProcessWithoutNullStreams): Promise<string> {
 }
 
 describe('the Electron harness gets its own throwaway userData', () => {
-  beforeAll(() => {
-    execFileSync(bin('electron-vite'), ['build'], { cwd: repoRoot, stdio: 'pipe' });
-  }, 180_000);
-
   afterAll(() => {
     for (const dir of scratchDirs) {
-      rmSync(dir, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     }
   });
 

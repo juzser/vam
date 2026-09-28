@@ -36,6 +36,8 @@ export default defineConfig({
       'test/electron/settings-update.test.ts',
     ],
     environment: 'node',
+    // One build for every file below -- `test/electron/global-build.ts` says why.
+    globalSetup: ['test/electron/global-build.ts'],
     testTimeout: 60_000,
   },
 });
