@@ -285,10 +285,31 @@ export class StreamClient {
    * as `%output`. Never re-sent on reconnect (see the module header and
    * `control.ts`'s own A2 note): there is nothing to resubmit safely for a
    * write this client never tracked past the moment it wrote it.
+   *
+   * A PLACEHOLDER STILL GOES ON `#blockQueue` (a review finding): tmux
+   * answers THIS `send-keys` with its own `%begin`/`%end` block exactly
+   * like every other command on this connection, and `#handleEvent`'s block
+   * branch pairs every incoming block with `#blockQueue.shift()` in strict
+   * FIFO order -- the same order tmux received the commands in, an
+   * invariant `#sendChain`'s own header already leans on. Before this fix,
+   * a keystroke written WHILE some other command was already pending (its
+   * OWN placeholder sitting at the front of the queue, awaiting its own
+   * reply) let the keystroke's reply arrive and wrongly `shift()` that
+   * OTHER command's placeholder instead -- resolving it early, on the wrong
+   * body, and leaving the real reply meant for it to land on WHATEVER
+   * placeholder came after (or nothing, if the queue had emptied by then).
+   * A Ctrl-C typed during a flood, in flight when `#continueAfterPause`'s
+   * own `-A continue` was pending, could resolve that recovery on the
+   * keystroke's own (irrelevant) reply and misalign every later one by one
+   * (`tmux-stream-client.test.ts`'s own reproduction). `resolve` is a true
+   * no-op -- nothing anywhere reads a `write()`'s own reply, exactly as
+   * before -- this placeholder exists purely to occupy this method's own
+   * position in the FIFO so it can never stand in for someone else's.
    */
   write(text: string): void {
     if (this.#child === null || this.#disposed) return;
     const hex = hexBytes(text).join(' ');
+    this.#blockQueue.push({ resolve: () => {} });
     this.#write(`send-keys -t ${paneTarget(this.#target)} -H ${hex}`);
   }
 

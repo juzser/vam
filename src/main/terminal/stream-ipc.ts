@@ -25,6 +25,7 @@ import { CHANNELS } from '../ipc/channels.js';
 import type { IpcMainLike } from '../ipc/handlers.js';
 import { readPublishedPanes } from '../sources/claude-code/session-pane.js';
 import { defaultSessionsRoot } from '../sources/claude-code/session-status.js';
+import { deleteBufferArgv, pasteBufferNameOf, sendPasteArgv } from '../sources/tmux/argv.js';
 import { listVamSessions, type TmuxRun } from '../sources/tmux/spawn.js';
 import type { WebContentsLike } from '../stream/register.js';
 import { MAX_PROJECT_ID_LENGTH } from './ipc.js';
@@ -132,12 +133,53 @@ export function registerTerminalStreamIpc(
     options?.createClient ?? ((opts: StreamClientOptions) => new StreamClient(opts));
 
   const clients = new Map<string, StreamClient>();
+  // The resolved tmux SESSION NAME for each open stream -- the SAME
+  // `match.name` `terminalStreamOpen` already hands back to the renderer
+  // (`StreamOpenResult['name']`), kept server-side too so `terminalStreamPaste`
+  // can target `sendPasteArgv` at it without asking the renderer to echo a
+  // name back for a bridge to trust.
+  const pasteTargets = new Map<string, string>();
+  // PER-STREAM ORDERING (a review finding): `terminalStreamWrite` (a
+  // synchronous write to the control child's own stdin) and
+  // `terminalStreamPaste` (>=2 sequential `execFile` spawns through `run`)
+  // travel on genuinely different transports with no ordering guarantee
+  // between them. "Paste, then press Enter" -- a very common action, both
+  // fire-and-forget from the renderer -- could let the Enter's `write` reach
+  // tmux before the paste's LATER spawns finished, submitting a partial or
+  // empty line; the old single-transport code never had this gap. `pending`
+  // is the tail of whatever this stream's own last-QUEUED operation is; see
+  // `enqueue` below for how a write with nothing pending skips it entirely.
+  const pending = new Map<string, Promise<void>>();
+
+  /**
+   * Chains `task` after any operation currently in flight for `streamId`,
+   * in arrival order -- the SAME order `ipcMain.handle`'s per-channel
+   * dispatch already delivers messages from one renderer in. Every call
+   * (paste or a queued write) replaces `pending`'s own entry with its own
+   * tail, so a THIRD arrival still waits on the second, which still waits on
+   * the first. The entry is removed once its own tail settles, but only if
+   * nothing NEWER has replaced it in the meantime -- otherwise a slow,
+   * already-superseded cleanup could delete a fresher entry out from under
+   * it.
+   */
+  function enqueue(streamId: string, task: () => Promise<void>): Promise<void> {
+    const prior = pending.get(streamId) ?? Promise.resolve();
+    const tail = prior.then(task);
+    const settled = tail.catch(() => {});
+    pending.set(streamId, settled);
+    void settled.then(() => {
+      if (pending.get(streamId) === settled) pending.delete(streamId);
+    });
+    return tail;
+  }
 
   function closeClient(streamId: string): void {
     const client = clients.get(streamId);
     if (client === undefined) return;
     client.dispose();
     clients.delete(streamId);
+    pasteTargets.delete(streamId);
+    pending.delete(streamId);
   }
 
   ipcMain.handle(
@@ -181,6 +223,7 @@ export function registerTerminalStreamIpc(
       try {
         const seed = await client.connect();
         clients.set(streamId, client);
+        pasteTargets.set(streamId, match.name);
         return { ok: true, streamId, seed, name: match.name };
       } catch {
         client.dispose();
@@ -217,14 +260,83 @@ export function registerTerminalStreamIpc(
       // `StreamClient.write` can hex-encode it through the SAME `hexBytes`
       // `send-keys -H` path `sendTextArgv`'s own operator text always used
       // (see `control-protocol.ts`'s own note on why that path exists).
-      client.write(Buffer.from(bytes).toString('utf8'));
+      const text = Buffer.from(bytes).toString('utf8');
+      // THE SYNCHRONOUS FAST PATH: with NOTHING pending for this stream,
+      // write straight to the client's own stdin, same as before this
+      // channel's ordering fix -- ordinary typing latency is unaffected.
+      // Only a write that actually arrives WHILE a paste is still running
+      // pays for the queue (`enqueue`, above this handler).
+      if (!pending.has(streamId)) {
+        client.write(text);
+        return;
+      }
+      await enqueue(streamId, async () => {
+        client.write(text);
+      });
     },
   );
+
+  ipcMain.handle(
+    CHANNELS.terminalStreamPaste,
+    async (_event, ...args: unknown[]): Promise<void> => {
+      const [streamId, bytes] = args;
+      if (
+        typeof streamId !== 'string' ||
+        !(bytes instanceof Uint8Array) ||
+        bytes.length > MAX_STREAM_WRITE_BYTES
+      ) {
+        return;
+      }
+      // Same posture as `terminalStreamWrite`: an id this bridge never
+      // opened, or already closed, is silently ignored, not an error.
+      const name = pasteTargets.get(streamId);
+      if (name === undefined) return;
+      const text = Buffer.from(bytes).toString('utf8');
+      // ALWAYS QUEUED, never the fast path `terminalStreamWrite` has above --
+      // a paste is inherently several sequential spawns (`sendPasteArgv`'s
+      // own header), so there is no synchronous case to fast-path, and
+      // queuing unconditionally is what keeps a SECOND paste fired right
+      // after this one from racing it too (`enqueue`'s own header).
+      await enqueue(streamId, () => sendPaste(name, text));
+    },
+  );
+
+  /**
+   * `sendPasteArgv` (`sources/tmux/argv.ts`) is the SAME mechanism
+   * `terminal/pane.ts`'s already-shipped, polling-path `sendToPane` already
+   * uses for a paste -- real `execFile` spawns through `run`, never the
+   * persistent control-mode connection's own text grammar
+   * (`control-protocol.ts`'s `encodeControlLine` does not recognise
+   * `set-buffer`/`paste-buffer` at all, so `run` -- `createControlTmuxRunner`
+   * in production -- falls back to a plain spawn for every step here
+   * regardless). `-p` on the final step is tmux's OWN per-pane truth about
+   * bracketed paste; this bridge never reads or guesses it.
+   *
+   * A STEP FAILING PARTWAY (a review finding) used to leave the buffer
+   * `sendPasteArgv` named on the tmux server forever: `paste-buffer`'s own
+   * `-d` is the ONLY thing that deletes it, and that step never runs once an
+   * earlier one has already failed. `deleteBufferArgv` cleans it up on any
+   * failure, best-effort (its own result is never checked) -- including a
+   * buffer that was never created at all (the very first `set-buffer`
+   * failed), which tmux simply refuses at no further cost.
+   */
+  async function sendPaste(name: string, text: string): Promise<void> {
+    const steps = sendPasteArgv(name, text);
+    for (const step of steps) {
+      if ((await run(step)).failure !== null) {
+        const bufferName = pasteBufferNameOf(steps);
+        if (bufferName !== undefined) await run(deleteBufferArgv(bufferName));
+        return;
+      }
+    }
+  }
 
   return {
     dispose: () => {
       for (const client of clients.values()) client.dispose();
       clients.clear();
+      pasteTargets.clear();
+      pending.clear();
     },
   };
 }

@@ -317,6 +317,78 @@ describe('StreamClient', () => {
       const continueLines = child.written.filter((line) => line.includes('refresh-client -A'));
       expect(continueLines).toHaveLength(1);
     });
+
+    // ── (S2) A KEYSTROKE'S REPLY CAN BE TAKEN AS THE REPLY TO THE
+    // PAUSE-RECOVERY COMMAND. `write()` (xterm's own `onData`, one
+    // keystroke at a time) sends `send-keys` over the SAME control
+    // connection `#send()`/`#sendChain()` share, but -- before this fix --
+    // pushed NOTHING onto `#blockQueue` for it. `#handleEvent`'s block
+    // branch hands every incoming block to `#blockQueue.shift()`
+    // unconditionally, in strict FIFO order matching the order commands
+    // were WRITTEN (tmux answers one control-mode connection's commands in
+    // the order it received them, never reordered -- the same guarantee
+    // `#sendChain`'s own header already leans on for its chained replies).
+    // A keystroke written WHILE another command is already pending (its own
+    // placeholder pushed, its own reply still in flight) is therefore the
+    // one case that can misfire: the keystroke's OWN reply, once it
+    // arrives, finds the OTHER command's placeholder sitting at the front
+    // of the queue and wrongly resolves IT instead -- "steals" it -- and
+    // every reply after that is one entry out of phase until the queue
+    // happens to empty out again.
+    //
+    // DECIDED HERE OVER COMMAND-NUMBER CORRELATION (the brief's other
+    // option, `%begin <time> <num> <flags>`): tmux's strict per-connection
+    // FIFO reply order is already an invariant this file leans on
+    // elsewhere (`#sendChain`'s own header, above), so a placeholder for
+    // EVERY write -- matching `#send`'s own existing pattern exactly --
+    // closes the gap completely with a one-line change and no new state to
+    // thread through `ControlFramer`'s event shape. Correlating by command
+    // number would also work, but only by parsing and carrying a field
+    // this file does not otherwise need, for a bug FIFO-ordering alone
+    // already fully explains and fixes.
+    it('a keystroke written before a pending command must not steal ITS reply (review finding: write() had no queue placeholder)', async () => {
+      const { client, children } = harness();
+      const connecting = client.connect();
+      const child = at(children, 0);
+      await connectWith(child, '%3', 'initial');
+      await connecting;
+
+      const seeds: string[] = [];
+      client.onSeed((seed) => seeds.push(seed));
+
+      // A keystroke, written FIRST -- nothing answers it yet.
+      client.write('x');
+      expect(child.written.at(-1)).toBe('send-keys -t =vam-atlas-a1b2c3: -H 78\n');
+
+      // %pause arrives; the client's OWN `-A continue` is written SECOND,
+      // behind the keystroke already sitting in tmux's input.
+      child.data('%pause %3\n');
+      await tick();
+      expect(child.written.at(-1)).toBe('refresh-client -A "%3:continue"\n');
+
+      // tmux answers in the SAME order it received them: the keystroke's
+      // own (empty, ok) reply first...
+      child.data('%begin 10 10 1\n%end 10 10 1\n');
+      await tick();
+      // ...then the real `-A continue` reply, nested %continue.
+      child.data('%begin 11 11 1\n%continue %3\n%end 11 11 1\n');
+      await tick();
+      // ...then the reseed's own cursor-query reply (empty, ok)...
+      child.data('%begin 12 12 1\n%end 12 12 1\n');
+      await tick();
+      // ...then the reseed's own capture-pane reply -- the REAL screen.
+      child.data('%begin 13 13 1\nREAL-SCREEN-TEXT\n%end 13 13 1\n');
+      await tick();
+
+      // Fixed: every reply paired with the command that actually produced
+      // it, so the reseed delivers the REAL screen. Before the fix, the
+      // keystroke's reply stole the `-A continue` placeholder, the real
+      // `%continue` reply then had nothing left to pair with and was
+      // dropped, and the reseed's own TWO replies each shifted onto the
+      // WRONG queued resolver in turn -- the seed that reached `onSeed`
+      // never contained `REAL-SCREEN-TEXT` at all.
+      expect(seeds).toEqual(['REAL-SCREEN-TEXT']);
+    });
   });
 
   it('reconnects after a drop: backoff, fresh child, fresh seed, no resent write', async () => {

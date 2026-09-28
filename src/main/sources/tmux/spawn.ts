@@ -343,6 +343,27 @@ type PaneMark = {
   readonly depth: number | null;
   /** `#{mouse_any_flag}`, or `null` for a line that did not carry it. */
   readonly mouse: boolean | null;
+  /** `#{bracket_paste_flag}`, or `null` for a line that did not carry it --
+   * whether the pane's own program has asked the terminal for bracketed
+   * paste (`terminal/stream/seed.ts`'s own re-emit of `CSI ?2004h`). */
+  readonly bracketPaste: boolean | null;
+  /**
+   * THE RAW `cursor_x`/`cursor_y`, parsed whenever tmux answered two real
+   * numbers for them -- REGARDLESS of `cursor_flag`, unlike `cursor` itself
+   * (whose `hidden` variant carries no coordinates at all: a caret must
+   * never be DRAWN where a program turned it off, `PaneCursor`'s own rule).
+   * `terminal/stream/seed.ts#seedWithCursor` needs the position even while
+   * hidden -- a program that hides the cursor and redraws relatively
+   * (Claude Code's own UI) still needs xterm's cursor sitting on the RIGHT
+   * cell for that relative math to land anywhere sane, and tmux keeps
+   * tracking the real cell the whole time it is hidden (MEASURED, a real
+   * tmux 3.7b on a private `-L` socket: hiding the cursor, then moving it
+   * with a CUP, both changed `#{cursor_x}`/`#{cursor_y}` on the very next
+   * `display-message`). `null` for the identical reasons `cursor` itself
+   * ever is: an unreadable flag, a non-digit or out-of-range coordinate, or
+   * no cursor line at all -- never a guessed `0,0`.
+   */
+  readonly position: { readonly column: number; readonly row: number } | null;
 };
 
 /**
@@ -360,41 +381,65 @@ type PaneMark = {
  * false and would slip through a `>=` guard the wrong way round. The shape is
  * matched whole, by pattern, and anything else is `unreadable`.
  *
- * THREE FIELDS, FOUR OR FIVE. The format asks for five (`argv.ts`,
+ * THREE FIELDS, UP TO SIX. The format asks for six now (`argv.ts`,
  * `CURSOR_FORMAT`): the fourth is the history depth, the fifth whether the
- * pane's program asked for the mouse. Three is still read as a cursor rather
- * than refused, because the many stubbed runners in this repo's own suite --
- * and any tmux old enough to have dropped the key entirely -- answer with
- * three, and every one of them is a screen-only read where the depth is not
- * needed; four is every stub written before the mouse was asked about. A
- * field that is not there is `null`, never `false`: "tmux did not say" and
- * "the program declined the mouse" send a wheel to different places.
+ * pane's program asked for the mouse, the sixth whether it asked for
+ * bracketed paste. Three is still read as a cursor rather than refused,
+ * because the many stubbed runners in this repo's own suite -- and any
+ * tmux old enough to have dropped a key entirely -- answer with three, and
+ * every one of them is a screen-only read where nothing past the flag is
+ * needed; four/five are every stub written before the mouse/bracket-paste
+ * fields were asked about. A field that is not there is `null`, never
+ * `false`: "tmux did not say" and "the program declined" send a wheel, or a
+ * bracketed paste, to different places.
  */
 export function readCursorLine(line: string): PaneMark {
-  const nothing: PaneMark = { cursor: { kind: 'unreadable' }, depth: null, mouse: null };
+  const nothing: PaneMark = {
+    cursor: { kind: 'unreadable' },
+    depth: null,
+    mouse: null,
+    bracketPaste: null,
+    position: null,
+  };
   const marked = `${VAM_CURSOR_MARK} `;
   if (!line.startsWith(marked)) return nothing;
   const fields = line.slice(marked.length).split(' ');
-  const [flag, x, y, history, mouseFlag] = fields;
-  if (fields.length < 3 || fields.length > 5) return nothing;
+  const [flag, x, y, history, mouseFlag, bracketFlag] = fields;
+  if (fields.length < 3 || fields.length > 6) return nothing;
   // `#{history_size}` is a count and never negative, so anything that is not
   // a run of digits is tmux having said nothing vam can use.
   const depth = history !== undefined && /^\d+$/.test(history) ? Number(history) : null;
   // Only its two values are believed, for the reason `cursor_flag` gives.
   const mouse = mouseFlag === '1' ? true : mouseFlag === '0' ? false : null;
-  // The flag can VETO, so it is read before the coordinates and only two
-  // values mean anything: a `cursor_flag` that is neither 0 nor 1 is a tmux
-  // this parse does not understand, not a cursor to guess about.
-  if (flag === '0') return { cursor: { kind: 'hidden' }, depth, mouse };
-  if (flag !== '1') return { ...nothing, depth, mouse };
-  if (x === undefined || y === undefined || !/^\d+$/.test(x) || !/^\d+$/.test(y)) {
-    return { ...nothing, depth, mouse };
-  }
-  const column = Number(x);
-  const row = Number(y);
-  return column > MAX_CURSOR_CELL || row > MAX_CURSOR_CELL
-    ? { ...nothing, depth, mouse }
-    : { cursor: { kind: 'at', column, row }, depth, mouse };
+  const bracketPaste = bracketFlag === '1' ? true : bracketFlag === '0' ? false : null;
+  // THE RAW POSITION, read independently of `cursor_flag` -- a review
+  // finding: this used to be read ONLY inside the `flag === '1'` branch
+  // below, so a hidden cursor's own real cell was discarded before
+  // `seedWithCursor` ever saw it (`seed.ts`'s own header). Still `null` for
+  // anything that is not two real digits, the identical guard the `at`
+  // branch always applied.
+  const position =
+    x !== undefined && y !== undefined && /^\d+$/.test(x) && /^\d+$/.test(y)
+      ? readPosition(Number(x), Number(y))
+      : null;
+  // The flag can VETO whether a caret is ever DRAWN, so it is read before
+  // deciding `cursor` itself -- but no longer before `position`, which a
+  // hidden cursor keeps just as much as a visible one (module header).
+  // A `cursor_flag` that is neither 0 nor 1 is a tmux this parse does not
+  // understand, not a cursor -- or a position -- to guess about.
+  if (flag === '0') return { cursor: { kind: 'hidden' }, depth, mouse, bracketPaste, position };
+  if (flag !== '1') return { ...nothing, depth, mouse, bracketPaste };
+  return position === null
+    ? { ...nothing, depth, mouse, bracketPaste }
+    : { cursor: { kind: 'at', ...position }, depth, mouse, bracketPaste, position };
+}
+
+/** The bound `MAX_CURSOR_CELL` applies to a parsed `cursor_x`/`cursor_y`
+ * pair -- shared by `cursor`'s own `at` variant and the standalone
+ * `position` field, so a coordinate too large to be a real screen cell is
+ * refused identically either way. */
+function readPosition(column: number, row: number): { column: number; row: number } | null {
+  return column > MAX_CURSOR_CELL || row > MAX_CURSOR_CELL ? null : { column, row };
 }
 
 /**

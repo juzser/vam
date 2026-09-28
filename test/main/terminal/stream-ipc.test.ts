@@ -218,6 +218,332 @@ describe('registerTerminalStreamIpc', () => {
     expect(fake.written).toEqual(['a'.repeat(MAX_STREAM_WRITE_BYTES)]);
   });
 
+  it('paste delivers the sanitized text through tmux paste-buffer -p, targeting the resolved session (the S2 fix: tmux itself decides bracketing, never this bridge)', async () => {
+    const { run, argvs } = runner({
+      '-V': TMUX_VERSION_OK,
+      'list-sessions': LIST_ONE,
+      'set-buffer': ok(''),
+      'paste-buffer': ok(''),
+    });
+    const { ipcMain, call } = fakeIpcMain();
+    const { webContents } = fakeWebContents();
+    const fake = fakeClient();
+    registerTerminalStreamIpc(ipcMain, webContents, run, { createClient: () => fake.client });
+
+    const opened = (await call(CHANNELS.terminalStreamOpen, ATLAS)) as {
+      ok: true;
+      streamId: string;
+    };
+    const bytes = new TextEncoder().encode('héllo');
+    await call(CHANNELS.terminalStreamPaste, opened.streamId, bytes);
+
+    const setBufferStep = argvs.find((argv) => argv[0] === 'set-buffer');
+    expect(setBufferStep?.at(-1)).toBe('héllo');
+    const pasteStep = argvs.find((argv) => argv[0] === 'paste-buffer');
+    expect(pasteStep).toBeDefined();
+    // `-p`: the whole reason this channel exists, over `terminalStreamWrite`.
+    expect(pasteStep).toContain('-p');
+    // `=<name>:` -- `paneTarget`'s own shape, targeting the SAME session
+    // `terminalStreamOpen` resolved, never a name this bridge re-derives.
+    expect(pasteStep?.at(-1)).toBe('=vam-atlas-a1b2c3:');
+  });
+
+  it('a paste that fails on its LAST step (paste-buffer itself) best-effort deletes its own orphaned buffer (review finding: a failed step used to leave the buffer on the tmux server forever)', async () => {
+    const { run, argvs } = runner({
+      '-V': TMUX_VERSION_OK,
+      'list-sessions': LIST_ONE,
+      'set-buffer': ok(''),
+      'paste-buffer': failed('no such buffer'),
+      'delete-buffer': ok(''),
+    });
+    const { ipcMain, call } = fakeIpcMain();
+    const { webContents } = fakeWebContents();
+    const fake = fakeClient();
+    registerTerminalStreamIpc(ipcMain, webContents, run, { createClient: () => fake.client });
+
+    const opened = (await call(CHANNELS.terminalStreamOpen, ATLAS)) as {
+      ok: true;
+      streamId: string;
+    };
+    await call(CHANNELS.terminalStreamPaste, opened.streamId, new TextEncoder().encode('hello'));
+
+    const setBufferStep = argvs.find((argv) => argv[0] === 'set-buffer');
+    const bufferName = setBufferStep?.[2];
+    expect(bufferName).toBeDefined();
+    const deleteStep = argvs.find((argv) => argv[0] === 'delete-buffer');
+    expect(deleteStep).toEqual(['delete-buffer', '-b', bufferName]);
+  });
+
+  it('a paste that fails on an EARLIER step (a later set-buffer chunk) still best-effort deletes the buffer', async () => {
+    let setBufferCalls = 0;
+    const argvs: (readonly string[])[] = [];
+    const run: TmuxRun = async (argv) => {
+      argvs.push(argv);
+      const verb = argv[0] ?? '';
+      if (verb === '-V') return TMUX_VERSION_OK;
+      if (verb === 'list-sessions') return LIST_ONE;
+      if (verb === 'set-buffer') {
+        setBufferCalls += 1;
+        // The FIRST chunk succeeds (the buffer now exists on the server),
+        // the second (an `-a` append) fails -- the shape a paste too large
+        // for one `set-buffer` call can hit partway through.
+        return setBufferCalls === 1 ? ok('') : failed('tmux: server exited');
+      }
+      if (verb === 'delete-buffer') return ok('');
+      return failed(`no stub for ${verb}`);
+    };
+    const { ipcMain, call } = fakeIpcMain();
+    const { webContents } = fakeWebContents();
+    const fake = fakeClient();
+    registerTerminalStreamIpc(ipcMain, webContents, run, { createClient: () => fake.client });
+
+    const opened = (await call(CHANNELS.terminalStreamOpen, ATLAS)) as {
+      ok: true;
+      streamId: string;
+    };
+    // Long enough (over the 8192-byte default chunk) to force a second
+    // `set-buffer` chunk.
+    await call(
+      CHANNELS.terminalStreamPaste,
+      opened.streamId,
+      new TextEncoder().encode('x'.repeat(9000)),
+    );
+
+    const sets = argvs.filter((argv) => argv[0] === 'set-buffer');
+    expect(sets.length).toBeGreaterThan(1);
+    const bufferName = sets[0]?.[2];
+    const deleteStep = argvs.find((argv) => argv[0] === 'delete-buffer');
+    expect(deleteStep).toEqual(['delete-buffer', '-b', bufferName]);
+    // Never reached `paste-buffer` -- the earlier failure stopped it.
+    expect(argvs.some((argv) => argv[0] === 'paste-buffer')).toBe(false);
+  });
+
+  it("a successful paste never calls delete-buffer -- paste-buffer's own -d already cleaned it up", async () => {
+    const { run, argvs } = runner({
+      '-V': TMUX_VERSION_OK,
+      'list-sessions': LIST_ONE,
+      'set-buffer': ok(''),
+      'paste-buffer': ok(''),
+    });
+    const { ipcMain, call } = fakeIpcMain();
+    const { webContents } = fakeWebContents();
+    const fake = fakeClient();
+    registerTerminalStreamIpc(ipcMain, webContents, run, { createClient: () => fake.client });
+
+    const opened = (await call(CHANNELS.terminalStreamOpen, ATLAS)) as {
+      ok: true;
+      streamId: string;
+    };
+    await call(CHANNELS.terminalStreamPaste, opened.streamId, new TextEncoder().encode('hello'));
+
+    expect(argvs.some((argv) => argv[0] === 'delete-buffer')).toBe(false);
+  });
+
+  it('ignores a paste for an unknown/closed streamId, same posture as write', async () => {
+    const { run, argvs } = runner({ '-V': TMUX_VERSION_OK, 'list-sessions': LIST_ONE });
+    const { ipcMain, call } = fakeIpcMain();
+    const { webContents } = fakeWebContents();
+    registerTerminalStreamIpc(ipcMain, webContents, run, {});
+
+    const bytes = new TextEncoder().encode('hello');
+    await call(CHANNELS.terminalStreamPaste, 'unknown-id', bytes);
+
+    expect(argvs.some((argv) => argv[0] === 'set-buffer' || argv[0] === 'paste-buffer')).toBe(
+      false,
+    );
+  });
+
+  it('ignores a paste over MAX_STREAM_WRITE_BYTES rather than forwarding it', async () => {
+    const { run, argvs } = runner({ '-V': TMUX_VERSION_OK, 'list-sessions': LIST_ONE });
+    const { ipcMain, call } = fakeIpcMain();
+    const { webContents } = fakeWebContents();
+    const fake = fakeClient();
+    registerTerminalStreamIpc(ipcMain, webContents, run, { createClient: () => fake.client });
+
+    const opened = (await call(CHANNELS.terminalStreamOpen, ATLAS)) as {
+      ok: true;
+      streamId: string;
+    };
+    const tooBig = new Uint8Array(MAX_STREAM_WRITE_BYTES + 1);
+    await call(CHANNELS.terminalStreamPaste, opened.streamId, tooBig);
+
+    expect(argvs.some((argv) => argv[0] === 'set-buffer' || argv[0] === 'paste-buffer')).toBe(
+      false,
+    );
+  });
+
+  it('a stream closed after opening refuses a later paste too', async () => {
+    const { run, argvs } = runner({
+      '-V': TMUX_VERSION_OK,
+      'list-sessions': LIST_ONE,
+      'set-buffer': ok(''),
+      'paste-buffer': ok(''),
+    });
+    const { ipcMain, call } = fakeIpcMain();
+    const { webContents } = fakeWebContents();
+    const fake = fakeClient();
+    registerTerminalStreamIpc(ipcMain, webContents, run, { createClient: () => fake.client });
+
+    const opened = (await call(CHANNELS.terminalStreamOpen, ATLAS)) as {
+      ok: true;
+      streamId: string;
+    };
+    await call(CHANNELS.terminalStreamClose, opened.streamId);
+    argvs.length = 0;
+    await call(CHANNELS.terminalStreamPaste, opened.streamId, new TextEncoder().encode('hello'));
+
+    expect(argvs).toEqual([]);
+  });
+
+  describe('paste/write ordering (review finding: paste and write travel on different transports with no ordering guarantee)', () => {
+    /** A `run` whose `set-buffer` answer does not settle until the test
+     *  releases `gate` -- standing in for `sendPasteArgv`'s own real
+     *  `execFile` spawns actually taking real wall-clock time, unlike
+     *  `StreamClient#write`'s synchronous stdin write. */
+    function deferredRunner() {
+      const argvs: (readonly string[])[] = [];
+      let release: (() => void) | undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const run: TmuxRun = async (argv) => {
+        argvs.push(argv);
+        const verb = argv[0] ?? '';
+        if (verb === '-V') return TMUX_VERSION_OK;
+        if (verb === 'list-sessions') return LIST_ONE;
+        if (verb === 'set-buffer') {
+          await gate;
+          return ok('');
+        }
+        if (verb === 'paste-buffer') return ok('');
+        return failed(`no stub for ${verb}`);
+      };
+      return { run, argvs, release: () => release?.() };
+    }
+
+    it('a write arriving while a paste is still in flight is queued behind it, not sent immediately', async () => {
+      const { run, release } = deferredRunner();
+      const { ipcMain, call } = fakeIpcMain();
+      const { webContents } = fakeWebContents();
+      const fake = fakeClient();
+      registerTerminalStreamIpc(ipcMain, webContents, run, { createClient: () => fake.client });
+
+      const opened = (await call(CHANNELS.terminalStreamOpen, ATLAS)) as {
+        ok: true;
+        streamId: string;
+      };
+
+      // Mirrors the operator's own report: paste, then Enter, back to back.
+      const pastePromise = call(
+        CHANNELS.terminalStreamPaste,
+        opened.streamId,
+        new TextEncoder().encode('pasted text'),
+      );
+      // Let the paste's own microtasks run far enough to reach the gated
+      // `set-buffer` call before the write arrives.
+      await Promise.resolve();
+      await Promise.resolve();
+      const writePromise = call(
+        CHANNELS.terminalStreamWrite,
+        opened.streamId,
+        new TextEncoder().encode('\r'),
+      );
+      // Give the write's own handler a chance to run to completion IF it
+      // were (wrongly) on the synchronous fast path.
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(fake.written).toEqual([]);
+
+      release();
+      await pastePromise;
+      await writePromise;
+
+      expect(fake.written).toEqual(['\r']);
+    });
+
+    it('a write with no paste pending goes straight to the client, on the synchronous fast path', async () => {
+      const { run } = runner({ '-V': TMUX_VERSION_OK, 'list-sessions': LIST_ONE });
+      const { ipcMain, call } = fakeIpcMain();
+      const { webContents } = fakeWebContents();
+      const fake = fakeClient();
+      registerTerminalStreamIpc(ipcMain, webContents, run, { createClient: () => fake.client });
+
+      const opened = (await call(CHANNELS.terminalStreamOpen, ATLAS)) as {
+        ok: true;
+        streamId: string;
+      };
+      // No `await` on the write's own returned promise -- the fast path must
+      // already have called `client.write` synchronously, before this
+      // handler's own promise needs even one microtask to settle.
+      void call(CHANNELS.terminalStreamWrite, opened.streamId, new TextEncoder().encode('x'));
+
+      expect(fake.written).toEqual(['x']);
+    });
+
+    it('two pastes fired back to back still run in arrival order, the second never touching tmux until the first is done', async () => {
+      const argvs: (readonly string[])[] = [];
+      let releaseFirst: (() => void) | undefined;
+      const firstGate = new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
+      let setBufferCalls = 0;
+      const run: TmuxRun = async (argv) => {
+        argvs.push(argv);
+        const verb = argv[0] ?? '';
+        if (verb === '-V') return TMUX_VERSION_OK;
+        if (verb === 'list-sessions') return LIST_ONE;
+        if (verb === 'set-buffer') {
+          setBufferCalls += 1;
+          // Only the FIRST paste's own `set-buffer` is held -- a real second
+          // paste arriving mid-flight must queue behind it rather than race
+          // it, exactly the shape "paste, paste again" (or a very fast
+          // double-paste) would hit.
+          if (setBufferCalls === 1) await firstGate;
+          return ok('');
+        }
+        if (verb === 'paste-buffer') return ok('');
+        return failed(`no stub for ${verb}`);
+      };
+      const { ipcMain, call } = fakeIpcMain();
+      const { webContents } = fakeWebContents();
+      const fake = fakeClient();
+      registerTerminalStreamIpc(ipcMain, webContents, run, { createClient: () => fake.client });
+
+      const opened = (await call(CHANNELS.terminalStreamOpen, ATLAS)) as {
+        ok: true;
+        streamId: string;
+      };
+      const firstPaste = call(
+        CHANNELS.terminalStreamPaste,
+        opened.streamId,
+        new TextEncoder().encode('first'),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      const secondPaste = call(
+        CHANNELS.terminalStreamPaste,
+        opened.streamId,
+        new TextEncoder().encode('second'),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // The SECOND paste must not have reached tmux at all yet -- it is
+      // queued behind the first, still gated.
+      expect(argvs.filter((argv) => argv[0] === 'set-buffer')).toHaveLength(1);
+
+      releaseFirst?.();
+      await firstPaste;
+      await secondPaste;
+
+      const sets = argvs.filter((argv) => argv[0] === 'set-buffer');
+      expect(sets.map((step) => step.at(-1))).toEqual(['first', 'second']);
+    });
+  });
+
   it('close disposes the client and is idempotent for an unknown id', async () => {
     const { run } = runner({ '-V': TMUX_VERSION_OK, 'list-sessions': LIST_ONE });
     const { ipcMain, call } = fakeIpcMain();

@@ -312,6 +312,7 @@ export const VAM_CURSOR_MARK = '@vam-cursor';
 
 /**
  * WHAT VAM ASKS ABOUT THE CURSOR, and the four fields are the whole of it.
+ * (Now six -- see `bracket_paste_flag` below, the newest addition.)
  *
  * `cursor_flag` first because it can veto the other two: it is 0 when a
  * program in the pane turned the cursor off (DECTCEM), and a caret drawn over
@@ -343,13 +344,44 @@ export const VAM_CURSOR_MARK = '@vam-cursor';
  * (straight into `claude`, `"tui": "fullscreen"`): `alternate_on=1
  * history_size=0 mouse_any_flag=1`, steady from three seconds on.
  *
- * MEASURED on tmux 3.7b: all five keys exist and expand, and a key tmux does
+ * `bracket_paste_flag` IS THE SIXTH, and it originally answered a DIFFERENT
+ * streaming bug entirely: `terminal/stream/seed.ts`'s own seed carried no
+ * notion of xterm's bracketed-paste MODE, so attaching to a session whose
+ * program already turned bracketed paste on (before this client ever
+ * connected -- the enable sequence reaches the pty once, at the program's
+ * own startup, and this client's `-C` connection may attach long after
+ * that) left xterm's `modes.bracketedPasteMode` permanently false for that
+ * view, and a multi-line paste submitted one line at a time.
+ * `#{bracket_paste_flag}` is tmux's OWN per-pane record of the identical
+ * fact `mouse_any_flag` already rides this line for -- "has the program in
+ * the pane asked the terminal for X" -- so `seedWithCursor` re-emits the
+ * SAME `CSI ?2004h` xterm would have parsed had it been attached from the
+ * start.
+ *
+ * THAT FIX WAS LATER SUPERSEDED for the actual paste bug: a paste now goes
+ * through `terminalStreamPaste` -> `sendPasteArgv`'s `paste-buffer -p`
+ * (`main/terminal/stream-ipc.ts`), which asks tmux itself whether the pane
+ * wants bracketing rather than trusting xterm's OWN, client-side mode --
+ * version-independent (no format key to read at all), where this field's
+ * own read is not: `#{bracket_paste_flag}` was added to tmux in 3.7 and
+ * expands to empty on anything older (CI's Ubuntu apt tmux, 3.4, measured
+ * expanding it empty -- see `readCursorLine`'s `bracketPaste: null` case).
+ * The re-emission above is kept anyway, on tmux new enough to answer it: it
+ * is still the one thing that keeps xterm's OWN reported
+ * `modes.bracketedPasteMode` truthful for a freshly attached view, cheap
+ * and correct even though nothing in this codebase currently reads that
+ * mode for paste correctness anymore. MEASURED on tmux 3.7b over a private
+ * `-L` socket: toggling `printf '\033[?2004h'` / `\033[?2004l'` in a pane
+ * flips `#{bracket_paste_flag}` between `1` and `0` on the very next
+ * `display-message`, independent of `cursor_flag`.
+ *
+ * MEASURED on tmux 3.7b: all six keys exist and expand, and a key tmux does
  * not know expands to the EMPTY STRING rather than failing -- which is what
  * makes an older tmux read as `unreadable` instead of as a crash.
  *
- * Exported for the test that pins the fifth field is asked for.
+ * Exported for the test that pins the fifth/sixth field is asked for.
  */
-export const CURSOR_FORMAT = `${VAM_CURSOR_MARK} #{cursor_flag} #{cursor_x} #{cursor_y} #{history_size} #{mouse_any_flag}`;
+export const CURSOR_FORMAT = `${VAM_CURSOR_MARK} #{cursor_flag} #{cursor_x} #{cursor_y} #{history_size} #{mouse_any_flag} #{bracket_paste_flag}`;
 
 /**
  * HOW FAR BACK THE TERMINAL TAB CAN SCROLL: five hundred lines above the
@@ -737,6 +769,39 @@ export function sendPasteArgv(
   );
   steps.push(['paste-buffer', '-d', '-p', '-r', '-S', '-b', bufferName, '-t', paneTarget(name)]);
   return steps;
+}
+
+/**
+ * READS BACK the buffer name one `sendPasteArgv` call generated for its own
+ * steps -- off the final `paste-buffer` step's own `-b` argument, the one
+ * every step already agrees on, rather than widening `sendPasteArgv`'s
+ * return type (a second return value threaded through both of its own
+ * callers, `terminal/pane.ts`'s `sendToPane` and `terminal/stream-ipc.ts`'s
+ * `terminalStreamPaste`, for the sole benefit of the one caller that needs
+ * to name the buffer again after the fact). `undefined` for anything that
+ * is not actually a `sendPasteArgv` step -- a caller with nothing to clean
+ * up, not a caller that has to guess a name.
+ */
+export function pasteBufferNameOf(steps: readonly (readonly string[])[]): string | undefined {
+  const pasteStep = steps.find((step) => step[0] === 'paste-buffer');
+  if (pasteStep === undefined) return undefined;
+  const at = pasteStep.indexOf('-b');
+  return at === -1 ? undefined : pasteStep[at + 1];
+}
+
+/**
+ * BEST-EFFORT CLEANUP for a `sendPasteArgv` call that failed partway --
+ * `set-buffer`'s own chunks (or `paste-buffer` itself) can fail after the
+ * buffer already exists on the tmux server, and `paste-buffer`'s own `-d`
+ * (the ONLY thing that deletes it on the success path) never ran to do it.
+ * Left alone, a failed paste orphans one named buffer per attempt, forever
+ * -- `delete-buffer` on a buffer that was never created (the very first
+ * `set-buffer` failed) is refused by tmux itself and costs nothing beyond
+ * the one wasted call; callers are expected to await this and ignore its
+ * own result, exactly the "best-effort" the name promises.
+ */
+export function deleteBufferArgv(bufferName: string): readonly string[] {
+  return ['delete-buffer', '-b', bufferName];
 }
 
 export function promptKeystrokes(name: string, prompt: string): readonly (readonly string[])[] {
