@@ -16,7 +16,7 @@
  * operator actually meets it, over the real preload bridge and the real
  * network this machine has.
  */
-import { execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -147,13 +147,14 @@ describe('Settings -> Update, under the real shell', () => {
   let userDataDir: string;
 
   beforeAll(() => {
-    execFileSync(bin('electron-vite'), ['build'], { cwd: repoRoot, stdio: 'pipe' });
+    // Built ONCE for the whole run by `vitest.app.config.ts`'s globalSetup
+    // (`test/electron/global-build.ts`) -- never per file, see its header.
     userDataDir = mkdtempSync(path.join(tmpdir(), 'vam-settings-update-userdata-'));
   }, 180_000);
 
   afterAll(() => {
     if (userDataDir !== undefined) {
-      rmSync(userDataDir, { recursive: true, force: true });
+      rmSync(userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     }
   });
 
