@@ -66,6 +66,7 @@ import { GITHUB_LOGIN_COMMAND, GITHUB_LOGOUT_COMMAND } from '../../shared/github
 import type { SourceId } from '../domain/model.js';
 import { t } from '../i18n/strings.js';
 import { type Prefs, prRepoFor, setProjectPrRepo } from '../prefs/prefs.js';
+import { ExternalLink } from './primitives.js';
 
 const FOCUS_RING =
   'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink';
@@ -212,6 +213,15 @@ export type GithubPanelProps = {
   /** The native folder picker behind "choose another repo" -- absent in the
    *  browser build, which has no dialog bridge either. */
   readonly chooseDirectory?: () => Promise<string | null>;
+  /**
+   * Opens the gh-missing guide's two external links (brew.sh, cli.github.com)
+   * in the operating system's browser -- `window.api.link.open`, the same
+   * allowlisted bridge `out-markdown.tsx` already uses for an agent's own
+   * links (`src/main/link/ipc.ts`). Absent in the browser build, which has no
+   * preload and therefore no policy to be refused by either -- see
+   * `ExternalLink` (`primitives.js`).
+   */
+  readonly openExternal?: (url: string) => Promise<unknown>;
 };
 
 export function GithubPanel({
@@ -222,6 +232,7 @@ export function GithubPanel({
   projects,
   copyText,
   chooseDirectory,
+  openExternal,
 }: GithubPanelProps) {
   const [status, setStatus] = useState<GithubAuthStatus | null>(null);
   const [checking, setChecking] = useState(false);
@@ -435,14 +446,17 @@ export function GithubPanel({
                       than build the check. */}
                   <p className="vam-sentence m-0 max-w-[52ch] text-control text-ink-faint">
                     {t('settings.integrations.github.guide.noBrew')}{' '}
-                    <a
+                    <ExternalLink
                       href="https://brew.sh"
-                      target="_blank"
-                      rel="noreferrer"
+                      onOpen={
+                        openExternal === undefined
+                          ? undefined
+                          : () => void openExternal('https://brew.sh')
+                      }
                       className="underline"
                     >
                       https://brew.sh
-                    </a>
+                    </ExternalLink>
                   </p>
                   <code
                     data-github-guide-login
@@ -464,14 +478,17 @@ export function GithubPanel({
                         ? t('settings.integrations.github.rechecking')
                         : t('settings.integrations.github.guide.checkAgain')}
                     </button>
-                    <a
+                    <ExternalLink
                       href="https://cli.github.com"
-                      target="_blank"
-                      rel="noreferrer"
+                      onOpen={
+                        openExternal === undefined
+                          ? undefined
+                          : () => void openExternal('https://cli.github.com')
+                      }
                       className="text-control text-ink-dim underline"
                     >
                       {t('settings.integrations.github.status.installLink')}
-                    </a>
+                    </ExternalLink>
                   </div>
                 </div>
               ) : null}

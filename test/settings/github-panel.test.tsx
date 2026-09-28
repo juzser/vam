@@ -512,4 +512,69 @@ describe('the "gh not installed" guide', () => {
     await waitFor(() => expect(guide()).not.toBeNull());
     expect(connect()).toBeNull();
   });
+
+  /**
+   * THE GUIDE'S TWO LINKS, under the same policy `PairingPanel.tsx`'s own
+   * `ExternalLink` was built for: `src/main/index.ts`'s
+   * `setWindowOpenHandler(() => ({ action: 'deny' }))` denies every
+   * `target="_blank"` in this window, so an ordinary anchor here does
+   * nothing at all. `ExternalLink` (`primitives.tsx`, shared with
+   * `PairingPanel.tsx`) is a real `<a href>` -- for accessibility and the
+   * browser-build fallback -- whose click hands off to a bridge instead of
+   * the window, exactly mirroring `test/settings/pairing-panel.test.tsx`'s
+   * own corpus for the identical defect.
+   */
+  describe('the guide’s two external links, under a policy that denies window.open', () => {
+    const brewLink = () =>
+      document.querySelector<HTMLAnchorElement>(
+        '[data-github-cli-guide] a[href="https://brew.sh"]',
+      );
+    const cliLink = () =>
+      document.querySelector<HTMLAnchorElement>(
+        '[data-github-cli-guide] a[href="https://cli.github.com"]',
+      );
+
+    function setupMissingWithOpen(over: Partial<GithubPanelProps> = {}) {
+      const openExternal = vi.fn(async () => undefined);
+      setupMissing({ openExternal, ...over });
+      return { openExternal };
+    }
+
+    it('keeps a real href, for accessibility and the browser-build fallback', async () => {
+      setupMissingWithOpen();
+      await waitFor(() => expect(brewLink()).not.toBeNull());
+      expect(brewLink()?.getAttribute('href')).toBe('https://brew.sh');
+      expect(cliLink()?.getAttribute('href')).toBe('https://cli.github.com');
+    });
+
+    it('asks main to open brew.sh through the bridge, not window.open', async () => {
+      const { openExternal } = setupMissingWithOpen();
+      await waitFor(() => expect(brewLink()).not.toBeNull());
+      fireEvent.click(brewLink() as HTMLElement);
+      expect(openExternal).toHaveBeenCalledWith('https://brew.sh');
+    });
+
+    it('asks main to open cli.github.com through the bridge the same way', async () => {
+      const { openExternal } = setupMissingWithOpen();
+      await waitFor(() => expect(cliLink()).not.toBeNull());
+      fireEvent.click(cliLink() as HTMLElement);
+      expect(openExternal).toHaveBeenCalledWith('https://cli.github.com');
+    });
+
+    it('stops the navigation the window would refuse anyway', async () => {
+      setupMissingWithOpen();
+      await waitFor(() => expect(brewLink()).not.toBeNull());
+      const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+      brewLink()?.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+    });
+
+    it('leaves the link alone where there is no bridge to ask across', async () => {
+      setupMissing({ openExternal: undefined });
+      await waitFor(() => expect(brewLink()).not.toBeNull());
+      const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+      brewLink()?.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(false);
+    });
+  });
 });

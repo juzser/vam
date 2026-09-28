@@ -1609,6 +1609,7 @@ export function SettingsOverlay({
                     projects={projects}
                     copyText={window.api?.clipboard?.writeText}
                     chooseDirectory={window.api?.dialog?.chooseDirectory}
+                    openExternal={window.api?.link?.open}
                   />
                 </SettingsCard>
               ) : null}

@@ -337,3 +337,62 @@ export function AdvancedDisclosure({
     </div>
   );
 }
+
+/**
+ * A LINK OUT OF VAM, UNDER A WINDOW THAT REFUSES TO NAVIGATE.
+ *
+ * Operator: "in settings the tailscale link is not clickable." It was an
+ * ordinary `target="_blank"` anchor, and `setWindowOpenHandler(() => ({
+ * action: 'deny' }))` in `src/main/index.ts` refuses every `window.open` in
+ * this app. The link was not broken; it was refused, by policy, for the
+ * reason `errors/report.ts` states: a renderer that can navigate off-origin
+ * is a renderer that can exfiltrate.
+ *
+ * STILL AN ANCHOR. A `<button>` dressed as a link loses what a link announces
+ * to a screen reader and what a pointer expects from one -- and the
+ * destination really is reached, in the operating system's browser, which is
+ * where an external page belongs. The `href` stays real, which is also what
+ * makes the browser build need no branch: there is no bridge there, nothing
+ * calls `preventDefault`, and the anchor works the way an anchor works.
+ *
+ * SHARED BY `PairingPanel.tsx` AND `GithubPanel.tsx` NOW, moved here once a
+ * second caller needed the identical shape (settings-views restructure's own
+ * gh-missing guide) -- rather than a second, drifting copy. `onOpen` TAKES NO
+ * ARGUMENT, on purpose: `PairingPanel.tsx`'s own bridge is keyed
+ * (`RemoteLinkKey`, so main owns both destinations and the renderer never
+ * names one), `GithubPanel.tsx`'s is a plain URL through `window.api.link`
+ * (`src/main/link/ipc.ts`'s allowlisted channel). Binding EITHER shape into a
+ * zero-argument closure is the caller's own concern, not this component's --
+ * the one thing every caller needs from `ExternalLink` is "call this on
+ * click, absent means no bridge", and that is the whole of its contract.
+ */
+export function ExternalLink({
+  href,
+  onOpen,
+  className,
+  children,
+}: {
+  readonly href: string;
+  readonly onOpen?: () => void;
+  readonly className: string;
+  readonly children: React.ReactNode;
+}) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className={className}
+      onClick={(event) => {
+        if (onOpen === undefined) return;
+        // The window would deny this anyway. Stopping it here keeps one path
+        // rather than two, and a second path is what later gets "fixed" by
+        // widening the policy.
+        event.preventDefault();
+        onOpen();
+      }}
+    >
+      {children}
+    </a>
+  );
+}
