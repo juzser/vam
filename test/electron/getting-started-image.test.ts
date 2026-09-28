@@ -27,6 +27,15 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import {
+  assertNoNewSessionUnderOnDefaultServer,
+  defaultServerPaneCwds,
+  isolatedServerSessionCount,
+  isolatedTmuxEnv,
+  killIsolatedServer,
+  mkIsolatedTmuxTmpdir,
+  tmuxAvailable,
+} from '../support/tmux-harness-env.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const bin = (name: string) => path.join(repoRoot, 'node_modules', '.bin', name);
@@ -65,16 +74,19 @@ async function freePort(): Promise<number> {
   });
 }
 
-function runProbe(userDataDir: string, remotePort: number): Promise<ProbeRun> {
+function runProbe(userDataDir: string, remotePort: number, tmuxTmpdir: string): Promise<ProbeRun> {
   return new Promise((resolve, reject) => {
     const child = spawn(bin('electron'), [probePath], {
       cwd: repoRoot,
-      env: {
-        ...process.env,
-        VAM_FIXTURE_SOURCE: '2',
-        VAM_USER_DATA_DIR: userDataDir,
-        VAM_REMOTE_PORT: String(remotePort),
-      },
+      env: isolatedTmuxEnv(
+        {
+          ...process.env,
+          VAM_FIXTURE_SOURCE: '2',
+          VAM_USER_DATA_DIR: userDataDir,
+          VAM_REMOTE_PORT: String(remotePort),
+        },
+        tmuxTmpdir,
+      ),
     });
     let stdout = '';
     let stderr = '';
@@ -117,22 +129,30 @@ function runProbe(userDataDir: string, remotePort: number): Promise<ProbeRun> {
 
 describe('the getting-started screen’s own mark, under the real file:// document', () => {
   let userDataDir: string;
+  let tmuxTmpdir: string;
+  let defaultServerBefore: readonly string[];
 
   beforeAll(() => {
     // Built ONCE for the whole run by `vitest.app.config.ts`'s globalSetup
     // (`test/electron/global-build.ts`) -- never per file, see its header.
     userDataDir = mkdtempSync(path.join(tmpdir(), 'vam-getting-started-image-userdata-'));
+    tmuxTmpdir = mkIsolatedTmuxTmpdir('vam-getting-started-image-tmux');
+    defaultServerBefore = tmuxAvailable() ? defaultServerPaneCwds() : [];
   }, 180_000);
 
   afterAll(() => {
     if (userDataDir !== undefined) {
       rmSync(userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     }
+    if (tmuxTmpdir !== undefined) {
+      killIsolatedServer(tmuxTmpdir);
+      rmSync(tmuxTmpdir, { recursive: true, force: true });
+    }
   });
 
   it('draws the mark, and it actually loaded', async () => {
     const remotePort = await freePort();
-    const run = await runProbe(userDataDir, remotePort);
+    const run = await runProbe(userDataDir, remotePort, tmuxTmpdir);
     expect(`${run.code} ${run.stderr}`).toBe(`0 ${run.stderr}`);
     expect(
       run.images,
@@ -149,4 +169,18 @@ describe('the getting-started screen’s own mark, under the real file:// docume
       ).toBeGreaterThan(0);
     }
   });
+
+  // THE TMUX ISOLATION, PROVEN AT RUNTIME -- see `launch.test.ts`'s identical
+  // assertion for the full rationale.
+  (tmuxAvailable() ? it : it.skip)(
+    'never lets this launch reach the operator’s real default tmux server',
+    () => {
+      assertNoNewSessionUnderOnDefaultServer({
+        before: defaultServerBefore,
+        after: defaultServerPaneCwds(),
+        watchDir: repoRoot,
+      });
+      expect(() => isolatedServerSessionCount(tmuxTmpdir)).not.toThrow();
+    },
+  );
 });

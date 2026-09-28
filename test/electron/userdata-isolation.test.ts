@@ -36,8 +36,17 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DEFAULT_REMOTE_PORT } from '../../src/main/remote/launch.js';
+import {
+  assertNoNewSessionUnderOnDefaultServer,
+  defaultServerPaneCwds,
+  isolatedServerSessionCount,
+  isolatedTmuxEnv,
+  killIsolatedServer,
+  mkIsolatedTmuxTmpdir,
+  tmuxAvailable,
+} from '../support/tmux-harness-env.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const bin = (name: string) => path.join(repoRoot, 'node_modules', '.bin', name);
@@ -49,6 +58,14 @@ function scratchDir(prefix: string): string {
   scratchDirs.push(dir);
   return dir;
 }
+
+// One private tmux socket for the whole describe block below: the second
+// test in it deliberately runs two Electron instances CONCURRENTLY, and
+// sharing one isolated server between them is exactly as safe as sharing
+// the operator's real one is in production (`control.ts`'s own "a second
+// vam instance" note) -- the only property this file cares about is that
+// NEITHER instance ever reaches the operator's actual default server.
+let tmuxTmpdir: string;
 
 /**
  * A genuinely free loopback port, never the operator's own remote-serve port
@@ -85,7 +102,7 @@ interface ProbeRun {
 function spawnProbe(env: NodeJS.ProcessEnv): ChildProcessWithoutNullStreams {
   return spawn(bin('electron'), [probePath], {
     cwd: repoRoot,
-    env: { ...process.env, VAM_FIXTURE_SOURCE: '1', ...env },
+    env: isolatedTmuxEnv({ ...process.env, VAM_FIXTURE_SOURCE: '1', ...env }, tmuxTmpdir),
   }) as ChildProcessWithoutNullStreams;
 }
 
@@ -148,9 +165,23 @@ function waitForReady(child: ChildProcessWithoutNullStreams): Promise<string> {
 }
 
 describe('the Electron harness gets its own throwaway userData', () => {
+  let defaultServerBefore: readonly string[];
+
+  // Built ONCE for the whole run by `vitest.app.config.ts`'s globalSetup
+  // (`test/electron/global-build.ts`) -- never per file, see its header.
+  // Only the tmux isolation setup belongs here now.
+  beforeAll(() => {
+    tmuxTmpdir = mkIsolatedTmuxTmpdir('vam-userdata-isolation-tmux');
+    defaultServerBefore = tmuxAvailable() ? defaultServerPaneCwds() : [];
+  });
+
   afterAll(() => {
     for (const dir of scratchDirs) {
       rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
+    if (tmuxTmpdir !== undefined) {
+      killIsolatedServer(tmuxTmpdir);
+      rmSync(tmuxTmpdir, { recursive: true, force: true });
     }
   });
 
@@ -245,4 +276,23 @@ describe('the Electron harness gets its own throwaway userData', () => {
       }
     }
   }, 40_000);
+
+  // THE TMUX ISOLATION, PROVEN AT RUNTIME -- see `launch.test.ts`'s identical
+  // assertion for the full rationale. Defined LAST so it reads the default
+  // server only after every launch above (three Electron processes across
+  // the three tests in this describe, one of them killed with `SIGKILL`) has
+  // already run and exited -- vitest runs a describe's own tests in
+  // definition order, so this genuinely reads AFTER them, not merely appears
+  // to.
+  (tmuxAvailable() ? it : it.skip)(
+    'never lets any of this file’s launches reach the operator’s real default tmux server',
+    () => {
+      assertNoNewSessionUnderOnDefaultServer({
+        before: defaultServerBefore,
+        after: defaultServerPaneCwds(),
+        watchDir: repoRoot,
+      });
+      expect(() => isolatedServerSessionCount(tmuxTmpdir)).not.toThrow();
+    },
+  );
 });
