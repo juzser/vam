@@ -124,7 +124,15 @@ describe.skipIf(!live)(
       }
     });
 
-    it('the seed carries CSI ?2004h -- xterm is primed the instant it is written, with no live %output ever needed', async () => {
+    // EXPLICIT TIMEOUT ON THE TEST BELOW, LARGER THAN THE POLL'S OWN
+    // DEADLINE -- a review finding: vitest's own default `testTimeout`
+    // (5000ms) killed this test before the 10s poll ever got the chance
+    // CI's own slower runner needed (MEASURED: CI failed with "Test timed
+    // out in 5000ms" even after the poll fix, the poll never actually
+    // being the thing that ran out).
+    it('the seed carries CSI ?2004h -- xterm is primed the instant it is written, with no live %output ever needed', {
+      timeout: 15_000,
+    }, async () => {
       // Ground truth: the fake program's own escape sequences already ran
       // and the pane already carries both facts, before `StreamClient` ever
       // attaches. POLLED, not a fixed sleep (this test's own header) -- a

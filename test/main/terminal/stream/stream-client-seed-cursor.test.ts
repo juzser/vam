@@ -203,7 +203,14 @@ describe.skipIf(!live)('StreamClient#connect seed (real tmux)', () => {
     }
   });
 
-  it('a HIDDEN cursor still seeds its real position, not just the hide escape (review finding)', async () => {
+  // EXPLICIT TIMEOUT ON THE TEST BELOW, LARGER THAN THE POLL'S OWN 10s
+  // DEADLINE: this file's own bracket-paste sibling test was killed by
+  // vitest's default `testTimeout` (5000ms) before its identically-shaped
+  // poll ever got the time CI's slower runner needed; matched here too
+  // rather than trusting this one to keep passing by a margin.
+  it('a HIDDEN cursor still seeds its real position, not just the hide escape (review finding)', {
+    timeout: 15_000,
+  }, async () => {
     // POLLED, not a fixed sleep: a loaded CI runner can take longer than
     // any one fixed wait to have actually scheduled and run the fake
     // program's own `printf` (MEASURED: CI's own run of this file's
