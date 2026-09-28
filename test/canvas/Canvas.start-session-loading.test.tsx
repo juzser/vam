@@ -354,6 +354,73 @@ describe('Start session — the wait for the agent to register', () => {
     });
 
     /**
+     * THE COORDINATOR'S OWN BUG REPORT (A): a starship/pure prompt echoes its
+     * OWN `❯` glyph in front of a `claude` an operator has typed but not yet
+     * pressed Enter on -- `detectStartScreen`'s READY_CARET (deliberately
+     * blind to `pane_current_command`, that file's own header) reads the line
+     * as `ready` regardless. `readStartScreen` (main) tells the two apart by
+     * the pane's OWN foreground command, and answers `provider: undefined`
+     * for a shell rather than folding it into the confirmed-but-unidentified
+     * `null` `providerRunningByKey` would otherwise happily store. This is
+     * that fact reaching the Response view: no `PaneReady`, Start stays
+     * exactly as un-offered as before the poll ran, and -- the other half of
+     * "not confirmed" -- the SAME poll keeps firing, because nothing here
+     * ever wrote `providerRunningByKey` to make it stop.
+     */
+    it('does not confirm ready for a shell wearing an echoed `❯ claude` prompt, keeps polling, and still confirms once the CLI genuinely starts', async () => {
+      vi.useFakeTimers();
+      // Mutable, the same shape the D-RELOAD test above uses: the first
+      // reads are the shell's own echoed caret, provider `undefined`; later
+      // ones are the CLI's REAL ready screen, once the operator actually
+      // presses Enter on it.
+      let provider: 'claude-code' | undefined;
+      const startScreen = vi.fn(async () => ({
+        kind: 'ok' as const,
+        screen: 'ready' as const,
+        provider,
+      }));
+      (window as unknown as { api: unknown }).api = { terminal: { startScreen } };
+      const { source, release } = gatedSource();
+      render(<Canvas model={modelWith(UNSTARTED)} source={source} />);
+      await act(async () => {
+        startButton()?.click();
+      });
+      await act(async () => {
+        release();
+      });
+      await act(async () => {});
+      expect(startScreen).toHaveBeenCalledWith('p1', UNSTARTED.id);
+      // NEVER CONFIRMED ON THE SHELL'S OWN CARET: no PaneReady, Start still
+      // frozen mid-wait exactly as any other unresolved wait would leave it
+      // -- not re-enabled either, which a shell-blind `null` read would have
+      // left indistinguishable from a genuinely confirmed pane.
+      expect(document.querySelector('[data-pane-ready]')).toBeNull();
+      expect(startButton()?.disabled).toBe(true);
+
+      // AND POLLING CONTINUES: a shell is not a dead end, only an
+      // unconfirmed one -- nothing may be written into `providerRunningByKey`
+      // on the strength of a read this uncertain, or a LATER, genuine ready
+      // read would find the key already "confirmed" and never correct it.
+      const callsSoFar = startScreen.mock.calls.length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(START_SCREEN_POLL_MS);
+      });
+      expect(startScreen.mock.calls.length).toBeGreaterThan(callsSoFar);
+      expect(document.querySelector('[data-pane-ready]')).toBeNull();
+
+      // THE OPERATOR ACTUALLY PRESSES ENTER: the SAME pane, a later poll,
+      // genuinely running now -- still reachable, because nothing above ever
+      // froze this key on the shell's own false start.
+      provider = 'claude-code';
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(START_SCREEN_POLL_MS);
+      });
+      expect(document.querySelector('[data-pane-ready]')?.textContent).toContain(
+        'Claude Code is ready',
+      );
+    });
+
+    /**
      * D-RELOAD, RE-FIXED AFTER THE COORDINATOR'S TRUST-CARD S2: the reload
      * case used to trust `Session.runningProvider` (the model's field)
      * OUTRIGHT, which drew `PaneReady` over a trust/update dialog the model's
@@ -965,6 +1032,87 @@ describe('Start session — the wait for the agent to register', () => {
       expect(startButton()?.disabled).toBe(true);
     });
 
+    /**
+     * THE COORDINATOR'S OWN BUG REPORT (B): declining the trust dialog used
+     * to discard `answerTrust`'s own result outright (`DetailPanel.tsx`'s
+     * `onAnswerTrust`) -- and nothing else ever ends THIS wait either, once
+     * declined. `claude`'s own "No, exit" quits the CLI back to a bare shell,
+     * so the row never leaves `unstarted` (no agent registers, ever) and the
+     * model never reports a `runningProvider` for it either -- neither of
+     * `startingPaneByKey`'s own two ordinary exits (the row leaving
+     * `unstarted`/`terminal`, or the model independently agreeing) was ever
+     * going to fire, and `PROVIDER_CONFIRMATION_EXPIRY_MS` only bounds
+     * `providerRunningByKey`, which a `trust` screen never populated. Start
+     * stayed disabled forever. The fix answers the "No" press itself: once
+     * `window.api.terminal.answerTrust` resolves, the wait clears.
+     */
+    it('B: declining the trust dialog clears the wait once the answer resolves, and Start comes back', async () => {
+      const startScreen = vi.fn(async () => ({ kind: 'ok' as const, screen: 'trust' as const }));
+      let resolveAnswer: ((result: null) => void) | null = null;
+      const answerTrust = vi.fn(
+        () =>
+          new Promise<null>((resolve) => {
+            resolveAnswer = resolve;
+          }),
+      );
+      (window as unknown as { api: unknown }).api = { terminal: { startScreen, answerTrust } };
+      render(<Canvas model={modelWith(UNSTARTED)} source={gatedSource().source} />);
+      await act(async () => {
+        startButton()?.click();
+      });
+      await act(async () => {});
+      expect(
+        document.querySelector('[data-start-screen-card]')?.getAttribute('data-start-screen-kind'),
+      ).toBe('trust');
+      expect(startButton()?.disabled).toBe(true);
+
+      await act(async () => {
+        document.querySelector<HTMLElement>('[data-start-screen-trust-no]')?.click();
+      });
+      expect(answerTrust).toHaveBeenCalledWith('p1', UNSTARTED.id, false);
+      // NOT YET -- the write has not resolved: the wait must not clear on
+      // the PRESS alone, only once vam actually knows the keys landed (or
+      // were refused), the same "verify then act" discipline every other
+      // write in this wait already follows.
+      expect(startButton()?.disabled).toBe(true);
+
+      await act(async () => {
+        resolveAnswer?.(null);
+      });
+      // CLEARED: the trust card is gone, and Start is genuinely pressable
+      // again -- never a different-looking stuck state.
+      expect(document.querySelector('[data-start-screen-card]')).toBeNull();
+      expect(startButton()?.disabled).toBe(false);
+      expect(providerPicker()?.hasAttribute('disabled')).toBe(false);
+    });
+
+    /**
+     * THE OTHER HALF OF (B): no path may leave Start disabled forever, not
+     * only the trust-decline one above -- a `timedOut` wait already admits
+     * vam has nothing further to wait on (`StartTimeoutHint`'s own header:
+     * "a spinner that could be wrong forever is worse than one that admits
+     * it"), so the operator's own retry must not be blocked by the identical
+     * wait that just gave up on itself.
+     */
+    it('B: a timed-out wait no longer disables Start -- the operator can retry', async () => {
+      vi.useFakeTimers();
+      const startScreen = vi.fn(async () => ({ kind: 'ok' as const, screen: 'unknown' as const }));
+      (window as unknown as { api: unknown }).api = { terminal: { startScreen } };
+      const { source } = gatedSource();
+      render(<Canvas model={modelWith(UNSTARTED)} source={source} />);
+      await act(async () => {
+        startButton()?.click();
+      });
+      await act(async () => {});
+      expect(startButton()?.disabled).toBe(true);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(START_SCREEN_UNKNOWN_STALL_MS);
+      });
+      expect(timeoutHint()?.textContent).toContain('Still starting');
+      expect(startButton()?.disabled).toBe(false);
+      expect(providerPicker()?.hasAttribute('disabled')).toBe(false);
+    });
+
     it('shortens the wait to the unknown-stall bound, well under the full 30s timeout', async () => {
       vi.useFakeTimers();
       const startScreen = vi.fn(async () => ({ kind: 'ok' as const, screen: 'unknown' as const }));
@@ -1017,9 +1165,13 @@ describe('Start session — the wait for the agent to register', () => {
     });
     expect(timeoutHint()?.textContent).toContain('Still starting');
     expect(startButton()?.querySelector('.vam-spin')).toBeNull();
-    // NEVER LEFT SPINNING: the button still says what it is doing, but the
-    // one part that promised an end it could not see is gone.
-    expect(startButton()?.disabled).toBe(true);
+    // NEVER LEFT SPINNING, AND NEVER LEFT DISABLED EITHER -- a review-found
+    // S2 (`ProviderStartControls`'s own header): a `timedOut` wait has
+    // already admitted vam has nothing further to wait on, and disabling
+    // Start regardless would block the operator's own retry with no path
+    // back except reloading. The button still says what it was doing until
+    // the operator acts, but it is genuinely pressable again.
+    expect(startButton()?.disabled).toBe(false);
   });
 });
 

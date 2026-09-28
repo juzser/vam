@@ -641,7 +641,7 @@ export async function loadClaudeCodeProjects(
     ),
   );
 
-  const grouped = new Map<string, { cwd: string; sessions: Session[] }>();
+  const grouped = new Map<string, { cwd: string; sessions: Session[]; projectId?: string }>();
   // Every pane a LIVE row was proven to be in this load -- the set the empty
   // panes are subtracted from below. Filled as the rows are built, so the
   // pairing is computed once per row and read twice.
@@ -873,7 +873,18 @@ export async function loadClaudeCodeProjects(
         // row still has no cwd to build a section from, and is skipped below
         // exactly as before this change.
         if (cwd === null) continue;
-        bucket = { cwd, sessions: [] };
+        // `projectId` STAMPED ON THE BUCKET -- a review-found S2 (D-42). This
+        // is `empty.project` itself for a TAGGED pane, which can differ from
+        // `projectIdOf(cwd)` the moment the shell `cd`s into a subdirectory
+        // AFTER `@vam-project` was stamped; for an UNTAGGED pane it is
+        // `projectIdOf(cwd)` already, so the two agree and nothing changes
+        // for that case. Read back below instead of re-deriving from
+        // `group.cwd`, which is what let the two disagree: the emitted id
+        // must be the SAME one `paneProjectDirectory` (`create-session.ts`)
+        // resolves a directory from -- tag first, cwd only when untagged --
+        // or "New session" on the row this bucket became asks for an id that
+        // lookup never matches and is refused as `unknown-project`.
+        bucket = { cwd, sessions: [], projectId };
         grouped.set(cwd, bucket);
         byProjectId.set(projectId, bucket);
       }
@@ -882,7 +893,7 @@ export async function loadClaudeCodeProjects(
   }
 
   return [...grouped.values()].map((group) => ({
-    id: projectIdOf(group.cwd),
+    id: group.projectId ?? projectIdOf(group.cwd),
     name: basename(group.cwd),
     // Deprecated on the model, and still set: the launched-app harness asserts
     // that what main serves carries at least the key set the browser demo
