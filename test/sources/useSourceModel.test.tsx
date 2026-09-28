@@ -13,7 +13,7 @@
 
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { CanvasModel, Project } from '../../src/renderer/domain/model.js';
+import type { CanvasModel, Project, SessionStatus } from '../../src/renderer/domain/model.js';
 import type { SessionSource } from '../../src/renderer/sources/port.js';
 import {
   SOURCE_POLL_INTERVAL_MS,
@@ -27,6 +27,37 @@ afterEach(() => {
 
 const projects = (name: string): readonly Project[] => [
   { id: 'p1', name, source: 'claude-code', sessions: [] },
+];
+
+/**
+ * A one-session project whose ONLY reason to differ between loads is
+ * `cacheSourceNowMs`/`age` (the two observation clocks, affe8f37) or,
+ * optionally, `status` -- a real change the stable key must still catch.
+ */
+const projectsWithClocks = (
+  cacheSourceNowMs: number,
+  age: string,
+  status: SessionStatus = 'running',
+): readonly Project[] => [
+  {
+    id: 'p1',
+    name: 'alpha',
+    source: 'claude-code',
+    sessions: [
+      {
+        id: 's1',
+        title: 'task',
+        epic: null,
+        status,
+        runningAgents: 0,
+        activity: null,
+        age,
+        branch: null,
+        decisions: [],
+        cacheSourceNowMs,
+      },
+    ],
+  },
 ];
 
 /** A source whose `load` resolves when the test says so, in the order it says. */
@@ -489,6 +520,160 @@ describe('useSourceModel', () => {
         vi.advanceTimersByTime(SOURCE_POLL_INTERVAL_MS * 2); // +40s from the hide moment
       });
       expect(pending).toHaveLength(4);
+    });
+  });
+
+  /**
+   * affe8f37: `JSON.stringify(projects)` alone never reads two loads as
+   * "unchanged" for a session with cache activity, because main stamps
+   * `cacheSourceNowMs` with the current poll time on every such load
+   * (`main/sources/claude-code/source.ts`) and `age` is a display string
+   * recomputed from that same clock. The comparison must ignore exactly
+   * those two fields, and nothing else.
+   */
+  describe('affe8f37: the unchanged-streak backoff ignores the observation clocks', () => {
+    it('the clocks alone do not reset the streak -- the gap between loads #4 and #5 is 20s, not 10s', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: false });
+      vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+      const { source, pending } = gatedSource();
+      mount(source);
+      expect(pending).toHaveLength(1);
+      await act(async () => pending[0]?.resolve(projectsWithClocks(1_000, '0s'))); // load #1
+
+      await act(async () => {
+        vi.advanceTimersByTime(SOURCE_POLL_INTERVAL_MS); // -> load #2, t=10s
+      });
+      await act(async () => pending[1]?.resolve(projectsWithClocks(2_000, '10s'))); // streak 2, clocks only differ
+
+      await act(async () => {
+        vi.advanceTimersByTime(SOURCE_POLL_INTERVAL_MS); // -> load #3, t=20s
+      });
+      await act(async () => pending[2]?.resolve(projectsWithClocks(3_000, '20s'))); // streak 3, backs off to 20s
+
+      await act(async () => {
+        vi.advanceTimersByTime(SOURCE_POLL_INTERVAL_MS * 2); // -> load #4, t=40s (backed-off gap)
+      });
+      expect(pending).toHaveLength(4);
+      await act(async () => pending[3]?.resolve(projectsWithClocks(4_000, '30s'))); // clocks only differ again
+
+      // The interval under test: load #4 to load #5.
+      await act(async () => {
+        vi.advanceTimersByTime(SOURCE_POLL_INTERVAL_MS - 1); // 9_999ms since load #4
+      });
+      expect(pending).toHaveLength(4);
+      await act(async () => {
+        vi.advanceTimersByTime(1); // 10_000ms since load #4
+      });
+      // HEAD (whole-object JSON.stringify) fails here: the clocks alone made
+      // load #4 read as different from load #3, resetting the streak and
+      // the cadence to the 10s base, so load #5 would already be pending.
+      // The fix's stable key reads them as unchanged, so nothing has
+      // arrived yet -- the backed-off 20s cadence holds.
+      expect(pending).toHaveLength(4);
+      await act(async () => {
+        vi.advanceTimersByTime(SOURCE_POLL_INTERVAL_MS); // 20_000ms since load #4
+      });
+      expect(pending).toHaveLength(5); // load #5 arrives at the 20s gap the backoff earned
+    });
+
+    it('is not blind: a real status change on load #4 still resets the streak to the 10s base', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: false });
+      vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+      const { source, pending } = gatedSource();
+      mount(source);
+      await act(async () => pending[0]?.resolve(projectsWithClocks(1_000, '0s')));
+      await act(async () => {
+        vi.advanceTimersByTime(SOURCE_POLL_INTERVAL_MS);
+      });
+      await act(async () => pending[1]?.resolve(projectsWithClocks(2_000, '10s')));
+      await act(async () => {
+        vi.advanceTimersByTime(SOURCE_POLL_INTERVAL_MS);
+      });
+      await act(async () => pending[2]?.resolve(projectsWithClocks(3_000, '20s'))); // streak 3, backs off to 20s
+
+      await act(async () => {
+        vi.advanceTimersByTime(SOURCE_POLL_INTERVAL_MS * 2); // -> load #4, t=40s
+      });
+      expect(pending).toHaveLength(4);
+      // The 4th load's session status differs too -- a real change, not an
+      // observation clock.
+      await act(async () => pending[3]?.resolve(projectsWithClocks(4_000, '30s', 'waiting')));
+
+      await act(async () => {
+        vi.advanceTimersByTime(SOURCE_POLL_INTERVAL_MS - 1); // 9_999ms since load #4
+      });
+      expect(pending).toHaveLength(4);
+      await act(async () => {
+        vi.advanceTimersByTime(1); // 10_000ms since load #4
+      });
+      expect(pending).toHaveLength(5); // the status change alone restores the 10s base
+    });
+
+    it('the rendered model still carries the newest load’s own observation clocks', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: false });
+      vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+      const { source, pending } = gatedSource();
+      const { latest } = mount(source);
+      await act(async () => pending[0]?.resolve(projectsWithClocks(1_000, '0s')));
+      await act(async () => {
+        vi.advanceTimersByTime(SOURCE_POLL_INTERVAL_MS);
+      });
+      await act(async () => pending[1]?.resolve(projectsWithClocks(2_000, '10s')));
+      await act(async () => {
+        vi.advanceTimersByTime(SOURCE_POLL_INTERVAL_MS);
+      });
+      await act(async () => pending[2]?.resolve(projectsWithClocks(3_000, '20s')));
+      await act(async () => {
+        vi.advanceTimersByTime(SOURCE_POLL_INTERVAL_MS * 2); // load #4, backed off
+      });
+      await act(async () => pending[3]?.resolve(projectsWithClocks(4_000, '30s')));
+      await act(async () => {
+        vi.advanceTimersByTime(SOURCE_POLL_INTERVAL_MS * 2); // load #5, still backed off
+      });
+      await act(async () => pending[4]?.resolve(projectsWithClocks(5_000, '40s')));
+
+      // The comparison ignores the clocks; the DISPLAYED model does not.
+      const session = latest()?.model.projects[0]?.sessions[0];
+      expect(session?.cacheSourceNowMs).toBe(5_000);
+      expect(session?.age).toBe('40s');
+    });
+  });
+
+  /**
+   * OPERATOR DECISION 2026-09-28 (event #70): the hidden-window finding is
+   * deferred and the 40s hidden `waiting`-notification latency is required.
+   * This is a regression guard, not a new behaviour -- it passes at HEAD and
+   * must still pass after affe8f37's fix. Its discriminating power is proven
+   * by mutation (see this file's own report), not by a HEAD failure: a
+   * source that differs ONLY in the observation clocks now reads as
+   * unchanged past a streak of 3, which must never let hidden's cadence
+   * compose with the visible backoff -- every gap while hidden stays 40s.
+   */
+  describe('affe8f37 regression guard: the 40s hidden bound holds and never composes', () => {
+    it('every gap between hidden loads is exactly 40s across six loads, even once the streak backs off under the hood', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: false });
+      const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+      const { source, pending } = gatedSource();
+      mount(source);
+      expect(pending).toHaveLength(1);
+      await act(async () => pending[0]?.resolve(projectsWithClocks(1_000, '0s')));
+
+      visibility.mockReturnValue('hidden');
+      await act(async () => {
+        fireEvent(document, new Event('visibilitychange'));
+      });
+
+      for (let i = 1; i <= 6; i += 1) {
+        await act(async () => {
+          vi.advanceTimersByTime(SOURCE_POLL_INTERVAL_MS * 4 - 1); // 39_999ms since the previous load
+        });
+        expect(pending).toHaveLength(i);
+        await act(async () => {
+          vi.advanceTimersByTime(1); // reaches exactly 40_000ms
+        });
+        expect(pending).toHaveLength(i + 1);
+        await act(async () => pending[i]?.resolve(projectsWithClocks(1_000 + i * 1_000, `${i * 10}s`)));
+      }
     });
   });
 });
