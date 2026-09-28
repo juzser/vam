@@ -71,6 +71,48 @@ describe('ConfirmDeleteWorktree — clean worktree', () => {
   });
 });
 
+describe('ConfirmDeleteWorktree — detached HEAD (S1 data-loss fix)', () => {
+  /**
+   * THE FALSE PROMISE THIS CLOSES: before the fix, a DETACHED worktree's
+   * short sha flowed straight into the "Its branch (<sha>)..." sentence --
+   * `branch` (`friendlyBranch`, `worktrees.ts`) already reads a detached
+   * `HEAD` as its short sha, so nothing here ever noticed the difference. A
+   * detached worktree has no branch at all; the copy must say so.
+   */
+  it('describes a detached worktree by its sha, never as a branch', () => {
+    const { container } = render(
+      <ConfirmDeleteWorktree
+        name="feat"
+        branch="abc1234"
+        detached={true}
+        dirty={false}
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    const copy = container.querySelector('[data-confirm-delete-worktree-copy]')?.textContent ?? '';
+    expect(copy).toContain('detached at abc1234');
+    // The sha is never called "its branch" -- a detached worktree has none.
+    expect(copy).not.toContain('branch (abc1234)');
+    expect(copy).not.toContain('Its branch');
+  });
+
+  it('still describes an ordinary branch worktree as a branch, unchanged', () => {
+    const { container } = render(
+      <ConfirmDeleteWorktree
+        name="feat"
+        branch="feat"
+        detached={false}
+        dirty={false}
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    const copy = container.querySelector('[data-confirm-delete-worktree-copy]')?.textContent ?? '';
+    expect(copy).toContain('Its branch (feat)');
+  });
+});
+
 describe('ConfirmDeleteWorktree — dirty worktree', () => {
   it('disables Delete until the typed name matches exactly', () => {
     const onConfirm = vi.fn();

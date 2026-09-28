@@ -282,6 +282,102 @@ describe('WorktreesSection — delete', () => {
   });
 });
 
+describe('WorktreesSection — delete a DETACHED worktree (S1 data-loss fix)', () => {
+  it('passes detached through to the confirm dialog, described as detached rather than a branch', async () => {
+    installApi({
+      worktrees: {
+        list: vi.fn().mockResolvedValue([worktree({ detached: true, branch: 'abc1234' })]),
+        create: vi.fn(),
+        remove: vi.fn(),
+      },
+    });
+    const { container } = render(
+      <WorktreesSection
+        project={project}
+        allEntries={[]}
+        forceOpenCreate={false}
+        onCloseCreate={vi.fn()}
+        renderSessionRow={fakeRenderSessionRow}
+        hideAgentWorktrees={HIDE_AGENT_WORKTREES}
+      />,
+    );
+    await waitFor(() => expect(container.querySelector('[data-worktree-delete]')).not.toBeNull());
+    fireEvent.click(container.querySelector('[data-worktree-delete]') as HTMLButtonElement);
+    const copy = await waitFor(() => {
+      const el = document.querySelector('[data-confirm-delete-worktree-copy]');
+      if (el === null) throw new Error('not yet');
+      return el;
+    });
+    expect(copy.textContent).toContain('detached at abc1234');
+    expect(copy.textContent).not.toContain('Its branch');
+    // Close the dialog before this test ends -- this file's own convention
+    // (nothing else here leaves a confirm-delete dialog open across a test
+    // boundary; without an RTL `cleanup()` between tests in this file, a
+    // dangling dialog is a REAL, later test-scoped element `document.
+    // querySelector` could match instead of the next test's own).
+    fireEvent.click(
+      document.querySelector('[data-confirm-delete-worktree-cancel]') as HTMLButtonElement,
+    );
+  });
+
+  it('shows the kept-ref name once removal reports one, after the dialog closes', async () => {
+    const remove = vi.fn().mockResolvedValue({ preservedBranch: false, keptRef: 'vam-kept/feat' });
+    installApi({
+      worktrees: {
+        list: vi.fn().mockResolvedValue([worktree({ detached: true, branch: 'abc1234' })]),
+        create: vi.fn(),
+        remove,
+      },
+    });
+    const { container } = render(
+      <WorktreesSection
+        project={project}
+        allEntries={[]}
+        forceOpenCreate={false}
+        onCloseCreate={vi.fn()}
+        renderSessionRow={fakeRenderSessionRow}
+        hideAgentWorktrees={HIDE_AGENT_WORKTREES}
+      />,
+    );
+    await waitFor(() => expect(container.querySelector('[data-worktree-delete]')).not.toBeNull());
+    fireEvent.click(container.querySelector('[data-worktree-delete]') as HTMLButtonElement);
+    const go = document.querySelector('[data-confirm-delete-worktree-go]') as HTMLButtonElement;
+    await act(async () => {
+      fireEvent.click(go);
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(container.querySelector('[data-worktrees-kept-ref]')?.textContent).toContain(
+        'vam-kept/feat',
+      ),
+    );
+  });
+
+  it('shows no kept-ref message for a plain removal (keptRef: null)', async () => {
+    const remove = vi.fn().mockResolvedValue({ preservedBranch: false, keptRef: null });
+    installApi({
+      worktrees: { list: vi.fn().mockResolvedValue([worktree()]), create: vi.fn(), remove },
+    });
+    const { container } = render(
+      <WorktreesSection
+        project={project}
+        allEntries={[]}
+        forceOpenCreate={false}
+        onCloseCreate={vi.fn()}
+        renderSessionRow={fakeRenderSessionRow}
+      />,
+    );
+    await waitFor(() => expect(container.querySelector('[data-worktree-delete]')).not.toBeNull());
+    fireEvent.click(container.querySelector('[data-worktree-delete]') as HTMLButtonElement);
+    const go = document.querySelector('[data-confirm-delete-worktree-go]') as HTMLButtonElement;
+    await act(async () => {
+      fireEvent.click(go);
+      await Promise.resolve();
+    });
+    expect(container.querySelector('[data-worktrees-kept-ref]')).toBeNull();
+  });
+});
+
 describe('WorktreesSection — start a session here', () => {
   it('shows "Start a session here" for a worktree with no live sessions, and calls createSessionIn', async () => {
     const { createSessionIn } = installApi({

@@ -8558,8 +8558,17 @@ function CanvasInner({
           {prefs.statusBarShowClaudeUsage && (
             <>
               <span className="h-3 w-px bg-line" />
+              {/* The provider mark, in EVERY state -- including the bare `—`
+                  with its tooltip. `SourceMark` is the same resolver the
+                  sidebar row and the Stats screen's `ProviderCard` already
+                  draw from (`sources/provider-marks.tsx`), never a copied
+                  path: one glyph for `claude-code`, drawn once. */}
               {usage.reason === null ? (
-                <span data-usage className={usage.highUsage ? 'text-failed' : undefined}>
+                <span
+                  data-usage
+                  className={`flex items-center gap-1${usage.highUsage ? ' text-failed' : ''}`}
+                >
+                  <SourceMark source="claude-code" lane={12} />
                   {usage.text}
                 </span>
               ) : (
@@ -8570,9 +8579,11 @@ function CanvasInner({
                       hover on touch it was unreachable at all. */}
                   <span
                     data-usage
+                    className="flex items-center gap-1"
                     // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see `StatusCell`.
                     tabIndex={0}
                   >
+                    <SourceMark source="claude-code" lane={12} />
                     {usage.text}
                   </span>
                 </Note>
@@ -8601,18 +8612,30 @@ function CanvasInner({
                   are not `UsageWindow`s, and a second bar widget over a shape
                   `describeCodexStatusUsage` already collapsed to one line is
                   more than this cell earns -- the popover (`UsagePopover.tsx`)
-                  is where the per-window detail lives. */}
+                  is where the per-window detail lives.
+
+                  The provider mark draws in EVERY state here too, including
+                  the bare `—` with its tooltip -- the same `SourceMark`
+                  resolver, `source="codex"`, so this cell and Claude's read
+                  as one family rather than two different widgets that
+                  happen to sit beside each other. */}
               {codexUsage.reason === null ? (
-                <span data-codex-usage className={codexUsage.highUsage ? 'text-failed' : undefined}>
+                <span
+                  data-codex-usage
+                  className={`flex items-center gap-1${codexUsage.highUsage ? ' text-failed' : ''}`}
+                >
+                  <SourceMark source="codex" lane={12} />
                   {codexUsage.text}
                 </span>
               ) : (
                 <Note text={codexUsage.reason}>
                   <span
                     data-codex-usage
+                    className="flex items-center gap-1"
                     // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see `StatusCell`.
                     tabIndex={0}
                   >
+                    <SourceMark source="codex" lane={12} />
                     {codexUsage.text}
                   </span>
                 </Note>

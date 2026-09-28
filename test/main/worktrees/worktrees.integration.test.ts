@@ -480,7 +480,7 @@ describe('removeWorktree', () => {
 
     const result = await removeWorktree({ projectId, worktreeId }, deps);
 
-    expect(result).toEqual({ preservedBranch: false });
+    expect(result).toEqual({ preservedBranch: false, keptRef: null });
     expect(existsSync(worktreeId)).toBe(false);
     const branches = execFileSync('git', ['branch', '--list', 'feat'], {
       cwd: repo,
@@ -502,7 +502,7 @@ describe('removeWorktree', () => {
 
     const result = await removeWorktree({ projectId, worktreeId }, deps);
 
-    expect(result).toEqual({ preservedBranch: true });
+    expect(result).toEqual({ preservedBranch: true, keptRef: null });
     expect(existsSync(worktreeId)).toBe(false);
     const branches = execFileSync('git', ['branch', '--list', 'feat'], {
       cwd: repo,
@@ -558,7 +558,7 @@ describe('removeWorktree', () => {
       deps,
     );
 
-    expect(result).toEqual({ preservedBranch: false });
+    expect(result).toEqual({ preservedBranch: false, keptRef: null });
     expect(existsSync(worktreeId)).toBe(false);
   });
 
@@ -682,7 +682,7 @@ describe('removeWorktree', () => {
 
       const result = await removeWorktree({ projectId, worktreeId: manualPath }, deps);
 
-      expect(result).toEqual({ preservedBranch: false });
+      expect(result).toEqual({ preservedBranch: false, keptRef: null });
       expect(existsSync(manualPath)).toBe(false);
     });
 
@@ -738,13 +738,142 @@ describe('removeWorktree', () => {
 
       const result = await removeWorktree({ projectId, worktreeId: manualPath }, deps);
 
-      expect(result).toEqual({ preservedBranch: true });
+      expect(result).toEqual({ preservedBranch: true, keptRef: null });
       expect(existsSync(manualPath)).toBe(false);
       const branches = execFileSync('git', ['branch', '--list', 'manual'], {
         cwd: repo,
         encoding: 'utf8',
       });
       expect(branches.trim()).not.toBe('');
+    });
+  });
+
+  /**
+   * THE S1 DATA-LOSS BUG THIS SUITE FALSIFIES: a DETACHED worktree has no
+   * branch for the `branch -d` step above to even attempt -- before this
+   * fix, `git worktree remove` ran unconditionally and the commit it had
+   * checked out simply became unreachable garbage the moment nothing else
+   * named it, exactly what `git fsck --unreachable --no-reflogs` would then
+   * list. Reproduced here with REAL git: a worktree made with `git worktree
+   * add --detach` (never through `createWorktree`, which always creates a
+   * branch -- the shape this bug needs is only reachable by adopting a
+   * worktree vam did not make itself, or one an operator detached by hand
+   * inside a worktree vam DID make), one commit recorded while detached, a
+   * clean tree, then `removeWorktree`.
+   *
+   * DESIGN CHOSEN: keep-ref-by-default. `removeWorktree` mints
+   * `refs/heads/vam-kept/<name>` (collision-safe suffix) for a detached
+   * `HEAD` reachable from no `refs/heads`/`refs/remotes`/`refs/tags` ref,
+   * and reports its short name as `keptRef` -- no typed-name escalation, no
+   * extra friction, because there is no "discard" choice to escalate INTO:
+   * the commit is always kept.
+   *
+   * FALSIFY BY HAND: comment out the `if (matched.detached ...)` block in
+   * `removeWorktree` (`src/main/worktrees/worktrees.ts`) and rerun -- the
+   * first test below goes red (`keptRef` stays `null`, and the `git fsck`
+   * assertion at its end finds the commit listed as unreachable garbage
+   * again).
+   */
+  describe('removeWorktree — DETACHED HEAD, unreachable commits (S1 data-loss fix)', () => {
+    it('keeps a DETACHED worktree’s otherwise-unreachable commit on a new branch before removing it', async () => {
+      const parent = tempParent();
+      const repo = tempRepo(parent);
+      const deps = depsFor(repo);
+      const projectId = projectIdOf(repo);
+      const detachedPath = join(parent, 'detached-wt');
+      execFileSync('git', ['worktree', 'add', '--detach', detachedPath, 'main'], { cwd: repo });
+      writeFileSync(join(detachedPath, 'unique.txt'), 'only reachable from here');
+      execFileSync('git', ['add', 'unique.txt'], { cwd: detachedPath });
+      execFileSync('git', ['commit', '--quiet', '-m', 'unreachable commit'], { cwd: detachedPath });
+      const headSha = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: detachedPath,
+        encoding: 'utf8',
+      }).trim();
+      // The falsifiable PRE-condition: before removal, this commit is
+      // reachable from nothing but the detached worktree's own HEAD.
+      const before = execFileSync(
+        'git',
+        ['for-each-ref', '--contains', headSha, 'refs/heads', 'refs/remotes', 'refs/tags'],
+        { cwd: repo, encoding: 'utf8' },
+      );
+      expect(before.trim()).toBe('');
+
+      const result = await removeWorktree({ projectId, worktreeId: detachedPath }, deps);
+
+      expect(existsSync(detachedPath)).toBe(false);
+      expect('kind' in result).toBe(false);
+      const outcome = result as { preservedBranch: boolean; keptRef: string | null };
+      expect(outcome.preservedBranch).toBe(false);
+      expect(outcome.keptRef).not.toBeNull();
+      expect(outcome.keptRef).toMatch(/^vam-kept\//);
+      // The commit is now reachable via the keep-ref git itself just made --
+      // not merely claimed reachable by this function's own return value.
+      const after = execFileSync(
+        'git',
+        ['for-each-ref', '--contains', headSha, `refs/heads/${outcome.keptRef}`],
+        { cwd: repo, encoding: 'utf8' },
+      );
+      expect(after.trim()).not.toBe('');
+      // And `git fsck` itself, the same tool the bug report used to prove
+      // the commit was garbage, no longer lists it as unreachable.
+      const fsck = execFileSync('git', ['fsck', '--unreachable', '--no-reflogs'], {
+        cwd: repo,
+        encoding: 'utf8',
+      });
+      expect(fsck).not.toContain(headSha);
+    });
+
+    it('creates no keep-ref for a DETACHED worktree whose HEAD is already reachable from an existing branch', async () => {
+      const parent = tempParent();
+      const repo = tempRepo(parent);
+      const deps = depsFor(repo);
+      const projectId = projectIdOf(repo);
+      const detachedPath = join(parent, 'detached-wt');
+      // Detached at `main`'s own tip, no new commit -- already reachable.
+      execFileSync('git', ['worktree', 'add', '--detach', detachedPath, 'main'], { cwd: repo });
+
+      const result = await removeWorktree({ projectId, worktreeId: detachedPath }, deps);
+
+      expect(existsSync(detachedPath)).toBe(false);
+      expect(result).toEqual({ preservedBranch: false, keptRef: null });
+    });
+
+    it('refuses a DIRTY detached worktree without confirmation, minting no keep-ref and removing nothing', async () => {
+      const parent = tempParent();
+      const repo = tempRepo(parent);
+      const deps = depsFor(repo);
+      const projectId = projectIdOf(repo);
+      const detachedPath = join(parent, 'detached-wt');
+      execFileSync('git', ['worktree', 'add', '--detach', detachedPath, 'main'], { cwd: repo });
+      writeFileSync(join(detachedPath, 'untracked.txt'), 'oops');
+
+      const result = await removeWorktree({ projectId, worktreeId: detachedPath }, deps);
+
+      expect(result).toMatchObject({ kind: 'refused', code: 'dirty' });
+      expect(existsSync(detachedPath)).toBe(true);
+      const refs = execFileSync('git', ['for-each-ref', 'refs/heads/vam-kept'], {
+        cwd: repo,
+        encoding: 'utf8',
+      });
+      expect(refs.trim()).toBe('');
+    });
+
+    it('names the keep-ref uniquely when one of that name already exists', async () => {
+      const parent = tempParent();
+      const repo = tempRepo(parent);
+      const deps = depsFor(repo);
+      const projectId = projectIdOf(repo);
+      execFileSync('git', ['branch', 'vam-kept/detached-wt'], { cwd: repo });
+      const detachedPath = join(parent, 'detached-wt');
+      execFileSync('git', ['worktree', 'add', '--detach', detachedPath, 'main'], { cwd: repo });
+      writeFileSync(join(detachedPath, 'unique.txt'), 'only reachable from here');
+      execFileSync('git', ['add', 'unique.txt'], { cwd: detachedPath });
+      execFileSync('git', ['commit', '--quiet', '-m', 'unreachable commit'], { cwd: detachedPath });
+
+      const result = await removeWorktree({ projectId, worktreeId: detachedPath }, deps);
+
+      const outcome = result as { preservedBranch: boolean; keptRef: string | null };
+      expect(outcome.keptRef).toBe('vam-kept/detached-wt-2');
     });
   });
 
