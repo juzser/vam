@@ -54,9 +54,21 @@ describe('seedWithCursor (pure)', () => {
     expect(seedWithCursor(body, 'not a cursor line')).toBe('a\nb');
   });
 
-  it('hides the cursor (DECTCEM off) and does not reposition it when cursor_flag is 0', () => {
+  it('places the cursor at its real cell, THEN hides it, when cursor_flag is 0 (review finding: the position used to be discarded)', () => {
+    // Claude Code's own UI hides the cursor and redraws relatively -- a
+    // seed that dropped the position here left every later relative redraw
+    // landing on the wrong row. tmux keeps tracking `cursor_x`/`cursor_y`
+    // even while the cursor is hidden (MEASURED against a real tmux 3.7b on
+    // a private `-L` socket: hiding the cursor, then moving it with a CUP,
+    // both changed `#{cursor_x}`/`#{cursor_y}` on the very next
+    // `display-message`), so this is real data to place, not a guess.
     const body = 'x\n';
-    expect(seedWithCursor(body, '@vam-cursor 0 5 5 0 0')).toBe('x\x1b[?25l');
+    expect(seedWithCursor(body, '@vam-cursor 0 5 5 0 0')).toBe('x\x1b[6;6H\x1b[?25l');
+  });
+
+  it('hides the cursor with no CUP when its position could not be read either (defensive, never invents 0,0)', () => {
+    const body = 'x\n';
+    expect(seedWithCursor(body, '@vam-cursor 0  ')).toBe('x\x1b[?25l');
   });
 
   it('appends nothing beyond the trailing-newline strip when the cursor reply is unreadable', () => {
@@ -95,6 +107,15 @@ const tmuxWorks = (): boolean => {
 
 const SOCKET = `vamtest${process.pid}sk`;
 const SESSION = `vam-seedcursor-${process.pid}`;
+// A SECOND, dedicated session whose own fake program hides its cursor and
+// then moves it -- the real-tmux falsification for the "keep the
+// coordinates" fix: `readCursorLine` used to discard `cursor_x`/`cursor_y`
+// outright whenever `cursor_flag` was 0 (`spawn.ts:388`), so a hidden
+// cursor's redraw-relative UI (Claude Code's own) landed on the wrong row
+// after a reseed. MEASURED separately (this task's own probe, a private
+// `-L` socket) that tmux keeps tracking `#{cursor_x}`/`#{cursor_y}` while
+// hidden, so there is a real position here to place, not a guess.
+const HIDDEN_SESSION = `vam-seedcursor-hidden-${process.pid}`;
 const COLUMNS = 60;
 const ROWS = 20;
 
@@ -111,6 +132,23 @@ describe.skipIf(!live)('StreamClient#connect seed (real tmux)', () => {
     // near the last line of the screen).
     tmux('send-keys', '-t', SESSION, '-l', '--', 'printf "one\\ntwo\\nthree\\n"');
     tmux('send-keys', '-t', SESSION, 'Enter');
+
+    tmux(
+      'new-session',
+      '-d',
+      '-s',
+      HIDDEN_SESSION,
+      '-x',
+      String(COLUMNS),
+      '-y',
+      String(ROWS),
+      'sh',
+    );
+    // DECTCEM off (hide), then a CUP well away from the origin -- so a fix
+    // that quietly fell back to `0,0` (or to no position at all) is
+    // distinguishable from one that genuinely read tmux's own tracked cell.
+    tmux('send-keys', '-t', HIDDEN_SESSION, '-l', '--', 'printf "\\033[?25l\\033[3;10H"');
+    tmux('send-keys', '-t', HIDDEN_SESSION, 'Enter');
   }, 20_000);
 
   afterAll(() => {
@@ -142,6 +180,31 @@ describe.skipIf(!live)('StreamClient#connect seed (real tmux)', () => {
     try {
       const seed = await client.connect();
       const expectedEscape = `\x1b[${mark.cursor.row + 1};${mark.cursor.column + 1}H\x1b[?25h`;
+      expect(seed.endsWith(expectedEscape)).toBe(true);
+    } finally {
+      client.dispose();
+    }
+  });
+
+  it('a HIDDEN cursor still seeds its real position, not just the hide escape (review finding)', async () => {
+    await new Promise((r) => setTimeout(r, 200));
+    const cursorLine = tmux(
+      'display-message',
+      '-p',
+      '-t',
+      HIDDEN_SESSION,
+      '-F',
+      '@vam-cursor #{cursor_flag} #{cursor_x} #{cursor_y} #{history_size} #{mouse_any_flag}',
+    ).trim();
+    const mark = readCursorLine(cursorLine);
+    expect(mark.cursor.kind).toBe('hidden');
+    expect(mark.position).not.toBeNull();
+    if (mark.position === null) throw new Error('unreachable');
+
+    const client = new StreamClient({ prefix: ['-L', SOCKET], target: HIDDEN_SESSION });
+    try {
+      const seed = await client.connect();
+      const expectedEscape = `\x1b[${mark.position.row + 1};${mark.position.column + 1}H\x1b[?25l`;
       expect(seed.endsWith(expectedEscape)).toBe(true);
     } finally {
       client.dispose();

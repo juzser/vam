@@ -312,6 +312,7 @@ export const VAM_CURSOR_MARK = '@vam-cursor';
 
 /**
  * WHAT VAM ASKS ABOUT THE CURSOR, and the four fields are the whole of it.
+ * (Now six -- see `bracket_paste_flag` below, the newest addition.)
  *
  * `cursor_flag` first because it can veto the other two: it is 0 when a
  * program in the pane turned the cursor off (DECTCEM), and a caret drawn over
@@ -343,13 +344,31 @@ export const VAM_CURSOR_MARK = '@vam-cursor';
  * (straight into `claude`, `"tui": "fullscreen"`): `alternate_on=1
  * history_size=0 mouse_any_flag=1`, steady from three seconds on.
  *
- * MEASURED on tmux 3.7b: all five keys exist and expand, and a key tmux does
+ * `bracket_paste_flag` IS THE SIXTH, and it answers a DIFFERENT streaming
+ * bug entirely: `terminal/stream/seed.ts`'s own seed carries no notion of
+ * xterm's bracketed-paste MODE, so attaching to a session whose program
+ * already turned bracketed paste on (before this client ever connected --
+ * the enable sequence reaches the pty once, at the program's own startup,
+ * and this client's `-C` connection may attach long after that) left
+ * xterm's `modes.bracketedPasteMode` permanently false for that view, and a
+ * multi-line paste submitted one line at a time. `#{bracket_paste_flag}` is
+ * tmux's OWN per-pane record of the identical fact `mouse_any_flag` already
+ * rides this line for -- "has the program in the pane asked the terminal
+ * for X" -- so `seedWithCursor` can re-emit the SAME `CSI ?2004h` xterm
+ * would have parsed had it been attached from the start, rather than the
+ * seed inventing a client-side guess or a second, tmux-side paste primitive
+ * of its own. MEASURED on tmux 3.7b over a private `-L` socket: toggling
+ * `printf '\033[?2004h'` / `\033[?2004l'` in a pane flips
+ * `#{bracket_paste_flag}` between `1` and `0` on the very next
+ * `display-message`, independent of `cursor_flag`.
+ *
+ * MEASURED on tmux 3.7b: all six keys exist and expand, and a key tmux does
  * not know expands to the EMPTY STRING rather than failing -- which is what
  * makes an older tmux read as `unreadable` instead of as a crash.
  *
- * Exported for the test that pins the fifth field is asked for.
+ * Exported for the test that pins the fifth/sixth field is asked for.
  */
-export const CURSOR_FORMAT = `${VAM_CURSOR_MARK} #{cursor_flag} #{cursor_x} #{cursor_y} #{history_size} #{mouse_any_flag}`;
+export const CURSOR_FORMAT = `${VAM_CURSOR_MARK} #{cursor_flag} #{cursor_x} #{cursor_y} #{history_size} #{mouse_any_flag} #{bracket_paste_flag}`;
 
 /**
  * HOW FAR BACK THE TERMINAL TAB CAN SCROLL: five hundred lines above the

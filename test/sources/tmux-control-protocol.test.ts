@@ -182,7 +182,7 @@ describe('encodeControlLine', () => {
     const encoded = encodeControlLine(capturePaneArgv('vam-a1b2c3', 500));
     expect(encoded).toEqual({
       line:
-        'display-message -p -t =vam-a1b2c3: -F "@vam-cursor #{cursor_flag} #{cursor_x} #{cursor_y} #{history_size} #{mouse_any_flag}" ; ' +
+        'display-message -p -t =vam-a1b2c3: -F "@vam-cursor #{cursor_flag} #{cursor_x} #{cursor_y} #{history_size} #{mouse_any_flag} #{bracket_paste_flag}" ; ' +
         'capture-pane -p -e -S -500 -t =vam-a1b2c3:',
       blocks: 2,
       mutating: false,
@@ -191,7 +191,7 @@ describe('encodeControlLine', () => {
 
   it('encodes a screen-only capture (history 0) as one segment with no -S', () => {
     expect(encodeControlLine(capturePaneArgv('vam-a1b2c3', 0))?.line).toBe(
-      'display-message -p -t =vam-a1b2c3: -F "@vam-cursor #{cursor_flag} #{cursor_x} #{cursor_y} #{history_size} #{mouse_any_flag}" ; ' +
+      'display-message -p -t =vam-a1b2c3: -F "@vam-cursor #{cursor_flag} #{cursor_x} #{cursor_y} #{history_size} #{mouse_any_flag} #{bracket_paste_flag}" ; ' +
         'capture-pane -p -e -t =vam-a1b2c3:',
     );
   });
