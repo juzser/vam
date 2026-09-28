@@ -271,6 +271,17 @@ export function TerminalStreamTab(props: {
     const openBridge = bridge;
     const openProjectId = projectId;
     let cancelled = false;
+    // A GENERATION COUNTER (finding cbd56848). `teardownStream()` bumps this
+    // every time it runs -- the effect cleanup, the visibility handler's
+    // "hidden" branch, and the backpressure-drain reconnect all funnel
+    // through it -- so a `connect()` still awaiting `openBridge.open()` when
+    // one of those fires can tell, once its own await resolves, that it is
+    // no longer the current attempt. Without this, `streamIdRef.current` is
+    // still `null` while that open is pending (nothing for the cleanup's own
+    // `teardownStream()` call to find and close), so a late successful open
+    // left its stream -- and the tmux child behind it -- running until app
+    // shutdown.
+    let generation = 0;
     let unsubscribeData: (() => void) | undefined;
     let unsubscribeSeed: (() => void) | undefined;
     let unsubscribeDown: (() => void) | undefined;
@@ -303,9 +314,16 @@ export function TerminalStreamTab(props: {
       const streamId = streamIdRef.current;
       streamIdRef.current = null;
       if (streamId !== null) openBridge.close(streamId);
+      generation += 1;
     }
 
     async function connect() {
+      // CAPTURED BEFORE ANY `await` IN THIS CALL, so it names exactly the
+      // attempt this invocation IS -- a later `teardownStream()` (unmount or
+      // a hidden/visible cycle) bumps the outer counter, and comparing back
+      // against it below is what tells a late `openBridge.open()` result
+      // that it lost the race.
+      const myGeneration = generation;
       setRefusal(null);
       setDown(null);
       setName(null);
@@ -551,7 +569,19 @@ export function TerminalStreamTab(props: {
       }
 
       const result = await openBridge.open(openProjectId, rowId);
-      if (cancelled) return;
+      // STALE, EITHER WAY (finding cbd56848): `cancelled` covers the effect
+      // having unmounted while this open was in flight; `myGeneration !==
+      // generation` covers a teardown-then-reconnect that ran in the
+      // meantime (the visibility handler's hidden branch, or a backpressure
+      // reconnect) without unmounting anything. Either one means this open
+      // is not the current attempt any more -- a successful one closes what
+      // it just opened through the SAME `openBridge.close` path
+      // `teardownStream()` uses, rather than adopting it into React state or
+      // leaving it running unowned.
+      if (cancelled || myGeneration !== generation) {
+        if (result.ok) openBridge.close(result.streamId);
+        return;
+      }
       if (!result.ok) {
         setRefusal(result.reason);
         // Only THIS refusal is about the operator's tmux rather than this
