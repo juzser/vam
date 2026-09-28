@@ -11,6 +11,24 @@
  * asking what is not `hidden` — that query now answers "the first of ten",
  * not "the one you navigated to".
  *
+ * THE SETTINGS-VIEWS RESTRUCTURE (item C) MOVED IT BACK, and for a reason
+ * the cards restructure did not have to answer: a "select a section, see
+ * ONLY that section" nav is the operator's own request this time, not this
+ * file's own convenience. `SettingsCard` now mounts the current section's
+ * content alone -- there is no `hidden` sibling for it to be found beside, a
+ * card and a section are the same element, and `[data-settings-panel="id"]`
+ * exists in the tree at all only once its own nav item has been clicked.
+ * Nothing below stopped scoping its queries by id when it stopped NEEDING
+ * to -- by-id was already the right hook, both times, for a different
+ * reason each time -- so every loop that reads a panel still clicks the nav
+ * item first, and the comments that explain why now describe the SECOND
+ * reason rather than the first. `SECTIONS` gained `stats` (item B) and
+ * would gain `skills` (item D) too, except this file always runs against a
+ * browser bundle with no `window.api` bridge, and Skills hides itself where
+ * that bridge is absent (`isDesktopOnlySection`) -- so the sweeps below that
+ * read the nav LIVE (`sectionIds`, not this hardcoded table) see eleven ids,
+ * never twelve, and that is correct here rather than a gap.
+ *
  *  - ITEM 1 (S2, then superseded by the cards restructure). `SectionStrip`
  *    carried `<span className="hidden sm:inline">` around every label, so
  *    below 640px the narrow nav WAS the icon rail its own doc comment argued
@@ -54,14 +72,20 @@ function ratio(a, b) {
 }
 
 /**
- * The sections whose NAME this file asserts, spelled once, all ten of them
- * now — read as the contract `sections.ts` fixes rather than re-derived from
- * whatever the page happens to draw. This file still runs against the BUILT
- * bundle rather than importing the source, so a stale copy of this table
- * reddens against the real DOM instead of asserting against itself.
+ * The sections whose NAME this file asserts, spelled once, all eleven of
+ * them THIS FILE CAN REACH — read as the contract `sections.ts` fixes rather
+ * than re-derived from whatever the page happens to draw. This file still
+ * runs against the BUILT bundle rather than importing the source, so a stale
+ * copy of this table reddens against the real DOM instead of asserting
+ * against itself. `skills` (item D) is not here: it hides wherever
+ * `window.api` is absent (`isDesktopOnlySection`), and every guard in this
+ * file runs against a plain browser bundle with no bridge at all -- the same
+ * reason `remote`'s own action buttons draw their "no bridge" state rather
+ * than the real pairing UI (ITEM 5's own note on that).
  */
 const SECTIONS = [
   ['interface', 'Interface'],
+  ['stats', 'Stats & Usage'],
   ['terminal', 'Terminal'],
   ['window', 'Window & Sidebar'],
   ['agents', 'Agents'],
@@ -772,12 +796,13 @@ const REMOTE_STUB = {
 console.log('\n=== the settings case ladder');
 {
   const page = await openSettings(1100, 800);
-  // ALL TEN SECTIONS, not the one that happens to be scrolled to. Every card
-  // is mounted and open at once now (the cards restructure), so a ladder
-  // checked on `interface` alone would have left `keyboard` -- the longest
-  // list of words here -- in whatever case it was already in. The nav click
-  // below is for the screenshot's own framing, not for visibility: every
-  // panel this loop asks about is already on screen before it clicks anything.
+  // EVERY SECTION THE NAV OFFERS, not the one that happens to be open. A
+  // ladder checked on `interface` alone would have left `keyboard` -- the
+  // longest list of words here -- in whatever case it was already in. The
+  // nav click below is load-bearing now (settings-views restructure, item
+  // C): `[data-settings-panel="id"]` is not in the tree at all until its
+  // own nav item has been clicked, the opposite problem the cards
+  // restructure's own version of this comment used to describe.
   const sectionIds = await page.evaluate(() =>
     [...document.querySelectorAll('[data-settings-nav-item]')].map((el) =>
       el.getAttribute('data-settings-nav-item'),
@@ -797,15 +822,12 @@ console.log('\n=== the settings case ladder');
       text: (el.textContent ?? '').trim().slice(0, 40),
       transform: getComputedStyle(el).textTransform,
     });
-    // BY ID, NOT BY "NOT HIDDEN". All ten cards are mounted and open by
-    // default now, so `:not([hidden])` would match the first of TEN and
-    // report `interface`'s own words for every section this loop asks about
-    // -- the cards restructure's whole reason this file needed a second look.
-    // `getComputedStyle` still resolves correctly on a card folded behind its
-    // own collapse or an Advanced disclosure (both just toggle `hidden`,
-    // which affects layout and paint but not the computed value of a
-    // property like `text-transform`), so scoping by id rather than by
-    // visibility loses nothing this ladder is asking about.
+    // BY ID, STILL. Only one card is in the tree at a time now (item C), so
+    // `:not([hidden])` would work today -- but `getComputedStyle` resolves
+    // correctly on a row folded behind its own Advanced disclosure (`hidden`
+    // affects layout and paint, not a property like `text-transform`), and
+    // scoping by id rather than by visibility is one query that is correct
+    // under either architecture, which is the property worth keeping it for.
     const panel = document.querySelector(`[data-settings-panel="${id}"]`);
     return {
       heading: [...(panel?.querySelectorAll('[data-settings-heading]') ?? [])].map(read),
@@ -1363,7 +1385,7 @@ console.log('\n=== the behaviour section’s switch');
 // LEFT and the CONTROL on the RIGHT, on the same line." `primitives.tsx`'s
 // `SettingsRow` answers with a `layout` prop and an `@container` split --
 // this is the browser measurement that split was always going to need,
-// since a class name is a claim about markup and a `@min-[440px]:flex-row`
+// since a class name is a claim about markup and a `@min-[500px]:flex-row`
 // rule is a claim jsdom cannot see at all (it applies no stylesheet and
 // resolves no container query).
 //

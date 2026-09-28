@@ -3276,66 +3276,6 @@ html {
 }
 
 /*
- * THE SHARED SIZE FOR A LARGE MODAL SCREEN.
- *
- * Operator: "Make the Settings popup bigger. The Stats & Usage screen should
- * be the same size." `SettingsOverlay.tsx` and `StatsScreen.tsx` both wear
- * this ONE class on their own panel div, so the two read the identical
- * declaration rather than two Tailwind arbitrary values a future edit could
- * quietly let drift apart -- `test/renderer/modal-size.test.ts` holds that
- * both still carry the class and neither grew a per-file width/height back.
- *
- * A FIXED HEIGHT, NOT `max-height` -- same reasoning `SettingsOverlay.tsx`'s
- * own comment gives for its nav column: a box that resizes with its content
- * makes anything anchored to it (a nav rail, a fixed header) jump under the
- * cursor. Both panels now split into a `flex-none` header and one
- * `flex-1 overflow-y-auto` scrolling body below the fixed frame, which is
- * also what makes their painted rects comparable at all --
- * `e2e/modal-size-shots.mjs` asserts the two are pixel-IDENTICAL at 1280x800
- * and 1920x1080, not merely close.
- *
- * THE WIDTH HAS NO FIXED PIXEL CEILING, unlike the "e.g. min(1200px, ...)"
- * the operator's own request suggested: a 1200px cap measures 1200/1856 =
- * 64.6% of the 1920x1080 viewport's own margin-adjusted width, well under
- * the "≥90% of the viewport width minus margins" that same request asks the
- * guard to assert. `min(2000px, ...)` is a safety ceiling for exotic
- * ultra-wide displays only -- it never engages at any viewport this repo
- * screenshots (1280, 1440, 1920), where the panel is simply
- * `100vw - 64px`. Reading is still bounded: `data-settings-scroll` and
- * `data-stats-scroll` each centre their own content in a readable
- * `max-w-[...]` column, so the extra width past that column is margin, not
- * a form stretched to fit a screen it was never designed for.
- *
- * THE HEIGHT KEEPS THE SUGGESTED CEILING -- nothing asks it to clear 90% of
- * anything, and an unbounded height would make a short dialog (Stats, on a
- * quiet machine) taller than its own content needs to read comfortably on a
- * very tall display.
- */
-.vam-modal-lg {
-  width: min(2000px, calc(100vw - 64px));
-  height: min(900px, calc(100vh - 64px));
-}
-
-/*
- * THE CARDS COLUMN HAS A READABLE CEILING, NOT THE FULL BOX.
- *
- * `vam-modal-lg` gives the panel nearly the whole window so Settings and
- * Stats & Usage can share one rect; a settings row or a stats grid stretched
- * to fill 1800+px of raw width would just read as a form nobody designed for
- * that screen, not as more to read. `[data-settings-scroll]`'s own direct
- * children (`SectionStrip`, then every `SettingsCard`) are capped and
- * centred here rather than in the component -- the nav rail is a sibling,
- * never a child, of that scrollport, so this rule never touches it, and it
- * has no effect at all below 720px wide (the narrow-desktop width `wide` and
- * `SectionStrip` already exist for), where the column was already narrower
- * than the cap.
- */
-[data-settings-scroll] > * {
-  max-width: 720px;
-  margin-inline: auto;
-}
-
-/*
  * The overlays, as bottom sheets.
  *
  * Every overlay in vam is a full-screen host (`inset-0`, `flex items-start
@@ -3346,11 +3286,15 @@ html {
  * finish using, which reads as working right up until it doesn't.
  *
  * So on a phone the panel is anchored to the BOTTOM, capped at 85dvh, and
- * scrolls within itself. `data-overlay-host` marks the four that are reachable
- * from a phone; the anchored popovers (`data-filter-menu`) are deliberately
- * not marked, because they are positioned against a control rather than
- * against the viewport and turning one into a sheet would move it away from
- * the thing it belongs to.
+ * scrolls within itself. `data-overlay-host` marks the three that are
+ * reachable from a phone as a SHEET; the anchored popovers (`data-filter-
+ * menu`) are deliberately not marked, because they are positioned against a
+ * control rather than against the viewport and turning one into a sheet
+ * would move it away from the thing it belongs to. Settings is deliberately
+ * not marked either, for the opposite reason (settings-views restructure,
+ * item A/C): it is a full-window screen on every width, phone included --
+ * `SettingsOverlay.tsx`'s own comment on its host `className` says why a
+ * screen that already fills the frame has no sheet left to be.
  *
  * WHAT THIS DOES NOT PROMISE: on iOS the soft keyboard shrinks the visual
  * viewport without shrinking the layout viewport, and `dvh` does not track it.

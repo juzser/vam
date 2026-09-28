@@ -1,36 +1,22 @@
 /**
- * Persisted open/closed state for the settings overlay's own cards.
+ * Persisted open/closed state for the settings overlay's own "Advanced"
+ * disclosures -- one per section that has one.
  *
- * The Orca-style restructure (epic: "settings cards") turned each section
- * into a collapsible CARD, and gave some of them an "Advanced" disclosure at
- * the bottom for their rarely-touched rows. Both states are worth
- * remembering across a relaunch -- an operator who folds Terminal shut
- * because they never touch it should not have to fold it shut again next
- * time -- and neither belongs in the big `Prefs` blob `prefs.ts` owns: this
- * is chrome about the DIALOG, not a setting `o` or a session ever reads,
- * which is exactly the trade-off `worktree-tree-collapse.ts` already made for
- * its own per-project fold. Direct `localStorage`, wrapped in try/catch,
- * rather than growing `Prefs` with a field nothing outside this overlay would
- * ever read.
+ * KEPT DIRECTLY IN `localStorage`, wrapped in try/catch, the same trade-off
+ * `worktree-tree-collapse.ts` already makes for its own per-project fold:
+ * this is chrome about the DIALOG, not a setting `o` or a session ever
+ * reads, so it does not belong in the big `Prefs` blob `prefs.ts` owns
+ * either. Storing only the sections an operator actually opened is what
+ * keeps an untouched install writing nothing at all.
  *
- * TWO MAPS, NOT ONE, because the two states are independent: collapsing a
- * card says nothing about whether its Advanced disclosure (if it has one) was
- * left open, and the reverse. Keeping them apart also keeps a section that
- * gains an Advanced disclosure later from disturbing the fold state of
- * sections that already shipped one.
- *
- * ABSENT MEANS THE DEFAULT, IN BOTH MAPS, and the two defaults point opposite
- * ways on purpose: a card starts OPEN -- an operator who has never touched
- * this dialog sees every row, exactly as the un-carded overlay showed them --
- * and Advanced starts CLOSED, because the rows behind it are the ones rarely
- * touched. Storing only the state that differs from the default is what
- * keeps an untouched install writing nothing at all, the same rule
- * `Prefs.collapsedProjects`' own list-membership follows.
+ * THE CARD-LEVEL FOLD THIS FILE USED TO ALSO KEEP (`isCardCollapsed` /
+ * `setCardCollapsed`) IS GONE, not renamed -- see this file's own test for
+ * the restructure that retired it. `last-section.ts` is what replaced its
+ * whole reason to exist.
  */
 
 import type { SectionId } from './sections.js';
 
-const CARD_KEY = 'vam.settings.cardCollapsed';
 const ADVANCED_KEY = 'vam.settings.advancedOpen';
 
 function store(): Storage | null {
@@ -76,19 +62,8 @@ function writeEntry(key: string, id: SectionId, value: boolean): void {
   }
 }
 
-/** Has this section's own card been folded shut? Absent is "no": a card
- *  starts open, the same picture the un-carded overlay always drew. */
-export function isCardCollapsed(id: SectionId): boolean {
-  return readMap(CARD_KEY)[id] === true;
-}
-
-/** Fold or unfold one section's own card. */
-export function setCardCollapsed(id: SectionId, collapsed: boolean): void {
-  writeEntry(CARD_KEY, id, collapsed);
-}
-
 /** Has this section's "Advanced" disclosure been opened? Absent is "no": it
- *  starts closed, the opposite default from the card itself. */
+ *  starts closed. */
 export function isAdvancedOpen(id: SectionId): boolean {
   return readMap(ADVANCED_KEY)[id] === true;
 }

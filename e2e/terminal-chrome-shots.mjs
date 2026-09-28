@@ -415,6 +415,14 @@ await page.waitForSelector('button[aria-label="settings"]', { timeout: 15_000 })
 for (const size of [SIZES.at(-1), SIZES[0], DEFAULT_SIZE]) {
   await page.locator('button[aria-label="settings"]').first().click();
   await page.waitForSelector('[data-settings-nav]', { timeout: 5_000 });
+  // SINGLE-SECTION-MOUNT (settings-views restructure, item C): opening
+  // Settings from the sidebar icon lands wherever `readLastSection` says --
+  // the first section, or whichever one localStorage remembers -- and
+  // `[data-terminal-size-option]` exists only while "terminal" is the
+  // MOUNTED section, not merely scrolled past. A stray nav click is a no-op
+  // when that section is already showing, so this is safe every iteration.
+  await page.locator('[data-settings-nav-item="terminal"]').click();
+  await page.waitForTimeout(150);
   await page.locator(`[data-terminal-size-option="${size}"]`).click();
   await page.locator('button[aria-label="close"]').first().click();
   await page.waitForSelector('[data-settings-nav]', { state: 'detached', timeout: 5_000 });

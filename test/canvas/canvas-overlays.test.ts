@@ -2,11 +2,14 @@
 /**
  * The extracted OVERLAY-VISIBILITY hook, asserted through its own return
  * value -- not through `Canvas`'s DOM. The load-bearing rules: `settingsSection`
- * defaults to `interface` (the cards restructure's renaming of the old
- * `appearance` default -- `settings/sections.ts`); opening the palette closes
- * nothing else; `settingsSection` survives a close and reopen (it records
- * today's behaviour, not a chosen one); and `confirmForceClose` holds its
- * payload.
+ * defaults to `null` (settings-views restructure, item C -- it used to
+ * default to `'interface'`, the cards restructure's renaming of the old
+ * `appearance` default, but a non-null value here is now read as an EXPLICIT
+ * deep link that overrides the last-viewed-section fallback
+ * `SettingsOverlay` itself applies, and a generic open has no deep link to
+ * name); opening the palette closes nothing else; `settingsSection` survives
+ * a close and reopen (it records today's behaviour, not a chosen one); and
+ * `confirmForceClose` holds its payload.
  */
 
 import { act, renderHook } from '@testing-library/react';
@@ -14,10 +17,16 @@ import { describe, expect, it } from 'vitest';
 import { useCanvasOverlays } from '../../src/renderer/canvas/canvas-overlays.js';
 
 describe('useCanvasOverlays', () => {
-  it('settingsSection defaults to interface', () => {
+  // NULL, NOT 'interface' -- settings-views restructure, item C. A non-null
+  // `settingsSection` is an explicit deep link (Remote, Stats) that always
+  // wins over the last-viewed-section fallback `SettingsOverlay` itself
+  // applies (`readLastSection`) when `initialSection` is undefined; a
+  // generic open has no deep link to name, so it stays null and lets that
+  // fallback -- 'interface' only on a machine with no history yet -- decide.
+  it('settingsSection defaults to null, so a generic open never overrides the last-viewed section', () => {
     const { result } = renderHook(() => useCanvasOverlays());
 
-    expect(result.current.settingsSection).toBe('interface');
+    expect(result.current.settingsSection).toBe(null);
   });
 
   it('opening the palette closes nothing else', () => {

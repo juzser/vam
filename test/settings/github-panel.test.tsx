@@ -20,6 +20,8 @@ import type { GithubAuthStatus } from '../../src/shared/github.js';
 afterEach(cleanup);
 
 const status = () => document.querySelector('[data-github-status]')?.textContent ?? '';
+const pill = () => document.querySelector('[data-github-status-pill]');
+const account = () => document.querySelector('[data-github-account]');
 const recheck = () => document.querySelector<HTMLButtonElement>('[data-github-recheck]');
 const connect = () => document.querySelector<HTMLButtonElement>('[data-github-connect]');
 const disconnect = () => document.querySelector<HTMLButtonElement>('[data-github-disconnect]');
@@ -166,6 +168,65 @@ describe('status', () => {
     setup({ api });
     await waitFor(() => expect(status()).toMatch(/octocat/));
     expect(document.querySelector('[data-github-scopes-warning]')).toBeNull();
+  });
+});
+
+/**
+ * THE SKILLS-CARD SHAPE (settings-views restructure, item F). Operator:
+ * "restyle GitHub connect UI to match the Skills card shape ... status pill:
+ * Connected/Not connected/gh not installed; 'Logged in as: **account**' when
+ * connected." `data-github-status` (the longer sentence) is untouched by
+ * this -- these are ADDITIONAL hooks, not replacements, the same way
+ * `AdhdSkillCard.tsx`'s pill sits beside its own title rather than instead
+ * of any existing text.
+ */
+describe('the status pill and "logged in as" line (item F)', () => {
+  it('reads "gh not installed" when the CLI itself is missing, and draws no account line', async () => {
+    const api = fakeApi({
+      authStatus: vi.fn(
+        async () => ({ kind: 'cli-missing', message: 'not found' }) satisfies GithubAuthStatus,
+      ),
+    });
+    setup({ api });
+    await waitFor(() =>
+      expect(pill()?.getAttribute('data-github-status-pill')).toBe('cli-missing'),
+    );
+    expect(pill()?.textContent).toMatch(/gh not installed/);
+    expect(account()).toBeNull();
+  });
+
+  it('reads "Not connected" when logged out, and draws no account line', async () => {
+    setup();
+    await waitFor(() =>
+      expect(pill()?.getAttribute('data-github-status-pill')).toBe('not-connected'),
+    );
+    expect(pill()?.textContent?.toLowerCase()).toMatch(/not connected/);
+    expect(account()).toBeNull();
+  });
+
+  it('reads "Connected" and names the account when logged in', async () => {
+    const api = fakeApi({
+      authStatus: vi.fn(
+        async () =>
+          ({
+            kind: 'logged-in',
+            accounts: [
+              {
+                host: 'github.com',
+                login: 'octocat',
+                active: true,
+                tokenSource: 'keyring',
+                scopes: ['repo'],
+                missingScopes: [],
+              },
+            ],
+          }) satisfies GithubAuthStatus,
+      ),
+    });
+    setup({ api });
+    await waitFor(() => expect(pill()?.getAttribute('data-github-status-pill')).toBe('connected'));
+    expect(pill()?.textContent?.toLowerCase()).toMatch(/^connected$/);
+    expect(account()?.textContent).toMatch(/octocat/);
   });
 });
 

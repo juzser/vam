@@ -15,14 +15,18 @@ export function useCanvasOverlays() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [keySheetOpen, setKeySheetOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  /** Which section Settings opens on next — `interface` unless the Remote
-   *  icon or its key just asked for `remote` directly (see `openSettings`). */
-  const [settingsSection, setSettingsSection] = useState<SectionId>('interface');
+  /**
+   * Which section Settings opens on next — `null` UNLESS a caller asked for
+   * one BY NAME (the Remote icon, the stats icon, a GitHub deep link): a
+   * generic open (the gear icon, the `,` shortcut) passes `null` through to
+   * `SettingsOverlay`'s own `initialSection` prop as `undefined`, which is
+   * what lets that component's own fallback take over -- the LAST section
+   * the operator actually viewed (`last-section.ts`, item C), not a value
+   * this hook would otherwise have to hard-code as `interface` and force on
+   * every generic open, silently overriding that fallback every time.
+   */
+  const [settingsSection, setSettingsSection] = useState<SectionId | null>(null);
   const [errorLogOpen, setErrorLogOpen] = useState(false);
-  /** The Stats & Usage screen — its own overlay flag, on `errorLogOpen`'s own
-   *  standing rather than a Settings section: nothing in it is a preference
-   *  the operator chooses, so it is not `settingsSection`'s concern either. */
-  const [statsOpen, setStatsOpen] = useState(false);
   /**
    * The row a close refused without being able to prove it is not vam's own
    * -- `SourceError.forcible` -- and offered the operator a confirmed kill
@@ -54,8 +58,6 @@ export function useCanvasOverlays() {
     setSettingsSection,
     errorLogOpen,
     setErrorLogOpen,
-    statsOpen,
-    setStatsOpen,
     confirmForceClose,
     setConfirmForceClose,
   };

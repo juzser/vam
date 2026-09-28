@@ -172,15 +172,15 @@ await page.locator('[data-settings-advanced="interface"]').click();
 await page.waitForSelector('[data-settings-overlay] .vam-hit-24', { timeout: 3000 });
 // AND SCROLLED INTO THE DIALOG'S OWN SCROLLPORT, not merely present in the
 // DOM. `AdvancedDisclosure` opens in place, well below the fold of a dialog
-// capped by `vam-modal-lg` (`styles.css`) -- `getBoundingClientRect` reports the reset
-// button's real layout position regardless (well down the scrollport, past
-// the visible fold, measured true both at the original 600px-tall panel and
-// the current `vam-modal-lg` one), so `waitForSelector`'s own visibility
-// check passes on a control that is clipped by the scrollport's
-// `overflow-y: auto` and not actually painted anywhere the probe below can
-// point at. Without this, every miss resolves to the modal's own backdrop
-// button, which sits behind the whole dialog and answers for any pixel the
-// dialog does not currently paint over.
+// that fills the whole window (`inset-0`, settings-views restructure item A)
+// -- `getBoundingClientRect` reports the reset button's real layout position
+// regardless (well down the scrollport, past the visible fold, measured true
+// both at the original 600px-tall panel and the current full-window one), so
+// `waitForSelector`'s own visibility check passes on a control that is
+// clipped by the scrollport's `overflow-y: auto` and not actually painted
+// anywhere the probe below can point at. Without this, every miss resolves
+// to some OTHER part of the same dialog -- the row above or below it in the
+// scrollport -- rather than to the reset button itself.
 //
 // `{ block: 'center' }`, NOT `scrollIntoViewIfNeeded()` -- measured after the
 // row-layout fix shortened every row above this one, which moved the reset

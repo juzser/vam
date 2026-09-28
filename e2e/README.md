@@ -379,16 +379,19 @@ first emoji row.
 
 ## What it still cannot say
 
-Two of the four `data-overlay-host` sheets could not be opened at 390px at
+Two of the three `data-overlay-host` sheets could not be opened at 390px at
 all in this fixture, and the suite says so in a `test.skip` with the reason
 rather than asserting them from CSS a second time. `ErrorLogPanel`'s only
 phone route is the `N failures` button, which `PhoneShell` draws when
 `failureCount > 0`; demo mode records every refused write as a `refusal`, never
 a `failure`, so the count is structurally 0. `ProjectPicker` opens from
 `onAddToGroup`, which needs a group, which needs a source that accepts writes.
-The shared sheet RULE is now measured on two real panels — a short one and one
-with a fixed height of its own (`vam-modal-lg`, `styles.css`) — but each
-unopened panel's own inner layout is not.
+The shared sheet RULE is now measured on the one real panel this fixture can
+open (the project icon picker) — but each unopened panel's own inner layout
+is not. Settings is not one of the three sheets any more (settings-views
+restructure, item A/C): it withdrew from the shared bottom-sheet cohort
+entirely, becoming a full-window screen at every width, and is measured on
+its own terms by the file's own "settings at 390px" block instead.
 
 Nor is any of this a device. It is one engine at one width with square pixels
 and no rubber-band scrolling; Safari's own sheet behaviour, the accessory bar,

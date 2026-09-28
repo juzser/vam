@@ -46,7 +46,15 @@ const MONO_ADVANCE_PX = 7.226;
 const SLOT_CHROME_PX = 8 * 2 + 1 * 2;
 
 function open(prefs: Prefs = EMPTY_PREFS) {
-  render(<SettingsOverlay prefs={prefs} theme="dark" onChange={vi.fn()} onClose={vi.fn()} />);
+  render(
+    <SettingsOverlay
+      prefs={prefs}
+      theme="dark"
+      onChange={vi.fn()}
+      onClose={vi.fn()}
+      initialSection="keyboard"
+    />,
+  );
 }
 
 const lines = () => [...document.querySelectorAll<HTMLElement>('[data-shortcut-section] ul > li')];

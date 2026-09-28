@@ -161,6 +161,76 @@ describe('status: installed', () => {
     fireEvent.click(recheck() as HTMLButtonElement);
     await waitFor(() => expect(pill()?.textContent).toMatch(/outdated/i));
   });
+
+  // SETTINGS-VIEWS RESTRUCTURE, ITEM E: fully installed used to still read
+  // "Install" -- only `outdated-modified` earned "Reinstall". An operator
+  // with the skill already on disk pressing a button that still says
+  // "Install" reads as "nothing happened yet", not as "do it again".
+  it('reads Reinstall, not Install, now that both agents already have it', async () => {
+    const api = fakeApi(INSTALLED);
+    open({ api });
+    await waitFor(() => expect(pill()?.textContent).toMatch(/^installed$/i));
+    expect(install()?.textContent).toMatch(/reinstall/i);
+  });
+
+  // REFRESHES IMMEDIATELY, THE OTHER HALF OF ITEM E: the button's own label
+  // follows `status`, which `runInstall` sets from the bridge's own
+  // response -- no second read, no stale "Install" surviving a successful
+  // install. `NOT_INSTALLED -> INSTALLED` above (`describe('status: not
+  // installed')`) already covers the pill; this covers the BUTTON, the
+  // other place the same `status` value is read.
+  it("the install button's own label refreshes immediately after installing, with no second read", async () => {
+    const api = fakeApi(NOT_INSTALLED);
+    open({ api });
+    await waitFor(() => expect(install()?.textContent).toMatch(/install/i));
+    expect(install()?.textContent).not.toMatch(/reinstall/i);
+    api.setNext(INSTALLED);
+    fireEvent.click(install() as HTMLButtonElement);
+    await waitFor(() => expect(install()?.textContent).toMatch(/reinstall/i));
+  });
+});
+
+const PARTIAL: AdhdSkillStatus = {
+  overall: 'installed',
+  agents: [
+    { agent: 'claude', state: 'installed', dir: '/home/op/.claude/skills/i-have-adhd' },
+    { agent: 'codex', state: 'not-installed', dir: '/home/op/.agents/skills/i-have-adhd' },
+  ],
+};
+
+describe('status: partially installed', () => {
+  it('labels the button Repair, and the coverage grid says which agent is missing', async () => {
+    const api = fakeApi(PARTIAL);
+    open({ api });
+    await waitFor(() => expect(pill()?.textContent).toMatch(/^installed$/i));
+    expect(install()?.textContent).toMatch(/repair/i);
+    expect(agentChip('claude')?.textContent).toMatch(/installed/i);
+    expect(agentChip('codex')?.textContent).toMatch(/missing/i);
+  });
+
+  it('reads Reinstall, not Repair, when the missing half is a content mismatch rather than an absence', async () => {
+    // OUTDATED already carries one agent `outdated-modified` and the other
+    // `not-installed` -- partial BY ABSENCE too, but a content mismatch
+    // outranks it (`isAdhdSkillPartiallyInstalled`'s own header explains
+    // why): "Reinstall" is the honest word for "vam found bytes it does not
+    // trust", and "Repair" would undersell that this needs the confirm step
+    // Reinstall still asks for below.
+    const api = fakeApi(OUTDATED);
+    open({ api });
+    await waitFor(() => expect(pill()?.textContent).toMatch(/outdated/i));
+    expect(install()?.textContent).toMatch(/reinstall/i);
+    expect(install()?.textContent).not.toMatch(/repair/i);
+  });
+
+  it('repairs by calling install with no force, the same as a fresh install', async () => {
+    const api = fakeApi(PARTIAL);
+    open({ api });
+    await waitFor(() => expect(install()?.textContent).toMatch(/repair/i));
+    api.setNext(INSTALLED);
+    fireEvent.click(install() as HTMLButtonElement);
+    await waitFor(() => expect(pill()?.textContent).toMatch(/^installed$/i));
+    expect(api.installCalls).toEqual([false]);
+  });
 });
 
 describe('status: outdated or modified', () => {

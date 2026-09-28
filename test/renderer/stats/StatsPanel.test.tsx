@@ -1,16 +1,22 @@
 // @vitest-environment happy-dom
 
 /**
- * The Stats & Usage screen: fetches once on mount, refreshes on its own
- * button, closes on Escape and on a scrim click, and draws the numbers the
- * operator's mockup asks for — never a raw token count where a compact one
- * belongs, and never a guessed cost for a model the price table does not
- * know.
+ * Stats & Usage's own content, as a Settings SECTION now (settings-views
+ * restructure, item B) rather than its own overlay: fetches once on mount,
+ * refreshes on its own button, and draws the numbers the operator's mockup
+ * asks for — never a raw token count where a compact one belongs, and never
+ * a guessed cost for a model the price table does not know.
+ *
+ * THE DIALOG CHROME THIS FILE USED TO ASSERT (Escape, a scrim click) MOVED
+ * WITH IT, to `SettingsOverlay.tsx`'s own tests -- `StatsPanel` has no
+ * `onClose` prop and no `role="dialog"` of its own any more; it is content a
+ * `SettingsCard` wraps, the same shape `AdhdSkillCard`/`GithubPanel` already
+ * take.
  */
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { StatsResult } from '../../../src/preload/api.js';
-import { StatsScreen } from '../../../src/renderer/stats/StatsScreen.js';
+import { StatsPanel } from '../../../src/renderer/stats/StatsPanel.js';
 import type { StatsSnapshot } from '../../../src/shared/stats.js';
 
 afterEach(() => {
@@ -88,10 +94,10 @@ function stubApi(
   return { get, refresh, prs };
 }
 
-describe('StatsScreen', () => {
+describe('StatsPanel', () => {
   it('fetches once on mount and draws the three headline cards', async () => {
     stubApi({ kind: 'ok', snapshot: SNAPSHOT });
-    render(<StatsScreen onClose={() => {}} />);
+    render(<StatsPanel />);
     expect(await screen.findByText('42')).toBeTruthy();
     expect(screen.getByText('49d 12h')).toBeTruthy();
     expect(screen.getByText('17')).toBeTruthy();
@@ -99,7 +105,7 @@ describe('StatsScreen', () => {
 
   it('formats large numbers compactly and shows the est. cost, labelled', async () => {
     stubApi({ kind: 'ok', snapshot: SNAPSHOT });
-    render(<StatsScreen onClose={() => {}} />);
+    render(<StatsPanel />);
     expect(await screen.findByText('18.2B')).toBeTruthy();
     expect(screen.getByText('Est. cost')).toBeTruthy();
     expect(screen.getByText('$1,234.50')).toBeTruthy();
@@ -107,13 +113,13 @@ describe('StatsScreen', () => {
 
   it('shows the price table date', async () => {
     stubApi({ kind: 'ok', snapshot: SNAPSHOT });
-    render(<StatsScreen onClose={() => {}} />);
+    render(<StatsPanel />);
     expect(await screen.findByText(/2026-01-15/)).toBeTruthy();
   });
 
   it('shows n/a for an unknown-model provider cost, never a guessed number', async () => {
     stubApi({ kind: 'ok', snapshot: SNAPSHOT });
-    render(<StatsScreen onClose={() => {}} />);
+    render(<StatsPanel />);
     await screen.findByText('Claude Code');
     expect(screen.getAllByText('n/a').length).toBeGreaterThan(0);
   });
@@ -130,7 +136,7 @@ describe('StatsScreen', () => {
         },
       },
     });
-    render(<StatsScreen onClose={() => {}} />);
+    render(<StatsPanel />);
     expect(await screen.findByText(/connect GitHub/)).toBeTruthy();
     expect(await screen.findByText(/not logged in to gh/)).toBeTruthy();
   });
@@ -146,7 +152,7 @@ describe('StatsScreen', () => {
         }),
     );
     stubApi({ kind: 'ok', snapshot: { ...SNAPSHOT, prsCreated: { kind: 'loading' } } }, { prs });
-    render(<StatsScreen onClose={() => {}} />);
+    render(<StatsPanel />);
     await screen.findByText('42');
     expect(prs).toHaveBeenCalledTimes(1);
     expect(screen.getByText('…')).toBeTruthy();
@@ -157,47 +163,29 @@ describe('StatsScreen', () => {
 
   it('shows Off for a provider with no data at all, and an Enable control', async () => {
     stubApi({ kind: 'ok', snapshot: SNAPSHOT });
-    render(<StatsScreen onClose={() => {}} />);
+    render(<StatsPanel />);
     await screen.findByText('Codex');
     expect(screen.getByText('Off')).toBeTruthy();
   });
 
   it('calls refresh() when the refresh button is pressed, not get() again', async () => {
     const { get, refresh } = stubApi({ kind: 'ok', snapshot: SNAPSHOT });
-    render(<StatsScreen onClose={() => {}} />);
+    render(<StatsPanel />);
     await screen.findByText('42');
     expect(get).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole('button', { name: /refresh/i }));
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it('closes on Escape', async () => {
-    stubApi({ kind: 'ok', snapshot: SNAPSHOT });
-    const onClose = vi.fn();
-    render(<StatsScreen onClose={onClose} />);
-    await screen.findByText('42');
-    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
-    expect(onClose).toHaveBeenCalled();
-  });
-
-  it('closes on a scrim click', async () => {
-    stubApi({ kind: 'ok', snapshot: SNAPSHOT });
-    const onClose = vi.fn();
-    render(<StatsScreen onClose={onClose} />);
-    await screen.findByText('42');
-    fireEvent.mouseDown(screen.getByRole('button', { name: /close stats/i }));
-    expect(onClose).toHaveBeenCalled();
-  });
-
   it('says so when the bridge is unavailable, in the browser build', () => {
     vi.stubGlobal('window', Object.assign(globalThis.window, { api: undefined }));
-    render(<StatsScreen onClose={() => {}} />);
+    render(<StatsPanel />);
     expect(screen.getByText(/only available in the desktop app/i)).toBeTruthy();
   });
 
   it('reports an error outcome honestly rather than showing stale or fake data', async () => {
     stubApi({ kind: 'error', message: 'the stats worker exited with code 1' });
-    render(<StatsScreen onClose={() => {}} />);
+    render(<StatsPanel />);
     expect(await screen.findByText(/the stats worker exited with code 1/)).toBeTruthy();
   });
 });

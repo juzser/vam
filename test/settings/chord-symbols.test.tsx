@@ -29,8 +29,20 @@ afterEach(cleanup);
 
 const ROWS = buildBindingSheet({}).flatMap((group) => group.rows);
 
-function open(prefs: Prefs = EMPTY_PREFS, onChange = vi.fn()) {
-  render(<SettingsOverlay prefs={prefs} theme="dark" onChange={onChange} onClose={vi.fn()} />);
+function open(
+  prefs: Prefs = EMPTY_PREFS,
+  onChange = vi.fn(),
+  initialSection: 'keyboard' | 'agents' = 'keyboard',
+) {
+  render(
+    <SettingsOverlay
+      prefs={prefs}
+      theme="dark"
+      onChange={onChange}
+      onClose={vi.fn()}
+      initialSection={initialSection}
+    />,
+  );
 }
 
 const slot = (id: string, index = 0) =>
@@ -159,7 +171,9 @@ describe('the shortcut editor paints each platform’s own keyboard', () => {
    */
   it('renders the prompt send keys as keys', () => {
     onBothPlatforms((mac) => {
-      open();
+      // The submit-key picker is Agents' own row, not Keyboard's -- unlike
+      // every other case in this file.
+      open(EMPTY_PREFS, vi.fn(), 'agents');
       const option = (key: string) =>
         document.querySelector<HTMLElement>(`[data-submit-key-option="${key}"]`)?.textContent;
       expect(option('enter')).toBe(mac ? '⏎' : 'Enter');

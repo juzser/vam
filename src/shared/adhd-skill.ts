@@ -110,6 +110,26 @@ export type AdhdSkillStatus = {
   readonly agents: readonly AdhdSkillAgentStatus[];
 };
 
+/**
+ * ONE OF THE TWO DIRECTORIES HAS IT, THE OTHER DOES NOT -- the sharper
+ * question `overall` alone cannot answer (settings-views restructure, item
+ * E). Operator: "partially installed (one of ~/.claude/skills /
+ * ~/.agents/skills) -> say so, label button 'Repair'."
+ *
+ * SCOPED TO ABSENCE, NOT TO CONTENT. `outdated-modified` (an agent whose
+ * bytes differ from vam's own copy) is a content mismatch, not a missing
+ * install -- both directories exist, so this reads `false` for an operator
+ * whose only defect is a hand-edited file. `AdhdSkillCard.tsx`'s own button
+ * label keeps a content mismatch as "Reinstall" regardless of what this
+ * predicate says, ahead of "Repair" in its own priority -- see that file's
+ * comment on `installLabel`.
+ */
+export function isAdhdSkillPartiallyInstalled(status: AdhdSkillStatus): boolean {
+  const missing = status.agents.some((a) => a.state === 'not-installed');
+  const present = status.agents.some((a) => a.state !== 'not-installed');
+  return missing && present;
+}
+
 /** One agent's outcome from an install or remove attempt. */
 export type AdhdSkillAgentOutcome =
   | { readonly agent: AdhdSkillAgent; readonly kind: 'written' }

@@ -6,7 +6,10 @@
  * happy-dom (`test/settings/github-panel.test.tsx`); what jsdom/happy-dom
  * cannot answer, and this file does, is whether the section actually PAINTS:
  * a real box for the status line, the Connect/Disconnect controls and the
- * repo picker, in both themes, logged out and logged in.
+ * repo picker, in both themes, logged out and logged in -- and, since the
+ * settings-views restructure gave this card the Skills-card shape (item F),
+ * whether the status PILL paints its own three words honestly, "gh" and
+ * all.
  *
  * A DESKTOP-ONLY SECTION, WITH NO PRELOAD BRIDGE IN THE BROWSER BUILD --
  * `settings-chrome-shots.mjs`'s own Remote example is the template: `?demo=1`
@@ -23,6 +26,7 @@ const origin = process.argv[2] ?? 'http://localhost:5520';
 const outDir = process.argv[3] ?? 'docs/ui';
 
 const LOGGED_OUT = { kind: 'logged-out' };
+const CLI_MISSING = { kind: 'cli-missing', message: 'gh: command not found' };
 const LOGGED_IN = {
   kind: 'logged-in',
   accounts: [
@@ -102,8 +106,12 @@ for (const theme of ['dark', 'light']) {
         return el === null ? null : el.getBoundingClientRect();
       };
       const port = document.querySelector('[data-settings-scroll]');
+      const pill = document.querySelector('[data-github-status-pill]');
       return {
         status: document.querySelector('[data-github-status]')?.textContent ?? null,
+        pillKind: pill?.getAttribute('data-github-status-pill') ?? null,
+        pillBox: box('[data-github-status-pill]'),
+        account: document.querySelector('[data-github-account]')?.textContent ?? null,
         connect: box('[data-github-connect]'),
         disconnect: box('[data-github-disconnect]'),
         repoCurrent: box('[data-github-repo-current]'),
@@ -111,10 +119,28 @@ for (const theme of ['dark', 'light']) {
         overflowX: port === null ? null : port.scrollWidth - port.clientWidth,
       };
     });
-    console.log(`  [${theme}/${name}] status="${state.status}"`);
+    console.log(
+      `  [${theme}/${name}] status="${state.status}" pill=${state.pillKind} account=${state.account}`,
+    );
 
     if (state.status === null || state.status === '') {
       throw new Error(`[${theme}/${name}] the Integrations panel drew no status line at all`);
+    }
+    // THE SKILLS-CARD SHAPE'S OWN PILL (item F), painted -- not merely typed.
+    if (state.pillBox === null || state.pillBox.height === 0) {
+      throw new Error(`[${theme}/${name}] the status pill did not paint`);
+    }
+    if (name === 'logged-out' && state.pillKind !== 'not-connected') {
+      throw new Error(`[${theme}/${name}] the pill reads ${state.pillKind}, not "not-connected"`);
+    }
+    if (name === 'logged-in' && state.pillKind !== 'connected') {
+      throw new Error(`[${theme}/${name}] the pill reads ${state.pillKind}, not "connected"`);
+    }
+    if (name === 'logged-out' && state.account !== null) {
+      throw new Error(`[${theme}/${name}] an account line drew while logged out`);
+    }
+    if (name === 'logged-in' && (state.account === null || !state.account.includes('octocat'))) {
+      throw new Error(`[${theme}/${name}] "Logged in as" did not name the fixture's own account`);
     }
     if (name === 'logged-out' && (state.connect === null || state.connect.height === 0)) {
       throw new Error(`[${theme}/${name}] no painted Connect button while logged out`);
@@ -142,6 +168,40 @@ for (const theme of ['dark', 'light']) {
     console.log(`${outDir}/settings-integrations-github-${theme}-${name}.png`);
     await page.close();
   }
+}
+
+// THE THIRD PILL STATE (item F): "gh not installed", painted with the one
+// letter-case exception `GithubStatusPill`'s own comment argues for -- `gh`
+// stays lower case rather than being title-cased by this surface's shared
+// `capitalize` rule.
+console.log('\n=== the "gh not installed" pill, dark');
+{
+  const page = await openIntegrations(CLI_MISSING, 'dark');
+  const state = await page.evaluate(() => {
+    const pill = document.querySelector('[data-github-status-pill]');
+    return {
+      kind: pill?.getAttribute('data-github-status-pill') ?? null,
+      text: pill?.textContent ?? null,
+      verbatim: pill?.hasAttribute('data-verbatim') ?? false,
+      connect: document.querySelector('[data-github-connect]') !== null,
+    };
+  });
+  console.log(`  pill=${state.kind} text="${state.text}" verbatim=${state.verbatim}`);
+  if (state.kind !== 'cli-missing') {
+    throw new Error(`the pill reads ${state.kind}, not "cli-missing"`);
+  }
+  if (state.text !== 'gh not installed') {
+    throw new Error(`the pill reads ${JSON.stringify(state.text)}, not the literal "gh not installed"`);
+  }
+  if (!state.verbatim) {
+    throw new Error('the "gh not installed" pill is not marked data-verbatim, so capitalize would title-case "gh"');
+  }
+  if (state.connect) {
+    throw new Error('a Connect button drew with the CLI itself missing, nothing to press');
+  }
+  await page.screenshot({ path: `${outDir}/settings-integrations-github-dark-cli-missing.png` });
+  console.log(`${outDir}/settings-integrations-github-dark-cli-missing.png`);
+  await page.close();
 }
 
 // AND AT THE NARROWEST DESKTOP WIDTH, NEVER SIDEWAYS. NOT 390PX: this is a

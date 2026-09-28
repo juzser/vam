@@ -1,27 +1,36 @@
 /**
- * THE STATS & USAGE SCREEN, IN A REAL BROWSER — the entry icon beside the
- * account icon, the overlay it opens, and the heatmap's scale, in both
- * themes, against a FIXTURE dataset. `window.api` is stubbed exactly like
- * `prs-tab-shots.mjs`: `?demo=1` cannot reach this at all (`App.tsx`'s demo
- * branch never installs a bridge, and the screen would draw nothing but
- * "only available in the desktop app" there), so this stubs the bridge
+ * STATS & USAGE, IN A REAL BROWSER — the entry icon beside the account icon,
+ * the Settings section it opens directly into, and the heatmap's scale, in
+ * both themes, against a FIXTURE dataset. `window.api` is stubbed exactly
+ * like `prs-tab-shots.mjs`: `?demo=1` cannot reach this at all (`App.tsx`'s
+ * demo branch never installs a bridge, and the section would draw nothing
+ * but "only available in the desktop app" there), so this stubs the bridge
  * instead and pays that file's own cost — EVERY STRING BELOW IS INVENTED.
  *
+ * SETTINGS-VIEWS RESTRUCTURE (item B): Stats & Usage used to be its own
+ * full-window overlay (`StatsScreen.tsx`, `role="dialog"`, its own Esc). That
+ * component is deleted; its content (`StatsPanel.tsx`) is now the "stats"
+ * section of `SettingsOverlay` itself, and the sidebar's stats icon opens
+ * Settings directly there (`Canvas.tsx`'s `onSidebarStats`). So this file now
+ * measures `[data-settings-overlay]` landing on `[data-settings-panel="stats"]`,
+ * not a second dialog of its own.
+ *
  * WHAT IT ASSERTS, none of which a unit environment can answer:
- *  - the entry icon sits in the avatar bar and opens the screen on click;
- *  - the screen's own numbers are what the fixture said, compacted and
+ *  - the entry icon sits in the avatar bar and opens Settings, at the
+ *    "stats" section specifically, on click;
+ *  - the section's own numbers are what the fixture said, compacted and
  *    labelled ("18.2B", "est.", the price table's own date) rather than a
  *    raw token count or a guessed cost;
  *  - the heatmap draws a real grid of coloured cells whose PAINTED
  *    background actually differs between an empty day and the busiest one,
  *    in BOTH themes, and that the scale's own step colours are each
- *    distinguishable from their neighbour and readable against the card —
+ *    distinguishable from their neighbour and readable against the panel —
  *    a class name is not a rendered pixel, and Tailwind emits no rule at
  *    all for a `--color-*` token that does not exist;
- *  - Escape closes the screen;
+ *  - Escape closes the whole Settings overlay;
  *  - and, at 390×844 with the identical bridge and fixture, the entry icon
  *    is not in the DOM at all — the operator's own decision that a phone
- *    cannot reach this screen.
+ *    cannot reach this section.
  *
  *   node e2e/stats-usage-shots.mjs http://localhost:5520 e2e/test-results
  *
@@ -229,13 +238,17 @@ const browser = await chromium.launch();
   check('the entry icon is in the avatar bar', (await page.locator('[aria-label="stats"]').count()) === 1);
 
   await page.click('[aria-label="stats"]');
-  const dialog = page.locator('[role="dialog"][aria-label="stats"]');
+  const dialog = page.locator('[data-settings-overlay]');
   await dialog.waitFor({ timeout: 5_000 });
-  check('the screen opened as a dialog', (await dialog.count()) === 1);
+  check('the icon opens Settings', (await dialog.count()) === 1);
+  check(
+    'Settings lands directly on the "stats" section, not a section picked at random',
+    (await page.locator('[data-settings-panel="stats"]').count()) === 1,
+  );
 
   await page.waitForSelector('[data-stats-heatmap]', { timeout: 5_000 });
 
-  const bodyText = await page.locator('[data-stats-screen]').innerText();
+  const bodyText = await page.locator('[data-settings-panel="stats"]').innerText();
   check('agents spawned reads the fixture count', bodyText.includes('128'));
   check('time worked reads "49d 12h"', bodyText.includes('49d 12h'));
   check('PRs created reads the fixture count', bodyText.includes('23'));
@@ -265,7 +278,7 @@ const browser = await chromium.launch();
     // never caught by a stylesheet read. Measured against a real PAINT.
     const tilePaint = await page.evaluate(() => {
       const tiles = [...document.querySelectorAll('[data-stats-icon-tile]')];
-      const card = document.querySelector('[data-stats-screen] .rounded-md');
+      const card = document.querySelector('[data-settings-overlay]');
       return {
         fills: tiles.map((t) => getComputedStyle(t).backgroundColor),
         cardFill: card === null ? null : getComputedStyle(card).backgroundColor,
@@ -295,7 +308,7 @@ const browser = await chromium.launch();
     const scale = await page.evaluate(() => {
       const cells = [...document.querySelectorAll('[data-stats-heatmap] .rounded-\\[2px\\]')];
       const paint = (el) => getComputedStyle(el).backgroundColor;
-      const card = document.querySelector('[data-stats-screen] .rounded-md');
+      const card = document.querySelector('[data-settings-overlay]');
       const cardFill = card === null ? null : getComputedStyle(card).backgroundColor;
       return { colours: cells.map(paint), cardFill };
     });
@@ -309,7 +322,7 @@ const browser = await chromium.launch();
     const contrast = await page.evaluate(() => {
       const cells = [...document.querySelectorAll('[data-stats-heatmap] .rounded-\\[2px\\]')];
       const bg = (el) => getComputedStyle(el).backgroundColor;
-      const card = document.querySelector('[data-stats-screen] .rounded-md');
+      const card = document.querySelector('[data-settings-overlay]');
       return { cellFills: cells.map(bg), cardFill: card === null ? null : getComputedStyle(card).backgroundColor };
     });
     const ratios = await page.evaluate(
@@ -330,8 +343,8 @@ const browser = await chromium.launch();
 
   await page.keyboard.press('Escape');
   await dialog.waitFor({ state: 'detached', timeout: 5_000 }).then(
-    () => check('Escape closes the screen', true),
-    () => check('Escape closes the screen', false),
+    () => check('Escape closes Settings', true),
+    () => check('Escape closes Settings', false),
   );
 
   await page.close();

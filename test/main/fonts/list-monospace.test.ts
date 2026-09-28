@@ -96,6 +96,22 @@ describe('listMonospaceFontFamilies', () => {
     expect(families.filter((name) => name === 'Menlo')).toHaveLength(1);
   });
 
+  it('finds a two-word hint against a REAL macOS filename, which carries no separator at all', () => {
+    // `AndaleMono.ttf` -- how macOS itself ships this font, camel-cased with
+    // no `-`/`_` for `familyFromFilename` to turn back into a space. Before
+    // `matchesHint` (`font-scan.ts`) this hint only ever matched the
+    // hyphenated fixture the sweep test below constructs, never a real
+    // machine's own file.
+    const fs = fakeFs({
+      '/System/Library/Fonts': ['AndaleMono.ttf'],
+      '/Library/Fonts': [],
+      '/Users/op/Library/Fonts': [],
+    });
+    expect(listMonospaceFontFamilies({ platform: 'darwin', homedir: '/Users/op', fs })).toEqual([
+      'AndaleMono',
+    ]);
+  });
+
   it('ignores a non-font file sitting in a font directory', () => {
     const fs = fakeFs({
       '/System/Library/Fonts': ['Menlo.ttc', 'readme.txt', '.DS_Store'],

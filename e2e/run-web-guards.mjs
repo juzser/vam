@@ -198,12 +198,12 @@ const GUARDS = [
   'composer-bar-shots',
   'settings-chrome-shots',
   'settings-panels-shots',
-  // SETTINGS AND STATS & USAGE ARE THE SAME SIZE, MEASURED: the operator's
-  // own ask ("Make the Settings popup bigger. The Stats & Usage screen
-  // should be the same size"), asserted as pixel-identical
-  // `getBoundingClientRect()`s at 1280x800 and 1920x1080, each clearing 90%
-  // of the viewport's own width. `modal-size-shots.mjs`'s own header holds
-  // the rest.
+  // SETTINGS FILLS THE WHOLE WINDOW, MEASURED: the operator's own ask
+  // (settings-views restructure, item A — "like a separate screen ... no
+  // card-modal look, no backdrop margins"), asserted as a `getBoundingClientRect()`
+  // flush with the viewport at 1280x800, 1440x900 and 1920x1080, opened both
+  // by the gear and by the sidebar's stats icon (item B: one surface, not
+  // two). `modal-size-shots.mjs`'s own header holds the rest.
   'modal-size-shots',
   'integrations-github-shots',
   'favicon-shots',

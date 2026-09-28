@@ -87,7 +87,15 @@ const PICK = `#${'3a2f5f'}`;
 
 function open(prefs: Prefs = EMPTY_PREFS, theme: EffectiveTheme = 'dark') {
   const onChange = vi.fn();
-  render(<SettingsOverlay prefs={prefs} theme={theme} onChange={onChange} onClose={() => {}} />);
+  render(
+    <SettingsOverlay
+      prefs={prefs}
+      theme={theme}
+      onChange={onChange}
+      onClose={() => {}}
+      initialSection="terminal"
+    />,
+  );
   return { onChange };
 }
 
@@ -473,10 +481,24 @@ describe('a change in the overlay reaches a Terminal tab that is already open', 
       rerender();
     };
     const { rerender: swap } = render(
-      <SettingsOverlay prefs={prefs} theme="dark" onChange={onChange} onClose={() => {}} />,
+      <SettingsOverlay
+        prefs={prefs}
+        theme="dark"
+        onChange={onChange}
+        onClose={() => {}}
+        initialSection="terminal"
+      />,
     );
     const rerender = () =>
-      swap(<SettingsOverlay prefs={prefs} theme="dark" onChange={onChange} onClose={() => {}} />);
+      swap(
+        <SettingsOverlay
+          prefs={prefs}
+          theme="dark"
+          onChange={onChange}
+          onClose={() => {}}
+          initialSection="terminal"
+        />,
+      );
     // `resetAll` below is `getByRole`-based, and the colour grid/reset sit
     // behind Advanced now (`openTerminalAdvanced`'s own note).
     openTerminalAdvanced();

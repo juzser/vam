@@ -38,6 +38,7 @@ import {
   type AdhdSkillState,
   type AdhdSkillStatus,
   adhdSkillInstallCommand,
+  isAdhdSkillPartiallyInstalled,
 } from '../../shared/adhd-skill.js';
 import { t } from '../i18n/strings.js';
 import { type Prefs, setConciseOutput } from '../prefs/prefs.js';
@@ -129,6 +130,34 @@ function StatusPill({ state }: { readonly state: AdhdSkillState }) {
       {PILL_TEXT[state]}
     </span>
   );
+}
+
+/**
+ * THE INSTALL BUTTON'S OWN WORD, three-way (settings-views restructure, item
+ * E). `null` (the first read still in flight) reads the same as
+ * `not-installed`: the button is `disabled` either way
+ * (`disabled={busy || status === null}` below), so its label never has to be
+ * seen before a real status lands.
+ *
+ * PRIORITY, WHEN MORE THAN ONE COULD APPLY: a CONTENT MISMATCH always wins.
+ * `outdated-modified` can co-occur with a missing agent (one hand-edited,
+ * the other never installed at all) -- `isAdhdSkillPartiallyInstalled` would
+ * call that partial too, but "Reinstall" is the honest word once vam has
+ * found bytes it does not trust: it is what asks for the confirm step below
+ * (`onInstallClick`), and "Repair" would undersell that. Only once no agent
+ * is in doubt does PARTIAL get to answer: one directory has it, the other
+ * does not, so this is neither a fresh install nor a straight redo.
+ */
+function installLabel(status: AdhdSkillStatus | null): string {
+  if (status === null || status.overall === 'not-installed') {
+    return t('settings.behaviour.adhd.install');
+  }
+  if (status.overall === 'outdated-modified') {
+    return t('settings.behaviour.adhd.reinstall');
+  }
+  return isAdhdSkillPartiallyInstalled(status)
+    ? t('settings.behaviour.adhd.repair')
+    : t('settings.behaviour.adhd.reinstall');
 }
 
 function agentChipText(state: AdhdSkillState): string {
@@ -249,11 +278,14 @@ export function AdhdSkillCard({ prefs, onChange, api }: AdhdSkillCardProps) {
       {/* THE CARD ITSELF -- a bordered, rounded surface (`bg-card`, this
           app's own raised-surface token, over the panel's flat `bg-panel`),
           the shape the operator asked for by name against the Orca
-          reference. Every OTHER row in this panel is deliberately flat
+          reference. Every OTHER row in a settings panel is deliberately flat
           (`Block`'s own header: "the space is the separator... at 2px each
-          row would start reading as a card it is not") -- this row is the
-          one exception, because the operator asked for exactly that
-          reading, once, here. */}
+          row would start reading as a card it is not") -- this row is an
+          exception, because the operator asked for exactly that reading,
+          here. `GithubPanel.tsx`'s own top row now wears the identical
+          shape (settings-views restructure, item F: "restyle GitHub connect
+          UI to match the Skills card shape"), so this is no longer the ONLY
+          one -- the reasoning is worth keeping, the count is not. */}
       <div className="flex flex-col gap-3 rounded border border-line bg-card p-4">
         <div className="flex items-start gap-3">
           {/* THE ICON TILE -- a bordered square, `rounded` (4px, this
@@ -349,9 +381,7 @@ export function AdhdSkillCard({ prefs, onChange, api }: AdhdSkillCardProps) {
                 className={BUTTON}
               >
                 <Terminal size={14} strokeWidth={1.8} aria-hidden="true" />
-                {status?.overall === 'outdated-modified'
-                  ? t('settings.behaviour.adhd.reinstall')
-                  : t('settings.behaviour.adhd.install')}
+                {installLabel(status)}
               </button>
               <button
                 type="button"

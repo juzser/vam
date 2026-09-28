@@ -31,6 +31,7 @@ import {
   TERMINAL_FONT_SIZES,
 } from '../../src/renderer/prefs/terminal-font.js';
 import { SettingsOverlay } from '../../src/renderer/settings/SettingsOverlay.js';
+import type { SectionId } from '../../src/renderer/settings/sections.js';
 
 function session(id: string): Session {
   return {
@@ -80,11 +81,21 @@ afterEach(() => {
   document.documentElement.style.cssText = '';
 });
 
-function open(prefs: Prefs = EMPTY_PREFS, theme: EffectiveTheme = 'dark') {
+function open(
+  prefs: Prefs = EMPTY_PREFS,
+  theme: EffectiveTheme = 'dark',
+  initialSection?: SectionId,
+) {
   const onChange = vi.fn();
   const onClose = vi.fn();
   const view = render(
-    <SettingsOverlay prefs={prefs} theme={theme} onChange={onChange} onClose={onClose} />,
+    <SettingsOverlay
+      prefs={prefs}
+      theme={theme}
+      onChange={onChange}
+      onClose={onClose}
+      initialSection={initialSection}
+    />,
   );
   return { onChange, onClose, view };
 }
@@ -252,7 +263,7 @@ describe('the override reaches the document', () => {
 
 describe('a binding is edited by pressing the key', () => {
   it('turns a binding into a capture box and takes the next keypress', () => {
-    const { onChange } = open();
+    const { onChange } = open(EMPTY_PREFS, 'dark', 'keyboard');
     fireEvent.click(slot('rename', 0) as HTMLElement);
     const box = capture();
     expect(box).not.toBeNull();
@@ -266,7 +277,7 @@ describe('a binding is edited by pressing the key', () => {
   });
 
   it('cancels on Escape without binding anything and without closing the panel', () => {
-    const { onChange, onClose } = open();
+    const { onChange, onClose } = open(EMPTY_PREFS, 'dark', 'keyboard');
     fireEvent.click(slot('rename', 0) as HTMLElement);
     fireEvent.keyDown(capture() as HTMLElement, { key: 'Escape' });
     expect(onChange).not.toHaveBeenCalled();
@@ -336,7 +347,7 @@ describe('a binding is edited by pressing the key', () => {
    *  clicking a second slot now fires blur before click, so the later
    *  `setCapturing` has to win. Exercised rather than reasoned about. */
   it('moves the armed box when a second slot is clicked', () => {
-    open();
+    open(EMPTY_PREFS, 'dark', 'keyboard');
     fireEvent.click(slot('rename', 0) as HTMLElement);
     fireEvent.click(slot('close', 0) as HTMLElement);
     expect(capture()).not.toBeNull();
@@ -345,7 +356,7 @@ describe('a binding is edited by pressing the key', () => {
   });
 
   it('refuses a reserved key and says which it was', () => {
-    const { onChange } = open();
+    const { onChange } = open(EMPTY_PREFS, 'dark', 'keyboard');
     fireEvent.click(slot('rename', 0) as HTMLElement);
     fireEvent.keyDown(capture() as HTMLElement, { key: 'g' });
     expect(onChange).not.toHaveBeenCalled();
@@ -362,7 +373,7 @@ describe('a binding is edited by pressing the key', () => {
       .flatMap((group) => group.rows)
       .find((row: BindingRow) => row.id === 'prompt')?.label;
     expect(caption).not.toBeUndefined();
-    const { onChange } = open();
+    const { onChange } = open(EMPTY_PREFS, 'dark', 'keyboard');
     fireEvent.click(slot('rename', 0) as HTMLElement);
     fireEvent.keyDown(capture() as HTMLElement, { key: 'i' });
     expect(onChange).not.toHaveBeenCalled();
@@ -371,7 +382,7 @@ describe('a binding is edited by pressing the key', () => {
 
   it('takes a second binding on the same action', () => {
     const prefs: Prefs = { ...EMPTY_PREFS, keyBindings: { rename: ['p'] } };
-    const { onChange } = open(prefs);
+    const { onChange } = open(prefs, 'dark', 'keyboard');
     fireEvent.click(slot('rename', 1) as HTMLElement);
     fireEvent.keyDown(capture() as HTMLElement, { key: 'u' });
     expect(changed(onChange, 0).keyBindings['rename']).toEqual(['p', 'u']);
@@ -379,7 +390,7 @@ describe('a binding is edited by pressing the key', () => {
 
   it('resets one action, and all of them', () => {
     const prefs: Prefs = { ...EMPTY_PREFS, keyBindings: { rename: ['p'], close: ['q'] } };
-    const { onChange } = open(prefs);
+    const { onChange } = open(prefs, 'dark', 'keyboard');
     fireEvent.click(document.querySelector('[data-binding-reset="rename"]') as HTMLElement);
     expect(changed(onChange, 0).keyBindings).toEqual({ close: ['q'] });
     // The overlay opens on Appearance, and the three panels it is not showing
@@ -397,7 +408,7 @@ describe('a binding is edited by pressing the key', () => {
     // An armed chip eats Ctrl-Tab and everything else for one keystroke. The
     // only thing that makes that state honest is the chip saying so, and the
     // focus ring being drawn rather than merely `focus-visible`.
-    open();
+    open(EMPTY_PREFS, 'dark', 'keyboard');
     fireEvent.click(slot('rename', 0) as HTMLElement);
     const box = capture() as HTMLInputElement;
     expect(box.placeholder).toContain('Esc to cancel');
@@ -406,7 +417,7 @@ describe('a binding is edited by pressing the key', () => {
   });
 
   it('shows the operator’s binding in the reference, not the default', () => {
-    open({ ...EMPTY_PREFS, keyBindings: { rename: ['p'] } });
+    open({ ...EMPTY_PREFS, keyBindings: { rename: ['p'] } }, 'dark', 'keyboard');
     const printed = [...document.querySelectorAll('[data-settings-keys]')].map(
       (el) => el.textContent ?? '',
     );
@@ -423,6 +434,11 @@ describe('the captured key is really in force', () => {
         window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
       });
     press(',');
+    // `,` opens on `interface` (`Canvas.tsx`'s own `'settings'` case); the
+    // capture slot is Keyboard's own now (the single-section-view
+    // restructure, item C), so the nav click is what puts it in the
+    // document at all.
+    fireEvent.click(document.querySelector('[data-settings-nav-item="keyboard"]') as HTMLElement);
     fireEvent.click(slot('help', 0) as HTMLElement);
     fireEvent.keyDown(capture() as HTMLElement, { key: 'q' });
     press('Escape');
@@ -513,14 +529,14 @@ describe('the terminal text size is an appearance setting', () => {
   const option = (size: number) => screen.getByLabelText(`terminal text ${size}px`);
 
   it('lives in Terminal, beside the terminal theme', () => {
-    open();
+    open(EMPTY_PREFS, 'dark', 'terminal');
     expect(
       option(DEFAULT_TERMINAL_FONT_SIZE).closest('section')?.querySelector('h2, h3')?.textContent,
     ).toBe('Terminal');
   });
 
   it('offers every size the pane can be drawn at, and no other', () => {
-    open();
+    open(EMPTY_PREFS, 'dark', 'terminal');
     for (const size of TERMINAL_FONT_SIZES) {
       expect(option(size), `${size}`).not.toBeNull();
     }
@@ -531,7 +547,7 @@ describe('the terminal text size is an appearance setting', () => {
   });
 
   it('shows the size in force and writes the one you press', () => {
-    const { onChange } = open({ ...EMPTY_PREFS, terminalFontSize: 10.5 });
+    const { onChange } = open({ ...EMPTY_PREFS, terminalFontSize: 10.5 }, 'dark', 'terminal');
     expect(option(10.5).getAttribute('aria-pressed')).toBe('true');
     expect(option(14).getAttribute('aria-pressed')).toBe('false');
     fireEvent.click(option(14));
@@ -539,7 +555,11 @@ describe('the terminal text size is an appearance setting', () => {
   });
 
   it('disturbs no neighbouring preference', () => {
-    const { onChange } = open({ ...EMPTY_PREFS, outFontSize: 15, theme: 'light' });
+    const { onChange } = open(
+      { ...EMPTY_PREFS, outFontSize: 15, theme: 'light' },
+      'dark',
+      'terminal',
+    );
     fireEvent.click(option(14));
     const next = changed(onChange, 0);
     expect(next.outFontSize).toBe(15);
@@ -578,21 +598,21 @@ describe('the file editor has its own settings, together now under Behaviour', (
     // MOVED, both of them: `file editor colours` joined `file editor indent`
     // in Behaviour when the cards restructure split Appearance into
     // Interface and Terminal (`settings/sections.ts` carries the rule).
-    open();
+    open(EMPTY_PREFS, 'dark', 'behaviour');
     expect(highlight()).not.toBeNull();
     expect(highlight()?.closest('section')?.querySelector('h2, h3')?.textContent).toBe('Behaviour');
     expect(indent().closest('section')?.querySelector('h2, h3')?.textContent).toBe('Behaviour');
   });
 
   it('shows the colour setting in force and writes the one you pick', () => {
-    const { onChange } = open({ ...EMPTY_PREFS, editorHighlight: true });
+    const { onChange } = open({ ...EMPTY_PREFS, editorHighlight: true }, 'dark', 'behaviour');
     expect(highlight()?.getAttribute('aria-checked')).toBe('true');
     fireEvent.click(highlight() as HTMLElement);
     expect(changed(onChange, 0).editorHighlight).toBe(false);
   });
 
   it('shows the indent in force, writes the one you pick, and offers no illegal width', () => {
-    const { onChange } = open({ ...EMPTY_PREFS, editorIndent: 2 });
+    const { onChange } = open({ ...EMPTY_PREFS, editorIndent: 2 }, 'dark', 'behaviour');
     expect(indent().value).toBe('2');
     fireEvent.change(indent(), { target: { value: '4' } });
     expect(changed(onChange, 0).editorIndent).toBe(4);
@@ -612,7 +632,7 @@ describe('the file editor has its own settings, together now under Behaviour', (
    * anything.
    */
   it('says which formats are coloured, so an uncoloured file is not read as a fault', () => {
-    open();
+    open(EMPTY_PREFS, 'dark', 'behaviour');
     const note = document.querySelector('[data-editor-highlight-note]')?.textContent ?? '';
     expect(note).toMatch(/json/i);
     expect(note).toContain('.env');
@@ -642,7 +662,7 @@ describe('the file editor has its own settings, together now under Behaviour', (
     };
     // The corpus: a sweep over an empty list would assert nothing at all.
     expect(EDITOR_LANGS.length).toBeGreaterThan(3);
-    open();
+    open(EMPTY_PREFS, 'dark', 'behaviour');
     const note = (
       document.querySelector('[data-editor-highlight-note]')?.textContent ?? ''
     ).toLowerCase();
@@ -653,7 +673,7 @@ describe('the file editor has its own settings, together now under Behaviour', (
   /** And the indent's own caption has to say SPACES — "indent: 4" reads as a
    *  tab width, and a tab byte is the one thing that breaks the gutter. */
   it('says the indent is spaces', () => {
-    open();
+    open(EMPTY_PREFS, 'dark', 'behaviour');
     const hint = indent().closest('div')?.parentElement?.textContent ?? '';
     expect(hint).toMatch(/space/i);
   });

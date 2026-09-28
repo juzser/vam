@@ -615,6 +615,36 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * zlib) plus ~350 B (~0.16%) of the same slack. The next PR to land here
  * should expect to remeasure rather than assume either number still has
  * room.
+ *
+ * THE SETTINGS-VIEWS RESTRUCTURE (items A-D: a full-window screen replacing
+ * the centred modal, Stats & Usage folded in as one of its sections, single-
+ * section-view navigation replacing the always-mounted cards, a new Skills
+ * section) TOUCHES NEITHER BUDGET, for the same reason the cards restructure
+ * above did not: every line of it is a re-layout of code already behind
+ * `SettingsOverlay`'s own lazy boundary, plus the deletion of `StatsScreen`'s
+ * own separate lazy chunk -- its content (`StatsPanel.tsx`) is a static
+ * import inside `SettingsOverlay.tsx` now, so it moved FROM its own chunk
+ * INTO this one rather than into the eager entry (confirmed by grep:
+ * `data-stats-panel` is absent from the entry chunk and present exactly once
+ * in `SettingsOverlay-*.js`). Measured, `electron-vite build --mode
+ * production`, this branch against `main`:
+ *
+ *     entry                722,046 B (unmoved) -> 721,741 B  (-305 B)
+ *     entry gzip           216,344 B (unmoved) -> 216,312 B  (-32 B, this
+ *                          machine's zlib)
+ *     SettingsOverlay chunk                       103,854 B  (was 76,458 B
+ *                          at the cards-restructure measurement above --
+ *                          the growth is Stats & Usage's own content plus
+ *                          Skills, both newly inside this chunk)
+ *
+ * The eager entry shrank slightly rather than grew: `Canvas.tsx` no longer
+ * carries a SECOND `React.lazy` declaration and `Suspense` boundary for the
+ * now-deleted `StatsScreen`, which is marginally less eager wiring than
+ * before, and nothing this restructure added touches the entry at all.
+ * `ENTRY_BUDGET_BYTES` and `ENTRY_GZIP_BUDGET_BYTES` stay at 723,500 /
+ * 216,700 -- both measurements land under the existing budgets with the
+ * same order of headroom the previous entry left, so this is not the "moves
+ * the number" category of change.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');

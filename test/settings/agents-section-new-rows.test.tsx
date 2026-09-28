@@ -36,7 +36,15 @@ function markDesktopShell(): void {
 
 function open(prefs: Prefs = EMPTY_PREFS) {
   const onChange = vi.fn();
-  render(<SettingsOverlay prefs={prefs} theme="dark" onChange={onChange} onClose={() => {}} />);
+  render(
+    <SettingsOverlay
+      prefs={prefs}
+      theme="dark"
+      onChange={onChange}
+      onClose={() => {}}
+      initialSection="agents"
+    />,
+  );
   return { onChange };
 }
 

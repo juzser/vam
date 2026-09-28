@@ -189,20 +189,24 @@ export const unwrapAgentWork = (pending: Promise<unknown>): Promise<AgentWork> =
  * check in the preload is a check the renderer could have skipped.
  */
 /**
- * The Terminal font-family picker's own member: the installed monospace
- * fonts this machine's font directories carry, off `main/fonts/ipc.ts`.
- * Forwards straight through -- no `unwrap`, because that channel answers a
- * bare array (an enumeration failure is a fact about this machine's disk,
- * not a `SourceError` there is a source to phrase in the words of, the same
- * argument `StatsApi` makes for its own scan).
+ * The Terminal and UI font-family pickers' own members: the installed
+ * monospace/curated-sans fonts this machine's font directories carry, off
+ * `main/fonts/ipc.ts`. Both forward straight through -- no `unwrap`, because
+ * each channel answers a bare array (an enumeration failure is a fact about
+ * this machine's disk, not a `SourceError` there is a source to phrase in
+ * the words of, the same argument `StatsApi` makes for its own scan).
+ * `listSans` is `settings-views` restructure item G's own member, sharing
+ * this type rather than a second one: both pickers read one bridge.
  */
 export type FontsApi = {
   listMonospace(): Promise<readonly string[]>;
+  listSans(): Promise<readonly string[]>;
 };
 
 export function createFontsApi(ipc: InvokerLike): FontsApi {
   return {
     listMonospace: () => ipc.invoke(CHANNELS.fontsListMonospace) as Promise<readonly string[]>,
+    listSans: () => ipc.invoke(CHANNELS.fontsListSans) as Promise<readonly string[]>,
   };
 }
 

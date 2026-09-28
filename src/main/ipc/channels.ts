@@ -102,6 +102,13 @@ export const CHANNELS = {
    */
   fontsListMonospace: 'vam:fonts:list-monospace',
   /**
+   * THE UI FONT PICKER'S OWN CHANNEL (settings-views restructure, item G) --
+   * `fontsListMonospace`'s exact sibling, one machine-wide scan over
+   * `main/fonts/list-sans.ts` instead of `list-monospace.ts`. Same standing:
+   * desktop-only, never a member of `PreloadSourceApi`.
+   */
+  fontsListSans: 'vam:fonts:list-sans',
+  /**
    * Settings -> Integrations -> GitHub, six channels, ALL DESKTOP-ONLY and
    * none of them a member of `PreloadSourceApi` -- `remote/server.ts`
    * registers no route for any of them, the same standing as `setPrRepos`

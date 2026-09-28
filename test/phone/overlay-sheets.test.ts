@@ -20,7 +20,6 @@ const read = (path: string) => readFileSync(fileURLToPath(new URL(path, import.m
 
 const CSS = read('../../src/renderer/styles.css');
 const HOSTS = [
-  '../../src/renderer/settings/SettingsOverlay.tsx',
   '../../src/renderer/errors/ErrorLogPanel.tsx',
   '../../src/renderer/panels/IconPicker.tsx',
   '../../src/renderer/panels/ProjectPicker.tsx',
@@ -40,8 +39,8 @@ describe('the overlay sheet rules', () => {
   it('caps the sheet and lets it scroll within itself', () => {
     expect(sheetRules).toMatch(/max-height: 85dvh;/);
     expect(sheetRules).toMatch(/overflow-y: auto;/);
-    // SettingsOverlay's panel wears `vam-modal-lg` (`styles.css`), a fixed
-    // height that would win over a max-height and reintroduce the
+    // ProjectPicker's panel wears `max-h-[380px]` (its own component file), a
+    // fixed height that would win over a max-height and reintroduce the
     // unreachable bottom.
     expect(sheetRules).toMatch(/height: auto;/);
   });
@@ -95,5 +94,15 @@ describe('the overlay sheet rules', () => {
     // look reachable while nothing can open them.
     expect(read('../../src/renderer/panels/CommandPalette.tsx')).not.toContain('data-overlay-host');
     expect(read('../../src/renderer/panels/KeySheet.tsx')).not.toContain('data-overlay-host');
+  });
+
+  it('is NOT carried by Settings, which is already a full-window screen', () => {
+    // Settings-views restructure, item A/C: Settings fills the whole frame
+    // at every width and gets its own list -> detail rule on a phone, rather
+    // than shrinking a small centred modal down into a bottom sheet. See
+    // `SettingsOverlay.tsx`'s own comment on its host `className`.
+    expect(read('../../src/renderer/settings/SettingsOverlay.tsx')).not.toContain(
+      'data-overlay-host',
+    );
   });
 });

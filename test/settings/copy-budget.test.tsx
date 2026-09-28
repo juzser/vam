@@ -64,6 +64,7 @@ import { cleanup, render } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { EMPTY_PREFS, type Prefs } from '../../src/renderer/prefs/prefs.js';
 import { SettingsOverlay } from '../../src/renderer/settings/SettingsOverlay.js';
+import type { SectionId } from '../../src/renderer/settings/sections.js';
 
 beforeAll(() => {
   Object.defineProperty(window, 'localStorage', {
@@ -87,10 +88,26 @@ beforeAll(() => {
 afterEach(() => {
   cleanup();
   localStorage.clear();
+  vi.unstubAllGlobals();
 });
 
-function open(prefs: Prefs = EMPTY_PREFS) {
-  render(<SettingsOverlay prefs={prefs} theme="dark" onChange={vi.fn()} onClose={vi.fn()} />);
+/**
+ * Opens straight to the section under test -- the single-section-view
+ * restructure (item C) means a section's own paragraphs are not in the
+ * document at all until its nav item is the one selected, so every
+ * budget below is measured against ITS OWN OPEN rather than one shared
+ * render the old always-mounted page let every section borrow.
+ */
+function open(id: SectionId, prefs: Prefs = EMPTY_PREFS) {
+  render(
+    <SettingsOverlay
+      prefs={prefs}
+      theme="dark"
+      onChange={vi.fn()}
+      onClose={vi.fn()}
+      initialSection={id}
+    />,
+  );
 }
 
 /**
@@ -132,15 +149,17 @@ const BUDGET: readonly (readonly [string, number, number])[] = [
   // Claude, show Codex). Re-measured 6 paragraphs, 63 words; the ceiling
   // gives the same short-sentence slack `notifications` carries.
   ['window', 6, 72],
-  // RENAMED FROM SESSIONS, gaining the ADHD skill card's own prose from
-  // Behaviour. Step 2B added keep-awake, auto tab titles, agent permissions
-  // and default agent -- but the permissions row (hint + its always-on note)
-  // is gated on `isDesktopShell()` (`prefs/agent-permissions.ts`) and this
-  // harness has no `window.api`, so those 2 paragraphs never draw here at
-  // all (the confirmation risk copy was already excluded the same way, being
-  // conditional on an open dialog this harness never opens). Re-measured 13,
-  // 172.
-  ['agents', 13, 190],
+  // RENAMED FROM SESSIONS. Step 2B added keep-awake, auto tab titles, agent
+  // permissions and default agent -- but the permissions row (hint + its
+  // always-on note) is gated on `isDesktopShell()` (`prefs/agent-
+  // permissions.ts`) and this harness has no `window.api`, so those 2
+  // paragraphs never draw here at all (the confirmation risk copy was
+  // already excluded the same way, being conditional on an open dialog this
+  // harness never opens). THE ADHD SKILL CARD'S OWN PROSE LEFT, for its own
+  // "Skills" section (settings-views restructure, item D) -- Agents dropped
+  // from 13/172 to 10/160 the moment that card's hint, credit line, copy-
+  // command hint and coverage hint stopped drawing here.
+  ['agents', 10, 175],
   // SMALLER THAN IT WAS: `view width` and `streaming terminal` left for
   // Window & Sidebar and Terminal, and the file editor's own two rows (one
   // of them, `file editor colours`, moved IN from Appearance) joined focus
@@ -152,12 +171,42 @@ const BUDGET: readonly (readonly [string, number, number])[] = [
   // this section did not move. Measured at 79 words over 5 paragraphs; the
   // ceiling leaves a short sentence of slack and refuses a second note.
   ['notifications', 5, 90],
+  // NEW (settings-views restructure, item D): the ADHD skill card's own
+  // prose, moved off Agents into its own section -- the section's own hint,
+  // the card's title-adjacent hint, the credit line, the copy-command hint
+  // and the coverage hint. Measured 5 paragraphs, 27 words, with the bridge
+  // stubbed (see `SKILLS_BRIDGE_STUB` below) -- unlike every other row in
+  // this table, Skills does not draw AT ALL without one (`isDesktopOnlySection`,
+  // item D's own "hide it where window.api is absent"), so measuring it
+  // bridge-less would be measuring nothing.
+  ['skills', 5, 45],
 ];
+
+/** The one bridge call `AdhdSkillCard` reads on mount -- just enough for the
+ *  section to exist at all in a harness with no real Electron shell, on the
+ *  same minimal-stub idiom `terminal-colours.test.tsx`'s own font-family
+ *  probes use. `'not-installed'`: the shortest-copy state, and the state
+ *  every fresh install actually starts in. */
+const SKILLS_BRIDGE_STUB = {
+  adhdSkill: { status: vi.fn(async () => ({ overall: 'not-installed' as const, agents: [] })) },
+};
+
+/** Skills draws nothing at all without a bridge (`isDesktopOnlySection`,
+ *  item D) -- every other section in `BUDGET` is measured bridge-less on
+ *  purpose (several of their own rows fold away without one too, and that
+ *  is the harness this table already tunes to), so only this one id stubs
+ *  it, right before the render that needs it. */
+function openForBudget(id: SectionId): void {
+  if (id === 'skills') {
+    vi.stubGlobal('window', Object.assign(globalThis.window, { api: SKILLS_BRIDGE_STUB }));
+  }
+  open(id);
+}
 
 describe('a settings panel says what a row does without arguing for it', () => {
   for (const [id, floor, ceiling] of BUDGET) {
     it(`draws at least ${floor} paragraphs in ${id}, so the budget is about something`, () => {
-      open();
+      openForBudget(id as SectionId);
       const drawn = paragraphs(id);
       expect(drawn.length).toBeGreaterThanOrEqual(floor);
       // And none of them is empty: a row whose caption is '' would shrink the
@@ -166,7 +215,7 @@ describe('a settings panel says what a row does without arguing for it', () => {
     });
 
     it(`keeps ${id}'s prose inside ${ceiling} words`, () => {
-      open();
+      openForBudget(id as SectionId);
       const drawn = paragraphs(id);
       const total = drawn.reduce((sum, text) => sum + words(text), 0);
       const longest = [...drawn].sort((a, b) => words(b) - words(a))[0] ?? '';
@@ -185,7 +234,7 @@ describe('a settings panel says what a row does without arguing for it', () => {
      * vam's own words into somebody's session, and it owes four facts.
      */
     it(`gives no row in ${id} a paragraph longer than 60 words`, () => {
-      open();
+      openForBudget(id as SectionId);
       const essays = paragraphs(id)
         .filter((text) => words(text) > 60)
         .map((text) => `${words(text)}: ${text.slice(0, 48)}…`);
