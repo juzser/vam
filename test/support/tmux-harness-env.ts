@@ -224,6 +224,31 @@ export function readProcEnviron(pid: number): ProcEnv | null {
  *  own tests never run a real `tmux`/`ps`. */
 export type DiagnosticExec = (file: string, args: readonly string[]) => string;
 
+/** Whether a path exists at all, and -- when it does -- the `dev`/`ino`
+ *  pair that identifies WHICH underlying file it is, socket or not. Two
+ *  different PATHS with the same `dev`+`ino` are the same file (a hard
+ *  link, or one reached via a symlinked ancestor); this is how
+ *  `describeDefaultServerLeak` below tells apart "this really is a
+ *  separate, genuine private socket" from "this is the real default
+ *  socket, reached under a different name". */
+export type PathInspection = {
+  readonly exists: boolean;
+  readonly isSocket: boolean;
+  readonly dev: number | null;
+  readonly ino: number | null;
+};
+
+/** The real inspection: `lstatSync`, never a thrown error -- a path that
+ *  does not exist answers `{ exists: false, ... }`, not an exception. */
+export function inspectPath(target: string): PathInspection {
+  try {
+    const st = lstatSync(target);
+    return { exists: true, isSocket: st.isSocket(), dev: st.dev, ino: st.ino };
+  } catch {
+    return { exists: false, isSocket: false, dev: null, ino: null };
+  }
+}
+
 /** The real diagnostic exec: `execFileSync`, with a failure turned into
  *  TEXT describing itself rather than a thrown error -- every diagnostic
  *  step below must produce SOME line of output, never abort the ones after
@@ -250,7 +275,13 @@ const runDiagnostic: DiagnosticExec = (file, args) => {
  *  - whether that PARENT's environment carried `TMUX_TMPDIR` at all
  *    (`readProcEnviron`) -- the one fact that tells apart "isolation never
  *    reached this spawn" (absent) from "isolation reached it and tmux's
- *    own resolution fell through anyway" (present, but not honoured).
+ *    own resolution fell through anyway" (present, but not honoured);
+ *  - when `TMUX_TMPDIR` WAS present, whether the socket it claims
+ *    (`<TMUX_TMPDIR>/tmux-<uid>/default`) still exists, and whether it is
+ *    the SAME underlying file (`dev`+`ino`) as the real default socket --
+ *    telling apart "its own private socket is gone/aliased" from "this is
+ *    a genuinely separate, still-live private socket, so something ELSE
+ *    entirely created the one on the real default server".
  *
  * Never throws on its own: `exec`'s default (`runDiagnostic`) turns a
  * failed command into descriptive text instead of an exception, and every
@@ -262,6 +293,8 @@ export function describeDefaultServerLeak(
   watchDir: string,
   exec: DiagnosticExec = runDiagnostic,
   readEnviron: (pid: number) => ProcEnv | null = readProcEnviron,
+  inspect: (target: string) => PathInspection = inspectPath,
+  uid: number = process.getuid?.() ?? 0,
 ): string {
   const listing = exec('tmux', [
     'list-panes',
@@ -303,11 +336,42 @@ export function describeDefaultServerLeak(
         `${exec('ps', ['-o', 'pid,ppid,command', '-p', String(ppid)])}`,
     );
     const env = readEnviron(ppid);
+    if (env === null) {
+      lines.push(
+        `/proc/${ppid}/environ unavailable (not Linux, process already gone, or no permission)`,
+      );
+      return lines.join('\n');
+    }
     lines.push(
-      env === null
-        ? `/proc/${ppid}/environ unavailable (not Linux, process already gone, or no permission)`
-        : `parent(${ppid}) env: TMUX_TMPDIR=${env.TMUX_TMPDIR ?? '<absent>'} TMUX=${env.TMUX ?? '<absent>'} ` +
-            `PWD=${env.PWD ?? '<absent>'} SHELL=${env.SHELL ?? '<absent>'}`,
+      `parent(${ppid}) env: TMUX_TMPDIR=${env.TMUX_TMPDIR ?? '<absent>'} TMUX=${env.TMUX ?? '<absent>'} ` +
+        `PWD=${env.PWD ?? '<absent>'} SHELL=${env.SHELL ?? '<absent>'}`,
+    );
+    if (env.TMUX_TMPDIR === undefined) return lines.join('\n');
+    const claimedSocket = path.join(env.TMUX_TMPDIR, `tmux-${uid}`, 'default');
+    const claimed = inspect(claimedSocket);
+    if (!claimed.exists) {
+      lines.push(
+        `its claimed private socket ${claimedSocket} does NOT exist -- ` +
+          `consistent with a deleted-tmpdir fallback (the exact incident mechanism)`,
+      );
+      return lines.join('\n');
+    }
+    const realDefaultCandidates = [
+      path.join('/tmp', `tmux-${uid}`, 'default'),
+      path.join(os.tmpdir(), `tmux-${uid}`, 'default'),
+    ];
+    const aliasesRealDefault = realDefaultCandidates.some((candidate) => {
+      const real = inspect(candidate);
+      return real.exists && real.dev === claimed.dev && real.ino === claimed.ino;
+    });
+    lines.push(
+      `its claimed private socket ${claimedSocket} exists (dev=${claimed.dev} ino=${claimed.ino}, ` +
+        `isSocket=${claimed.isSocket}) and ${
+          aliasesRealDefault
+            ? 'IS THE SAME FILE as the real default socket (same dev+ino) -- an alias, not a separate connection'
+            : 'is a DIFFERENT file from the real default socket -- a genuinely separate, still-live private ' +
+              'socket, so something ELSE entirely must have created the session on the real default server'
+        }`,
     );
     return lines.join('\n');
   });

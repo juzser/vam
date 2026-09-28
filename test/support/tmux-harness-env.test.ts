@@ -212,6 +212,58 @@ describe('describeDefaultServerLeak, with injected exec/readEnviron (no real tmu
     expect(unavailable).toMatch(/unavailable/i);
   });
 
+  it('reports when the parent’s claimed private socket no longer exists -- consistent with a deleted-tmpdir fallback', () => {
+    const exec = (file: string, args: readonly string[]): string => {
+      if (file === 'tmux') return 'vamctl\tcat\t4242\t/home/runner/work/vam/vam\n';
+      if (args.includes('ppid=')) return '999\n';
+      return 'PID PPID COMMAND\n4242 999 cat\n';
+    };
+    const text = describeDefaultServerLeak(
+      '/home/runner/work/vam/vam',
+      exec,
+      () => ({ TMUX_TMPDIR: '/tmp/vam-userdata-isolation-tmux-DY6Mzw' }),
+      () => ({ exists: false, isSocket: false, dev: null, ino: null }),
+    );
+    expect(text).toMatch(/does NOT exist/);
+    expect(text).toMatch(/deleted-tmpdir fallback/);
+  });
+
+  it('reports when the claimed private socket ALIASES the real default (same dev+ino)', () => {
+    const exec = (file: string, args: readonly string[]): string => {
+      if (file === 'tmux') return 'vamctl\tcat\t4242\t/home/runner/work/vam/vam\n';
+      if (args.includes('ppid=')) return '999\n';
+      return 'PID PPID COMMAND\n4242 999 cat\n';
+    };
+    const text = describeDefaultServerLeak(
+      '/home/runner/work/vam/vam',
+      exec,
+      () => ({ TMUX_TMPDIR: '/tmp/vam-userdata-isolation-tmux-DY6Mzw' }),
+      () => ({ exists: true, isSocket: true, dev: 1, ino: 42 }),
+      501,
+    );
+    expect(text).toMatch(/IS THE SAME FILE as the real default socket/);
+  });
+
+  it('reports when the claimed private socket is genuinely a DIFFERENT file from the real default', () => {
+    const exec = (file: string, args: readonly string[]): string => {
+      if (file === 'tmux') return 'vamctl\tcat\t4242\t/home/runner/work/vam/vam\n';
+      if (args.includes('ppid=')) return '999\n';
+      return 'PID PPID COMMAND\n4242 999 cat\n';
+    };
+    const text = describeDefaultServerLeak(
+      '/home/runner/work/vam/vam',
+      exec,
+      () => ({ TMUX_TMPDIR: '/tmp/vam-userdata-isolation-tmux-DY6Mzw' }),
+      (target) =>
+        target.includes('vam-userdata-isolation')
+          ? { exists: true, isSocket: true, dev: 1, ino: 42 }
+          : { exists: true, isSocket: true, dev: 1, ino: 99 },
+      501,
+    );
+    expect(text).toMatch(/DIFFERENT file from the real default socket/);
+    expect(text).toMatch(/something ELSE entirely must have created/);
+  });
+
   it('never throws even when every exec call fails', () => {
     const exec = (): string => {
       throw new Error('boom');
