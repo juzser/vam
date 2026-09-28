@@ -8,6 +8,7 @@
  */
 
 import { describe, expect, expectTypeOf, it } from 'vitest';
+import * as RendererModel from '../../src/renderer/domain/model.js';
 // Deliberately NOT `import type`: a type-only import (or one only ever used
 // as a type argument) is elided by vitest's esbuild transform before it ever
 // resolves the specifier, so the suite would pass vacuously under the null
@@ -16,7 +17,6 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 // live so vitest itself resolves the module and fails with a module-
 // resolution error naming `src/shared/model.js` when it is missing.
 import * as SharedModel from '../../src/shared/model.js';
-import * as RendererModel from '../../src/renderer/domain/model.js';
 
 describe('the renderer shim re-exports the same types src/shared/model.ts declares', () => {
   it('resolves both module paths at runtime', () => {
