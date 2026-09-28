@@ -22,15 +22,24 @@ import { describe, expect, it } from 'vitest';
  * `test/e2e/tmux-socket-guard.test.ts` and `test/electron/
  * tmux-isolation-guard.test.ts` already apply to their own corpora -- it
  * sweeps the file's SOURCE and asserts, by content:
- *  1. the exact vulnerable shape (`-L` paired with the literal `'default'`)
- *     never appears anywhere in the file again, and
+ *  1. NO `-L` argv token appears anywhere in the file at all, and
  *  2. the safe replacement (an explicit `-S <computed path>`, guarded by a
  *     real `isSocket()` check before anything destructive runs) is present.
+ *
+ * A BLANKET BAN ON `-L`, NOT JUST ON `-L` PAIRED WITH THE LITERAL
+ * `'default'` (a reviewer finding on this same fix): a sweep that only
+ * matched `-L` next to a quoted `'default'` would miss a rewrite that
+ * reintroduced the hazard through a VARIABLE instead -- `const SOCK =
+ * 'default'; [...prefix, '-L', SOCK, ...]` reaches the identical operator
+ * socket and would slip straight past a literal-only pattern. After this
+ * fix the file has no legitimate reason to pass `-L` to tmux anywhere at
+ * all -- every kill/count/list call in it addresses an explicit `-S <path>`
+ * instead -- so banning the token outright is not over-broad.
  *
  * Falsified directly while writing this fix: reverting `e2e/
  * electron-launch.et.ts` to its pre-fix contents (`git show
  * origin/main:e2e/electron-launch.et.ts`) makes both assertions below fail --
- * the vulnerable shape is present, and the safe replacement is not.
+ * `-L` is present, and `-S` is not.
  */
 
 const FILE = path.resolve(__dirname, '..', '..', 'e2e', 'electron-launch.et.ts');
@@ -42,12 +51,10 @@ function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
 }
 
-/** The exact vulnerable shape: `-L` immediately paired with the literal
- *  socket name `default` -- the name a bare, unisolated `tmux` call always
- *  resolves to, and so the one name whose accidental fallback reaches the
- *  operator's REAL default server. `['-L', SOCKET]` elsewhere in this repo
- *  (a per-pid identifier, never `'default'`) does not match. */
-const VULNERABLE_DASH_L_DEFAULT = /['"]-L['"]\s*,\s*['"]default['"]/;
+/** ANY `-L` argv token at all -- literal or paired with a variable. Broader
+ *  than matching only `-L` next to a quoted `'default'`: see this file's
+ *  own header for why a variable-paired reintroduction must be caught too. */
+const HAS_DASH_L_TOKEN = /['"]-L['"]/;
 
 /** The safe replacement: an explicit `-S` argument, so nothing here ever
  *  asks tmux to resolve a socket by NAME through its own search list for a
@@ -61,8 +68,8 @@ const CHECKS_IS_SOCKET = /\.isSocket\(\)/;
 describe('e2e/electron-launch.et.ts never lets a kill/list tmux call resolve `-L default`', () => {
   const code = stripComments(readFileSync(FILE, 'utf8'));
 
-  it('contains no `-L` paired with the literal socket name `default`', () => {
-    expect(code).not.toMatch(VULNERABLE_DASH_L_DEFAULT);
+  it('contains no `-L` argv token at all, literal or variable', () => {
+    expect(code).not.toMatch(HAS_DASH_L_TOKEN);
   });
 
   it('addresses the isolated socket with an explicit -S path instead', () => {

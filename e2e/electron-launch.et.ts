@@ -123,11 +123,19 @@ function assertNoNewSessionUnderOnDefaultServer(input: {
  * default-server path -- both checks run before any filesystem check, so
  * they fire even when a real default socket happens to sit there.
  */
-function resolveIsolatedSocket(tmuxTmpdir: string, uid: number = process.getuid?.() ?? 0): string | null {
+function defaultTmpRoots(): ReadonlySet<string> {
+  const roots = new Set<string>(['/tmp', os.tmpdir()]);
+  if (process.env.TMPDIR) roots.add(process.env.TMPDIR);
+  return roots;
+}
+
+function resolveIsolatedSocket(
+  tmuxTmpdir: string,
+  uid: number = process.getuid?.() ?? 0,
+  tmpRoots: ReadonlySet<string> = defaultTmpRoots(),
+): string | null {
   const socketPath = path.join(tmuxTmpdir, `tmux-${uid}`, 'default');
 
-  const tmpRoots = new Set<string>(['/tmp', os.tmpdir()]);
-  if (process.env.TMPDIR) tmpRoots.add(process.env.TMPDIR);
   const underATmpRoot = [...tmpRoots].some(
     (root) => socketPath === path.join(root, `tmux-${uid}`, 'default') || socketPath.startsWith(`${root}${path.sep}`),
   );
@@ -143,6 +151,26 @@ function resolveIsolatedSocket(tmuxTmpdir: string, uid: number = process.getuid?
       `refusing to target the operator's own default tmux socket (${socketPath}) -- ` +
         `an isolated/destructive call must never be able to reach it, even via TMUX_TMPDIR's own fallback`,
     );
+  }
+
+  // REALPATH ALIAS CHECK -- see `test/support/tmux-harness-env.ts`'s
+  // identical `resolveIsolatedSocket` for the full rationale: the checks
+  // above compare strings, so a `tmuxTmpdir` that is itself a symlink
+  // aliasing one of `tmpRoots` under a different name would otherwise sail
+  // straight through them.
+  const socketDir = path.dirname(socketPath);
+  if (fs.existsSync(socketDir)) {
+    const realSocketDir = fs.realpathSync(socketDir);
+    for (const root of tmpRoots) {
+      const forbiddenDir = path.join(root, `tmux-${uid}`);
+      if (forbiddenDir === socketDir || !fs.existsSync(forbiddenDir)) continue;
+      if (fs.realpathSync(forbiddenDir) === realSocketDir) {
+        throw new Error(
+          `refusing to target the operator's own default tmux socket directory -- ` +
+            `${socketDir} is a symlink alias of ${forbiddenDir} (both realpath to ${realSocketDir})`,
+        );
+      }
+    }
   }
 
   try {
@@ -195,7 +223,16 @@ function killIsolatedServer(tmuxTmpdir: string): void {
  *  `os.tmpdir()` is already close to the kernel's ~104-byte `sun_path`
  *  ceiling before this file's own `tmux-<uid>/<name>` suffix is added. */
 function mkIsolatedTmuxTmpdir(prefix: string): string {
-  return fs.mkdtempSync(path.join(TMUX_SOCKET_ROOT, `${prefix}-`));
+  const dir = fs.mkdtempSync(path.join(TMUX_SOCKET_ROOT, `${prefix}-`));
+  // PRE-CREATE TMUX'S OWN `tmux-<uid>` SOCKET DIRECTORY -- see
+  // `test/support/tmux-harness-env.ts`'s identical `mkIsolatedTmuxTmpdir`
+  // for the full CI-measured rationale (main, run 36396039883): a launch
+  // makes several near-simultaneous tmux calls that can all reach a
+  // brand-new `tmuxTmpdir` before any of them has created this
+  // subdirectory on its own, which is exactly the shape of gap the
+  // incident's own mechanism has no obligation to lose safely under.
+  fs.mkdirSync(path.join(dir, `tmux-${process.getuid?.() ?? 0}`), { recursive: true, mode: 0o700 });
+  return dir;
 }
 
 /**

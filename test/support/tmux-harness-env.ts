@@ -39,7 +39,7 @@
  * trigger.
  */
 import { execFileSync } from 'node:child_process';
-import { lstatSync, mkdtempSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -74,7 +74,30 @@ export function mkIsolatedTmuxTmpdir(prefix: string): string {
   if (prefix === '') {
     throw new Error('mkIsolatedTmuxTmpdir requires a non-empty prefix');
   }
-  return mkdtempSync(path.join(TMUX_SOCKET_ROOT, `${prefix}-`));
+  const dir = mkdtempSync(path.join(TMUX_SOCKET_ROOT, `${prefix}-`));
+  // PRE-CREATE TMUX'S OWN `tmux-<uid>` SOCKET DIRECTORY, HERE, SYNCHRONOUSLY,
+  // BEFORE THIS FUNCTION EVER RETURNS -- CI evidence (main, post-#546+#540
+  // combined, run 36396039883): a session appeared on the OPERATOR'S REAL
+  // DEFAULT server during an isolated launch, with a pane cwd exactly the
+  // repo root -- the shape a bare, unisolated `tmux -C new-session -A -s
+  // vamctl` produces. Production code is NEVER given `-S`/`-L` (the whole
+  // point of `TMUX_TMPDIR`-only isolation, this file's own header), so
+  // every tmux call the launched app makes relies ENTIRELY on tmux itself
+  // resolving `TMUX_TMPDIR` and creating `tmux-<uid>` under it, ON ITS OWN,
+  // the FIRST time any of them connects. A single launch makes several
+  // near-simultaneous tmux calls (the vamctl control connection, plus at
+  // least one plain `list-sessions`/`-V` the sidebar and the streaming
+  // version-gate both fire on mount) that can all reach a BRAND-NEW
+  // `tmuxTmpdir` before any of them has created that subdirectory --
+  // exactly the shape of gap the incident's own mechanism (tmux's
+  // `"$TMUX_TMPDIR:/tmp/"` search list, silently skipping an entry it
+  // cannot use) has no obligation to lose safely under. Creating it here,
+  // mode 0700 and owned by this process, removes the race entirely: every
+  // tmux call the launched app makes finds an already-valid, already-owned
+  // directory waiting for it, with nothing left to create -- and therefore
+  // nothing left to race over -- on its first connect.
+  mkdirSync(path.join(dir, `tmux-${process.getuid?.() ?? 0}`), { recursive: true, mode: 0o700 });
+  return dir;
 }
 
 /**
@@ -199,15 +222,29 @@ export function assertNoNewSessionUnderOnDefaultServer(input: {
  * same place `os.tmpdir()` reports). Both throws happen BEFORE any
  * filesystem check, so they fire even when a real default socket happens to
  * sit at that exact path.
+ *
+ * A SECOND DEFENCE-IN-DEPTH PASS, BY REALPATH (a reviewer finding): the
+ * checks above compare STRINGS, so a `tmuxTmpdir` that is itself a SYMLINK
+ * aliasing one of `tmpRoots` under a different name would sail straight
+ * through them -- the string never matches, even though the directory it
+ * actually opens is identical. Once both the socket's own parent directory
+ * and a forbidden root's `tmux-<uid>` directory genuinely EXIST, their
+ * `realpathSync` is compared instead of their spelling. Skipped whenever
+ * either side does not exist yet: a directory that is not there cannot
+ * alias anything, and `lstatSync` below already refuses a socket that was
+ * never created.
+ *
+ * `tmpRoots`, the third parameter, is INJECTABLE so a test can exercise
+ * this whole function -- including this exact alias check -- against
+ * fake, test-owned roots, never the real `/tmp/tmux-<uid>`.
  */
 export function resolveIsolatedSocket(
   tmuxTmpdir: string,
   uid: number = process.getuid?.() ?? 0,
+  tmpRoots: ReadonlySet<string> = defaultTmpRoots(),
 ): string | null {
   const socketPath = path.join(tmuxTmpdir, `tmux-${uid}`, 'default');
 
-  const tmpRoots = new Set<string>(['/tmp', os.tmpdir()]);
-  if (process.env.TMPDIR) tmpRoots.add(process.env.TMPDIR);
   const underATmpRoot = [...tmpRoots].some(
     (root) =>
       socketPath === path.join(root, `tmux-${uid}`, 'default') ||
@@ -229,11 +266,36 @@ export function resolveIsolatedSocket(
     );
   }
 
+  const socketDir = path.dirname(socketPath);
+  if (existsSync(socketDir)) {
+    const realSocketDir = realpathSync(socketDir);
+    for (const root of tmpRoots) {
+      const forbiddenDir = path.join(root, `tmux-${uid}`);
+      if (forbiddenDir === socketDir || !existsSync(forbiddenDir)) continue;
+      if (realpathSync(forbiddenDir) === realSocketDir) {
+        throw new Error(
+          `refusing to target the operator's own default tmux socket directory -- ` +
+            `${socketDir} is a symlink alias of ${forbiddenDir} (both realpath to ${realSocketDir})`,
+        );
+      }
+    }
+  }
+
   try {
     return lstatSync(socketPath).isSocket() ? socketPath : null;
   } catch {
     return null;
   }
+}
+
+/** `tmpRoots`'s own default: `/tmp` and `os.tmpdir()`, plus `$TMPDIR` when
+ *  the environment carries one -- computed fresh on every call (never a
+ *  module-level constant) so a test that changes `process.env.TMPDIR`
+ *  between calls is not reading a stale snapshot. */
+function defaultTmpRoots(): ReadonlySet<string> {
+  const roots = new Set<string>(['/tmp', os.tmpdir()]);
+  if (process.env.TMPDIR) roots.add(process.env.TMPDIR);
+  return roots;
 }
 
 /** Strips both `TMUX` (names the caller's own real pane -- wrong data for a

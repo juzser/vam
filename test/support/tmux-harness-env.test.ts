@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -53,6 +53,33 @@ describe('mkIsolatedTmuxTmpdir', () => {
 
   it('requires a non-empty prefix', () => {
     expect(() => mkIsolatedTmuxTmpdir('')).toThrow();
+  });
+
+  // CI EVIDENCE (main, post-#546+#540 combined, run 36396039883): a session
+  // appeared on the OPERATOR'S REAL DEFAULT server during `launch.test.ts`'s
+  // own isolated launch, cwd exactly the repo root -- the shape a bare,
+  // unisolated `tmux -C new-session -A -s vamctl` produces. Production code
+  // is NEVER given `-S`/`-L` (the whole point of `TMUX_TMPDIR`-only
+  // isolation -- this file's own header), so the launched app's tmux calls
+  // rely ENTIRELY on tmux itself successfully resolving `TMUX_TMPDIR` and
+  // creating `<tmuxTmpdir>/tmux-<uid>` on its own, on FIRST use. Multiple
+  // near-simultaneous tmux invocations from one launch (the vamctl control
+  // connection, plus at least one plain `list-sessions`/`-V` call the
+  // sidebar and the streaming version-gate both make on mount) can each
+  // reach a brand-new `tmuxTmpdir` before ANY of them has created that
+  // subdirectory -- exactly the kind of first-use race the incident's own
+  // mechanism (`"$TMUX_TMPDIR:/tmp/"`, skipping an entry it cannot use) has
+  // no obligation to lose safely. Pre-creating the subdirectory HERE, before
+  // the harness ever launches anything, removes the race entirely: every
+  // tmux invocation the launched app makes finds an already-valid,
+  // already-owned, already-0700 directory waiting for it, with nothing left
+  // to create (and therefore nothing left to race over) on first connect.
+  it("pre-creates tmux's own tmux-<uid> socket directory, mode 0700, so the launched app never has to create it on first use", () => {
+    const dir = mkIsolatedTmuxTmpdir('vam-tmux-env-test-presock');
+    dirs.push(dir);
+    const socketDir = path.join(dir, `tmux-${UID}`);
+    expect(existsSync(socketDir)).toBe(true);
+    expect(statSync(socketDir).mode & 0o777).toBe(0o700);
   });
 });
 
@@ -171,6 +198,43 @@ describe('resolveIsolatedSocket', () => {
 
   it('throws for a tmpdir outside any tmp root entirely', () => {
     expect(() => resolveIsolatedSocket('/Users/someone/not-a-tmp-dir')).toThrow(/tmp/);
+  });
+
+  // REVIEWER S3: the checks above compare STRINGS, so a `tmuxTmpdir` that is
+  // itself a SYMLINK aliasing one of the forbidden roots under a different
+  // name would sail straight through them -- the string never matches, even
+  // though the path it actually opens is identical. Built entirely against
+  // FAKE, test-owned roots (never the real `/tmp/tmux-<uid>`), so this can
+  // never touch or even read the operator's own default socket.
+  it('throws when tmuxTmpdir is a symlink whose REALPATH aliases a forbidden root, even though the string differs', () => {
+    const fakeForbiddenRoot = mkdtempSync(path.join('/tmp', 'vam-resolve-socket-fake-forbidden-'));
+    dirs.push(fakeForbiddenRoot);
+    mkdirSync(path.join(fakeForbiddenRoot, `tmux-${UID}`), { recursive: true });
+    const aliasPath = path.join('/tmp', `vam-resolve-socket-alias-${process.pid}`);
+    symlinkSync(fakeForbiddenRoot, aliasPath);
+    dirs.push(aliasPath);
+    expect(aliasPath).not.toBe(fakeForbiddenRoot);
+    // `/tmp` is ALSO in `tmpRoots` here so `aliasPath` (which sits directly
+    // under `/tmp`, not under `fakeForbiddenRoot`'s own string) passes the
+    // ordinary "is this under a tmp root at all" check on its way to the
+    // REALPATH check this test actually means to exercise -- otherwise the
+    // thrown error would be the EARLIER, unrelated "outside /tmp" one,
+    // which also happens to match `/default/i` (it prints the path) and
+    // would make this test pass for the wrong reason.
+    expect(() =>
+      resolveIsolatedSocket(aliasPath, UID, new Set([fakeForbiddenRoot, '/tmp'])),
+    ).toThrow(/alias/i);
+  });
+
+  it('does NOT throw for two genuinely different roots -- the realpath check is not just "always throw"', () => {
+    const fakeForbiddenRoot = mkdtempSync(path.join('/tmp', 'vam-resolve-socket-fake-forbidden2-'));
+    dirs.push(fakeForbiddenRoot);
+    mkdirSync(path.join(fakeForbiddenRoot, `tmux-${UID}`), { recursive: true });
+    const realOtherRoot = mkdtempSync(path.join('/tmp', 'vam-resolve-socket-real-other-'));
+    dirs.push(realOtherRoot);
+    expect(
+      resolveIsolatedSocket(realOtherRoot, UID, new Set([fakeForbiddenRoot, '/tmp'])),
+    ).toBeNull();
   });
 });
 
