@@ -167,6 +167,31 @@ describe('locateTranscript caching (finding 67751ec1)', () => {
     expect(path).toBe(join(root, 'proj-a', 'abc#123.jsonl'));
   });
 
+  it('does not poison the cache for a session with no transcript yet', async () => {
+    mkdirSync(join(root, 'proj-a'));
+    writeFileSync(join(root, 'proj-a', 'sess-known.jsonl'), '{}\n');
+
+    const first = await locateTranscript(root, 'sess-missing');
+    expect(first.path).toBeUndefined();
+    // Only the real session (from the refresh this miss triggered) is
+    // cached -- no entry was recorded for the miss itself.
+    expect(__transcriptCacheSizeForTests(root)).toBe(1);
+    readdirMock.mockClear();
+
+    // No negative cache entry was recorded, so the second miss refreshes
+    // again rather than short-circuiting on a remembered "not found".
+    const second = await locateTranscript(root, 'sess-missing');
+    expect(second.path).toBeUndefined();
+    expect(readdirMock).toHaveBeenCalledTimes(2);
+    expect(__transcriptCacheSizeForTests(root)).toBe(1);
+
+    // The moment the session's transcript appears, the very next lookup
+    // finds it -- a negative cache would have hidden it.
+    writeFileSync(join(root, 'proj-a', 'sess-missing.jsonl'), '{}\n');
+    const third = await locateTranscript(root, 'sess-missing');
+    expect(third.path).toBe(join(root, 'proj-a', 'sess-missing.jsonl'));
+  });
+
   it('keeps indexTranscripts uncached: it always returns a fresh full index', async () => {
     mkdirSync(join(root, 'proj-a'));
     writeFileSync(join(root, 'proj-a', 'sess-1.jsonl'), '{}\n');
