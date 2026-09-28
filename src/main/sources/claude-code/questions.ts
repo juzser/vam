@@ -23,7 +23,7 @@
  * module is pure: given lines, it returns data.
  */
 
-import type { AgentQuestion, QuestionOption } from '../../../renderer/domain/model.js';
+import type { AgentQuestion, QuestionOption } from '../../../shared/model.js';
 import type { Located } from './transcript.js';
 
 /** A pane draws a list, not a menu; a record offering more is malformed. */

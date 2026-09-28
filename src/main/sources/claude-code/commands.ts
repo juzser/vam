@@ -34,7 +34,7 @@
  * required -- main may name the renderer's types, never load its code.
  */
 
-import type { Command } from '../../../renderer/domain/model.js';
+import type { Command } from '../../../shared/model.js';
 
 /** The strip is a keyboard target, not a listing; more would not be readable. */
 const MAX_COMMANDS = 6;

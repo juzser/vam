@@ -62,7 +62,7 @@
  */
 
 import { type ChildProcess, spawn } from 'node:child_process';
-import type { SlashCommand } from '../../../renderer/domain/model.js';
+import type { SlashCommand } from '../../../shared/model.js';
 import { cliMissingMessage } from '../../env/cli-missing.js';
 
 /**

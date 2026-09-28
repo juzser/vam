@@ -48,11 +48,7 @@
 
 import { execFile } from 'node:child_process';
 import { statSync } from 'node:fs';
-import type {
-  PullRequest,
-  PullRequestChecks,
-  PullRequestList,
-} from '../../../renderer/domain/model.js';
+import type { PullRequest, PullRequestChecks, PullRequestList } from '../../../shared/model.js';
 import { checkPrLink } from '../../../shared/pr-link.js';
 import { cliMissingMessage } from '../../env/cli-missing.js';
 
