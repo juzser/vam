@@ -19,6 +19,20 @@ export type ConfirmDeleteWorktreeProps = {
   /** `basename(worktreeId)` -- what the operator must retype for a dirty tree. */
   readonly name: string;
   readonly branch: string | null;
+  /**
+   * `true` for a DETACHED `HEAD` -- `branch` still carries its short sha in
+   * this case (`friendlyBranch`'s own fallback, `worktrees.ts`), but the copy
+   * below must never call a sha "its branch": a detached worktree has none.
+   * S1 DATA-LOSS FIX: the promise this dialog used to make for EVERY
+   * worktree ("only deleted if it has no unmerged commits") was FALSE for a
+   * detached one -- `removeWorktree` had no branch to run its safe-delete
+   * check against at all, so a clean detached worktree's commit was deleted
+   * unconditionally on one click. `removeWorktree` now mints a keep-ref for
+   * exactly that case (`worktrees.ts`'s own header), so this prop's only job
+   * left is making the CONFIRM COPY match reality: never call a sha a
+   * branch. Defaults to `false` so every existing branch-worktree caller
+   * keeps its current copy unchanged. */
+  readonly detached?: boolean;
   readonly dirty: boolean;
   /** `confirmName` is passed only for the dirty path; `undefined` for a clean one. */
   readonly onConfirm: (confirmName?: string) => void;
@@ -28,6 +42,7 @@ export type ConfirmDeleteWorktreeProps = {
 export function ConfirmDeleteWorktree({
   name,
   branch,
+  detached = false,
   dirty,
   onConfirm,
   onCancel,
@@ -67,10 +82,12 @@ export function ConfirmDeleteWorktree({
           <Trash2 size={13} strokeWidth={1.8} className="text-danger" />
           <span className="font-mono font-semibold text-body text-ink">Delete {name}?</span>
         </div>
-        <p className="mt-2 text-control text-ink-faint">
-          {branch !== null
-            ? `Its branch (${branch}) is only deleted if it has no unmerged commits — an unmerged branch is kept.`
-            : 'The worktree directory is removed from disk.'}
+        <p data-confirm-delete-worktree-copy className="mt-2 text-control text-ink-faint">
+          {detached
+            ? `It is detached at ${branch ?? '?'}. If these commits are not reachable from another branch, vam keeps them on a new branch before deleting.`
+            : branch !== null
+              ? `Its branch (${branch}) is only deleted if it has no unmerged commits — an unmerged branch is kept.`
+              : 'The worktree directory is removed from disk.'}
         </p>
         {dirty ? (
           <>

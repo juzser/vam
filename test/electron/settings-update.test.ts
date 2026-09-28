@@ -16,7 +16,7 @@
  * operator actually meets it, over the real preload bridge and the real
  * network this machine has.
  */
-import { execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -85,8 +85,13 @@ async function freePort(): Promise<number> {
  */
 function runProbe(userDataDir: string, remotePort: number, tmuxTmpdir: string): Promise<ProbeRun> {
   return new Promise((resolve, reject) => {
+    // ITS OWN PROCESS GROUP, so `killTree` below reaches Electron's helpers
+    // (GPU, renderer, network service) too. SIGKILL on the main process alone
+    // left them running and still writing into `userDataDir`, and the teardown
+    // `rmSync` then failed with ENOTEMPTY on CI.
     const child = spawn(bin('electron'), [probePath], {
       cwd: repoRoot,
+      detached: true,
       env: isolatedTmuxEnv(
         {
           ...process.env,
@@ -102,14 +107,26 @@ function runProbe(userDataDir: string, remotePort: number, tmuxTmpdir: string): 
     let stdout = '';
     let stderr = '';
     let settled = false;
+    const killTree = () => {
+      try {
+        if (child.pid !== undefined) process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        // Already gone -- the group has no members left to signal.
+      }
+    };
     const finish = (run: ProbeRun) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      // Best-effort: the process may already be mid-exit, or may take its
-      // own sweet time -- either way this test no longer waits on it.
-      child.kill('SIGKILL');
-      resolve(run);
+      // The answer is in; the whole process tree goes, and this resolves only
+      // once the main process has closed, so nothing is still writing into
+      // `userDataDir` when `afterAll` removes it.
+      killTree();
+      if (child.exitCode !== null || child.signalCode !== null) {
+        resolve(run);
+        return;
+      }
+      child.once('close', () => resolve(run));
     };
     child.stdout.on('data', (chunk) => {
       stdout += String(chunk);
@@ -130,7 +147,7 @@ function runProbe(userDataDir: string, remotePort: number, tmuxTmpdir: string): 
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      child.kill('SIGKILL');
+      killTree();
       reject(
         new Error(
           `settings-update-probe printed no result within 90s\nstdout:\n${stdout}\nstderr:\n${stderr}`,
@@ -161,7 +178,8 @@ describe('Settings -> Update, under the real shell', () => {
   let defaultServerBefore: readonly string[];
 
   beforeAll(() => {
-    execFileSync(bin('electron-vite'), ['build'], { cwd: repoRoot, stdio: 'pipe' });
+    // Built ONCE for the whole run by `vitest.app.config.ts`'s globalSetup
+    // (`test/electron/global-build.ts`) -- never per file, see its header.
     userDataDir = mkdtempSync(path.join(tmpdir(), 'vam-settings-update-userdata-'));
     tmuxTmpdir = mkIsolatedTmuxTmpdir('vam-settings-update-tmux');
     // READ-ONLY, before this describe's isolated Electron process exists at
@@ -178,7 +196,7 @@ describe('Settings -> Update, under the real shell', () => {
 
   afterAll(() => {
     if (userDataDir !== undefined) {
-      rmSync(userDataDir, { recursive: true, force: true });
+      rmSync(userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     }
     if (tmuxTmpdir !== undefined) {
       killIsolatedServer(tmuxTmpdir);

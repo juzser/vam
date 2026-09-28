@@ -30,7 +30,7 @@
  * of the explicit override directory, and the `toBe` assertion on the
  * resolved path fails. Still never the operator's real `vam` profile.
  */
-import { type ChildProcessWithoutNullStreams, execFileSync, spawn } from 'node:child_process';
+import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -167,15 +167,17 @@ function waitForReady(child: ChildProcessWithoutNullStreams): Promise<string> {
 describe('the Electron harness gets its own throwaway userData', () => {
   let defaultServerBefore: readonly string[];
 
+  // Built ONCE for the whole run by `vitest.app.config.ts`'s globalSetup
+  // (`test/electron/global-build.ts`) -- never per file, see its header.
+  // Only the tmux isolation setup belongs here now.
   beforeAll(() => {
-    execFileSync(bin('electron-vite'), ['build'], { cwd: repoRoot, stdio: 'pipe' });
     tmuxTmpdir = mkIsolatedTmuxTmpdir('vam-userdata-isolation-tmux');
     defaultServerBefore = tmuxAvailable() ? defaultServerPaneCwds() : [];
-  }, 180_000);
+  });
 
   afterAll(() => {
     for (const dir of scratchDirs) {
-      rmSync(dir, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     }
     if (tmuxTmpdir !== undefined) {
       killIsolatedServer(tmuxTmpdir);
