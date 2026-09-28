@@ -37,6 +37,23 @@ import { readCursorLine } from '../../../../src/main/sources/tmux/spawn.js';
 import { StreamClient } from '../../../../src/main/terminal/stream/client.js';
 import { seedWithCursor } from '../../../../src/main/terminal/stream/seed.js';
 
+/** The same generous, condition-based poll `stream-client-pause-after.test.ts`
+ * already uses for real-tmux timing: a loaded CI runner can be slower than
+ * any one fixed wait to have actually scheduled and run a `send-keys`, so
+ * this polls the real condition (the cursor reply actually hidden) rather
+ * than gambling on a wall-clock number. */
+const pollUntil = async (
+  check: () => boolean,
+  deadlineMs: number,
+  intervalMs = 100,
+): Promise<boolean> => {
+  const deadline = Date.now() + deadlineMs;
+  while (!check() && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  return check();
+};
+
 describe('seedWithCursor (pure)', () => {
   it('places the cursor at cursor_x/cursor_y (0-based) as a 1-based CSI row;col H, and shows it', () => {
     const body = 'line0\nline1\nline2\n';
@@ -187,15 +204,24 @@ describe.skipIf(!live)('StreamClient#connect seed (real tmux)', () => {
   });
 
   it('a HIDDEN cursor still seeds its real position, not just the hide escape (review finding)', async () => {
-    await new Promise((r) => setTimeout(r, 200));
-    const cursorLine = tmux(
-      'display-message',
-      '-p',
-      '-t',
-      HIDDEN_SESSION,
-      '-F',
-      '@vam-cursor #{cursor_flag} #{cursor_x} #{cursor_y} #{history_size} #{mouse_any_flag}',
-    ).trim();
+    // POLLED, not a fixed sleep: a loaded CI runner can take longer than
+    // any one fixed wait to have actually scheduled and run the fake
+    // program's own `printf` (MEASURED: CI's own run of this file's
+    // bracket-paste sibling test saw a flat 300ms miss the same class of
+    // race).
+    let cursorLine = '';
+    const settled = await pollUntil(() => {
+      cursorLine = tmux(
+        'display-message',
+        '-p',
+        '-t',
+        HIDDEN_SESSION,
+        '-F',
+        '@vam-cursor #{cursor_flag} #{cursor_x} #{cursor_y} #{history_size} #{mouse_any_flag}',
+      ).trim();
+      return readCursorLine(cursorLine).cursor.kind === 'hidden';
+    }, 10_000);
+    expect(settled, `cursor never read hidden: ${cursorLine}`).toBe(true);
     const mark = readCursorLine(cursorLine);
     expect(mark.cursor.kind).toBe('hidden');
     expect(mark.position).not.toBeNull();

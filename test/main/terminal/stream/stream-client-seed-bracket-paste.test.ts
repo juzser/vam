@@ -78,6 +78,26 @@ const ROWS = 20;
 const tmux = (...argv: string[]): string =>
   execFileSync('tmux', ['-L', SOCKET, ...argv], { encoding: 'utf8' });
 
+/** The same generous, condition-based poll `stream-client-pause-after.test.ts`
+ * already uses for exactly this class of real-tmux timing: a CI runner can
+ * be slow enough that the fake program's own `printf` has not yet run by
+ * the time a FIXED wait would have given up (MEASURED failure: CI's own run
+ * saw the ground-truth query still reading `bracket_paste_flag=0` after a
+ * flat 300ms). Polling the actual condition, rather than gambling on one
+ * wall-clock number, is what makes this hold on a loaded runner and a fast
+ * laptop alike. */
+const pollUntil = async (
+  check: () => boolean,
+  deadlineMs: number,
+  intervalMs = 100,
+): Promise<boolean> => {
+  const deadline = Date.now() + deadlineMs;
+  while (!check() && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  return check();
+};
+
 const live = tmuxWorks();
 
 describe.skipIf(!live)(
@@ -107,17 +127,22 @@ describe.skipIf(!live)(
     it('the seed carries CSI ?2004h -- xterm is primed the instant it is written, with no live %output ever needed', async () => {
       // Ground truth: the fake program's own escape sequences already ran
       // and the pane already carries both facts, before `StreamClient` ever
-      // attaches.
-      await new Promise((r) => setTimeout(r, 300));
-      const groundTruth = tmux(
-        'display-message',
-        '-p',
-        '-t',
-        SESSION,
-        '-F',
-        '@vam-cursor #{cursor_flag} #{cursor_x} #{cursor_y} #{history_size} #{mouse_any_flag} #{bracket_paste_flag}',
-      ).trim();
-      expect(groundTruth.endsWith(' 1')).toBe(true);
+      // attaches. POLLED, not a fixed sleep (this test's own header) -- a
+      // loaded CI runner can take longer than any one fixed wait to have
+      // actually scheduled and run the fake program's `printf`.
+      let groundTruth = '';
+      const settled = await pollUntil(() => {
+        groundTruth = tmux(
+          'display-message',
+          '-p',
+          '-t',
+          SESSION,
+          '-F',
+          '@vam-cursor #{cursor_flag} #{cursor_x} #{cursor_y} #{history_size} #{mouse_any_flag} #{bracket_paste_flag}',
+        ).trim();
+        return groundTruth.endsWith(' 1');
+      }, 10_000);
+      expect(settled, `ground truth never showed bracket_paste_flag=1: ${groundTruth}`).toBe(true);
 
       const client = new StreamClient({ prefix: ['-L', SOCKET], target: SESSION });
       try {
