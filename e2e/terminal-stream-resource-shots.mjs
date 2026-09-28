@@ -79,6 +79,16 @@ const bundleOf = async (entry) => {
 const { StreamClient } = await bundleOf('src/main/terminal/stream/client.ts');
 const { readPane } = await bundleOf('src/main/sources/tmux/spawn.ts');
 const { spawnRealControlChild } = await bundleOf('src/main/sources/tmux/control.ts');
+// THE SHIPPED SCROLLBACK/WATER-MARK NUMBERS, bundled from the SAME
+// zero-dependency module `TerminalStreamTab.tsx` itself imports them from
+// (`terminal-stream-tuning.ts`) -- a guard-quality finding: test 6 below
+// used to construct its own `Terminal` at the LATENCY harness's own
+// default `scrollback: 2000` (a number tuned for a DIFFERENT measurement,
+// `terminal-stream-latency-harness.html`) and hand-copy the water marks
+// inline, so it silently measured a smaller buffer than this file ships
+// and could drift from either number without ever noticing.
+const { TERMINAL_STREAM_SCROLLBACK, TERMINAL_STREAM_HIGH_WATER_MARK, TERMINAL_STREAM_LOW_WATER_MARK } =
+  await bundleOf('src/renderer/panels/terminal-stream/terminal-stream-tuning.ts');
 
 const run = (argv) =>
   new Promise((resolve) => {
@@ -791,14 +801,22 @@ try {
 
   /* ── 6. THE FULL PIPELINE, RE-MEASURED: real tmux -> real StreamClient
    * (now sending pause-after) -> real xterm running THIS FILE's own
-   * high/low-water-mark drop logic (`TerminalStreamTab.tsx`, mirrored here
-   * the same way every measurement above mirrors the shipped component
-   * rather than importing it -- this harness's page context has no bundler
-   * wiring for the renderer's own module graph). The coordinator's own ask:
-   * CPU, peak renderer memory, time-to-quiet, and whether the final screen
-   * matches `capture-pane` -- BEFORE and AFTER the drop-and-reseed recovery
-   * a real reconnect would perform, so a genuine drop (if one happens) is
-   * visible rather than papered over by measuring only the healed state.
+   * high/low-water-mark drop logic, at the SHIPPED scrollback -- all three
+   * numbers bundled straight from `terminal-stream-tuning.ts`
+   * (`TERMINAL_STREAM_SCROLLBACK`/`_HIGH_WATER_MARK`/`_LOW_WATER_MARK`,
+   * this file's own `bundleOf`, above) and handed into the page rather than
+   * copied inline -- a guard-quality finding: this used to construct its
+   * `Terminal` by reusing the LATENCY harness's own `window.__term`
+   * (scrollback 2000, tuned for a different measurement) and hand-copy the
+   * water marks as bare literals, so it silently measured a smaller buffer
+   * than `TerminalStreamTab.tsx` ships and could drift from either number
+   * without this guard ever noticing (`measuredScrollback`, asserted
+   * below, is the falsification for exactly that). The coordinator's own
+   * ask: CPU, peak renderer memory, time-to-quiet, and whether the final
+   * screen matches `capture-pane` -- BEFORE and AFTER the drop-and-reseed
+   * recovery a real reconnect would perform, so a genuine drop (if one
+   * happens) is visible rather than papered over by measuring only the
+   * healed state.
    */
   console.log('\n--- 5MB flood, full pipeline: real StreamClient + real xterm + this file’s own backpressure ---');
 
@@ -820,46 +838,74 @@ try {
   const floodCdp = await floodPage.context().newCDPSession(floodPage);
   await floodCdp.send('Performance.enable');
 
-  await floodPage.evaluate((seedText) => {
-    const term = globalThis.window.__term;
-    term.write(seedText.replace(/\r?\n/g, '\r\n'));
-    // The SAME HIGH/LOW water marks and drop logic `TerminalStreamTab.tsx`
-    // runs (`TERMINAL_STREAM_HIGH_WATER_MARK`/`_LOW_WATER_MARK`) -- see this
-    // block's own header on why it is mirrored rather than imported.
-    const HIGH = 2 * 1024 * 1024;
-    const LOW = HIGH / 4;
-    let pendingBytes = 0;
-    let dropping = false;
-    let droppedChunks = 0;
-    let peakHeap = performance.memory?.usedJSHeapSize ?? 0;
-    const trackHeap = () => {
-      const h = performance.memory?.usedJSHeapSize ?? 0;
-      if (h > peakHeap) peakHeap = h;
-    };
-    globalThis.window.__peakHeap = () => peakHeap;
-    globalThis.window.__droppedChunks = () => droppedChunks;
-    globalThis.window.__feedChunk = (chunk) => {
-      trackHeap();
-      if (dropping) {
-        droppedChunks += 1;
-        return;
-      }
-      pendingBytes += chunk.length;
-      term.write(chunk, () => {
-        pendingBytes -= chunk.length;
+  await floodPage.evaluate(
+    async ({ seedText, scrollback, high, low }) => {
+      // A FRESH TERM AT THE SHIPPED SCROLLBACK, never `window.__term` -- this
+      // page's own top-level script (the shared latency harness) builds THAT
+      // one at `scrollback: 2000`, a number chosen for the LATENCY guard, not
+      // this one (a review finding: reusing it silently measured a smaller
+      // buffer than `TerminalStreamTab.tsx` actually ships). Mirrors
+      // `heapAfterLines`, right above, which already avoids the identical
+      // trap the identical way -- a fresh term per measurement.
+      const { Terminal } = await import('/node_modules/@xterm/xterm/lib/xterm.mjs');
+      const term = new Terminal({ scrollback, convertEol: false, allowProposedApi: true });
+      const div = document.createElement('div');
+      div.style.width = '1100px';
+      div.style.height = '700px';
+      document.body.appendChild(div);
+      term.open(div);
+      globalThis.window.__floodTerm = term;
+
+      term.write(seedText.replace(/\r?\n/g, '\r\n'));
+      // The SAME HIGH/LOW water marks `TerminalStreamTab.tsx` ships
+      // (bundled node-side from `terminal-stream-tuning.ts` and handed in
+      // as `high`/`low` -- a review finding: this used to hand-copy its own
+      // `2 * 1024 * 1024` here, which a future change to the shipped
+      // constant would silently leave behind).
+      let pendingBytes = 0;
+      let dropping = false;
+      let droppedChunks = 0;
+      let peakHeap = performance.memory?.usedJSHeapSize ?? 0;
+      const trackHeap = () => {
+        const h = performance.memory?.usedJSHeapSize ?? 0;
+        if (h > peakHeap) peakHeap = h;
+      };
+      globalThis.window.__peakHeap = () => peakHeap;
+      globalThis.window.__droppedChunks = () => droppedChunks;
+      globalThis.window.__feedChunk = (chunk) => {
         trackHeap();
-        if (dropping && pendingBytes <= LOW) {
-          dropping = false;
-          pendingBytes = 0;
+        if (dropping) {
+          droppedChunks += 1;
+          return;
         }
-      });
-      if (pendingBytes > HIGH) dropping = true;
-    };
-  }, seed);
+        pendingBytes += chunk.length;
+        term.write(chunk, () => {
+          pendingBytes -= chunk.length;
+          trackHeap();
+          if (dropping && pendingBytes <= low) {
+            dropping = false;
+            pendingBytes = 0;
+          }
+        });
+        if (pendingBytes > high) dropping = true;
+      };
+    },
+    {
+      seedText: seed,
+      scrollback: TERMINAL_STREAM_SCROLLBACK,
+      high: TERMINAL_STREAM_HIGH_WATER_MARK,
+      low: TERMINAL_STREAM_LOW_WATER_MARK,
+    },
+  );
+
+  // THE MEASURED SCROLLBACK ITSELF, asserted (not merely assumed) below --
+  // the whole point of this fix: prove the guard measured the SHIPPED
+  // number, not the latency harness's own unrelated default.
+  const measuredScrollback = await floodPage.evaluate(() => globalThis.window.__floodTerm.options.scrollback);
 
   const bufferText = () =>
     floodPage.evaluate(() => {
-      const term = globalThis.window.__term;
+      const term = globalThis.window.__floodTerm;
       const buf = term.buffer.active;
       let text = '';
       for (let y = 0; y < buf.length; y += 1) text += `${buf.getLine(y)?.translateToString(true) ?? ''}\n`;
@@ -913,7 +959,7 @@ try {
   // property `TerminalStreamTab.test.tsx`'s own unit tests already pin.
   const groundTruth = tmux('capture-pane', '-p', '-t', `=${TMUX_SESSION}:`);
   await floodPage.evaluate((text) => {
-    const term = globalThis.window.__term;
+    const term = globalThis.window.__floodTerm;
     term.reset();
     term.write(text.replace(/\r?\n/g, '\r\n'));
   }, groundTruth);
@@ -937,7 +983,15 @@ try {
   await floodPage.close();
   floodClient.dispose();
 
-  return { cpuMs, peakHeapMB, timeToQuietMs, droppedChunks, liveMatchesBeforeReseed, matchesAfterReseed };
+  return {
+    cpuMs,
+    peakHeapMB,
+    timeToQuietMs,
+    droppedChunks,
+    liveMatchesBeforeReseed,
+    matchesAfterReseed,
+    measuredScrollback,
+  };
   }
 
   const flood6 = await withRetryOnce(
@@ -946,6 +1000,17 @@ try {
     (r) => r.peakHeapMB < FLOOD_PEAK_HEAP_MB_BOUND,
   );
   report.flood6 = flood6;
+  // GUARD QUALITY (a review finding): this measurement is worthless if it
+  // is not even looking at the terminal `TerminalStreamTab.tsx` ships --
+  // asserted structurally, like every other check in this block, so a
+  // future change to either the shipped constant or this harness's own
+  // wiring reddens HERE rather than silently measuring the wrong buffer
+  // again.
+  check(
+    `full pipeline: measures the SHIPPED scrollback (${TERMINAL_STREAM_SCROLLBACK}), not the latency harness's own default`,
+    flood6.measuredScrollback === TERMINAL_STREAM_SCROLLBACK,
+    `measured scrollback=${flood6.measuredScrollback}`,
+  );
   // STRUCTURAL, unlike the CPU/heap/time-to-quiet numbers logged above (no
   // calibration history for TASK DURATION / time-to-quiet -- see this file's
   // header on why only CPU-per-MB and peak heap get an asserted ceiling):
