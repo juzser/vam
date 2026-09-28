@@ -160,9 +160,21 @@ worth repeating here:
 > children of their own login shell and cannot be adopted — no process may take
 > over another's controlling TTY.
 
-vam can **read** a session it did not start. It can never type into one. A
-toggle that reveals them for reading is the whole of what vam can offer, and an
-"adopt" button would be a control that cannot act.
+vam can **read** a session it did not start. For a TTY-bound provider —
+Claude Code, where the only way in is the controlling terminal a login shell
+already owns — it can never type into one either: a toggle that reveals such
+rows for reading is the whole of what vam can offer, and an "adopt" button
+would be a control that cannot act.
+
+**Codex is the exception, and it is not a loophole in this rule so much as a
+different transport.** `codex/source.ts`'s `recordPrompt` delivers through
+`codex queue --thread <uuid> --message <text>` (`queueMessage`, designed in
+#424/#429) — a message queued at the CLI's own store rather than typed at a
+terminal, so it reaches a thread regardless of who started the process
+running it. `closeSession` stays `false` there for the ORIGINAL reason
+(vam did not start the process, so there is nothing of vam's to stop) — that
+half of the rule is untouched. What changes is only the "never type into
+one" half, and only for this one provider's one write route.
 
 ### 5. Closing, which is three things and not one
 
@@ -170,8 +182,16 @@ The operator asked how closing works under this model. Three different acts are
 called "close" today, and the mistake available here is one button that means
 all three.
 
-**Close the tab** is the view and nothing else. The pane keeps running, the
-session stays in the list, reopening the tab finds it where it was. Unchanged.
+**Close the tab** closes the SESSION, not merely the view. This is the
+opposite of what this section said until #412, the operator's own bug
+report: "the close button on the tab doesn't seem to work." It did not,
+because a tab's `×` only ever refused (A11.1's liveness guard, true for
+every tab that could be clicked, so the refusal was the whole of its
+behaviour) — never the harmless view-only close this paragraph used to
+describe. A22 routed it onto the same `closeSession` the sidebar row's `×`,
+the `x` chord and the tab's context menu already used, which is what makes
+"close the tab" and "close the session" the same act today: there is no
+tab-only close left to distinguish it from.
 
 **End the agent, keep the pane** is new, and the model gives it away: the agent
 exits, the pane survives, and the row falls back to the state of §3 with the
@@ -206,17 +226,72 @@ Close control at all**: vam can read a session it did not start and can never
 type into one, so a close button there is a control that cannot do what it
 offers.
 
-**Gentle before forceful.** Killing the tmux session cuts the agent off at
-whatever it was doing, which may be a partial write into an append-only
-transcript. Whether that truncation actually happens here is NOT measured; what
-is certain is that it would be permanent — nothing rewrites a line in a file
-that is only ever appended to, and every later reader inherits it. Letting the
-agent exit on its own first, with a timeout before the kill, costs almost
-nothing against a failure that cannot be undone.
+**Gentle before forceful — now measured, not implemented.** Killing the tmux
+session cuts the agent off at whatever it was doing, which may be a partial
+write into an append-only transcript, and any such truncation would be
+permanent — nothing rewrites a line in a file that is only ever appended to,
+and every later reader inherits it. This section used to say the risk was
+"NOT measured"; it has been now, without ever sending a paid prompt to a real
+`claude` or `codex` process, and the answer is **kill truncates: only when a
+kill lands while a write is literally in flight for the line the session is
+currently streaming — no truncation was found anywhere it could actually be
+looked for.**
 
-**Confirm only when the agent is mid-turn.** A session sitting idle is closed
-without a question; one that is `running` is worth asking about, because the
-work in flight is the thing the operator cannot get back by reopening.
+- **The real corpus, scanned read-only:** 0 of 1,690 `~/.claude/projects/**/*.jsonl`
+  files on this machine end in anything but a complete, valid JSON line with
+  its trailing newline. 0 of 882 `~/.codex/sessions/**` rollout files do
+  either. vam's own long-running usage-stats tracker (`stats-cache.json`)
+  corroborates it from a different angle: across the 2,556 transcript files it
+  has ever read, `malformedLines` — incremented per COMPLETE line that fails
+  to parse — has never once fired. That tracker is not itself a test of THIS
+  question, though: `line-stream.ts`'s own header states that a trailing line
+  with no newline is "never consumed" by design, on the same assumption every
+  other reader in this tree already makes about a live, append-only file — so
+  it structurally cannot see the one shape this section is about.
+- **The write itself, read out of the installed Claude Code CLI (v2.1.283,
+  a compiled bundle, `strings`- and offset-readable):** each transcript line
+  is appended as ONE buffered write — `` s = S(n) + '\n' `` built before a
+  single `appendFileSync`/`open(O_APPEND) + write` call, never the JSON body
+  and its trailing newline as two separate writes. A kill can therefore only
+  ever land BETWEEN two complete lines (the file ends cleanly, exactly the
+  1,690/882 above) or DURING the one write in flight (that one line loses
+  bytes and/or its newline) — never split a line's body from its own
+  newline as two independent operations.
+- **The idle-session experiment, run on a private `tmux -L` socket, no prompt
+  ever typed:** starting `claude` and leaving it at its own composer with
+  zero messages sent creates NO transcript file at all — Claude Code creates
+  the file lazily, on the first turn. Killing that session (`kill-session`)
+  confirmed it: no file appeared before the kill, and none appeared after it
+  either. The specific case "kill a session nobody has typed anything into"
+  therefore has no file to truncate, on this version, full stop — which is
+  also why this experiment could not exercise the one in-flight-write race
+  the two points above bound rather than rule out: doing that for real
+  requires a streaming turn, which requires the paid prompt this measurement
+  was not allowed to send.
+
+**Not implemented in this PR.** The narrow, real risk that remains — a kill
+landing mid-write on the line currently streaming — is what a graceful exit
+(Ctrl-C, then `/exit`, then a timeout, then kill) would close off entirely.
+Proposed as a follow-up rather than built here, so the operator can decide
+whether the cost (every close waits out the timeout on a session that is NOT
+mid-write, which is the common case above) is worth closing a race this
+measurement bounds but cannot make theoretically impossible.
+
+**Confirm only when the agent is mid-turn, on every device — shipped.** The
+operator's own words: "ask for confirmation before closing a session ONLY
+while the agent is running, on every device." `closeSession` in `Canvas.tsx`
+is the one place every close route (the tab's `×`, the sidebar row's `×`, the
+`x` chord, the tab's context menu, and the phone app bar's `×` — all five,
+desktop and phone alike) already called before this existed, so gating THERE
+rather than in each caller is what makes the rule impossible to route around.
+`running` is the only status that asks: `waiting` has already finished its
+turn and put the ball back with the operator (this file's own definition of
+the status, in `domain/model.ts`) — nothing in flight is lost by closing it,
+so it closes exactly like idle/done/terminal, with no question, on every
+device including the phone, which used to ask unconditionally and no longer
+does. The dialog itself (`ConfirmCloseSession`, shared by both devices now)
+is keyboard-friendly: Enter confirms, Escape cancels, and focus starts on
+Cancel so a reflex Return is never the thing to fear.
 
 ## Traps this design must not walk into
 

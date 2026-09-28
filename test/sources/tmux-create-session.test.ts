@@ -19,6 +19,7 @@ import {
   createSessionInProject,
 } from '../../src/main/sources/claude-code/create-session.js';
 import { projectIdOf } from '../../src/main/sources/claude-code/project-id.js';
+import { loadClaudeCodeProjects } from '../../src/main/sources/claude-code/source.js';
 import { FIXTURE_SOURCE } from '../../src/main/sources/fixture-source.js';
 import type { MainSource } from '../../src/main/sources/source.js';
 import { loginShellCommand } from '../../src/main/sources/tmux/shell.js';
@@ -281,6 +282,68 @@ describe('o, in a project that has only pane rows', () => {
 
     expect(failure?.code).toBe('unknown-project');
     expect(run.calls).toEqual([]);
+  });
+});
+
+/**
+ * D-42 -- THE COORDINATOR'S OWN BUG REPORT (C): the ROUND TRIP, both halves
+ * of it in the same test. `paneProjectDirectory` above already resolves a
+ * TAGGED pane's directory by its tag first (`o, in a project that has only
+ * pane rows`'s own describe block) -- that half was never broken. The other
+ * half is `loadClaudeCodeProjects` (`source.ts`): it used to emit
+ * `projectIdOf(group.cwd)` for a pane-only bucket even when the bucket was
+ * built from a pane's TAG, so a shell that `cd`'d into a subdirectory after
+ * `@vam-project` was stamped made the sidebar show an id that digested the
+ * DRIFTED cwd -- an id `paneProjectDirectory` never matches, because no pane
+ * is tagged with it. "New session" on that row asked for exactly the id the
+ * sidebar showed and got `unknown-project` back, on a project whose Terminal
+ * tab was open at that very moment.
+ */
+describe('D-42: the id loadClaudeCodeProjects shows for a pane-only, cd’d project is the one New session can resolve', () => {
+  it('New session succeeds using the exact id the sidebar would draw for a tagged pane whose shell cd’d into a subdirectory', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'vam-tag-drift-'));
+    const sessionsRoot = mkdtempSync(join(tmpdir(), 'vam-tag-drift-sessions-'));
+    try {
+      const TAG = projectIdOf('/w/orchard');
+      const DRIFTED = '/w/orchard/sub';
+      const pane: TmuxSession = {
+        project: TAG,
+        name: 'vam-orchard-a1b2c3',
+        command: 'zsh',
+        cwd: DRIFTED,
+      };
+      const projects = await loadClaudeCodeProjects(
+        root,
+        [],
+        Date.now(),
+        undefined,
+        sessionsRoot,
+        null,
+        [pane],
+      );
+      const bucket = projects.find((p) => p.sessions.some((s) => s.pane === pane.name));
+      expect(bucket, 'the pane must land in SOME project bucket').toBeDefined();
+      // THE DEFECT, PINNED: the sidebar's own id is the pane's tag -- the
+      // identical id `paneProjectDirectory` resolves a directory FROM --
+      // never a fresh digest of the drifted cwd.
+      expect(bucket?.id).toBe(TAG);
+
+      const run = recordingTmux();
+      const failure = await createSessionInProject({
+        agents: [],
+        projectId: bucket?.id ?? '',
+        title: 'new work',
+        run,
+        name: 'vam-new-work-a1b2c3',
+        panes: [pane],
+      });
+
+      expect(failure).toBeNull();
+      expect(run.calls[0]?.[8]).toBe(DRIFTED);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(sessionsRoot, { recursive: true, force: true });
+    }
   });
 });
 

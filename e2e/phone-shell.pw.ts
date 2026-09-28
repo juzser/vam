@@ -1606,18 +1606,25 @@ test.describe('the sheets behind a source', () => {
     await expect(page.locator('[data-phone-shell] [data-session-row]').first()).toBeVisible();
   };
 
-  /** A refused write, which is what puts a `failure` in the log. */
+  /**
+   * A refused write, which is what puts a `failure` in the log.
+   *
+   * NO CONFIRM STEP HERE, and that is the row this helper picks rather than a
+   * missing gate: the sidebar ranks `waiting` above `running` (it is the
+   * status that "earns the canvas its keep" -- `domain/model.ts`'s own
+   * words), so the FIRST row on this fixture's two-project list is `s2`
+   * ("beta-1", `waiting`), not `s1`. DECISION 1
+   * (`docs/design/vam-owns-the-session.md` §5) asks before closing only a
+   * `running` session; `waiting` has already finished its turn, so the tap
+   * sends the close at once -- exactly what this helper needs, one tap
+   * fewer than it used to take.
+   */
   const recordAFailure = async (page: Page): Promise<void> => {
     const box = await page.locator('[data-phone-shell] [data-session-row]').first().boundingBox();
     if (box === null) throw new Error('no session row');
     await page.touchscreen.tap(box.x + 60, box.y + box.height / 2);
     await expect(page.locator('[data-phone-shell]')).toHaveAttribute('data-phone-shell', 'session');
-    // THROUGH THE CONFIRM, which is what the `×` opens now: closing a session
-    // ends a running agent and nothing in vam undoes it, so the tap raises the
-    // question and the question is what acts (`phone/ConfirmCloseSession.tsx`).
-    // The refusal this helper is here to produce still arrives, one tap later.
     await page.locator('[data-phone-close]').tap();
-    await page.locator('[data-confirm-close-session-go]').tap();
     await expect(page.locator('[data-phone-status]').first()).toContainText('stub');
     await page.locator('[data-phone-back]').tap();
   };

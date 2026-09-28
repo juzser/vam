@@ -1,44 +1,56 @@
 /**
- * The confirm in front of the phone app bar's `×`.
+ * The confirm every close route shows while the session it targets is
+ * `running` -- DECISION 1 (`docs/design/vam-owns-the-session.md` §5,
+ * "Confirm only when the agent is mid-turn"). Rendered once, by `Canvas.tsx`,
+ * as a sibling of both the desktop columns and the phone shell, so the same
+ * dialog answers the tab's `×`, the sidebar row's `×`, the `x` chord, the
+ * tab's context menu, and the phone app bar's `×` alike. `closeSession` in
+ * `Canvas.tsx` is the one place that decides whether to show it; nothing here
+ * knows which device or which control raised the question.
  *
- * WHY THIS EXISTS AT ALL, and it is a geometry argument before it is a
- * politeness one. `PhoneShell`'s close control sits at the right-hand end of a
- * 390px bar, and the Agents icon ends 8px before it starts: on a touchscreen
- * the tap that changes which facet of a session you are looking at and the tap
- * that STOPS it are neighbours. Closing a session ends a running agent and
- * nothing inside vam undoes it. A single tap is not an adequate amount of
- * intent for that, so the tap opens a question and the question is what acts --
- * the same rule `ConfirmForceClose` and `ConfirmPrAction` state in their own
- * headers.
+ * WHY IT EXISTS AT ALL. Closing a `running` session ends an agent mid-turn and
+ * nothing inside vam undoes that — the work in flight is what the operator
+ * cannot get back by reopening. A single tap or keypress is not an adequate
+ * amount of intent for that, so the control opens a question and the question
+ * is what acts — the same rule `ConfirmForceClose` and `ConfirmPrAction` state
+ * in their own headers.
  *
- * AND BECAUSE THE FILE CLAIMED THERE ALREADY WAS ONE. `PhoneShell` said the
- * `×` "goes through the same confirm the `x` chord does". There was no confirm
- * on either path -- `Canvas`'s `onSidebarClose` calls `closeSession` straight,
- * and `ConfirmForceClose` is only offered AFTER a close has already been
- * refused. Driven against a source that can close, one tap sent the write and
- * opened no dialog at all.
+ * THIS USED TO BE PHONE-ONLY, ASKED UNCONDITIONALLY, AND THAT HAS BEEN
+ * SUPERSEDED. An earlier version of this file called "the phone only" a
+ * decision: the same close on a desktop went straight through with no
+ * question, on any status. The operator's own answer, asked directly, was
+ * "ask for confirmation before closing a session ONLY while the agent is
+ * running, on every device" — so the rule is now the STATUS that gates it,
+ * not the DEVICE that shows it, and desktop and phone read the same
+ * `session.status` through the same `closeSession`.
  *
- * THE PHONE ONLY, and that is a decision rather than an oversight. On a desktop
- * the same act is a deliberate chord or a menu item, aimed with a pointer that
- * has hover and a row that is 26px from its neighbour; here it is a finger on a
- * bar with no hover and no undo. Putting the question in front of the keyboard
- * route as well would tax the operator who typed it on purpose.
+ * `waiting` DOES NOT COUNT AS RUNNING. `domain/model.ts`'s own definition:
+ * `waiting` means the session already finished its turn and the ball is with
+ * the operator — closing it loses nothing in flight, so it closes exactly
+ * like `idle`/`done`/`terminal` do, with no question, on every device
+ * including the phone.
  *
  * Vam's existing overlay idiom, not a second one: the same scrim-plus-shell as
  * `ConfirmForceClose`, `ConfirmRemoveProject` and `ConfirmPrAction`, and the
- * same keyboard rule -- an open overlay owns the keyboard and hears only
- * Escape.
+ * same keyboard rule for Escape -- an open overlay owns the keyboard and it
+ * cancels. UNLIKE THOSE THREE, Enter CONFIRMS here rather than doing nothing:
+ * the operator's own requirement for this dialog specifically ("Enter
+ * confirms, Esc cancels, and focus starts on Cancel to avoid accidental
+ * kills"), because what it ends is resumable (`claude attach` brings the
+ * conversation back) where a force-kill is not.
  *
  * NO `aria-label` STARTING WITH `close ` ON EITHER BUTTON, which is not a style
  * note: `styles.css` carries `[data-phone-shell] button[aria-label^='close ']
  * :not([data-phone-close]) { display: none }` to remove the row's hover-only
- * `x` from a phone, and this dialog renders INSIDE `[data-phone-shell]`. A
- * confirm whose confirming button named itself that way would be invisible and
+ * `x` from a phone, and this dialog renders INSIDE `[data-phone-shell]` when a
+ * phone shows it. A confirming button named that way would be invisible and
  * the operator would be stuck in a dialog they could only cancel. The buttons
  * carry text and no label, so the rule cannot reach them.
  *
- * THE DESTRUCTIVE BUTTON DOES NOT HOLD INITIAL FOCUS, for the reason its three
- * neighbours give: Cancel does, so a reflex Return is the harmless answer.
+ * THE DESTRUCTIVE BUTTON DOES NOT HOLD INITIAL FOCUS -- Cancel does, so a tap
+ * or an accidental Tab-then-Space lands on the harmless answer. Enter is
+ * bound explicitly below rather than left to "whatever is focused activates",
+ * which is what makes it confirm even though focus starts elsewhere.
  */
 
 import { TriangleAlert } from 'lucide-react';
@@ -65,11 +77,21 @@ export function ConfirmCloseSession({ title, onConfirm, onCancel }: ConfirmClose
       aria-modal="true"
       aria-label={`stop the session ${title}`}
       onKeyDown={(event) => {
-        // Everything is swallowed; only Escape does anything. See the header.
+        // Everything is swallowed; only Escape and Enter do anything. See the
+        // header for why this dialog binds Enter where its siblings do not.
         event.stopPropagation();
         if (event.key === 'Escape') {
           event.preventDefault();
           onCancel();
+          return;
+        }
+        if (event.key === 'Enter') {
+          // `preventDefault` matters here specifically: focus starts on
+          // Cancel, and without it the browser's own "Enter activates the
+          // focused button" would fire Cancel's click right after this does,
+          // cancelling the confirm it just sent.
+          event.preventDefault();
+          onConfirm();
         }
       }}
       className="fixed inset-0 z-40 flex items-center justify-center px-4"
