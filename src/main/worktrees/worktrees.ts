@@ -35,7 +35,14 @@
  *     operator retypes its name (`confirmName`); a LOCKED worktree is never
  *     removed at all, force or not; branch deletion is always `git branch
  *     -d` (never `-D`) and a branch `-d` refuses is PRESERVED, reported as
- *     `preservedBranch`, never silently discarded.
+ *     `preservedBranch`, never silently discarded. A DETACHED `HEAD` names no
+ *     branch for `-d` to even attempt -- its commit is PRESERVED the same
+ *     way whenever no OTHER ref already contains it: a keep-ref
+ *     (`vam-kept/<name>`, collision-safe) is minted immediately after
+ *     removal succeeds and reported as `keptRef`, never left to become the
+ *     unreachable garbage `git fsck --unreachable --no-reflogs` would
+ *     otherwise list (the S1 this rule used to leave open, closed by
+ *     `removeWorktree`'s own header below).
  *  6. REMOVAL IS CONFINED TO A KNOWN PROJECT'S OWN WORKTREES, exactly like
  *     rules 1-3 above -- `removeWorktree` takes a `projectId`, checked
  *     against `knownProjectIds()` and resolved through
@@ -534,6 +541,55 @@ function classifyRemoveFailure(error: unknown, worktreePath: string): SourceErro
 }
 
 /**
+ * `true` when `sha` is reachable from at least one `refs/heads`, `refs/
+ * remotes` or `refs/tags` ref -- `git for-each-ref --contains <sha>` scoped
+ * to exactly those three namespaces, the only ones a commit could still be
+ * found under once the worktree that had it checked out (DETACHED, so no
+ * branch of its own) is gone. `false` on ANY git failure too: an odd or
+ * unexpected error here must fall on the SAFE side (treat as "not proven
+ * reachable", which `removeWorktree` reads as "mint a keep-ref") rather than
+ * assume a reachability it never actually confirmed.
+ */
+async function isReachableElsewhere(sha: string, run: GitRun, cwd: string): Promise<boolean> {
+  try {
+    const { stdout } = await run(
+      ['for-each-ref', '--contains', sha, 'refs/heads', 'refs/remotes', 'refs/tags'],
+      cwd,
+    );
+    return stdout.trim() !== '';
+  } catch {
+    return false;
+  }
+}
+
+async function refExists(ref: string, run: GitRun, cwd: string): Promise<boolean> {
+  try {
+    await run(['show-ref', '--verify', '--quiet', ref], cwd);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * `vam-kept/<baseName>`, suffixed `-2`, `-3`, ... until `refs/heads/
+ * <candidate>` names no ref that already exists -- collision-safe against a
+ * repeated removal of two detached worktrees that happen to share a
+ * directory name (one removed, a new detached worktree made under the same
+ * name, removed again), never silently overwriting an earlier rescue.
+ */
+async function uniqueKeepRefName(baseName: string, run: GitRun, cwd: string): Promise<string> {
+  const base = `vam-kept/${baseName}`;
+  let candidate = base;
+  let suffix = 2;
+  while (await refExists(`refs/heads/${candidate}`, run, cwd)) {
+    candidate = `${base}-${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
+}
+
+/**
  * `git worktree remove [--force] <path>`, then `git branch -d <branch>` --
  * safe delete, never `-D`, so an unmerged/unpublished branch survives and
  * `preservedBranch` says so.
@@ -543,6 +599,43 @@ function classifyRemoveFailure(error: unknown, worktreePath: string): SourceErro
  * (`code: 'dirty'`) UNLESS `force` is `true` AND `confirmName` equals the
  * worktree's own directory name exactly -- a checkbox is not proof anyone
  * read what they were about to discard.
+ *
+ * A DETACHED `HEAD` (S1 DATA-LOSS FIX): `branch -d` below has no branch to
+ * run against at all for a worktree whose `HEAD` names no branch, so before
+ * this fix a detached worktree's commit was preserved by NOTHING -- `git
+ * worktree remove` ran, the one thing that had named the commit (the
+ * worktree's own `HEAD` file) was gone, and the commit itself became
+ * unreachable garbage the instant nothing else happened to contain it
+ * (`git fsck --unreachable --no-reflogs` would list it; a clean detached
+ * worktree deleted the commit on ONE click, with the confirm dialog's own
+ * copy claiming otherwise). Fixed here, KEEP-REF-BY-DEFAULT: immediately
+ * after `git worktree remove` actually succeeds (never before -- see below
+ * for why), a detached `HEAD` reachable from no `refs/heads`/`refs/remotes`/
+ * `refs/tags` ref gets `refs/heads/vam-kept/<name>` minted at that same sha,
+ * collision-safe-suffixed against a repeat, reported as `keptRef` (`null`
+ * whenever no rescue was needed: a branch worktree, or a detached one already
+ * reachable elsewhere). No typed-name escalation for this path -- there is no
+ * "discard" choice to escalate INTO, the commit is simply always kept.
+ *
+ * WHY THE CHECK RUNS **AFTER** A SUCCESSFUL REMOVAL, NOT BEFORE IT (an
+ * explicit design choice, not an oversight): reachability of `matched.
+ * headSha` via OTHER refs is entirely unaffected by whether THIS worktree's
+ * own directory still exists -- a detached `HEAD` is never itself one of the
+ * `refs/heads`/`refs/remotes`/`refs/tags` refs `for-each-ref` scans, so
+ * running the check and the `git branch` that follows it a few lines later
+ * than "before `worktree remove`" changes nothing about what they can prove.
+ * What it DOES avoid: minting a keep-ref nobody asked for on a REFUSED
+ * removal (`dirty` without confirmation, `locked`, or any other refusal
+ * above) -- this module's own testing convention states it plainly
+ * (`worktrees.integration.test.ts`'s file header: "a refusal that happens
+ * after the side effect is not a refusal"), and a rescue branch appearing
+ * next to a worktree the operator was just told survived intact would be
+ * exactly that in reverse, a side effect ON a refusal. Placing the mint
+ * immediately after `worktree remove`'s own success, in the same
+ * synchronous call chain, before this function ever returns, keeps it exactly
+ * as safe against "never silently lose it" as running it first would have
+ * been (nothing else touches this repository's refs in between), without
+ * that cost.
  *
  * CONFINED TO `input.projectId`'S OWN WORKTREES (rule 6, this module's
  * header): `worktreeId` is never trusted to name its own repository. The
@@ -640,6 +733,34 @@ export async function removeWorktree(
     return classifyRemoveFailure(error, realWorktreeId);
   }
 
+  // S1 DATA-LOSS FIX -- see this function's own header for why this runs
+  // HERE, immediately after `worktree remove` succeeded, rather than before
+  // it. A DETACHED `HEAD` names no branch for the `preservedBranch` step
+  // below to even attempt; this is its own, equally-never-silent net.
+  let keptRef: string | null = null;
+  if (matched.detached && matched.headSha !== null) {
+    const reachable = await isReachableElsewhere(matched.headSha, deps.run, repoRoot);
+    if (!reachable) {
+      const baseName =
+        sanitizeWorktreeName(basename(realWorktreeId)) ?? matched.headSha.slice(0, 7);
+      try {
+        const candidate = await uniqueKeepRefName(baseName, deps.run, repoRoot);
+        await deps.run(['branch', candidate, matched.headSha], repoRoot);
+        keptRef = candidate;
+      } catch {
+        // RESIDUAL RISK, ACCEPTED: the worktree directory is already gone by
+        // this point (this function's own header explains why the check
+        // lives here). A `git branch` failure on a name this call just
+        // proved does not exist would mean something is badly wrong with the
+        // repository itself (disk full, permissions) -- the same class of
+        // failure that would already have broken `worktree remove` moments
+        // earlier. `keptRef` stays `null` rather than this function
+        // returning a `SourceError` for a removal that, from the
+        // filesystem's own point of view, already completed.
+      }
+    }
+  }
+
   let preservedBranch = false;
   if (matched.branchRef !== null && matched.branchRef.startsWith('refs/heads/')) {
     const branchName = matched.branchRef.slice('refs/heads/'.length);
@@ -649,5 +770,5 @@ export async function removeWorktree(
       preservedBranch = true;
     }
   }
-  return { preservedBranch };
+  return { preservedBranch, keptRef };
 }
