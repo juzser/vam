@@ -142,6 +142,39 @@ describe('checkForUpdate', () => {
       kind: 'up-to-date',
     });
   });
+
+  /**
+   * A CONNECTION THAT NEITHER REFUSES NOR ANSWERS -- a captive portal, a
+   * firewall that drops packets instead of resetting the connection, a dead
+   * VPN tunnel. Every other network case above is a `fetch` that SETTLES
+   * (rejects, or resolves with a status); this one never does, and until now
+   * nothing here bounded it. `UpdatePanel.tsx`'s button disables itself for
+   * exactly the length of the request (`main/update/ipc.ts`'s own reasoning
+   * for having no separate throttle) -- which means an unbounded request
+   * leaves it disabled and reading "checking…" forever, the one outcome this
+   * module's whole point was to avoid: silence dressed as an answer never
+   * arriving is worse than the daily-error-message silence it replaced.
+   *
+   * Falsified by deleting the `signal` this test asserts was passed: the
+   * fake fetcher's own promise then has nothing to ever settle it, and this
+   * test times out instead of passing -- the same failure the operator's own
+   * stuck button was.
+   */
+  it('bounds the request with a timeout, so a connection that neither refuses nor answers cannot hang the button forever', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    const hangingFetch: UpdateFetcher = vi.fn(
+      (_url, init) =>
+        new Promise<Awaited<ReturnType<UpdateFetcher>>>((_resolve, reject) => {
+          capturedSignal = init.signal;
+          init.signal?.addEventListener('abort', () => {
+            reject(new DOMException('The operation was aborted.', 'AbortError'));
+          });
+        }),
+    );
+    const status = await checkForUpdate('0.0.0', { fetch: hangingFetch, timeoutMs: 20 });
+    expect(capturedSignal).toBeInstanceOf(AbortSignal);
+    expect(status).toEqual({ kind: 'unknown', reason: 'network' });
+  }, 1000);
 });
 
 describe('the URL a click will open', () => {

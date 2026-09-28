@@ -198,6 +198,7 @@ const GUARDS = [
   'composer-bar-shots',
   'settings-chrome-shots',
   'settings-panels-shots',
+  'settings-update-shots',
   'integrations-github-shots',
   'favicon-shots',
   'key-truth-shots',
