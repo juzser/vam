@@ -58,7 +58,15 @@ const CONTESTED_MOD: Prefs = { ...EMPTY_PREFS, keyBindings: { newProject: ['Mod-
 
 function open(prefs: Prefs = EMPTY_PREFS) {
   const onChange = vi.fn();
-  render(<SettingsOverlay prefs={prefs} theme="dark" onChange={onChange} onClose={vi.fn()} />);
+  render(
+    <SettingsOverlay
+      prefs={prefs}
+      theme="dark"
+      onChange={onChange}
+      onClose={vi.fn()}
+      initialSection="keyboard"
+    />,
+  );
   return { onChange };
 }
 

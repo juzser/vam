@@ -322,22 +322,22 @@ export function usagePanelLeftOffset(
  * wall, so `usagePanelLeftOffset` measures the toggle's own position and
  * pulls the panel back just far enough to keep it on screen, on both shells.
  *
- * `phone` TAKES A PROP NOW, and only for the toggle's OWN paint, at rest --
- * the operator's follow-up request, after looking at the shipped
- * screenshot: "remove the account button's background so it looks less
- * big", meaning the filled grey circle the desktop avatar bar has always
- * painted here, which reads heaviest of all seven controls once this same
- * button sits in the phone's dense one-row toolbar beside six borderless
- * glyphs. Desktop's own call site (`SessionList.tsx`, `{!phone &&
- * <UsagePopover />}`) passes nothing and keeps the exact className string
- * this component always rendered -- the operator's complaint was about the
- * phone toolbar's after-shot, not the sidebar. Only the phone call site
- * (`{phone && <UsagePopover phone />}`) opts in. "Keep a hover/pressed/
- * focus-visible state" is the other half of the same sentence: the circle
- * still fills on `hover:`/`active:`/`focus-visible:`, so the toggle is never
- * silently unmarked as interactive, only quiet until it is touched.
+ * `phone` NO LONGER TAKES A PROP AT ALL -- it used to, for only the toggle's
+ * OWN paint at rest: the operator's follow-up request, after looking at the
+ * shipped screenshot, to drop the filled grey circle the desktop avatar bar
+ * had always painted here (it read heaviest of all seven controls once this
+ * same button sat in the phone's dense one-row toolbar beside six borderless
+ * glyphs), while the desktop call site kept its circle unchanged. The
+ * settings-views work (item H) generalised that request -- "remove the
+ * account icon's background, ON DESKTOP TOO" -- so both call sites
+ * (`SessionList.tsx`'s avatar bar and its phone toolbar row) now paint the
+ * identical className, and a prop that chose between two identical strings
+ * has nothing left to select. "Keep a hover/pressed/focus-visible state" is
+ * still true of both: the circle fills on `hover:`/`active:`/`focus-visible:`,
+ * so the toggle is never silently unmarked as interactive, only quiet until
+ * it is touched.
  */
-export function UsagePopover({ phone = false }: { readonly phone?: boolean } = {}) {
+export function UsagePopover() {
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -412,11 +412,16 @@ export function UsagePopover({ phone = false }: { readonly phone?: boolean } = {
           aria-label="usage"
           onKeyDown={onEscape}
           onClick={() => setOpen((o) => !o)}
-          className={
-            phone
-              ? 'flex h-[24px] w-[24px] flex-none cursor-pointer items-center justify-center rounded-full text-ink-faint hover:bg-line-strong hover:text-ink active:bg-line-strong focus-visible:bg-line-strong'
-              : 'flex h-[24px] w-[24px] flex-none cursor-pointer items-center justify-center rounded-full bg-line-strong text-ink-dim hover:text-ink'
-          }
+          // NO FILL AT REST, on desktop too now (settings-views work, item H:
+          // "remove the account icon's background, on desktop too") -- its
+          // plain-icon neighbours in this same bar (Stats, Settings, Remote,
+          // the theme toggle: `SessionList.tsx`'s own avatar bar) never
+          // painted one either, so the account icon was the one outlier. The
+          // phone toggle already dropped its own resting fill for the
+          // identical operator request (`active:`/`focus-visible:` doing the
+          // pressed/keyboard work a phone has no `hover:` for) -- this reuses
+          // that exact idiom for both, rather than inventing a second one.
+          className="flex h-[24px] w-[24px] flex-none cursor-pointer items-center justify-center rounded-full text-ink-faint hover:bg-line-strong hover:text-ink active:bg-line-strong focus-visible:bg-line-strong"
         >
           <CircleUser size={14} strokeWidth={1.5} />
         </button>

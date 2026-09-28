@@ -7,8 +7,9 @@
  * half a rendered tree can answer: that the phone shell puts `vam-phone` on
  * the root the overlays are siblings of, that the reachable overlays carry the
  * `data-overlay-host` hook the sheet rules key on, and that the anchored
- * filter popover deliberately does not. The geometry those rules produce is a
- * content scan and lives in `overlay-sheets.test.ts`, which says so.
+ * filter popover and the full-window Settings screen deliberately do not. The
+ * geometry those rules produce is a content scan and lives in
+ * `overlay-sheets.test.ts`, which says so.
  */
 
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
@@ -48,11 +49,12 @@ describe('the overlays at phone width', () => {
    * `settings`, and that gear is gone from the phone at the operator's request
    * -- four of the five sections behind it configure `localStorage` on the
    * device holding it rather than the machine the sessions run on
-   * (`settings/sections.ts`, `PHONE_SECTIONS`). The subject here is unchanged:
-   * that the overlay this opens is a marked SHEET HOST, not which control
-   * opens it.
+   * (`settings/sections.ts`, `PHONE_SECTIONS`). The subject here changed with
+   * the settings-views restructure (item A/C): Settings is now a full-window
+   * screen at every width rather than a sheet host, so this asserts the
+   * ABSENCE of the sheet marker and of a scrim, not their presence.
    */
-  it('opens settings as a marked host, reachable from the list', async () => {
+  it('opens settings as a full-window screen, not a bottom sheet', async () => {
     render(<Canvas model={MODEL} source={phoneSource()} />);
     expect(document.querySelector('button[aria-label="settings"]')).toBeNull();
     // Remote is one tap further in now, behind the toolbar's "more actions"
@@ -73,10 +75,11 @@ describe('the overlays at phone width', () => {
       return el;
     });
     expect(host).not.toBeNull();
-    expect(host?.hasAttribute('data-overlay-host')).toBe(true);
-    // The sheet is the host's non-button child; the scrim is the button.
-    const panel = [...(host?.children ?? [])].filter((c) => c.tagName !== 'BUTTON');
-    expect(panel).toHaveLength(1);
+    expect(host?.hasAttribute('data-overlay-host')).toBe(false);
+    // No scrim either: a full-window screen leaves no page showing behind it
+    // for one to dim or a click to fall through to (`SettingsOverlay.tsx`'s
+    // own comment on its host `className`).
+    expect([...(host?.children ?? [])].some((c) => c.tagName === 'BUTTON')).toBe(false);
   });
 
   it('opens the icon picker as a marked host', () => {

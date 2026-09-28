@@ -1,24 +1,27 @@
 // @vitest-environment happy-dom
 
 /**
- * The four reusable building blocks the settings cards restructure introduces:
- * `SettingsCard` (a collapsible section), `SettingsRow` (one setting, label
- * left, control right -- `Block`'s replacement), `SettingsSubgroup` (a
- * sub-heading over a run of indented rows) and `AdvancedDisclosure` (the
- * chevron-plus-"Advanced" fold at a card's own bottom).
+ * The reusable building blocks the settings views are made of: `SettingsCard`
+ * (one section's plain titled view -- icon, title, description, its rows
+ * beneath), `SettingsRow` (one setting, label left, control right --
+ * `Block`'s replacement), `SettingsSubgroup` (a sub-heading over a run of
+ * indented rows) and `AdvancedDisclosure` (the chevron-plus-"Advanced" fold
+ * for a section's rarely-touched rows).
  *
- * Follow-up PRs build their own rows on these, so what is asserted here is the
- * CONTRACT: a card starts open and remembers a fold across a remount (the
- * dialog's own relaunch), Advanced starts closed and remembers the opposite,
- * and both wear the accessible names/states the operator's own screen reader
- * would announce -- `aria-expanded` on a real button, never a `div` wearing a
- * click handler.
+ * Follow-up PRs build their own rows on these, so what is asserted here is
+ * the CONTRACT: `SettingsCard` draws a section unconditionally (the
+ * single-section-view restructure, item C, retired its own top-level
+ * fold -- `SettingsOverlay.tsx`'s nav is what decides whether a section is
+ * even mounted now), Advanced still starts closed and remembers the
+ * opposite, and both wear the accessible names/states the operator's own
+ * screen reader would announce -- `aria-expanded` on Advanced's real button,
+ * never a `div` wearing a click handler.
  */
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { Palette } from 'lucide-react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { isAdvancedOpen, isCardCollapsed } from '../../src/renderer/settings/card-collapse.js';
+import { afterEach, describe, expect, it } from 'vitest';
+import { isAdvancedOpen } from '../../src/renderer/settings/card-collapse.js';
 import {
   AdvancedDisclosure,
   SettingsCard,
@@ -29,69 +32,26 @@ import {
 afterEach(cleanup);
 
 describe('SettingsCard', () => {
-  it('opens by default -- an untouched dialog shows every row', () => {
+  it('draws its rows unconditionally -- there is no fold left to hide them behind', () => {
     render(
       <SettingsCard id="interface" label="Interface" Icon={Palette} hint="theme and colour">
         <p>row content</p>
       </SettingsCard>,
     );
     expect(document.querySelector('[data-settings-rows]')?.closest('[hidden]')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Interface' }).getAttribute('aria-expanded')).toBe(
-      'true',
-    );
+    expect(screen.getByText('row content')).not.toBeNull();
   });
 
-  it('folds shut on a click of its own header, and the header is a real button', () => {
+  it('draws the heading as a plain heading, not a button -- there is nothing left for it to toggle', () => {
     render(
       <SettingsCard id="interface" label="Interface" Icon={Palette} hint="theme and colour">
         <p>row content</p>
       </SettingsCard>,
     );
-    const header = screen.getByRole('button', { name: 'Interface' });
-    fireEvent.click(header);
-    expect(header.getAttribute('aria-expanded')).toBe('false');
-    expect(document.querySelector('[data-settings-rows]')?.closest('[hidden]')).not.toBeNull();
-  });
-
-  it('remembers a fold across a remount, and a fresh mount honours the store', () => {
-    localStorage.setItem('vam.settings.cardCollapsed', JSON.stringify({ interface: true }));
-    render(
-      <SettingsCard id="interface" label="Interface" Icon={Palette} hint="theme and colour">
-        <p>row content</p>
-      </SettingsCard>,
+    expect(screen.queryByRole('button', { name: 'Interface' })).toBeNull();
+    expect(document.querySelector('[data-settings-heading]')?.getAttribute('aria-expanded')).toBe(
+      null,
     );
-    expect(screen.getByRole('button', { name: 'Interface' }).getAttribute('aria-expanded')).toBe(
-      'false',
-    );
-  });
-
-  it('writes the fold back to storage so the NEXT mount sees it too', () => {
-    render(
-      <SettingsCard id="interface" label="Interface" Icon={Palette} hint="theme and colour">
-        <p>row content</p>
-      </SettingsCard>,
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Interface' }));
-    expect(isCardCollapsed('interface')).toBe(true);
-  });
-
-  it('reports its open state to an optional listener, on mount and on every toggle', () => {
-    const onOpenChange = vi.fn();
-    render(
-      <SettingsCard
-        id="integrations"
-        label="Integrations"
-        Icon={Palette}
-        hint="GitHub"
-        onOpenChange={onOpenChange}
-      >
-        <p>row content</p>
-      </SettingsCard>,
-    );
-    expect(onOpenChange).toHaveBeenCalledWith(true);
-    onOpenChange.mockClear();
-    fireEvent.click(screen.getByRole('button', { name: 'Integrations' }));
-    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
   it('carries the panel and rows hooks a guard finds it by', () => {
@@ -105,6 +65,20 @@ describe('SettingsCard', () => {
     expect(document.querySelector('[data-settings-panel-hint]')?.textContent).toBe(
       "the terminal's own paint",
     );
+  });
+
+  it('keeps a 16px gap under the heading rule before the rows start (#532)', () => {
+    render(
+      <SettingsCard id="terminal" label="Terminal" Icon={Palette} hint="the terminal's own paint">
+        <p>row content</p>
+      </SettingsCard>,
+    );
+    // A CLASS NAME IS A FACT ABOUT THE MARKUP, NOT ABOUT THE PAINT -- the same
+    // split `SettingsRow`'s own `data-settings-row-layout` test below draws:
+    // `settings-chrome-shots.mjs`'s own heading-gap check (ITEM 8) measures
+    // the real painted gap in a browser; this is the contract a `py-4` class
+    // literally reads as 16px in this codebase's spacing scale.
+    expect(document.querySelector('[data-settings-card-body]')?.className).toMatch(/\bpy-4\b/);
   });
 });
 

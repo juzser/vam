@@ -244,14 +244,6 @@ const SettingsOverlay = lazy(() =>
   import('../settings/SettingsOverlay.js').then((m) => ({ default: m.SettingsOverlay })),
 );
 
-/** The Stats & Usage screen, lazy on the SAME idiom as `SettingsOverlay`
- *  above: it exists only once `statsOpen` is true, so its own chunk (the
- *  heatmap grid, the provider cards) costs nothing until the operator
- *  actually opens it. */
-const StatsScreen = lazy(() =>
-  import('../stats/StatsScreen.js').then((m) => ({ default: m.StatsScreen })),
-);
-
 /** `model.groups ?? []` on every render is a fresh reference each keystroke,
  *  defeating `SessionList`'s memo -- a module-level constant keeps this a
  *  stable reference across renders. */
@@ -2322,8 +2314,6 @@ function CanvasInner({
     setSettingsSection,
     errorLogOpen,
     setErrorLogOpen,
-    statsOpen,
-    setStatsOpen,
     confirmForceClose,
     setConfirmForceClose,
     confirmCloseSession,
@@ -2335,7 +2325,6 @@ function CanvasInner({
     keySheetOpen ||
     settingsOpen ||
     errorLogOpen ||
-    statsOpen ||
     confirmForceClose !== null ||
     confirmCloseSession !== null;
   /**
@@ -6733,7 +6722,12 @@ function CanvasInner({
           void newProject();
           return;
         case 'settings':
-          setSettingsSection('interface');
+          // NO EXPLICIT SECTION -- `SettingsOverlay`'s own fallback
+          // (`last-section.ts`, item C) decides: the last one the operator
+          // viewed, or `interface` for a first launch. Forcing `interface`
+          // here would silently win every time and make that fallback dead
+          // code.
+          setSettingsSection(null);
           setSettingsOpen(true);
           return;
         case 'remote':
@@ -7439,14 +7433,24 @@ function CanvasInner({
   );
 
   const onSidebarSettings = useCallback(() => {
-    setSettingsSection('interface');
+    // NO EXPLICIT SECTION -- see the `,` shortcut's identical `'settings'`
+    // case above for why.
+    setSettingsSection(null);
     setSettingsOpen(true);
   }, [setSettingsSection, setSettingsOpen]);
   const onSidebarRemote = useCallback(() => {
     setSettingsSection('remote');
     setSettingsOpen(true);
   }, [setSettingsSection, setSettingsOpen]);
-  const onSidebarStats = useCallback(() => setStatsOpen(true), [setStatsOpen]);
+  // Stats & Usage is a Settings SECTION now (settings-views restructure,
+  // item B), not its own overlay flag -- the icon opens the identical
+  // dialog `onSidebarSettings`/`onSidebarRemote` do, focused directly on
+  // `stats` (`SettingsOverlay`'s `initialSection`), the same pattern Remote
+  // already set.
+  const onSidebarStats = useCallback(() => {
+    setSettingsSection('stats');
+    setSettingsOpen(true);
+  }, [setSettingsSection, setSettingsOpen]);
 
   const onSidebarToggleTheme = useCallback(
     () => savePrefs(setTheme(prefs, effective === 'dark' ? 'light' : 'dark')),
@@ -8311,15 +8315,6 @@ function CanvasInner({
           the layout is showing at the time. */}
       {errorLogOpen && <ErrorLogPanel onClose={() => setErrorLogOpen(false)} />}
 
-      {/* Same reason as the log above: opened from the sidebar's own avatar
-          bar, so it must draw over whatever layout is on screen. `Suspense`
-          with a `null` fallback, on `SettingsOverlay`'s own idiom below. */}
-      {statsOpen && (
-        <Suspense fallback={null}>
-          <StatsScreen onClose={() => setStatsOpen(false)} />
-        </Suspense>
-      )}
-
       {/* Same reason again: settings is a window overlay, so it sits with the
           palette and the sheet rather than inside the canvas column.
           `Suspense` with a `null` fallback: `SettingsOverlay` is its own lazy
@@ -8333,7 +8328,7 @@ function CanvasInner({
             theme={effective}
             onChange={savePrefs}
             onClose={() => setSettingsOpen(false)}
-            initialSection={settingsSection}
+            initialSection={settingsSection ?? undefined}
             /* WHAT THIS CONNECTION CANNOT DO, in the source's own words. It used
                to be a band above the transcript on the phone's session screen,
                where it cost 45px of every session on every real phone; it is a

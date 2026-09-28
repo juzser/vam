@@ -32,8 +32,17 @@ import { SessionList } from '../../src/renderer/panels/SessionList.js';
 import { PHONE_QUERY } from '../../src/renderer/phone/viewport.js';
 import { EMPTY_PREFS } from '../../src/renderer/prefs/prefs.js';
 import { SettingsOverlay } from '../../src/renderer/settings/SettingsOverlay.js';
-import { SECTIONS } from '../../src/renderer/settings/sections.js';
+import { isDesktopOnlySection, SECTIONS } from '../../src/renderer/settings/sections.js';
 import { baseProps, entriesOf } from '../panels/session-list-props.js';
+
+/**
+ * Skills (settings-views restructure, item D) hides where `window.api` is
+ * absent (`isDesktopOnlySection`), and this harness has no bridge at all --
+ * so the nav this file's own desktop render draws is `SECTIONS` minus that
+ * one id, the same filter `test/settings/settings-nav.test.tsx` applies for
+ * the identical reason.
+ */
+const VISIBLE_SECTIONS = SECTIONS.filter((section) => !isDesktopOnlySection(section.id));
 
 /**
  * A `matchMedia` that answers PER QUERY, which the existing stubs do not: the
@@ -172,6 +181,8 @@ describe('the settings overlay at phone width', () => {
       />,
     );
     expect(document.querySelector('[data-settings-nav]')).not.toBeNull();
-    expect(document.querySelectorAll('[data-settings-nav-item]')).toHaveLength(SECTIONS.length);
+    expect(document.querySelectorAll('[data-settings-nav-item]')).toHaveLength(
+      VISIBLE_SECTIONS.length,
+    );
   });
 });

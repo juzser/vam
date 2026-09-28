@@ -94,6 +94,29 @@ const option = (key: string) =>
   document.querySelector<HTMLButtonElement>(`[data-submit-key-option="${key}"]`);
 const note = () => document.querySelector<HTMLElement>('[data-submit-key-note]')?.textContent ?? '';
 
+/**
+ * `,` OPENS ON `interface` FROM `Canvas.tsx` (its own `'settings'` case),
+ * not `agents` -- the single-section-view restructure (item C) means the
+ * send-key row is not in the document until the nav is clicked there, so
+ * every end-to-end open in this file (through `Canvas`, not `open()`
+ * above) drives that click rather than trusting the row was already
+ * mounted.
+ */
+async function openSettingsAtAgents(): Promise<void> {
+  act(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', bubbles: true }));
+  });
+  await waitFor(() => {
+    if (!document.querySelector('[data-settings-nav-item="agents"]')) {
+      throw new Error('nav still pending');
+    }
+  });
+  fireEvent.click(document.querySelector('[data-settings-nav-item="agents"]') as HTMLElement);
+  await waitFor(() => {
+    if (!option('enter')) throw new Error('still pending');
+  });
+}
+
 function changed(onChange: { mock: { calls: unknown[][] } }, index = 0): Prefs {
   const call = onChange.mock.calls[index];
   expect(call, `onChange was not called ${index + 1} time(s)`).toBeDefined();
@@ -187,29 +210,35 @@ describe('picking a key changes the composer, not only the store', () => {
     expect(fireEvent.keyDown(box, { key: 'Enter' })).toBe(false);
     expect(fireEvent.keyDown(box, { key: 'Enter', shiftKey: true })).toBe(true);
 
-    act(() => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', bubbles: true }));
-    });
     // `SettingsOverlay` is its own lazy chunk now (`Canvas.tsx`'s own
-    // `React.lazy` + `Suspense`), so `option(...)` is not there the instant
-    // the keystroke lands the first time -- `waitFor` (real timers, its
-    // default) rather than a fixed `Promise.resolve()` count. The chunk is
-    // cached after this first open, so the second open below needs no wait.
-    await waitFor(() => {
-      if (!option('shift-enter')) throw new Error('still pending');
-    });
+    // `React.lazy` + `Suspense`), and the send-key row is Agents' own now
+    // too (the single-section-view restructure, item C): `,` lands on
+    // `interface` from `Canvas.tsx`'s own `'settings'` case, so
+    // `openSettingsAtAgents` drives the nav click that puts it in the
+    // document at all. The chunk is cached after this first open, and the
+    // nav click itself is what persists `agents` as the last section
+    // viewed (`last-section.ts`), so the second open below needs neither
+    // wait: it reopens there on its own.
+    await openSettingsAtAgents();
     fireEvent.click(option('shift-enter') as HTMLElement);
-    fireEvent.click(screen.getByRole('button', { name: 'close settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'close' }));
     fireEvent.change(box, { target: { value: 'ship it' } });
     expect(fireEvent.keyDown(box, { key: 'Enter' })).toBe(true);
     expect(fireEvent.keyDown(box, { key: 'Enter', shiftKey: true })).toBe(false);
 
-    // And it is reversible from the same row.
+    // And it is reversible from the same row. `last-section.ts` reopens
+    // Settings on `agents` directly now (the first open's own nav click
+    // persisted it), but the section view still mounts on a later tick than
+    // the keystroke -- `waitFor` rather than trusting it landed
+    // synchronously.
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', bubbles: true }));
     });
+    await waitFor(() => {
+      if (!option('enter')) throw new Error('still pending');
+    });
     fireEvent.click(option('enter') as HTMLElement);
-    fireEvent.click(screen.getByRole('button', { name: 'close settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'close' }));
     fireEvent.change(box, { target: { value: 'ship it' } });
     expect(fireEvent.keyDown(box, { key: 'Enter' })).toBe(false);
     expect(fireEvent.keyDown(box, { key: 'Enter', shiftKey: true })).toBe(true);
@@ -223,15 +252,12 @@ describe('picking a key changes the composer, not only the store', () => {
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'i', bubbles: true }));
     });
-    act(() => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', bubbles: true }));
-    });
-    // See the sibling test above: `SettingsOverlay`'s own lazy chunk.
-    await waitFor(() => {
-      if (!option('shift-enter')) throw new Error('still pending');
-    });
+    // See the sibling test above: `SettingsOverlay`'s own lazy chunk and
+    // Agents' own nav click, driven independently here rather than trusted
+    // from a previous test's own last-viewed section.
+    await openSettingsAtAgents();
     fireEvent.click(option('shift-enter') as HTMLElement);
-    fireEvent.click(screen.getByRole('button', { name: 'close settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'close' }));
 
     const box = document.querySelector(
       'textarea[aria-label="prompt to session"]',

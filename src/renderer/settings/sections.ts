@@ -18,6 +18,8 @@
 import {
   Bell,
   Bot,
+  Brain,
+  ChartColumn,
   Keyboard,
   type LucideIcon,
   Palette,
@@ -38,15 +40,40 @@ import {
 
 export type SectionId =
   | 'interface'
+  | 'stats'
   | 'terminal'
   | 'window'
   | 'agents'
+  | 'skills'
   | 'behaviour'
   | 'notifications'
   | 'integrations'
   | 'remote'
   | 'keyboard'
   | 'update';
+
+/**
+ * Every section this build can ever offer, filtered to the ones a DESKTOP
+ * bridge actually backs -- `id`s absent from this set need no membership
+ * test elsewhere, because `visibleSections` (`SettingsOverlay.tsx`) is
+ * built by filtering `SECTIONS` against this predicate, once, rather than
+ * by a scattered `if (id === 'skills') …` at every call site that needs to
+ * know.
+ *
+ * SKILLS IS THE ONE SECTION THIS GATES TODAY (operator, item D: "Desktop
+ * only: hide it where window.api is absent"), and it is a STRONGER rule
+ * than Integrations/Remote's own desktop-only reasoning right above
+ * `PHONE_SECTIONS`: those two stay in the nav on a wide BROWSER build (no
+ * bridge, but not phone-WIDTH either) and degrade their own content to a
+ * "not available" sentence instead -- `GithubPanel.tsx`'s and
+ * `RemotePanel.tsx`'s own `api === undefined` branches. Skills' entire
+ * reason to exist is a `window.api.adhdSkill` write to this machine's own
+ * disk; a browser tab showing an Install button that cannot install
+ * anything is worse than one section fewer in the nav.
+ */
+export function isDesktopOnlySection(id: SectionId): boolean {
+  return id === 'skills';
+}
 
 /**
  * WHAT A PHONE MAY SEE OF THIS OVERLAY, and why it is almost none of it.
@@ -123,6 +150,24 @@ export const SECTIONS: readonly {
   // `Canvas.settings` reachable without navigating anywhere or expanding
   // anything -- a card starts open by default for exactly this reason.
   { id: 'interface', label: 'Interface', Icon: Palette },
+  // SECOND, ahead of every editable preference below it -- the settings-
+  // views restructure (item B) folded the standalone Stats & Usage overlay
+  // in here as a nav section rather than a second full-window surface.
+  // PLACEMENT, ARGUED RATHER THAN GUESSED: the operator's own brief offered
+  // "first or right after Interface" and asked for a pick. Not FIRST,
+  // because Interface is where this overlay has opened since before
+  // sections existed (see that section's own comment) and is what
+  // `initialSection`'s fallback and every existing screenshot/guard assumes
+  // lands on open with no navigation at all -- bumping it to second place
+  // for a read-only report would move the one truly stable default. Right
+  // AFTER it, rather than further down: the sidebar's own stats icon sits
+  // beside the account icon at the very top of the app (`SessionList.tsx`),
+  // opened often and on impulse, unlike the editable-preference cluster
+  // (Terminal/Window/Agents/Behaviour) it would otherwise interrupt if
+  // wedged between two of them. `ChartColumn`: the exact glyph that icon
+  // already draws (`SessionList.tsx`'s `aria-label="stats"` button) -- the
+  // nav entry and the icon that opens it cannot come to mean two shapes.
+  { id: 'stats', label: 'Stats & Usage', Icon: ChartColumn },
   // RIGHT AFTER INTERFACE, the way Behaviour used to sit right after
   // Appearance: every row in it was in Appearance until this split, and the
   // two together still read as "how vam looks", split by WHICH surface the
@@ -143,6 +188,20 @@ export const SECTIONS: readonly {
   // family: what the agent is told to write, not what vam draws. `Bot` is
   // unchanged; it already named the right thing.
   { id: 'agents', label: 'Agents', Icon: Bot },
+  // RIGHT AFTER AGENTS (operator, item D: "The skill setting should be
+  // split out into its own section on the left"). `AdhdSkillCard` used to
+  // be Agents' own last row; it gets a section of its own now rather than
+  // staying a row, for the same reason the ORIGINAL restructure gave it a
+  // row instead of a Behaviour switch -- it is big enough (its own status
+  // pill, an install/reinstall/repair flow, per-agent coverage chips) to
+  // read as a settled preference buried in a bigger card rather than as the
+  // one thing this whole section is about. `Brain`: the identical icon
+  // `AdhdSkillCard`'s own tile already draws -- the nav entry and the card
+  // it opens cannot come to mean two shapes, `sections.ts`'s own rule for
+  // Stats above. DESKTOP ONLY (`isDesktopOnlySection`): the card writes to
+  // this machine's own `~/.claude/skills`/`~/.agents/skills`, which a
+  // browser tab or a paired phone has no bridge to reach at all.
+  { id: 'skills', label: 'Skills', Icon: Brain },
   // SMALLER THAN IT WAS, not retired: focus view is still the one row about
   // what a turn shows, and the file editor's pair joins it as a small
   // sub-group rather than as a section of one row each.

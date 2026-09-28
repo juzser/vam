@@ -28,9 +28,12 @@
  *
  * FIXTURE: `?demo=1`, the built page's own demo mode. Deterministic, offline,
  * and no factory port to keep free. Its one cost is stated where it bites:
- * demo refuses every write, so two of the four `data-overlay-host` sheets
+ * demo refuses every write, so two of the three `data-overlay-host` sheets
  * cannot be opened from a phone at all in this fixture (see the `test.skip`
- * and its comment).
+ * and its comment). Settings is not one of the three any more
+ * (settings-views restructure, item A/C): it is a full-window screen at
+ * every width rather than a sheet, and "settings at 390px" below measures it
+ * on its own terms.
  */
 
 import { expect, type Locator, type Page, test } from '@playwright/test';
@@ -839,6 +842,25 @@ test.describe('settings at 390px', () => {
     await expect(page.locator('[data-settings-overlay]')).toBeVisible();
   }
 
+  /**
+   * A FULL-WINDOW SCREEN, NOT A BOTTOM SHEET (settings-views restructure,
+   * item A/C). Every other overlay a phone can open anchors to the bottom
+   * edge and caps at 85dvh (`the overlay sheets at 390px`, below); Settings
+   * used to as well, back when it was a small centred modal made large.
+   * Filling the frame at every width is the same reason it carries no
+   * `data-overlay-host` any more (`SettingsOverlay.tsx`'s own comment on its
+   * host `className`).
+   */
+  test('fills the screen edge to edge, rather than anchoring to the bottom', async ({ page }) => {
+    await openSettings(page);
+    const geometry = await page.locator('[data-settings-overlay]').evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return { top: r.top, left: r.left, width: r.width, height: r.height };
+    });
+    const viewport = page.viewportSize();
+    expect(geometry).toEqual({ top: 0, left: 0, width: viewport?.width, height: viewport?.height });
+  });
+
   /** The same census as `controls`, over the dialog rather than the shell. */
   async function settingsControls(page: Page): Promise<Box[]> {
     return page.$$eval(
@@ -948,24 +970,18 @@ test.describe('settings at 390px', () => {
 });
 
 /**
-
-/**
  * The overlay sheets.
  *
- * Two of the four marked hosts are opened here; the other two are not
- * reachable at 390px in the demo fixture and are skipped ALOUD rather than
- * quietly asserted from CSS again -- see the skip's own comment.
+ * One of the three marked hosts is opened here directly; the other two
+ * (`ErrorLogPanel`, `ProjectPicker`) are not reachable at 390px in the demo
+ * fixture and are measured instead in "the sheets behind a source" farther
+ * down this file, through a source that accepts writes. Settings is not one
+ * of the three (settings-views restructure, item A/C): it withdrew from the
+ * shared bottom-sheet cohort entirely when it became a full-window screen at
+ * every width, and "settings at 390px" above measures its own shape rather
+ * than this one.
  */
 test.describe('the overlay sheets at 390px', () => {
-  // Through `remote access`: the gear is not drawn at 390px. What this test is
-  // about is the SHEET the overlay becomes, not which control opens it.
-  const openSettings = async (page: Page): Promise<Locator> => {
-    // Remote is one tap further in now, behind the toolbar's "more actions"
-    // overflow button (Orca one-row pass, follow-up to pull request 527).
-    await page.locator('[data-phone-shell] button[aria-label="more actions"]').tap();
-    await page.locator('[data-phone-shell] button[aria-label="remote access"]').tap();
-    return page.locator('[data-overlay-host]');
-  };
   const openIconPicker = async (page: Page): Promise<Locator> => {
     await page.locator('[data-phone-shell] [data-project-icon]').first().tap();
     return page.locator('[data-overlay-host]');
@@ -974,10 +990,7 @@ test.describe('the overlay sheets at 390px', () => {
   /** The panel inside a host: everything that is not the full-bleed scrim. */
   const panelOf = (host: Locator) => host.locator(':scope > :not(button)').first();
 
-  for (const [name, open] of [
-    ['settings', openSettings],
-    ['the project icon picker', openIconPicker],
-  ] as const) {
+  for (const [name, open] of [['the project icon picker', openIconPicker]] as const) {
     test(`${name} opens as a bottom sheet, capped and scrolling within itself`, async ({
       page,
     }) => {
@@ -1004,9 +1017,9 @@ test.describe('the overlay sheets at 390px', () => {
       // own bottom IS the viewport's bottom (within the sheet's safe-area
       // padding, which is 0 in a browser with no inset).
       expect(Math.round(geometry.bottom)).toBe(Math.round(geometry.viewport));
-      // Capped at 85dvh and never taller than the screen -- the fixed
-      // height `vam-modal-lg` (`styles.css`) gives settings' own panel must
-      // not win.
+      // Capped at 85dvh and never taller than the screen -- the picker's own
+      // fixed-height inner layout (the emoji grid's `min-height: 85dvh`,
+      // `styles.css`) must not win over the cap.
       expect(geometry.height).toBeLessThanOrEqual(geometry.viewport * 0.85 + 1);
       expect(geometry.top).toBeGreaterThanOrEqual(0);
       expect(geometry.maxHeight).toBeCloseTo(geometry.viewport * 0.85, 0);

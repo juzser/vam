@@ -83,7 +83,15 @@ afterEach(() => {
 function open(prefs: Prefs = EMPTY_PREFS) {
   const onChange = vi.fn();
   const onClose = vi.fn();
-  render(<SettingsOverlay prefs={prefs} theme="dark" onChange={onChange} onClose={onClose} />);
+  render(
+    <SettingsOverlay
+      prefs={prefs}
+      theme="dark"
+      onChange={onChange}
+      onClose={onClose}
+      initialSection="behaviour"
+    />,
+  );
   return { onChange, onClose };
 }
 
@@ -204,22 +212,36 @@ describe('throwing the switch changes the screen, not only the store', () => {
     expect(lines().length, 'the column starts with a line per turn').toBe(3);
 
     // `SettingsOverlay` is its own lazy chunk now (`Canvas.tsx`'s own
-    // `React.lazy` + `Suspense`), so `toggle()` is not there the instant the
-    // keystroke lands the first time -- `waitFor` (real timers, its
-    // default) rather than a fixed `Promise.resolve()` count. The chunk is
-    // cached after the first open, so the second `settings()` below
-    // resolves this wait immediately.
+    // `React.lazy` + `Suspense`), so neither the nav nor `toggle()` is there
+    // the instant the keystroke lands the first time -- `waitFor` (real
+    // timers, its default) rather than a fixed `Promise.resolve()` count.
+    // The chunk is cached after the first open, so the second `settings()`
+    // below resolves both waits immediately.
+    //
+    // THE `,` SHORTCUT OPENS ON `interface` (`Canvas.tsx`'s own `'settings'`
+    // case), not `behaviour` -- the single-section-view restructure (item C)
+    // means focus view's own switch is not in the document until the nav is
+    // clicked there, so this drives that click rather than trusting it was
+    // already mounted.
     const settings = async () => {
       act(() => {
         window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', bubbles: true }));
       });
+      await waitFor(() => {
+        if (!document.querySelector('[data-settings-nav-item="behaviour"]')) {
+          throw new Error('nav still pending');
+        }
+      });
+      fireEvent.click(
+        document.querySelector('[data-settings-nav-item="behaviour"]') as HTMLElement,
+      );
       await waitFor(() => {
         if (!toggle()) throw new Error('still pending');
       });
     };
     await settings();
     fireEvent.click(toggle() as HTMLElement);
-    fireEvent.click(screen.getByRole('button', { name: 'close settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'close' }));
     expect(lines().length, 'every turn here is quiet and finished').toBe(0);
     // AND THE FOLD LEFT A WAY BACK ON EVERY ONE OF THEM, through the same
     // seam. A column with no lines and no ways back is what the retired
@@ -228,7 +250,7 @@ describe('throwing the switch changes the screen, not only the store', () => {
 
     await settings();
     fireEvent.click(toggle() as HTMLElement);
-    fireEvent.click(screen.getByRole('button', { name: 'close settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'close' }));
     expect(lines().length, 'and the choice is reversible').toBe(3);
     expect(unfolds().length, 'with nothing folded, nothing offers to unfold').toBe(0);
   });
@@ -250,12 +272,19 @@ describe('throwing the switch changes the screen, not only the store', () => {
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', bubbles: true }));
     });
-    // See the sibling test above: `SettingsOverlay`'s own lazy chunk.
+    // See the sibling test above: `SettingsOverlay`'s own lazy chunk, and the
+    // nav click focus view's own single-section view now needs.
+    await waitFor(() => {
+      if (!document.querySelector('[data-settings-nav-item="behaviour"]')) {
+        throw new Error('nav still pending');
+      }
+    });
+    fireEvent.click(document.querySelector('[data-settings-nav-item="behaviour"]') as HTMLElement);
     await waitFor(() => {
       if (!toggle()) throw new Error('still pending');
     });
     fireEvent.click(toggle() as HTMLElement);
-    fireEvent.click(screen.getByRole('button', { name: 'close settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'close' }));
     expect(lines().length).toBe(1);
     expect(document.querySelector('[data-progress-failed]')?.textContent).toBe('· 2 failed');
   });

@@ -1,19 +1,27 @@
 /**
- * Stats & Usage — everything this machine's own transcripts say about the
- * operator's agents, computed locally by `src/main/stats/scan.ts` (a real
- * `node:worker_threads` worker, never this process) and read through the
- * ONE channel `window.api.stats` exposes.
+ * Stats & Usage's own content -- everything this machine's own transcripts
+ * say about the operator's agents, computed locally by `src/main/stats/
+ * scan.ts` (a real `node:worker_threads` worker, never this process) and read
+ * through the ONE channel `window.api.stats` exposes.
  *
- * SAME OVERLAY IDIOM AS `ErrorLogPanel.tsx`: a full-bleed scrim, `role=
- * "dialog"`, `aria-modal`, Escape and a scrim click both close it — copied
- * rather than reinvented, on that panel's own precedent for the identical
- * reason (`KeySheet`/`CommandPalette` before it).
+ * SETTINGS-VIEWS RESTRUCTURE (item B): this used to be `StatsScreen.tsx`, its
+ * own full-window overlay (a scrim, `role="dialog"`, its own Esc/close
+ * handling) -- the same idiom `ErrorLogPanel.tsx` set and `SettingsOverlay.tsx`
+ * still uses for the whole dialog. Stats & Usage is a SECTION of that dialog
+ * now, not a second screen beside it, so this file keeps only the CONTENT:
+ * the bridge reads, the loading/error states, and the report itself. The
+ * dialog chrome (the scrim, the header, Escape) is `SettingsOverlay.tsx`'s
+ * own now, the same one every other section shares.
  *
- * COMPUTES ONLY WHILE OPEN, on the operator's own instruction: mounting this
- * component IS the trigger — one `get()` call — and nothing here polls
- * while it stays on screen. The refresh button is the only other trigger,
- * and it calls the SAME channel (`stats.refresh`), because main does the
- * identical thing either way (`CHANNELS.statsScan`'s own header).
+ * COMPUTES ONLY WHILE MOUNTED, on the operator's own instruction carried over
+ * unchanged: mounting this component IS the trigger -- one `get()` call --
+ * and nothing here polls while it stays on screen. `SettingsCard` only
+ * mounts the active section's content at all (the single-section-view
+ * restructure), so "while mounted" and "while the operator is looking at
+ * this section" are the same fact now, same as it was "while the overlay is
+ * open" before. The refresh button is the only other trigger, and it calls
+ * the SAME channel (`stats.refresh`), because main does the identical thing
+ * either way (`CHANNELS.statsScan`'s own header).
  */
 
 import {
@@ -27,7 +35,7 @@ import {
   RefreshCw,
   Sparkles,
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { StatsResult } from '../../preload/api.js';
 import { formatCompactNumber, formatDuration } from '../../shared/format-number.js';
 import type {
@@ -38,10 +46,6 @@ import type {
 } from '../../shared/stats.js';
 import { PROVIDER_MARKS } from '../sources/provider-marks.js';
 import { Heatmap } from './Heatmap.js';
-
-export type StatsScreenProps = {
-  readonly onClose: () => void;
-};
 
 const USD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 const DATE = new Intl.DateTimeFormat('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
@@ -75,7 +79,7 @@ function prsReasonText(reason: PrsUnavailableReason): string {
 
 /** The rounded icon square every headline card and overview tile draws to
  *  its own left, on the Orca layout this screen otherwise does not copy
- *  (vam's own tokens throughout — `bg-running`/`text-running`, already
+ *  (vam's own tokens throughout — `bg-running/15`/`text-running`, already
  *  proven to paint in both themes by `e2e/stats-usage-shots.mjs` and every
  *  OTHER surface in this file that already used them before this tile
  *  existed, rather than a fresh, unverified `bg-icon-*` per card). */
@@ -365,7 +369,12 @@ const PRS_FOLLOWUP_FAILED: PrsCreated = {
   reason: 'error',
 };
 
-export function StatsScreen({ onClose }: StatsScreenProps) {
+/** Stats & Usage's own report -- the settings-views restructure's `StatsPanel`,
+ *  mounted by `SettingsOverlay.tsx` while (and only while) the `stats`
+ *  section is the active one. No props: everything it needs, it reads off
+ *  `window.api.stats` itself, the same self-contained shape `AdhdSkillCard`
+ *  and `GithubPanel` already take for their own bridge reads. */
+export function StatsPanel() {
   const [result, setResult] = useState<StatsResult | null>(null);
   // The PR count can arrive AFTER the rest of the snapshot (`worker.ts`'s
   // own header) -- tracked separately so a follow-up answer patches ONLY
@@ -375,22 +384,6 @@ export function StatsScreen({ onClose }: StatsScreenProps) {
   // snapshot has not loaded at all yet).
   const [prsOverride, setPrsOverride] = useState<PrsCreated | null>(null);
   const bridge = window.api?.stats;
-  const dialogRef = useRef<HTMLDivElement>(null);
-
-  // THE KEYBOARD, MOVED ONTO THE DIALOG ON OPEN — not a nicety, a
-  // requirement for `onEscape` below to ever fire. This is reached by a
-  // CLICK on the sidebar's entry icon, which is OUTSIDE this subtree; a real
-  // browser delivers a keydown to whatever element actually holds focus
-  // (`document.activeElement`), and without this a real Escape press keeps
-  // landing on that button and never reaches this dialog's own handler at
-  // all — measured with a real keypress in `e2e/stats-usage-shots.mjs`,
-  // which a synthetic `fireEvent.keyDown(dialog, ...)` unit test cannot see
-  // (it dispatches directly on the node, bypassing focus entirely).
-  // `SettingsOverlay.tsx` documents the identical fix for the identical
-  // reason.
-  useEffect(() => {
-    dialogRef.current?.focus();
-  }, []);
 
   useEffect(() => {
     if (bridge === undefined) return;
@@ -441,94 +434,29 @@ export function StatsScreen({ onClose }: StatsScreenProps) {
       .catch(() => setResult({ kind: 'error', message: 'the stats scan failed unexpectedly' }));
   };
 
-  const onEscape = (event: React.KeyboardEvent<HTMLElement>): void => {
-    if (event.key === 'Escape') onClose();
-  };
-
+  if (bridge === undefined) {
+    return (
+      <p data-stats-unavailable className="vam-sentence text-control text-ink-dim">
+        stats are only available in the desktop app on macOS
+      </p>
+    );
+  }
+  if (result === null) {
+    return (
+      <p className="vam-sentence text-control text-ink-dim">reading this machine's transcripts…</p>
+    );
+  }
+  if (result.kind === 'error') {
+    return <p className="vam-sentence text-control text-failed">{result.message}</p>;
+  }
   return (
-    <div
-      ref={dialogRef}
-      data-stats-screen
-      data-overlay-host
-      role="dialog"
-      // NOT "stats and usage" -- see the entry button's own comment
-      // (`SessionList.tsx`): any accessible name containing "usage"
-      // collides with `e2e/usage-popover-shots.mjs`'s substring
-      // `getByLabel('usage')` query for the account icon's popover toggle.
-      aria-label="stats"
-      aria-modal="true"
-      tabIndex={-1}
-      onKeyDown={onEscape}
-      // `pt-16`, matching `SettingsOverlay.tsx`'s own host exactly: with both
-      // panels now the same fixed `vam-modal-lg` size, a different top
-      // padding here would still offset the two panels' rects vertically --
-      // `e2e/modal-size-shots.mjs` asserts the two IDENTICAL, not merely the
-      // same size.
-      className="absolute inset-0 z-50 flex items-start justify-center pt-16 focus:outline-none"
-    >
-      <button
-        type="button"
-        aria-label="close stats"
-        className="absolute inset-0 cursor-default bg-ground/70"
-        onMouseDown={onClose}
+    <div data-stats-panel className="flex flex-col gap-4">
+      <ScreenBody
+        snapshot={
+          prsOverride === null ? result.snapshot : { ...result.snapshot, prsCreated: prsOverride }
+        }
+        onRefresh={onRefresh}
       />
-      {/* `vam-modal-lg` (`styles.css`): the shared large-modal size,
-          `SettingsOverlay.tsx`'s own panel wears the identical class -- "the
-          same size" is a fact about one declaration, not two Tailwind
-          arbitrary values that used to merely agree (`min(920px,94vw)` here,
-          `min(880px,94vw)` there). Fixed height, not `max-h`: the header
-          below stays put and only the body scrolls, the same reason
-          `SettingsOverlay.tsx`'s nav column needs one, and what makes the two
-          panels' rects comparable at all -- `e2e/modal-size-shots.mjs`
-          measures them pixel-IDENTICAL. */}
-      <div className="vam-modal-lg relative flex flex-col overflow-hidden rounded-md border border-line bg-panel">
-        <div className="flex flex-none items-baseline justify-between border-line border-b px-4 py-3">
-          <div>
-            <h2 className="font-semibold text-heading text-ink">Stats & Usage</h2>
-            <p className="text-control text-ink-dim">
-              What this machine's own agent transcripts say — computed locally, nothing leaves it.
-            </p>
-          </div>
-          <button
-            type="button"
-            aria-label="close"
-            onClick={onClose}
-            className="rounded border border-line px-2 py-0.5 text-control text-ink-dim hover:text-ink"
-          >
-            Esc
-          </button>
-        </div>
-
-        {/* Named the same way `data-settings-scroll` is: the one region that
-            actually scrolls, so a guard asking what is on screen has
-            something narrower to point at than the whole dialog. */}
-        <div data-stats-scroll className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-          {/* A readable ceiling, not the full box -- `vam-modal-lg` gives this
-              panel nearly the whole window so it can share Settings' exact
-              rect; a stats grid stretched to 1800+px would only widen the
-              gaps between numbers, never add anything to read. */}
-          <div className="mx-auto flex w-full max-w-[760px] flex-col gap-4">
-            {bridge === undefined ? (
-              <p data-stats-unavailable className="text-control text-ink-dim">
-                stats are only available in the desktop app on macOS
-              </p>
-            ) : result === null ? (
-              <p className="text-control text-ink-dim">reading this machine's transcripts…</p>
-            ) : result.kind === 'error' ? (
-              <p className="text-control text-failed">{result.message}</p>
-            ) : (
-              <ScreenBody
-                snapshot={
-                  prsOverride === null
-                    ? result.snapshot
-                    : { ...result.snapshot, prsCreated: prsOverride }
-                }
-                onRefresh={onRefresh}
-              />
-            )}
-          </div>
-        </div>
-      </div>
     </div>
   );
 }

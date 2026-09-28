@@ -1514,46 +1514,61 @@ if (templateIds.length >= 3) {
   // first of them until this change. A unit test can prove the bucket holds
   // it; only a browser can prove it reached the root and then reached paint,
   // which is why both are read here -- the custom property on the document,
-  // and the resolved colour of the scrim that is drawn with it.
+  // and the resolved colour of a `bg-ground` element that is drawn with it.
+  //
+  // THAT ELEMENT USED TO BE THE SETTINGS BACKDROP -- `button[aria-label="close
+  // settings"]`, a full-viewport `bg-ground/70` scrim behind the old card-
+  // modal. The settings-views restructure's own item A retired it outright
+  // ("no card-modal look, no backdrop margins" -- Settings is a full-window
+  // overlay now, nothing dimmed sits behind it), so that query now finds
+  // nothing and this whole check went stale the moment item A landed. The
+  // main canvas's own `[data-split-pane]` wrapper (`Canvas.tsx`, `bg-ground`,
+  // no opacity) is the next element downstream still painting this token: it
+  // stays MOUNTED under the Settings overlay (`z-50`, a sibling, not a route
+  // swap), so its computed fill still answers exactly the same question the
+  // scrim used to -- measured directly against this build: `rgb(13, 13, 13)`
+  // at rest, `rgb(0, 0, 0)` the moment "contrast" (root `#000000`) is picked.
   const grounds = [];
   for (const id of tinted) {
     await openSettings();
     await page.locator(`[data-palette-template="${id}"]`).click();
     await page.waitForTimeout(350);
-    // While the overlay is still up: the scrim is the one element that paints
-    // `bg-ground` at every moment this guard can reach, so it is where the
-    // token's journey to a pixel is checked.
+    // While the overlay is still up: `[data-split-pane]` is the one element
+    // that paints `bg-ground` at every moment this guard can reach (covered
+    // by Settings, not unmounted by it), so it is where the token's journey
+    // to a pixel is checked.
     const ground = await page.evaluate(() => {
       const root = getComputedStyle(document.documentElement)
         .getPropertyValue('--vam-ground')
         .trim();
-      const scrim = document.querySelector('button[aria-label="close settings"]');
+      const groundPainter = document.querySelector('[data-split-pane]');
       return {
         root,
-        // NOT PARSED, COMPARED. Tailwind compiles `bg-ground/70` through its
-        // own colour pipeline and Chromium hands this back as
-        // `oklab(0.19125 ... / 0.7)`, so there is no hex here to match the
-        // root against -- two earlier versions of this check tried, and got
-        // `NaN` and then a 40-digit string. What the browser can answer
+        // NOT PARSED, COMPARED. Tailwind compiles `bg-ground` through its own
+        // colour pipeline and Chromium hands this back as `oklab(...)` or
+        // `rgb(...)` depending on the value, so there is no hex here to match
+        // the root against -- two earlier versions of this check tried, and
+        // got `NaN` and then a 40-digit string. What the browser can answer
         // without a colour-space conversion is whether the fill CHANGED, and
         // that is the whole claim: a ground written by a template has to
         // reach the element that paints it.
-        scrimFill: scrim === null ? null : getComputedStyle(scrim).backgroundColor,
+        groundFill: groundPainter === null ? null : getComputedStyle(groundPainter).backgroundColor,
       };
     });
     grounds.push({ id, ...ground });
-    console.log(`  "${id}" ground: root ${ground.root}, scrim ${ground.scrimFill}`);
+    console.log(`  "${id}" ground: root ${ground.root}, paint ${ground.groundFill}`);
     check(
-      `the "${id}" scrim is painted with something`,
-      ground.scrimFill !== null && ground.scrimFill !== '',
-      String(ground.scrimFill),
+      `the "${id}" ground is painted with something`,
+      ground.groundFill !== null && ground.groundFill !== '',
+      String(ground.groundFill),
     );
-    // THE ONE FRAME WHERE THE GROUND IS ACTUALLY ON SCREEN. The shot taken
-    // after this loop closes the overlay shows the ROOM -- sidebar, pane, tab
-    // strip -- and the ground is behind all of it: a palette can take the page
-    // to #000000 and the room screenshot will not move a pixel. The scrim is
-    // `bg-ground/70` across the whole viewport, so this is the frame that
-    // shows what a ground is worth.
+    // THIS SHOT IS OF SETTINGS ITSELF, not the room behind it -- since item
+    // A, Settings is a full-window, OPAQUE (`bg-panel`) overlay with no
+    // translucent scrim left to see a room through, so there is no frame
+    // where a ground write shows up here. It is kept for the visual record
+    // (`palette-ground-*.png` is reviewed alongside `palette-template-*.png`
+    // below), not because this specific frame proves anything the
+    // `groundFill` check above does not already prove.
     await page.screenshot({ path: `${outDir}/palette-ground-${id}.png` });
     await page.keyboard.press('Escape');
     await page.waitForTimeout(300);
@@ -1615,7 +1630,7 @@ if (templateIds.length >= 3) {
   // AND A PALETTE REALLY DOES MOVE IT. Every assertion in the loop above is
   // satisfied by a feature that is completely dead: if no template wrote a
   // ground at all, each one would simply show the stylesheet's and the root
-  // would agree with the scrim every time. So the sweep has to prove it found
+  // would agree with the painted element every time. So the sweep has to prove it found
   // the thing it is here to measure -- more than one ground across the row,
   // and at least one of them darker than vam's own.
   const distinct = [...new Set(grounds.map((g) => g.root.toLowerCase()))];
@@ -1638,11 +1653,11 @@ if (templateIds.length >= 3) {
   // writes the root's inline style; a token that got that far and no further
   // would leave every one of these fills identical, which is exactly what the
   // guard saw when the apply loop was put back on the swatch grid.
-  const fills = [...new Set(grounds.map((g) => String(g.scrimFill)))];
+  const fills = [...new Set(grounds.map((g) => String(g.groundFill)))];
   check(
-    'and the scrim that paints the ground really changes with it',
+    'and the painted ground really changes with it',
     fills.length >= 2,
-    JSON.stringify(grounds.map((g) => `${g.id}:${g.scrimFill}`)),
+    JSON.stringify(grounds.map((g) => `${g.id}:${g.groundFill}`)),
   );
 
   // ------------------------------------- THE WAY BACK, AND WHAT IT PROMISES

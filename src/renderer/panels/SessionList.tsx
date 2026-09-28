@@ -4088,12 +4088,16 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
             its floor is now the row's own 30px, folded into that same
             rule (see its comment for why).
 
-            `phone` IS PASSED NOW, for the toggle's OWN paint only (see
-            `UsagePopover`'s own header): the operator's follow-up request
-            to drop this button's filled circle at rest, after looking at
-            the shipped screenshot. Desktop's call site three thousand
-            lines up stays `<UsagePopover />`, no prop, unchanged. */}
-        {phone && <UsagePopover phone />}
+            NO `phone` PROP ANY MORE. It used to carry the toggle's OWN paint
+            (the operator's follow-up request to drop this button's filled
+            circle at rest, after looking at the shipped screenshot) until the
+            settings-views work dropped the desktop toggle's resting fill too
+            (item H: "remove the account icon's background, on desktop too") --
+            once both call sites paint identically, a prop that selects between
+            two now-identical class strings is dead weight, so `UsagePopover`
+            lost the parameter rather than keep it unread. Desktop's call site
+            three thousand lines up is the same bare `<UsagePopover />`. */}
+        {phone && <UsagePopover />}
         {/* REMOTE AND THE THEME TOGGLE, BEHIND ONE "MORE" BUTTON. Drawn bare
             (each its own `vam-tap` icon, same as every other control in this
             row) this row measured 460px of content in a 389px box at 390px --

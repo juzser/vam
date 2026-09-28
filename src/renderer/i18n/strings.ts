@@ -74,7 +74,13 @@ const EN = {
   // ── The dialog's own chrome ──────────────────────────────────────────────
   'settings.title': 'settings',
   'settings.status.stored': 'stored in this browser, not in a session',
-  'settings.nav.heading': 'Sections',
+  // `settings.nav.heading` ("Sections") is gone: the operator asked for the
+  // rail's own eyebrow to become a "Back to app" ROW rather than a label
+  // beside one, so `SectionRail` in `SettingsOverlay.tsx` draws this instead
+  // now, closing Settings the same way Esc/`×` already do.
+  // `SectionStrip` (narrow desktop) never drew this heading at all -- its own
+  // toolbar has no room for one -- so nothing there changes.
+  'settings.nav.back': 'Back to app',
   // The accessible name of the close control, which the i18n pass walked past
   // because the button's whole label was the hard-coded string `Esc` -- a key
   // a phone does not have. Lower, like every other name on this surface.
@@ -96,6 +102,12 @@ const EN = {
   // overrides sit behind an Advanced disclosure now: most operators pick a
   // template and never open it.
   'settings.interface.hint': 'theme, templates, and the size a response is drawn at',
+
+  // STATS & USAGE, FOLDED IN AS A SECTION (settings-views restructure, item
+  // B). `StatsPanel.tsx` carries the whole report; this section's own hint
+  // is the one line `SettingsCard` draws under its heading, the same role
+  // every other section's hint plays.
+  'settings.stats.hint': "what this machine's own agent transcripts say — computed locally",
   'settings.interface.theme.label': 'theme',
   'settings.interface.theme.hint': 'system follows what the operating system asks for',
   'settings.interface.templates.label': 'templates',
@@ -143,12 +155,11 @@ const EN = {
   'settings.terminal.text.hint':
     'how large the terminal screen is drawn — a bigger size fits fewer columns, and a running screen re-wraps',
   // THE TERMINAL'S OWN FONT FAMILY, alongside its already-shipped size just
-  // above. A chip per font `main/fonts/list-monospace.ts` detected on this
-  // machine, plus the free-text field every chip fills — never the other
-  // way round, so there is one value and one way to set it.
+  // above. A dropdown (settings-views restructure, item G) offering every
+  // family `main/fonts/list-monospace.ts` detected on this machine, or the
+  // curated `shared/fonts.ts` list in a browser build with no bridge.
   'settings.terminal.fontFamily.label': 'terminal font',
   'settings.terminal.fontFamily.hint': 'tried first, before the shipped fallback below it',
-  'settings.terminal.fontFamily.noneDetected': 'no monospace fonts detected — type one',
   'settings.terminal.preview.label': 'preview',
   'settings.terminal.preview.hint': 'the font, size and colours above, together',
   'settings.terminal.themes.title': 'Themes',
@@ -257,11 +268,17 @@ const EN = {
   // ── Agents (renamed from Sessions) ───────────────────────────────────────
   // EVERY ROW HERE IS ABOUT THE AGENT A SESSION DRIVES, which is what earned
   // the rename: which one starts, which key sends it a prompt, how long its
-  // cache lives -- and now the ADHD skill, joining from Behaviour for the
-  // same reason (it decides what the agent is told to write, not what vam
-  // draws).
+  // cache lives. THE ADHD SKILL PASSED THROUGH HERE, BUT DID NOT STAY: it
+  // joined Agents from Behaviour in the cards restructure (same reasoning:
+  // it decides what the agent is told to write, not what vam draws), then
+  // left for its own "Skills" section in the settings-views restructure
+  // (item D) once it grew big enough (its own status pill, an
+  // install/reinstall/repair flow) to read as a settled preference buried
+  // in a bigger card rather than as the one thing a section is about.
   'settings.agents.hint':
     'which agent a new session starts, which key sends it a prompt, and how long its cache lives',
+  // Skills' own hint, read by the new section `AdhdSkillCard` moved into.
+  'settings.skills.hint': 'the real upstream skills vam can install into an agent’s own directory',
   'settings.agents.provider.label': 'default provider',
   'settings.agents.sendKey.label': 'send key',
   'settings.agents.sendKey.hint': 'which key sends the prompt you are typing to the session',
@@ -328,9 +345,11 @@ const EN = {
   // pinned source commit.
   //
   // ITS OWN KEYS KEEP THE `settings.behaviour.adhd.*` NAMESPACE even though the
-  // card itself is drawn in Agents now: renaming twenty-odd call sites inside
+  // card itself has moved twice since (Behaviour to Agents in the cards
+  // restructure, Agents to its own "Skills" section in the settings-views
+  // restructure, item D): renaming twenty-odd call sites inside
   // `AdhdSkillCard.tsx` for a cosmetic match is that component's own call to
-  // make, not this restructure's, which moves the CARD, not its strings.
+  // make, not either restructure's, which moved the CARD, not its strings.
   //
   // KEPT TERSE ON PURPOSE, MORE THAN THE OLD SWITCH'S OWN DISCLOSURE WAS: this
   // catalogue ships whole inside the eager entry chunk regardless of
@@ -361,6 +380,14 @@ const EN = {
   'settings.behaviour.adhd.outdated-modified': 'Outdated or modified',
   'settings.behaviour.adhd.install': 'Install',
   'settings.behaviour.adhd.reinstall': 'Reinstall',
+  // PARTIALLY INSTALLED (settings-views restructure, item E): one of the two
+  // agent directories has it and the other does not -- neither "Install"
+  // (something is already there) nor "Reinstall" (something is still
+  // missing) says that honestly. `isAdhdSkillPartiallyInstalled` (`shared/
+  // adhd-skill.ts`) is the predicate; the coverage grid below the button
+  // already names WHICH agent is missing, so this word is the only new copy
+  // this state needs.
+  'settings.behaviour.adhd.repair': 'Repair',
   'settings.behaviour.adhd.recheck': 'Re-check',
   'settings.behaviour.adhd.remove': 'Remove',
   // THE CONFIRM, SHOWN ONLY BEFORE OVERWRITING A DIRECTORY THAT DIFFERS --
@@ -499,6 +526,23 @@ const EN = {
   'settings.integrations.hint':
     'connect a GitHub account with `gh`, and choose which repo each project reads pull requests from',
   'settings.integrations.github.heading': 'GitHub',
+  // THE SKILLS-CARD SHAPE (settings-views restructure, item F): an icon
+  // tile, a title, a one-line hint -- `AdhdSkillCard.tsx`'s own top row, the
+  // precedent this reuses rather than invents. Shorter than the section's
+  // own `settings.integrations.hint` above (which still carries the fuller
+  // "choose which repo" half): this is the CARD's own line, the section's is
+  // the SettingsCard wrapper's.
+  'settings.integrations.github.hint': 'connect with the `gh` CLI; vam stores no token of its own',
+  // THE STATUS PILL'S OWN THREE WORDS, distinct from the longer sentence
+  // `data-github-status` still carries below it (kept for
+  // `test/settings/github-panel.test.tsx`'s own assertions, which read that
+  // element for "octocat", "not logged in", "not installed"). `gh` stays
+  // lower case even here -- `GithubStatusPill`'s own comment on why it is
+  // the one pill state that opts out of this surface's `capitalize` class.
+  'settings.integrations.github.pill.connected': 'Connected',
+  'settings.integrations.github.pill.notConnected': 'Not connected',
+  'settings.integrations.github.pill.cliMissing': 'gh not installed',
+  'settings.integrations.github.loggedInAs': 'logged in as',
   'settings.integrations.github.status.missing': '`gh` is not installed',
   'settings.integrations.github.status.installLink': 'install gh',
   'settings.integrations.github.status.loggedOut': 'not logged in',
@@ -517,6 +561,17 @@ const EN = {
   'settings.integrations.github.copyCommand': 'copy command',
   'settings.integrations.github.copied': 'copied',
   'settings.integrations.github.pane.ended': 're-check above',
+  // THE GH-MISSING GUIDE (operator request): what to DO once the pill and
+  // the status sentence above have already said `gh` itself is not on PATH.
+  // Its own "copy" button reuses `copyCommand`/`copied` above rather than a
+  // fourth pair of strings -- both buttons copy one shell command into the
+  // clipboard, and the entry bundle budget (`bundle-budget.test.ts`) is the
+  // reason this is not just tidiness: every catalogue byte ships eagerly,
+  // whichever section reads it.
+  'settings.integrations.github.guide.intro':
+    'GitHub CLI (gh) is not installed. Install it, then sign in.',
+  'settings.integrations.github.guide.noBrew': 'no Homebrew yet? see',
+  'settings.integrations.github.guide.checkAgain': 'check again',
   'settings.integrations.repo.heading': 'repository',
   'settings.integrations.repo.current': 'reading pull requests from {name}',
   'settings.integrations.repo.own': "this project's own repository",
@@ -566,10 +621,10 @@ const EN = {
   'steps.more': '+{count} more, not shown',
 
   // ── Shared across more than one section's row ────────────────────────────
-  // `FontFamilyField`'s placeholder, read by both the terminal and the UI
-  // font rows — one control, one string, rather than a copy each row could
-  // drift from.
-  'settings.fontFamily.placeholder': 'system default',
+  // `FontFamilySelect`'s own first `<option>`, read by both the terminal and
+  // the UI font dropdowns (settings-views restructure, item G) — one
+  // control, one string, rather than a copy each row could drift from.
+  'settings.fontFamily.systemDefault': 'System default',
 
   // ── Exercised by the catalogue's own tests, and by nothing else ──────────
   // Kept HERE rather than in the test file so that the shape a test asserts

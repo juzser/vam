@@ -1,40 +1,33 @@
 /**
- * THE FOUR SHAPES ORCA'S APPEARANCE SETTINGS ARE MADE OF, adapted into vam's
- * own tokens: `SettingsCard` (a collapsible section), `SettingsRow` (one
- * setting -- `Block`'s replacement, under a new name because it now lives
- * outside any one panel's file), `SettingsSubgroup` (a sub-heading over a run
- * of indented rows, e.g. "Terminal Typography") and `AdvancedDisclosure` (the
- * chevron-plus-"Advanced" fold a card keeps its rarely-touched rows behind).
+ * THE SHAPES VAM'S SETTINGS VIEWS ARE MADE OF: `SettingsCard` (one section's
+ * plain titled view), `SettingsRow` (one setting -- `Block`'s replacement,
+ * under a new name because it now lives outside any one panel's file),
+ * `SettingsSubgroup` (a sub-heading over a run of indented rows, e.g.
+ * "Terminal Typography") and `AdvancedDisclosure` (the chevron-plus-"Advanced"
+ * fold a section keeps its rarely-touched rows behind).
  *
- * STEP 1 OF THE CARDS RESTRUCTURE builds these and re-files vam's existing
- * settings into them; it adds no new setting. Follow-up PRs build their own
- * rows on top of what is here, which is the whole reason this file exists
- * separately from `SettingsOverlay.tsx` rather than as four more local
- * functions in it.
+ * THE SETTINGS-VIEWS RESTRUCTURE (item C: "each section in Settings should be
+ * its own view, not one long scroll") retired the CARDS RESTRUCTURE's own
+ * accordion: `SettingsOverlay.tsx`'s nav now shows exactly one section's
+ * `SettingsCard` at a time (mounting it is what "selected" means; there is no
+ * sibling section in the document to hide), so the fold this component used
+ * to draw around its own heading -- a `<button>`, a chevron, persisted
+ * open/closed state -- has nothing left to toggle. What is left is what the
+ * operator asked for: "a plain titled view (icon + title + description) with
+ * its subgroups beneath". `data-settings-panel`, `data-settings-heading`,
+ * `data-settings-panel-hint` and `data-settings-rows` are unchanged from the
+ * cards restructure -- the same hooks a guard or a unit test already queries
+ * by, now finding the one section that is actually mounted rather than one of
+ * several always-mounted-but-`hidden` siblings.
  *
- * EVERY CARD IS ALWAYS MOUNTED, collapsed or not -- the settings overlay is
- * now one scrolling page of them, not a tab strip that swaps a single
- * visible panel. Collapsing a card (or closing its Advanced disclosure)
- * hides its content with the plain HTML `hidden` attribute rather than by
- * unmounting it: that keeps every `querySelector` a guard or a unit test
- * already writes against `[data-settings-panel="x"] [data-settings-rows]`
- * finding what it asks for regardless of fold state, the same invariant the
- * single-panel overlay this replaces already relied on.
- *
- * OPEN BY DEFAULT, THE CARD; SHUT BY DEFAULT, ADVANCED -- see
- * `card-collapse.ts` for why the two defaults point opposite ways, and both
- * are persisted per section so an operator who folds a card they never use
- * does not fold it again next launch.
+ * ADVANCED STILL FOLDS, AND STILL STARTS CLOSED -- see `card-collapse.ts` for
+ * why, and why that default did not change: a section's OWN rarely-touched
+ * rows are still rare once the section is the only thing on screen.
  */
 
 import { ChevronDown, ChevronRight, type LucideIcon } from 'lucide-react';
-import { useEffect, useId, useState } from 'react';
-import {
-  isAdvancedOpen,
-  isCardCollapsed,
-  setAdvancedOpen,
-  setCardCollapsed,
-} from './card-collapse.js';
+import { useId, useState } from 'react';
+import { isAdvancedOpen, setAdvancedOpen } from './card-collapse.js';
 import type { SectionId } from './sections.js';
 
 const FOCUS_RING =
@@ -43,95 +36,60 @@ const FOCUS_RING =
 const rowsId = (id: string) => `vam-settings-rows-${id}`;
 
 /**
- * One section, drawn as a collapsible card: an icon tile, the section's own
- * name, a chevron that says which way the fold goes -- all inside ONE
- * button, so a click or a key anywhere on the header toggles it -- a divider,
- * then the hint and the rows a caller passes as `children`.
+ * One section's plain titled view: an icon tile, the section's own name, a
+ * description -- then a divider, then the rows a caller passes as `children`.
  *
- * `id` IS THE SECTION, not a free-standing prop: it is what keys the fold's
- * own persistence (`card-collapse.ts`), what the outer `data-settings-panel`
- * hook is named, and what `panelId`/the rows region's own `id` are derived
- * from -- one value the card cannot come to disagree with itself about.
+ * `id` IS THE SECTION, not a free-standing prop: it is what the outer
+ * `data-settings-panel` hook is named after, so a guard or a unit test
+ * cannot come to disagree with the nav about which section this is.
  */
 export function SettingsCard({
   id,
   label,
   Icon,
   hint,
-  onOpenChange,
   children,
 }: {
   readonly id: SectionId;
   readonly label: string;
   readonly Icon: LucideIcon;
   readonly hint: string;
-  /**
-   * Told the open state on mount and on every toggle after. OPTIONAL: most
-   * cards are self-contained, and only the two whose own content polls a
-   * bridge while it is on screen (`GithubPanel`, `RemotePanel`) need to know,
-   * so they can stop polling for a card nobody is looking at.
-   */
-  readonly onOpenChange?: (open: boolean) => void;
   readonly children: React.ReactNode;
 }) {
-  const [open, setOpen] = useState(() => !isCardCollapsed(id));
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `onOpenChange` is read, not depended on -- a caller that passes a fresh arrow every render must not re-fire this for a state that has not changed, only `open` deciding whether it has.
-  useEffect(() => {
-    onOpenChange?.(open);
-  }, [open]);
-  const contentId = rowsId(id);
-  const toggle = () => {
-    const next = !open;
-    setOpen(next);
-    setCardCollapsed(id, !next);
-  };
   return (
     <section data-settings-panel={id} className="mt-6 first:mt-0">
-      <div className="rounded-md border border-line bg-panel">
-        <button
-          type="button"
-          onClick={toggle}
-          aria-expanded={open}
-          aria-controls={contentId}
-          className={`vam-tap flex w-full cursor-pointer items-center gap-2.5 px-4 py-3 text-left ${FOCUS_RING}`}
+      <div className="flex items-center gap-2.5 px-1 py-1">
+        {/* THE ICON TILE -- decorative: the heading's own text beside it is
+            the accessible name, and a screen reader that read the icon too
+            would say the section twice. */}
+        <span
+          aria-hidden="true"
+          className="flex h-6 w-6 flex-none items-center justify-center rounded-[7px] border border-line bg-sunken text-ink-dim"
         >
-          {/* THE ICON TILE -- a rounded square, the section's own glyph inside
-              it, decorative: the button's own accessible name is the label
-              text beside it, and a screen reader that read the icon too would
-              say the section twice. */}
-          <span
-            aria-hidden="true"
-            className="flex h-6 w-6 flex-none items-center justify-center rounded-[7px] border border-line bg-sunken text-ink-dim"
-          >
-            <Icon size={13} strokeWidth={1.6} />
-          </span>
-          <h3
-            data-settings-heading
-            className="flex-1 font-semibold text-body text-ink uppercase tracking-[0.07em]"
-          >
-            {label}
-          </h3>
-          <ChevronDown
-            aria-hidden="true"
-            size={15}
-            strokeWidth={1.8}
-            className={`flex-none text-ink-dim transition-transform ${open ? '' : '-rotate-90'}`}
-          />
-        </button>
-        <div data-settings-card-divider className="border-line-loud border-t" />
-        {/* THE HINT IS A SIBLING OF THE ROWS, NOT ONE OF THEM -- it is the
-            section's own description, not a row's caption, and
-            `copy-budget.test.tsx` counts `[data-settings-rows] p` as "one
-            paragraph per row" on that exact assumption; nesting the hint
-            inside would double-count it (once by its own hook, once by
-            that selector). Both share the one `hidden` wrapper, so the hint
-            folds shut with the rest of the card's content. */}
-        <div id={contentId} data-settings-card-body hidden={!open} className="px-4 py-4">
-          <p data-settings-panel-hint className="vam-sentence mb-5 text-control text-ink-dim">
-            {hint}
-          </p>
-          <div data-settings-rows>{children}</div>
-        </div>
+          <Icon size={13} strokeWidth={1.6} />
+        </span>
+        <h3
+          data-settings-heading
+          className="flex-1 font-semibold text-body text-ink uppercase tracking-[0.07em]"
+        >
+          {label}
+        </h3>
+      </div>
+      <div data-settings-card-divider className="border-line-loud border-t" />
+      {/* THE HINT IS A SIBLING OF THE ROWS, NOT ONE OF THEM -- it is the
+          section's own description, not a row's caption, and
+          `copy-budget.test.tsx` counts `[data-settings-rows] p` as "one
+          paragraph per row" on that exact assumption; nesting the hint
+          inside would double-count it (once by its own hook, once by that
+          selector). `py-4`, unchanged from the cards restructure: the 16px
+          gap under the heading rule an operator's own report asked for
+          (`e2e/settings-chrome-shots.mjs`'s ITEM 8 measures it), which this plain
+          view still owes the same as the collapsible card it replaced. */}
+      <div data-settings-card-body className="px-1 py-4">
+        <p data-settings-panel-hint className="vam-sentence mb-5 text-control text-ink-dim">
+          {hint}
+        </p>
+        <div data-settings-rows>{children}</div>
       </div>
     </section>
   );
@@ -223,13 +181,16 @@ export function SettingsRow({
     >
       {inline ? (
         <div
-          // MOBILE-FIRST STACKED, THEN A ROW ABOVE 440px OF THE ROW'S OWN
+          // MOBILE-FIRST STACKED, THEN A ROW ABOVE 500px OF THE ROW'S OWN
           // WIDTH -- measured against the real build: the narrowest desktop
-          // dialog's own row width is ~413px (a 520px window, the narrow
-          // strip's own chrome taken out), the next width guards test is
-          // ~450px (560px window) -- so 440px is the one number between
-          // them, and it is what keeps "at 520px, inline rows fall back to
-          // stacked" true without also demoting the very next width tested.
+          // dialog's own row width is 472px (a 520px window; settings-views
+          // restructure item A removed the shared modal's 64px backdrop
+          // margin, which is what widened this row from the 413px it
+          // measured before that change), the next width `settings-chrome-
+          // shots.mjs` tests is 512px (a 560px window) -- so 500px is the one
+          // number between them, and it is what keeps "at 520px, inline rows
+          // fall back to stacked" true without also demoting the very next
+          // width tested.
           //
           // `items-start`, NOT `items-center` -- measured against the real
           // paint before this was written: several rows carry a helper
@@ -241,9 +202,9 @@ export function SettingsRow({
           // with it. Top-aligned, the label's own first line sits level
           // with the control's own first line in every row this file has,
           // whether the control column is one line or four.
-          className="flex flex-col gap-3 @min-[440px]:flex-row @min-[440px]:items-start @min-[440px]:gap-4"
+          className="flex flex-col gap-3 @min-[500px]:flex-row @min-[500px]:items-start @min-[500px]:gap-4"
         >
-          <div className="min-w-0 @min-[440px]:flex-1">
+          <div className="min-w-0 @min-[500px]:flex-1">
             {heading}
             {description}
           </div>
@@ -269,7 +230,7 @@ export function SettingsRow({
               left-to-right). A control with no note (a stepper, most
               switches) is unaffected: nothing else in the column to move
               it away from. */}
-          <div className="@min-[440px]:flex @min-[440px]:max-w-[280px] @min-[440px]:flex-none @min-[440px]:flex-col @min-[440px]:items-end">
+          <div className="@min-[500px]:flex @min-[500px]:max-w-[280px] @min-[500px]:flex-none @min-[500px]:flex-col @min-[500px]:items-end">
             {children}
           </div>
         </div>
@@ -374,5 +335,64 @@ export function AdvancedDisclosure({
         {children}
       </div>
     </div>
+  );
+}
+
+/**
+ * A LINK OUT OF VAM, UNDER A WINDOW THAT REFUSES TO NAVIGATE.
+ *
+ * Operator: "in settings the tailscale link is not clickable." It was an
+ * ordinary `target="_blank"` anchor, and `setWindowOpenHandler(() => ({
+ * action: 'deny' }))` in `src/main/index.ts` refuses every `window.open` in
+ * this app. The link was not broken; it was refused, by policy, for the
+ * reason `errors/report.ts` states: a renderer that can navigate off-origin
+ * is a renderer that can exfiltrate.
+ *
+ * STILL AN ANCHOR. A `<button>` dressed as a link loses what a link announces
+ * to a screen reader and what a pointer expects from one -- and the
+ * destination really is reached, in the operating system's browser, which is
+ * where an external page belongs. The `href` stays real, which is also what
+ * makes the browser build need no branch: there is no bridge there, nothing
+ * calls `preventDefault`, and the anchor works the way an anchor works.
+ *
+ * SHARED BY `PairingPanel.tsx` AND `GithubPanel.tsx` NOW, moved here once a
+ * second caller needed the identical shape (settings-views restructure's own
+ * gh-missing guide) -- rather than a second, drifting copy. `onOpen` TAKES NO
+ * ARGUMENT, on purpose: `PairingPanel.tsx`'s own bridge is keyed
+ * (`RemoteLinkKey`, so main owns both destinations and the renderer never
+ * names one), `GithubPanel.tsx`'s is a plain URL through `window.api.link`
+ * (`src/main/link/ipc.ts`'s allowlisted channel). Binding EITHER shape into a
+ * zero-argument closure is the caller's own concern, not this component's --
+ * the one thing every caller needs from `ExternalLink` is "call this on
+ * click, absent means no bridge", and that is the whole of its contract.
+ */
+export function ExternalLink({
+  href,
+  onOpen,
+  className,
+  children,
+}: {
+  readonly href: string;
+  readonly onOpen?: () => void;
+  readonly className: string;
+  readonly children: React.ReactNode;
+}) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className={className}
+      onClick={(event) => {
+        if (onOpen === undefined) return;
+        // The window would deny this anyway. Stopping it here keeps one path
+        // rather than two, and a second path is what later gets "fixed" by
+        // widening the policy.
+        event.preventDefault();
+        onOpen();
+      }}
+    >
+      {children}
+    </a>
   );
 }
