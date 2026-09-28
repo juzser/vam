@@ -696,6 +696,29 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * gzip figure (217,186 B) plus ~364 B (~0.17%) of the same slack. The next
  * PR to land here should still expect to remeasure rather than assume
  * either number still has room.
+ *
+ * A THIRTEENTH, SMALL, ORDINARY GROWTH: the operator's Esc/Cmd+. reversal
+ * (`chords.ts`'s new `interrupt` action and its `Mod-.` table entry,
+ * `rowConflicts()`, and `keysheet.ts`'s one new `ACTION_LABELS` row) is all
+ * eager -- `chords.ts` and `keysheet.ts` are both shared modules the entry
+ * already statically imports (`TerminalTab.tsx`, `DetailPanel.tsx`,
+ * `Canvas.tsx` all read `chords.ts` directly), so this did not go through
+ * `SettingsOverlay`'s own lazy boundary even though the new conflict-dot UI
+ * itself lives entirely inside that lazy chunk. CI's own `electron-vite
+ * build --mode production` run (`ubuntu-latest`, this PR's actual gate)
+ * measured entry gzip at 217,677 B against the 217,550 B budget above --
+ * over by 127 B, and over on the FIRST push despite this branch's own local
+ * (`darwin`) build passing under budget beforehand, the same cross-machine
+ * zlib-output variance the eleventh and twelfth paragraphs' own "this
+ * machine's zlib" notes already flagged, now large enough on its own to
+ * flip a result. `ENTRY_GZIP_BUDGET_BYTES` moves 217,550 -> 217,900: CI's
+ * own measured figure (217,677 B) plus ~223 B (~0.1%) of the same
+ * small-headroom slack every bump above uses, sized to clear this
+ * particular machine's zlib rather than assume it matches whichever one
+ * measured the paragraph before it. `ENTRY_BUDGET_BYTES` is untouched: the
+ * raw (pre-gzip) entry-size test passed in the same CI run, so the new
+ * table entry and label row cost real gzip bytes without crossing the raw
+ * budget's own, much wider, margin.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -707,7 +730,7 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
 const ENTRY_BUDGET_BYTES = 726_100;
-const ENTRY_GZIP_BUDGET_BYTES = 217_550;
+const ENTRY_GZIP_BUDGET_BYTES = 217_900;
 
 // The one string this repo's markdown stack ships that nothing else in the
 // dependency graph or vam's own source does: `gfmTable`, the extension name
