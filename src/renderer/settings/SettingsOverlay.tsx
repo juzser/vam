@@ -82,9 +82,11 @@ import {
   NO_BINDINGS,
   newClashes,
   normalizeKey,
+  rowConflicts,
 } from '../keyboard/chords.js';
 import { type BindingRow, buildBindingSheet } from '../keyboard/keysheet.js';
 import { ChordGlyphs } from '../keyboard/ShortcutTip.js';
+import { Note } from '../panels/Note.js';
 import { usePhoneViewport } from '../phone/viewport.js';
 import { type AgentPermissions, isDesktopShell } from '../prefs/agent-permissions.js';
 import type { DefaultAgent } from '../prefs/default-agent.js';
@@ -1734,6 +1736,7 @@ export function SettingsOverlay({
                                 capturing={capturing}
                                 onCapture={setCapturing}
                                 onKey={(slot, event) => capture(row, slot, event)}
+                                conflictText={conflictText(clashes, prefs.keyBindings, row.id)}
                                 onReset={() =>
                                   bind(clearBindings(prefs.keyBindings, row.id), row.id)
                                 }
@@ -2021,6 +2024,36 @@ function labelFor(overrides: KeyBindings, id: string): string {
   return id;
 }
 
+/**
+ * THE CONFLICT DOT'S OWN SENTENCE, or `null` for a row `rowConflicts` finds
+ * nothing on — a `BindingLine` that draws no dot at all.
+ *
+ * `rowConflicts` (`chords.ts`) is symmetric and per-chord; this turns its
+ * matches into the one line the operator reads, naming every OTHER action a
+ * chord this row holds is also bound to, in the operator's own symbols
+ * (`chordSymbols`, the same rule the standing notice above the list and the
+ * refusal message already keep — never the stored `Mod-k` token). More than
+ * one contested chord on a row joins as one sentence rather than one dot
+ * each: a row is one thing to look at, and `test/settings/
+ * binding-conflict-dot.test.tsx` holds the single-conflict shape this ships
+ * with; a second contested chord on one row has not shipped yet to measure
+ * against.
+ */
+function conflictText(
+  clashes: ReturnType<typeof bindingClashes>,
+  overrides: KeyBindings,
+  id: string,
+): string | null {
+  const conflicts = rowConflicts(clashes, id);
+  if (conflicts.length === 0) {
+    return null;
+  }
+  const others = conflicts
+    .map((conflict) => `${labelFor(overrides, conflict.with)} (${chordSymbols(conflict.chord)})`)
+    .join(', ');
+  return `Also bound to: ${others}`;
+}
+
 /** One box, one geometry, three fills — a slot is field-shaped in every state,
  *  not a chip that turns into an input. The border is `ink-faint` for the
  *  stepper's reason: `sunken` on `panel` is 1.04:1, so the edge is the sole
@@ -2052,6 +2085,7 @@ function BindingLine({
   capturing,
   onCapture,
   onKey,
+  conflictText,
   onReset,
 }: {
   readonly row: BindingRow;
@@ -2060,6 +2094,9 @@ function BindingLine({
   readonly capturing: Capturing;
   readonly onCapture: (next: Capturing) => void;
   readonly onKey: (slot: number, event: React.KeyboardEvent) => void;
+  /** The conflict dot's own sentence (`conflictText`), or `null` to draw no
+   *  dot at all — this row holds no chord any other action also claims. */
+  readonly conflictText: string | null;
   readonly onReset: () => void;
 }) {
   const slots = Array.from({ length: MAX_BINDINGS }, (_, slot) => slot);
@@ -2093,6 +2130,26 @@ function BindingLine({
         >
           {armed ? 'press a key — Esc cancels' : row.label}
         </span>
+        {/* THE CONFLICT DOT — every row a chord is contested on, winner
+            included, which `row.dead`'s own strikethrough (below, per slot)
+            never marks: that field exists to say a SLOT does nothing, and a
+            winning slot does something. `aria-label` carries the sentence
+            unconditionally, so a screen reader announces it on arrival
+            rather than on whichever moment Radix opens the tooltip; `Note`
+            (`panels/Note.tsx`) is what makes the SAME sentence reachable by
+            focus as well as by hover — the shape this codebase already uses
+            for a keyboard-first hint. `bg-danger` is the fixed hue every
+            other destructive/warning control in this app already wears. */}
+        {conflictText === null ? null : (
+          <Note text={conflictText}>
+            <button
+              type="button"
+              data-binding-conflict={row.id}
+              aria-label={conflictText}
+              className={`vam-hit-24 h-[7px] w-[7px] shrink-0 cursor-pointer rounded-full bg-danger ${FOCUS_RING}`}
+            />
+          </Note>
+        )}
         {row.overridden ? (
           <button
             type="button"

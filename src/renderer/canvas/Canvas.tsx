@@ -78,6 +78,7 @@ import { cycleMatch, searchMatches } from '../domain/search.js';
 import type { SessionEntry, ViewOptions } from '../domain/selectors.js';
 import {
   applyViewOrder,
+  interruptRefusal,
   orderedPaneTabs,
   orderedSessions,
   runningAgentTotal,
@@ -6683,6 +6684,56 @@ function CanvasInner({
           }
           void closeSession(focusedEntry.session.id, focusedEntry.session.title);
           return;
+        /**
+         * `Mod-.` — THE INTERRUPT, moved off Escape at the operator's own
+         * request (`chords.ts`'s `interrupt` action carries the whole
+         * history). GLOBAL rather than composer-local on purpose: "whenever
+         * a session is focused", not "while its composer happens to be
+         * open" — the same reach every other per-session chord in this
+         * switch already has (`close`, `rename`, `copy`).
+         *
+         * THE THREE REFUSALS ARE `domain/selectors.ts`'s `interruptRefusal`,
+         * the SAME function `DetailPanel.tsx`'s own `interruptRun` reads —
+         * two callers, one answer, rather than two copies of "can vam stop
+         * it" (that pane's own comment on the same defect). What differs
+         * here is only the surface a refusal is drawn on: `DetailPanel`
+         * has its own inline banner (`cycleNote`) tied to a mounted
+         * composer that may not even exist for the focused pane right now;
+         * this one is a global chord, so it speaks through the status bar
+         * every other window-level refusal in this switch already uses.
+         *
+         * SENT DIRECTLY, NOT THROUGH `DetailPanel`'s `pressPaneKey` — that
+         * function's in-flight guard and remote-pairing fallback exist for
+         * a specific mounted composer's own UI state (`cycleNote`), which a
+         * window-level chord has none of. `window.api.terminal.send` is the
+         * identical channel underneath either route; a rare double-press
+         * sending Escape twice is a no-op to Claude Code, not a hazard the
+         * way two half-typed prompt strokes racing would be.
+         */
+        case 'interrupt': {
+          if (focusedEntry === null) {
+            setStatus('pick a session first');
+            return;
+          }
+          const refusal = interruptRefusal(focusedEntry, terminalTab);
+          if (refusal !== null) {
+            setStatus(refusal);
+            return;
+          }
+          const send = globalThis.window?.api?.terminal?.send;
+          if (send === undefined) {
+            setStatus('not sent — this build has no keyboard into a session’s pane');
+            return;
+          }
+          void send(focusedEntry.project.id, { kind: 'escape' }, focusedEntry.session.id).then(
+            (result) => {
+              if (result !== 'sent') {
+                setStatus('not sent — vam could not reach this session’s pane to interrupt it');
+              }
+            },
+          );
+          return;
+        }
         case 'newSession':
           // Real now: main starts a detached tmux session running `claude` in
           // the project's own directory. Which project is the focused

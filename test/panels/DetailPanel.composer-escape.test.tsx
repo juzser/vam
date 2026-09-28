@@ -1,35 +1,35 @@
 // @vitest-environment happy-dom
 
 /**
- * ESCAPE IN THE COMPOSER INTERRUPTS THE AGENT; `Mod-[` LETS GO OF THE BOX.
+ * ESCAPE LEAVES THE COMPOSER AGAIN; THE INTERRUPT MOVED TO `Mod-.`.
  *
- * Operator request: "Escape in the composer should cancel the running prompt
- * (Claude Code's default), and leaving insert mode should move to a different
- * key."
+ * THIS IS THE SECOND REVERSAL OF THIS KEY. It used to be vam's own way out of
+ * the box. A prior change made it the interrupt instead — Claude Code's own
+ * default, sent over `pressPaneKey`/`interruptRun` — which meant leaving the
+ * box needed a key of its own (`Mod-[`). Asked "should Esc leave Insert, with
+ * cancel-previous-prompt on a different key?", the operator chose exactly
+ * that: Escape rejoins `Mod-[` as the way out, and the interrupt is `Mod-.`
+ * now (`chords.ts`'s `interrupt` action, `Canvas.tsx`'s `case 'interrupt'`,
+ * covered in `test/canvas/Canvas.interrupt.test.tsx`) — a GLOBAL chord that
+ * reaches the focused session's pane whether or not this box holds the
+ * keyboard, unlike a key this box could only ever answer while it did.
  *
- * THIS IS AN EXTENSION OF SHIPPED BEHAVIOUR, NOT A NEW CAPABILITY. vam already
- * sends Escape into a session's pane — `TerminalTab` maps it to
- * `{kind:'escape'}` and the phone keystroke strip presses the same key over the
- * same bridge. What is new is that the composer reaches it, and it reaches it
- * through `pressPaneKey`, the SAME channel with the same in-flight guard and
- * the same refusal caption (`data-mode-cycle`), rather than growing a second.
+ * `interruptRun` ITSELF IS UNCHANGED AND STILL TESTED — it is what the
+ * bubble menu's "Cancel prompt" row calls (`DetailPanel.bubble-menu.test.tsx`
+ * covers its three refusal outcomes in full); what moved is only which
+ * keystroke reaches it from inside the composer, which is now none.
  *
- * THE THREE OUTCOMES ARE THREE OUTCOMES, and that is most of this file.
- * "Escape went into the agent", "there is nothing running to interrupt" and
- * "vam has no keyboard into this session at all" are different facts, and this
- * pane's oldest defect is two of them looking the same
- * (`main/sources/pull-requests.ts`: "'No PRs' and 'vam could not ask' must
- * never look the same"). None of them may be silence.
- *
- * AND ESCAPE NO LONGER LEAVES THE BOX. That is the risk the change creates —
- * an operator pressing Escape by reflex now interrupts an agent — so the way
- * out is asserted to be BOTH bound and PAINTED where the operator is typing.
+ * WHAT THIS FILE HOLDS: that Escape and `Mod-[` are the SAME act (both leave,
+ * neither sends anything to the pane), that the two typeahead lists and the
+ * two popovers still take Escape before the box lets go of anything (Claude
+ * Code's own rule survives the reversal even though nothing downstream of it
+ * is an interrupt any more), and that the box claims only its own keys.
  */
 
-import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Decision, Project, Session, SessionStatus } from '../../src/renderer/domain/model.js';
+import type { Decision, Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/DetailPanel.js';
 import {
@@ -102,7 +102,6 @@ function Harness({
 
 const q = (selector: string) => document.querySelector<HTMLElement>(selector);
 const box = () => q('textarea[aria-label="prompt to session"]') as unknown as HTMLTextAreaElement;
-const note = () => q('[data-mode-cycle]')?.textContent ?? '';
 const type = (text: string) => fireEvent.change(box(), { target: { value: text } });
 
 /** A bridge into a pane, typed as the real member is so calls can be read. */
@@ -127,209 +126,103 @@ afterEach(() => {
   setActivePromptSubmitKey(DEFAULT_PROMPT_SUBMIT_KEY);
 });
 
-describe('Escape interrupts the session the composer is aimed at', () => {
-  it('presses Escape in the pane, over the bridge the keystroke strip already uses', async () => {
+describe('Escape is the way out of the box again', () => {
+  it('lets go of the keyboard and stops composing, sending nothing to the pane', async () => {
     const send = bridge();
-    draw();
+    const stopped = draw();
+    box().focus();
+    expect(fireEvent.keyDown(box(), { key: 'Escape' })).toBe(false);
     await act(async () => {
-      fireEvent.keyDown(box(), { key: 'Escape' });
-      await Promise.resolve();
       await Promise.resolve();
     });
-    expect(send).toHaveBeenCalledWith('p1', { kind: 'escape' }, 's1');
-    expect(note()).toContain('sent');
+    expect(stopped).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).not.toBe(box());
+    expect(send).not.toHaveBeenCalled();
   });
 
-  it('claims the keystroke, so the shell-level Escape never sees it', () => {
-    // `Canvas`'s `cancel` case says in a comment that an Escape typed INSIDE
-    // the composer never reaches it. That was true because the box blurred
-    // itself; it has to stay true now that the box does something else.
+  it('claims the keystroke, so no shell-level handler also sees it', () => {
     bridge();
     draw();
     expect(fireEvent.keyDown(box(), { key: 'Escape' })).toBe(false);
   });
 
-  it('stays in the box: no blur, no stop, and the draft is untouched', () => {
-    // Claude Code does not clear the draft on interrupt and does not move the
-    // keyboard, and neither may this. An interrupt that also cost the operator
-    // their half-typed prompt would be a worse trade than pressing nothing.
+  it('leaves the draft exactly where it was — an exit is not a discard', () => {
     bridge();
-    const stopped = draw();
+    draw();
     box().focus();
     type('half a thought');
     fireEvent.keyDown(box(), { key: 'Escape' });
-    expect(stopped).not.toHaveBeenCalled();
-    expect(document.activeElement).toBe(box());
     expect(box().value).toBe('half a thought');
   });
 
-  it('reports a bridge that refused, rather than looking like a interrupt that landed', async () => {
-    const send = bridge('refused');
-    draw();
-    await act(async () => {
-      fireEvent.keyDown(box(), { key: 'Escape' });
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(send).toHaveBeenCalledTimes(1);
-    expect(q('[data-mode-refusal]')?.getAttribute('data-mode-refusal')).toBe('true');
-    expect(note()).toContain('not sent');
-  });
-
-  it('falls back to the remote channel with no window.api at all, rather than sending nothing in silence', async () => {
-    // No `window.api` at all — the browser build, or Electron before preload.
-    // `typePaneStrokes` no longer refuses instantly here: Escape is one of
-    // the six `paneKeyToRemoteKeyId` answers for (`shared/remote-key.ts`),
-    // so a browser tab with no local bridge still has `/api/send-key`
-    // (`send-key-remote.ts`) to try, the same fallback the phone keystroke
-    // strip takes — this composer already shares that channel with the
-    // strip, per this file's own header, and the fallback is a property of
-    // the channel, not of `phone` being set. `DetailPanel.keystroke-strip
-    // .test.tsx`'s own "falls back to the remote channel" test covers the
-    // full round trip (a stubbed refusal, `/api/send-key`'s exact POST); this
-    // one only checks the composer's Escape reaches the same fallback rather
-    // than the old instant "no keyboard" refusal.
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = vi.fn(async () => ({
-      json: async () => ({ ok: true, value: null }),
-    })) as unknown as typeof fetch;
-    draw();
-    await act(async () => {
-      fireEvent.keyDown(box(), { key: 'Escape' });
-    });
-    await waitFor(() => {
-      expect(note()).toContain('sent');
-    });
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      '/api/send-key',
-      expect.objectContaining({ method: 'POST' }),
-    );
-    globalThis.fetch = originalFetch;
-  });
-});
-
-describe('an Escape with nothing to interrupt says so', () => {
-  it('refuses aloud on a session that is not running, and sends nothing', () => {
-    const send = bridge();
-    draw({ status: 'idle' });
-    fireEvent.keyDown(box(), { key: 'Escape' });
-    expect(send).not.toHaveBeenCalled();
-    expect(note().toLowerCase()).toContain('nothing running');
-  });
-
-  it('says the same for every status that is not running', () => {
-    const send = bridge();
-    for (const status of ['idle', 'done', 'failed', 'waiting'] as SessionStatus[]) {
-      cleanup();
-      draw({ status });
-      fireEvent.keyDown(box(), { key: 'Escape' });
-      expect(note().toLowerCase(), status).toContain('nothing running');
-    }
-    expect(send).not.toHaveBeenCalled();
-  });
-
-  it('does NOT confuse "nothing to interrupt" with "vam cannot reach this session"', () => {
-    // TWO UNKNOWNS, TWO SENTENCES. A session vam did not start has no keyboard
-    // into it at all — that is a fact about vam's reach, not about whether the
-    // agent is busy, and the operator acts differently on each.
+  it('does not interrupt on the way out, for a session that would otherwise refuse loudly', () => {
+    // A session vam did not start still lets the operator LEAVE the box —
+    // only `interruptRun` (reached from the bubble menu, not from here any
+    // more) has anything to refuse.
     const send = bridge();
     draw({ vamControlled: false });
     fireEvent.keyDown(box(), { key: 'Escape' });
     expect(send).not.toHaveBeenCalled();
-    expect(note()).not.toContain('nothing running');
-    expect(note().toLowerCase()).toContain('did not start');
-  });
-
-  it('says its own thing again for a source with no terminal at all', () => {
-    const send = bridge();
-    draw({}, { terminal: false });
-    fireEvent.keyDown(box(), { key: 'Escape' });
-    expect(send).not.toHaveBeenCalled();
-    expect(note()).not.toContain('nothing running');
-    expect(note()).not.toContain('did not start');
-    expect(note().toLowerCase()).toContain('terminal');
   });
 });
 
 describe('the typeahead lists still answer Escape first', () => {
-  it('closes the ! list and interrupts nothing', () => {
-    const send = bridge();
-    draw();
+  it('closes the ! list without leaving the box', () => {
+    const stopped = draw();
     type('!pr');
     expect(q('[data-bang-suggest]')).not.toBeNull();
     fireEvent.keyDown(box(), { key: 'Escape' });
     expect(q('[data-bang-suggest]')).toBeNull();
-    expect(send).not.toHaveBeenCalled();
+    expect(stopped).not.toHaveBeenCalled();
     // And the typed `!` is left exactly where it was.
     expect(box().value).toBe('!pr');
-    // A SECOND Escape, with the list gone, is the interrupt.
+    // A SECOND Escape, with the list gone, is the way out.
     fireEvent.keyDown(box(), { key: 'Escape' });
-    expect(send).toHaveBeenCalledTimes(1);
+    expect(stopped).toHaveBeenCalledTimes(1);
   });
 
-  it('closes the / list and interrupts nothing', () => {
-    const send = bridge();
-    draw();
+  it('closes the / list without leaving the box', () => {
+    const stopped = draw();
     type('/comp');
     expect(q('[data-slash-suggest]')).not.toBeNull();
     fireEvent.keyDown(box(), { key: 'Escape' });
     expect(q('[data-slash-suggest]')).toBeNull();
-    expect(send).not.toHaveBeenCalled();
+    expect(stopped).not.toHaveBeenCalled();
   });
 });
 
 /**
- * A DIALOG TAKES ESCAPE BEFORE THE AGENT DOES.
+ * A DIALOG TAKES ESCAPE BEFORE THE BOX LETS GO OF ANYTHING.
  *
- * Claude Code's own rule, which this whole change is modelled on: "Interrupt
- * Claude, or close a dialog … When a dialog is open, `Esc` closes the dialog."
- * The two typeahead lists above already obeyed it. The composer has two MORE
- * transient layers -- the provider popover and the mode popover -- and neither
- * closed on Escape at all before this, from anywhere: they were dismissible
- * only by picking a row or by clicking their own toggle again.
- *
- * That was survivable while Escape merely left the box. It is not now: Escape
- * in this surface interrupts a running agent, so a layer that does not claim it
- * first turns "close this popover" into "stop my agent".
+ * Claude Code's own rule survives the reversal even though nothing downstream
+ * of it interrupts an agent any more: a popover opened from the tools row is
+ * still a layer of its own, and Escape closing it rather than also leaving
+ * the composer is the same "one Escape, one dismissal" rule every overlay in
+ * this app keeps (`Canvas.tsx`'s own `cancel` case).
  */
-describe('an open popover takes Escape before the agent does', () => {
-  it('closes the mode popover instead of interrupting, from inside the box', () => {
-    const send = bridge();
-    draw();
+describe('an open popover takes Escape before the box lets go', () => {
+  it('closes the mode popover instead of leaving, from inside the box', () => {
+    const stopped = draw();
     fireEvent.click(q('[data-mode-toggle]') as HTMLElement);
     expect(q('[data-mode-picker]')).not.toBeNull();
     fireEvent.keyDown(box(), { key: 'Escape' });
     expect(q('[data-mode-picker]')).toBeNull();
-    expect(send).not.toHaveBeenCalled();
-    // And with it closed, Escape is the interrupt again.
+    expect(stopped).not.toHaveBeenCalled();
+    // And with it closed, Escape is the way out again.
     fireEvent.keyDown(box(), { key: 'Escape' });
-    expect(send).toHaveBeenCalledTimes(1);
+    expect(stopped).toHaveBeenCalledTimes(1);
   });
 
-  /**
-   * THE SECOND LAYER, AND IT IS THE MODEL MENU NOW.
-   *
-   * This case drove the PROVIDER popover, which is withdrawn while
-   * `PROVIDERS` has one row (`src/shared/providers.ts`) -- and re-pointing it
-   * is better than doubling the table here, because the model menu is a live
-   * third layer in the shipped app that this file had never driven at all.
-   * `DetailPanel.popover-dismiss.test.tsx` keeps the provider arm alive
-   * against a two-row double, so nothing is dropped.
-   */
-  it('closes the model menu instead of interrupting, from inside the box', () => {
-    const send = bridge();
-    draw({ vamControlled: true }, { delivers: true, terminal: true });
+  it('closes the model menu instead of leaving, from inside the box', () => {
+    const stopped = draw({ vamControlled: true }, { delivers: true, terminal: true });
     fireEvent.click(q('[data-model-picker]') as HTMLElement);
     expect(q('[data-model-picker-menu]')).not.toBeNull();
     fireEvent.keyDown(box(), { key: 'Escape' });
     expect(q('[data-model-picker-menu]')).toBeNull();
-    expect(send).not.toHaveBeenCalled();
+    expect(stopped).not.toHaveBeenCalled();
   });
 
   it('closes it from the toggle itself, where the pointer left the keyboard', () => {
-    // A popover is opened by CLICKING, which leaves the keyboard on the
-    // button rather than in the textarea. Escape has to work from there too,
-    // or the one gesture that opens it has no matching dismiss.
     draw();
     const toggle = q('[data-mode-toggle]') as HTMLElement;
     fireEvent.click(toggle);
@@ -347,19 +240,15 @@ describe('an open popover takes Escape before the agent does', () => {
     expect(q('[data-mode-picker]')).toBeNull();
   });
 
-  it('does not swallow Escape when no popover is open, so the interrupt still fires', () => {
-    // The guard must be about an OPEN layer, not about the region: a wrapper
-    // that ate Escape unconditionally would make the interrupt unreachable
-    // from the two controls beside it.
-    const send = bridge();
-    draw();
+  it('does not swallow Escape when no popover is open, so leaving still works', () => {
+    const stopped = draw();
     fireEvent.keyDown(q('[data-mode-toggle]') as HTMLElement, { key: 'Escape' });
     expect(q('[data-mode-picker]')).toBeNull();
-    expect(send).not.toHaveBeenCalled();
+    expect(stopped).not.toHaveBeenCalled();
   });
 });
 
-describe('Mod-[ is the way out of the box', () => {
+describe('Mod-[ answers the identical way out, unchanged', () => {
   it('lets go of the keyboard and stops composing', () => {
     const stopped = draw();
     box().focus();
@@ -373,15 +262,6 @@ describe('Mod-[ is the way out of the box', () => {
     box().focus();
     fireEvent.keyDown(box(), { key: '[', code: 'BracketLeft', ctrlKey: true });
     expect(stopped).toHaveBeenCalledTimes(1);
-  });
-
-  it('interrupts nothing on its way out', () => {
-    // The two keys are separate acts. A way out that also pressed Escape in
-    // the pane would make leaving the box cost the operator their agent's run.
-    const send = bridge();
-    draw();
-    fireEvent.keyDown(box(), { key: '[', code: 'BracketLeft', metaKey: true });
-    expect(send).not.toHaveBeenCalled();
   });
 
   it('leaves a bare [ to the draft', () => {
@@ -434,8 +314,15 @@ describe('the box does not claim the chords that belong above or below it', () =
     expect(fireEvent.keyDown(box(), { key: '0', code: 'Digit0', metaKey: true })).toBe(true);
   });
 
+  it('leaves Mod-. alone too — the interrupt is the window listener’s now', () => {
+    // `case 'interrupt'` (`Canvas.tsx`) is what actually presses Escape into
+    // the pane; this box must not claim the chord that reaches it or the
+    // window listener never sees the keydown at all.
+    draw();
+    expect(fireEvent.keyDown(box(), { key: '.', metaKey: true })).toBe(true);
+  });
+
   it('claims Mod-[ and Escape, which ARE its own', () => {
-    bridge();
     draw();
     expect(fireEvent.keyDown(box(), { key: '[', code: 'BracketLeft', metaKey: true })).toBe(false);
     expect(fireEvent.keyDown(box(), { key: 'Escape' })).toBe(false);
@@ -448,51 +335,22 @@ describe('the box does not claim the chords that belong above or below it', () =
  * Escape used to be the only way out of the composer, and the only place that
  * was written down was a caption saying `Esc → sidebar`. Both halves of that
  * went false, and the row that replaced it was then cut three more times by the
- * person who reads it on every prompt they type -- the send key ("only the
- * leave one needs showing"), the leave key ("drop the leave shortcut from under
- * the prompt box"), and finally the place itself: "remove the 'Esc to
- * interrupt' shortcut under the prompt input. Nothing is ever displayed down
- * there."
- *
- * RETIRED WITH IT, all about captions this file no longer draws: `'names the
- * interrupt, and nothing else that is a convention'`, `'follows the send-key
- * preference rather than naming a fixed key, on a phone'`, `'does not offer an
- * interrupt for a session vam cannot press a key in'`, `'retires the caption
- * that promised Escape went to the sidebar'`, `'names no key a phone cannot
- * press'` and `'costs no width while the box is not open for typing'`. The end
- * state they were converging on is asserted once, structurally, in
- * `DetailPanel.test.tsx` ("nothing is drawn beneath the prompt input, on any
- * route").
- *
- * WHAT STAYS HERE IS THE HALF THAT WAS NEVER ABOUT A CAPTION: the keys that
- * stopped being printed still have to WORK. Every Escape-interrupt test above
- * is one of those, and so is the one below.
+ * person who reads it on every prompt they type. The end state is asserted
+ * once, structurally, in `DetailPanel.test.tsx` ("nothing is drawn beneath the
+ * prompt input, on any route").
  */
 describe('the composer names the keys that operate it', () => {
   it('still lets the box go on the key it never printed', () => {
-    // THE CAPTION WENT; THE KEY DID NOT. This is the assertion that keeps the
-    // two apart -- delete the binding and the removal of a hint quietly becomes
-    // the removal of the only way out of the box without a mouse.
-    //
-    // AND `Mod-[` IS TAUGHT NOWHERE NOW, which is worth writing down rather
-    // than repeating the comment this replaces. The `?` sheet is generated from
-    // the chord TABLES and this key is bound in the composer's own `onKeyDown`,
-    // so the sheet names `Mod-0` and `Mod-Shift-h` for the same act and has
-    // never named this one. That was already true when the caption went; it is
-    // recorded here because the old comment claimed otherwise.
-    bridge();
     draw();
     expect(q('[data-prompt-keys]')).toBeNull();
     expect(fireEvent.keyDown(box(), { key: '[', code: 'BracketLeft', metaKey: true })).toBe(false);
   });
 
   it('draws nothing under the input on a phone either, where the row was unconditional', () => {
-    // The send caption was drawn on every phone prompt regardless of the
-    // preference, so the phone is the route a half-done removal survives on.
     draw({}, { phone: true, terminal: true });
     expect(q('[data-prompt-keys]')).toBeNull();
-    // And the control that DOES interrupt on a phone is still on screen: what
-    // was removed is a caption, and the act keeps its button.
+    // And the control that DOES interrupt on a phone is still on screen: it
+    // was never reached from the box's own Escape to begin with.
     expect(q('[data-key-strip-key="escape"]')).not.toBeNull();
   });
 });

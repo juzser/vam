@@ -143,6 +143,7 @@ import type {
   TurnStep,
 } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
+import { interruptRefusal as computeInterruptRefusal } from '../domain/selectors.js';
 import { t } from '../i18n/strings.js';
 import { chordSymbols, normalizeKey } from '../keyboard/chords.js';
 import { insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
@@ -7856,19 +7857,15 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
    * The three refusals were inline in `interruptRun` until the right-click
    * menu needed them BEFORE the click: a menu item can say "vam did not start
    * this session" while it is still disabled, which is the one thing a
-   * keystroke cannot do. Derived here so both routes read the same three
-   * conditions in the same order -- two copies of this would be two answers to
-   * "can vam stop it", and the pane's oldest defect is two different facts
-   * that look the same.
+   * keystroke cannot do. `Canvas.tsx`'s `case 'interrupt'` (`Mod-.`) needed
+   * the identical check a second time — a GLOBAL chord, reachable whether or
+   * not this pane is even mounted for the focused session — so the three
+   * conditions moved to `domain/selectors.ts`'s `interruptRefusal`, the one
+   * place both routes read them from now. Two copies of this would be two
+   * answers to "can vam stop it", and the pane's oldest defect is two
+   * different facts that look the same.
    */
-  const interruptRefusal: string | null =
-    terminal === false
-      ? 'not sent — this source has no session terminal to interrupt'
-      : entry === null || entry.session.vamControlled !== true
-        ? 'not sent — vam did not start this session, so it has no keyboard into it'
-        : !sessionRunning
-          ? 'nothing running to interrupt — this session is not working'
-          : null;
+  const interruptRefusal: string | null = computeInterruptRefusal(entry, terminal);
 
   const interruptRun = () => {
     if (interruptRefusal !== null) {
@@ -10801,44 +10798,51 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                       // textarea inserts the newline itself -- a
                       // `preventDefault()` on that path would hand the operator a
                       // box with no send AND no newline.
-                    } else if (event.key === 'Escape') {
-                      // THE INTERRUPT. With both typeahead lists closed (they
-                      // answered Escape above and still do), Escape goes into the
-                      // agent rather than out of the box -- Claude Code's own
-                      // default, at the operator's request. `preventDefault` is
-                      // what keeps `Canvas`'s `cancel` comment true: "an Escape
-                      // typed INSIDE the composer never reaches here".
+                    } else if (event.key === 'Escape' || normalizeKey(event) === 'Mod-[') {
+                      // THE WAY OUT — and, for one stretch of this box's
+                      // history, Escape was something else: THE INTERRUPT,
+                      // sent into the agent rather than out of the box
+                      // (Claude Code's own default, at the operator's
+                      // request then). Asked whether Escape should go back to
+                      // leaving Insert, with the interrupt moved to a chord
+                      // of its own, the operator chose exactly that — so
+                      // Escape rejoins `Mod-[` here, both answered the one
+                      // way out, and the interrupt is `Mod-.` now
+                      // (`chords.ts`'s `interrupt` action, `Canvas.tsx`'s
+                      // `case 'interrupt'`), which reaches this same
+                      // session's pane whether or not the box holds the
+                      // keyboard at all.
                       //
-                      // The draft is NOT cleared and the keyboard is NOT moved.
-                      // Claude does neither, and an interrupt that also cost the
-                      // operator their half-typed prompt would be a worse trade
-                      // than pressing nothing at all.
-                      event.preventDefault();
-                      // A popover opened from the tools row can still be up while
-                      // the keyboard is in the box. It is a dialog, so it takes
-                      // this Escape and the agent does not.
-                      if (closeOpenPopover()) return;
-                      interruptRun();
-                    } else if (normalizeKey(event) === 'Mod-[') {
-                      // AND THE WAY OUT, which Escape used to be. `Ctrl-[` IS
-                      // Escape in vim and in a terminal, and `Mod` folds Ctrl and
-                      // Cmd (`chords.ts`), so this is `Cmd+[` on the keyboard the
-                      // operator has. Bound HERE rather than in the chord tables,
-                      // for the reason Shift+Tab above is and for one more:
+                      // `Ctrl-[` IS Escape in vim and in a terminal, and
+                      // `Mod` folds Ctrl and Cmd (`chords.ts`), so `Mod-[` is
+                      // `Cmd+[` on the keyboard the operator has — kept
+                      // rather than retired now that Escape does the same
+                      // job, for the vim muscle memory it was always aimed
+                      // at. Bound HERE rather than in the chord tables, for
+                      // the reason Shift+Tab above is and for one more:
                       // `focusList` already holds `MAX_BINDINGS` chords
-                      // (`Mod-Shift-h`, `Mod-0`), and a third would be invisible in the shortcut
-                      // editor -- which draws exactly `MAX_BINDINGS` slots -- and
-                      // destroyed by the first rebind of either. It is in
-                      // `RESERVED_KEYS` instead, so nothing else can take it.
-                      //
-                      // BLUR, not just `composing = false`. Clearing the flag only
-                      // makes this box read-only; while it still holds DOM focus
-                      // the window key listener returns early on every keystroke
-                      // (it ignores keys aimed at an INPUT or a TEXTAREA), so
-                      // `j`/`k` land here and vanish and the sidebar is
-                      // unreachable without a mouse. Releasing focus is what hands
-                      // the keyboard back.
+                      // (`Mod-Shift-h`, `Mod-0`), and a third would be
+                      // invisible in the shortcut editor -- which draws
+                      // exactly `MAX_BINDINGS` slots -- and destroyed by the
+                      // first rebind of either. It is in `RESERVED_KEYS`
+                      // instead, so nothing else can take it; Escape is
+                      // reserved there too, for the identical reason.
                       event.preventDefault();
+                      // A popover opened from the tools row can still be up
+                      // while the keyboard is in the box. It is a dialog, so
+                      // it takes Escape before the box lets go of anything —
+                      // Claude Code's own rule ("Interrupt Claude, or close a
+                      // dialog … When a dialog is open, Esc closes the
+                      // dialog"), which this composer keeps even though
+                      // Escape no longer interrupts.
+                      if (event.key === 'Escape' && closeOpenPopover()) return;
+                      // BLUR, not just `composing = false`. Clearing the flag
+                      // only makes this box read-only; while it still holds
+                      // DOM focus the window key listener returns early on
+                      // every keystroke (it ignores keys aimed at an INPUT or
+                      // a TEXTAREA), so `j`/`k` land here and vanish and the
+                      // sidebar is unreachable without a mouse. Releasing
+                      // focus is what hands the keyboard back.
                       inputRef.current?.blur();
                       onStopComposing();
                     }
@@ -12346,33 +12350,50 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
               4. Then the send hint narrowed to the DEVIATION only -- silence
                  on `Enter`, a caption on `Shift-Enter` -- which left a row
                  that on a desktop, on the shipped key, drew nothing at all.
-              5. And now: "remove the 'Esc to interrupt' shortcut under the
-                 prompt input. Nothing is ever displayed down there." The whole
-                 row goes, the send caption on it included, because the
+              5. "remove the 'Esc to interrupt' shortcut under the prompt
+                 input. Nothing is ever displayed down there." The whole row
+                 goes, the send caption on it included, because the
                  operator's sentence is about the PLACE and not about one of
                  its captions.
+              6. AND ESCAPE ITSELF REVERSED A SECOND TIME. Asked whether Esc
+                 should go back to leaving Insert, with cancel-previous-prompt
+                 moved to a chord of its own, the operator chose exactly
+                 that: Escape rejoins `Mod-[` as the way out of this box
+                 (both bound in the SAME branch now, see `onKeyDown` below),
+                 and the interrupt is `Mod-.` — a GLOBAL chord, reachable
+                 whether or not this box is even mounted (`chords.ts`'s
+                 `interrupt` action, `Canvas.tsx`'s `case 'interrupt'`). Step
+                 2's own claim, "Escape in this box became the agent's
+                 INTERRUPT", is what step 6 undoes; it is kept above rather
+                 than corrected in place because the row this whole sequence
+                 is about was already gone by the time step 6 happened, so
+                 there was no caption left to get wrong a second time.
 
             WHAT WENT IS CAPTIONS, NOT KEYS, and the distinction is the whole
             safety of this change. `Mod-[` is still bound in this box's own
             `onKeyDown` below and still reserved in `chords.ts` so nothing can
             take it; `Mod-0` and `Mod-Shift-h` still reach `focusList` from in
-            here; Escape is still the interrupt; and the submit key still
-            follows the preference. `test/panels/DetailPanel.test.tsx` asserts
-            the three bindings against the real grammar so that removing a
-            caption can never quietly remove one.
+            here; Escape is the way out again (step 6); and the submit key
+            still follows the preference. `test/panels/DetailPanel.test.tsx`
+            asserts the three bindings against the real grammar so that
+            removing a caption can never quietly remove one.
 
             WHAT IS NOW TAUGHT NOWHERE, said plainly rather than left to be
-            discovered. The `?` sheet is generated from the chord TABLES, so it
-            names `Mod-0` and `Mod-Shift-h` and it names neither `Mod-[` (bound
-            here, not in a table) nor Escape (answered ahead of every table in
-            `resolveChord`, which is why `keysheet.ts` gives `cancel` no row).
-            `Mod-[` already went untaught two steps ago; Escape-as-interrupt
-            goes untaught now, and this row was its only caption anywhere. The
-            ACT keeps two real controls -- the In bubble's right-click "Cancel
-            this turn", and the phone keystroke strip's `Esc → agent` button --
-            so what is lost is the keystroke's discoverability, not the
-            interrupt. That is a cost, it was asked for with the place named,
-            and it is recorded here rather than dressed up as a tidy-up.
+            discovered. The `?` sheet is generated from the chord TABLES, so
+            it names `Mod-.` (the interrupt, now a real table entry) but
+            neither `Mod-[` (bound here, not in a table) nor Escape (answered
+            ahead of every table in `resolveChord`, which is why `keysheet.ts`
+            gives `cancel` no row) — both of which are this box's own way OUT,
+            not its interrupt any more. `Mod-[` went untaught at step 3 and
+            Escape rejoined it at step 6; docs/keyboard.md's own "In the
+            Terminal tab" table and `Mod-.`'s row in its main table are where
+            an operator now learns any of this from outside the app. The ACT
+            keeps two real controls that never depended on this row to begin
+            with -- the In bubble's right-click "Cancel this turn", and the
+            phone keystroke strip's `Esc → agent` button -- so what step 5
+            cost was the keystroke's discoverability from in here, not the
+            interrupt, and that cost is recorded here rather than dressed up
+            as a tidy-up.
 
             SO THE TOOLS ROW ABOVE IS THE LAST THING IN THIS BOX. There is no
             element under the input at all now -- not an empty one, not a
