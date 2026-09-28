@@ -39,7 +39,8 @@
  * trigger.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { lstatSync, mkdtempSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 /**
@@ -166,17 +167,115 @@ export function assertNoNewSessionUnderOnDefaultServer(input: {
 }
 
 /**
- * How many sessions exist on the PRIVATE server named by `tmuxTmpdir` --
- * `-L default`, the same socket NAME production vam's own un-prefixed calls
- * resolve to, only redirected by `TMUX_TMPDIR` rather than by an explicit
- * `-L`/`-S` vam's code does not carry. `0` for "no server running" (the
- * launch never made a tmux call at all -- not every harness run does),
- * never a failure.
+ * THE INCIDENT THIS GUARDS AGAINST. tmux resolves a NAMED socket (`-L name`,
+ * including the implicit `default` name any bare `tmux` call or `-L default`
+ * uses) by searching the list `"$TMUX_TMPDIR:/tmp/"` for the first entry
+ * whose `realpath` succeeds, then appends `tmux-<uid>/<name>` -- SKIPPING,
+ * not erroring on, any entry whose `realpath` fails (a deleted directory,
+ * for instance). So `TMUX_TMPDIR=<a deleted dir> tmux -L default kill-server`
+ * does not fail closed: it silently falls through to `/tmp`, and because the
+ * socket NAME is `default` -- the exact name a bare, unisolated `tmux` call
+ * always uses -- it reaches `/tmp/tmux-<uid>/default`, the OPERATOR'S REAL
+ * default server, and kills it. Measured on this machine, 2026-09-28: this
+ * is exactly what happened, killing every live session the operator had.
+ *
+ * `resolveIsolatedSocket` exists so nothing in this file ever again asks
+ * tmux to resolve a socket by NAME through that search list for a
+ * destructive or count-bearing call. It computes the absolute path itself
+ * (`<tmuxTmpdir>/tmux-<uid>/default`, precisely the path tmux's own
+ * resolution would produce when `tmuxTmpdir` is genuinely valid) and hands
+ * every caller `-S <that exact path>` instead of `-L default` -- `-S` is an
+ * explicit path tmux opens directly, with NO search-list fallback of any
+ * kind. A `tmuxTmpdir` that no longer exists, or whose `tmux-<uid>/default`
+ * entry is missing or is not actually a socket, resolves to `null`: the
+ * caller does nothing, rather than ever letting tmux itself guess.
+ *
+ * DEFENCE IN DEPTH, for the case a caller ever passes a `tmuxTmpdir` that
+ * itself somehow already equals a live root (a future bug, not the one
+ * measured here): this throws if the computed path is not safely under
+ * `/tmp` or `os.tmpdir()`, and throws again if it exactly equals either
+ * real default-server path (`/tmp/tmux-<uid>/default` or
+ * `<os.tmpdir()>/tmux-<uid>/default` -- `$TMPDIR`, when set, resolves to the
+ * same place `os.tmpdir()` reports). Both throws happen BEFORE any
+ * filesystem check, so they fire even when a real default socket happens to
+ * sit at that exact path.
  */
-export function isolatedServerSessionCount(tmuxTmpdir: string): number {
+export function resolveIsolatedSocket(
+  tmuxTmpdir: string,
+  uid: number = process.getuid?.() ?? 0,
+): string | null {
+  const socketPath = path.join(tmuxTmpdir, `tmux-${uid}`, 'default');
+
+  const tmpRoots = new Set<string>(['/tmp', os.tmpdir()]);
+  if (process.env.TMPDIR) tmpRoots.add(process.env.TMPDIR);
+  const underATmpRoot = [...tmpRoots].some(
+    (root) =>
+      socketPath === path.join(root, `tmux-${uid}`, 'default') ||
+      socketPath.startsWith(`${root}${path.sep}`),
+  );
+  if (!underATmpRoot) {
+    throw new Error(
+      `refusing to resolve a tmux socket outside /tmp or os.tmpdir(): ${socketPath} (from tmuxTmpdir=${tmuxTmpdir})`,
+    );
+  }
+
+  const forbiddenDefaultPaths = [...tmpRoots].map((root) =>
+    path.join(root, `tmux-${uid}`, 'default'),
+  );
+  if (forbiddenDefaultPaths.includes(socketPath)) {
+    throw new Error(
+      `refusing to target the operator's own default tmux socket (${socketPath}) -- ` +
+        `an isolated/destructive call must never be able to reach it, even via TMUX_TMPDIR's own fallback`,
+    );
+  }
+
   try {
-    const stdout = execFileSync('tmux', ['-L', 'default', 'list-sessions'], {
-      env: isolatedTmuxEnv(process.env, tmuxTmpdir),
+    return lstatSync(socketPath).isSocket() ? socketPath : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Strips both `TMUX` (names the caller's own real pane -- wrong data for a
+ *  process addressing an explicit `-S` path) and `TMUX_PANE` from the env
+ *  handed to an explicit-socket tmux call, so nothing about the calling
+ *  process's own possible tmux nesting leaks into it. */
+function withoutTmuxNesting(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const next = { ...base };
+  delete next.TMUX;
+  delete next.TMUX_PANE;
+  return next;
+}
+
+/**
+ * The minimal shape this module needs from `execFileSync` -- narrow enough
+ * that a test can inject a `vi.fn()` without satisfying every overload of
+ * the real, multiply-overloaded `execFileSync` type.
+ */
+export type TmuxExec = (
+  file: string,
+  args: readonly string[],
+  options: { env: NodeJS.ProcessEnv; stdio?: 'ignore'; encoding?: 'utf8' },
+) => string;
+
+const runTmux: TmuxExec = (file, args, options) =>
+  String(execFileSync(file, args as string[], options));
+
+/**
+ * How many sessions exist on the PRIVATE server named by `tmuxTmpdir` --
+ * addressed by the exact absolute socket path `resolveIsolatedSocket`
+ * computes, via `-S`, never `-L default`/`TMUX_TMPDIR` (see that function's
+ * own doc for why). `0` both when the private tmpdir was never given a real
+ * socket (`resolveIsolatedSocket` returns `null` -- not every harness run
+ * makes a tmux call at all) and when tmux itself answers "no server
+ * running"; neither is a failure.
+ */
+export function isolatedServerSessionCount(tmuxTmpdir: string, exec: TmuxExec = runTmux): number {
+  const socket = resolveIsolatedSocket(tmuxTmpdir);
+  if (socket === null) return 0;
+  try {
+    const stdout = exec('tmux', ['-S', socket, 'list-sessions'], {
+      env: withoutTmuxNesting(process.env),
       encoding: 'utf8',
     });
     return stdout.split('\n').filter((line) => line.trim() !== '').length;
@@ -187,20 +286,24 @@ export function isolatedServerSessionCount(tmuxTmpdir: string): number {
 }
 
 /**
- * Tears down the PRIVATE server, addressed ONLY by the same `TMUX_TMPDIR` it
- * was given -- never by a bare session or socket NAME, which could reach
- * something else entirely on a shared default server. A server that was
- * never started (no tmux call happened during the run) answers "no server
- * running"; that is success, not a failure, so it is swallowed the same way
- * every other read here swallows it.
+ * Tears down the PRIVATE server, addressed ONLY by the exact absolute
+ * socket path `resolveIsolatedSocket` computes and verifies -- via `-S`,
+ * NEVER `-L default` / `TMUX_TMPDIR`, so a `tmuxTmpdir` that no longer
+ * resolves (deleted, or never had a socket) can never make this call fall
+ * through to the operator's real default server (see `resolveIsolatedSocket`
+ * for the measured incident this exists to close). A private tmpdir with no
+ * real socket under it does nothing at all -- there is nothing to tear
+ * down, not a failure.
  */
-export function killIsolatedServer(tmuxTmpdir: string): void {
+export function killIsolatedServer(tmuxTmpdir: string, exec: TmuxExec = runTmux): void {
+  const socket = resolveIsolatedSocket(tmuxTmpdir);
+  if (socket === null) return;
   try {
-    execFileSync('tmux', ['-L', 'default', 'kill-server'], {
-      env: isolatedTmuxEnv(process.env, tmuxTmpdir),
+    exec('tmux', ['-S', socket, 'kill-server'], {
+      env: withoutTmuxNesting(process.env),
       stdio: 'ignore',
     });
   } catch {
-    // Nothing running on this private socket -- nothing to clean up.
+    // Gone already between the isSocket() check and this call -- fine.
   }
 }
