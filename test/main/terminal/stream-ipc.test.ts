@@ -218,6 +218,92 @@ describe('registerTerminalStreamIpc', () => {
     expect(fake.written).toEqual(['a'.repeat(MAX_STREAM_WRITE_BYTES)]);
   });
 
+  it('paste delivers the sanitized text through tmux paste-buffer -p, targeting the resolved session (the S2 fix: tmux itself decides bracketing, never this bridge)', async () => {
+    const { run, argvs } = runner({
+      '-V': TMUX_VERSION_OK,
+      'list-sessions': LIST_ONE,
+      'set-buffer': ok(''),
+      'paste-buffer': ok(''),
+    });
+    const { ipcMain, call } = fakeIpcMain();
+    const { webContents } = fakeWebContents();
+    const fake = fakeClient();
+    registerTerminalStreamIpc(ipcMain, webContents, run, { createClient: () => fake.client });
+
+    const opened = (await call(CHANNELS.terminalStreamOpen, ATLAS)) as {
+      ok: true;
+      streamId: string;
+    };
+    const bytes = new TextEncoder().encode('héllo');
+    await call(CHANNELS.terminalStreamPaste, opened.streamId, bytes);
+
+    const setBufferStep = argvs.find((argv) => argv[0] === 'set-buffer');
+    expect(setBufferStep?.at(-1)).toBe('héllo');
+    const pasteStep = argvs.find((argv) => argv[0] === 'paste-buffer');
+    expect(pasteStep).toBeDefined();
+    // `-p`: the whole reason this channel exists, over `terminalStreamWrite`.
+    expect(pasteStep).toContain('-p');
+    // `=<name>:` -- `paneTarget`'s own shape, targeting the SAME session
+    // `terminalStreamOpen` resolved, never a name this bridge re-derives.
+    expect(pasteStep?.at(-1)).toBe('=vam-atlas-a1b2c3:');
+  });
+
+  it('ignores a paste for an unknown/closed streamId, same posture as write', async () => {
+    const { run, argvs } = runner({ '-V': TMUX_VERSION_OK, 'list-sessions': LIST_ONE });
+    const { ipcMain, call } = fakeIpcMain();
+    const { webContents } = fakeWebContents();
+    registerTerminalStreamIpc(ipcMain, webContents, run, {});
+
+    const bytes = new TextEncoder().encode('hello');
+    await call(CHANNELS.terminalStreamPaste, 'unknown-id', bytes);
+
+    expect(argvs.some((argv) => argv[0] === 'set-buffer' || argv[0] === 'paste-buffer')).toBe(
+      false,
+    );
+  });
+
+  it('ignores a paste over MAX_STREAM_WRITE_BYTES rather than forwarding it', async () => {
+    const { run, argvs } = runner({ '-V': TMUX_VERSION_OK, 'list-sessions': LIST_ONE });
+    const { ipcMain, call } = fakeIpcMain();
+    const { webContents } = fakeWebContents();
+    const fake = fakeClient();
+    registerTerminalStreamIpc(ipcMain, webContents, run, { createClient: () => fake.client });
+
+    const opened = (await call(CHANNELS.terminalStreamOpen, ATLAS)) as {
+      ok: true;
+      streamId: string;
+    };
+    const tooBig = new Uint8Array(MAX_STREAM_WRITE_BYTES + 1);
+    await call(CHANNELS.terminalStreamPaste, opened.streamId, tooBig);
+
+    expect(argvs.some((argv) => argv[0] === 'set-buffer' || argv[0] === 'paste-buffer')).toBe(
+      false,
+    );
+  });
+
+  it('a stream closed after opening refuses a later paste too', async () => {
+    const { run, argvs } = runner({
+      '-V': TMUX_VERSION_OK,
+      'list-sessions': LIST_ONE,
+      'set-buffer': ok(''),
+      'paste-buffer': ok(''),
+    });
+    const { ipcMain, call } = fakeIpcMain();
+    const { webContents } = fakeWebContents();
+    const fake = fakeClient();
+    registerTerminalStreamIpc(ipcMain, webContents, run, { createClient: () => fake.client });
+
+    const opened = (await call(CHANNELS.terminalStreamOpen, ATLAS)) as {
+      ok: true;
+      streamId: string;
+    };
+    await call(CHANNELS.terminalStreamClose, opened.streamId);
+    argvs.length = 0;
+    await call(CHANNELS.terminalStreamPaste, opened.streamId, new TextEncoder().encode('hello'));
+
+    expect(argvs).toEqual([]);
+  });
+
   it('close disposes the client and is idempotent for an unknown id', async () => {
     const { run } = runner({ '-V': TMUX_VERSION_OK, 'list-sessions': LIST_ONE });
     const { ipcMain, call } = fakeIpcMain();

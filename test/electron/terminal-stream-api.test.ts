@@ -89,6 +89,20 @@ describe('createTerminalStreamApi', () => {
     expect(errorSpy).toHaveBeenCalled();
   });
 
+  it('paste() forwards streamId/bytes to terminalStreamPaste (not terminalStreamWrite) and never throws when invoke rejects', async () => {
+    const ipc = fakeIpc();
+    ipc.invoke.mockRejectedValueOnce(new Error('boom'));
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const api = createTerminalStreamApi(ipc);
+    const bytes = new Uint8Array([1, 2, 3]);
+
+    expect(() => api.paste('s1', bytes)).not.toThrow();
+    expect(ipc.invoke).toHaveBeenCalledWith(CHANNELS.terminalStreamPaste, 's1', bytes);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(errorSpy).toHaveBeenCalled();
+  });
+
   it('onData delivers a push for the matching streamId', () => {
     const ipc = fakeIpc();
     const api = createTerminalStreamApi(ipc);

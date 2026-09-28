@@ -7,9 +7,10 @@
  * theme/font that tracks the shared prefs stores, insert/select-mode marks,
  * scrollback chords and visibility-driven connect/disconnect. Paste WAS
  * refused outright; the operator asked for it back, and it now goes through
- * `terminal-paste.ts`'s shared sanitiser and xterm's own bracketed-paste mode
- * (see the paste listener below). IME composition is covered separately (see
- * this file's own commits). The `Terminal` instance's lifecycle is React's
+ * `terminal-paste.ts`'s shared sanitiser and tmux's own `paste-buffer -p`,
+ * over a dedicated `terminalStreamPaste` channel (see the paste listener
+ * below). IME composition is covered separately (see this file's own
+ * commits). The `Terminal` instance's lifecycle is React's
  * mount/unmount; the STREAM's lifecycle is additionally gated on
  * `document.visibilityState`, below.
  *
@@ -469,13 +470,20 @@ export function TerminalStreamTab(props: {
         // permission this app's policy denies (`composer-paste.ts` carries
         // the same argument for the prompt box's own image paste).
         //
-        // BRACKETING IS THIS COMPONENT'S OWN DECISION, unlike the
-        // capture-pane renderer's `sendPasteArgv`, which leaves it to tmux's
-        // `paste-buffer -p`: there is no tmux verb on this path at all, only
-        // a write of raw bytes to the control-mode connection, so xterm's own
-        // `modes.bracketedPasteMode` -- the SAME fact tmux tracks per pane,
-        // read here instead of there -- is what this component consults
-        // before deciding whether to wrap.
+        // BRACKETING IS TMUX'S OWN DECISION, made server-side by
+        // `openBridge.paste` -> `terminalStreamPaste` -> `sendPasteArgv`'s
+        // `paste-buffer -p` (`main/terminal/stream-ipc.ts`), NOT this
+        // component's. It used to be: read xterm's OWN
+        // `modes.bracketedPasteMode` and wrap here before writing raw bytes
+        // to the control-mode connection -- but a freshly ATTACHED stream's
+        // `liveTerm` starts with that mode false regardless of the PANE's
+        // actual, server-side state (a review finding: attaching to a
+        // session where the running program had already turned bracketed
+        // paste on shipped the paste unbracketed, since this component's own
+        // xterm instance never saw the escape that turned it on). tmux
+        // itself always has the pane's real answer, so asking tmux to wrap
+        // can never guess it wrong the way reading a fresh xterm's own,
+        // possibly-stale mode could.
         liveTerm.textarea?.addEventListener(
           'paste',
           (event) => {
@@ -485,10 +493,9 @@ export function TerminalStreamTab(props: {
             if (raw === '') return;
             const text = preparePastedText(raw);
             if (text === '') return;
-            const payload = liveTerm.modes.bracketedPasteMode ? `\x1b[200~${text}\x1b[201~` : text;
             const currentStreamId = streamIdRef.current;
             if (currentStreamId !== null) {
-              openBridge.write(currentStreamId, new TextEncoder().encode(payload));
+              openBridge.paste(currentStreamId, new TextEncoder().encode(text));
             }
           },
           { capture: true },

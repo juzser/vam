@@ -25,6 +25,7 @@ import { CHANNELS } from '../ipc/channels.js';
 import type { IpcMainLike } from '../ipc/handlers.js';
 import { readPublishedPanes } from '../sources/claude-code/session-pane.js';
 import { defaultSessionsRoot } from '../sources/claude-code/session-status.js';
+import { sendPasteArgv } from '../sources/tmux/argv.js';
 import { listVamSessions, type TmuxRun } from '../sources/tmux/spawn.js';
 import type { WebContentsLike } from '../stream/register.js';
 import { MAX_PROJECT_ID_LENGTH } from './ipc.js';
@@ -132,12 +133,19 @@ export function registerTerminalStreamIpc(
     options?.createClient ?? ((opts: StreamClientOptions) => new StreamClient(opts));
 
   const clients = new Map<string, StreamClient>();
+  // The resolved tmux SESSION NAME for each open stream -- the SAME
+  // `match.name` `terminalStreamOpen` already hands back to the renderer
+  // (`StreamOpenResult['name']`), kept server-side too so `terminalStreamPaste`
+  // can target `sendPasteArgv` at it without asking the renderer to echo a
+  // name back for a bridge to trust.
+  const pasteTargets = new Map<string, string>();
 
   function closeClient(streamId: string): void {
     const client = clients.get(streamId);
     if (client === undefined) return;
     client.dispose();
     clients.delete(streamId);
+    pasteTargets.delete(streamId);
   }
 
   ipcMain.handle(
@@ -181,6 +189,7 @@ export function registerTerminalStreamIpc(
       try {
         const seed = await client.connect();
         clients.set(streamId, client);
+        pasteTargets.set(streamId, match.name);
         return { ok: true, streamId, seed, name: match.name };
       } catch {
         client.dispose();
@@ -221,10 +230,42 @@ export function registerTerminalStreamIpc(
     },
   );
 
+  ipcMain.handle(
+    CHANNELS.terminalStreamPaste,
+    async (_event, ...args: unknown[]): Promise<void> => {
+      const [streamId, bytes] = args;
+      if (
+        typeof streamId !== 'string' ||
+        !(bytes instanceof Uint8Array) ||
+        bytes.length > MAX_STREAM_WRITE_BYTES
+      ) {
+        return;
+      }
+      // Same posture as `terminalStreamWrite`: an id this bridge never
+      // opened, or already closed, is silently ignored, not an error.
+      const name = pasteTargets.get(streamId);
+      if (name === undefined) return;
+      const text = Buffer.from(bytes).toString('utf8');
+      // `sendPasteArgv` (`sources/tmux/argv.ts`) is the SAME mechanism
+      // `terminal/pane.ts`'s already-shipped, polling-path `sendToPane`
+      // already uses for a paste -- real `execFile` spawns through `run`,
+      // never the persistent control-mode connection's own text grammar
+      // (`control-protocol.ts`'s `encodeControlLine` does not recognise
+      // `set-buffer`/`paste-buffer` at all, so `run` -- `createControlTmuxRunner`
+      // in production -- falls back to a plain spawn for every step here
+      // regardless). `-p` on the final step is tmux's OWN per-pane truth
+      // about bracketed paste; this bridge never reads or guesses it.
+      for (const step of sendPasteArgv(name, text)) {
+        if ((await run(step)).failure !== null) return;
+      }
+    },
+  );
+
   return {
     dispose: () => {
       for (const client of clients.values()) client.dispose();
       clients.clear();
+      pasteTargets.clear();
     },
   };
 }

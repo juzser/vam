@@ -344,22 +344,35 @@ export const VAM_CURSOR_MARK = '@vam-cursor';
  * (straight into `claude`, `"tui": "fullscreen"`): `alternate_on=1
  * history_size=0 mouse_any_flag=1`, steady from three seconds on.
  *
- * `bracket_paste_flag` IS THE SIXTH, and it answers a DIFFERENT streaming
- * bug entirely: `terminal/stream/seed.ts`'s own seed carries no notion of
- * xterm's bracketed-paste MODE, so attaching to a session whose program
- * already turned bracketed paste on (before this client ever connected --
- * the enable sequence reaches the pty once, at the program's own startup,
- * and this client's `-C` connection may attach long after that) left
- * xterm's `modes.bracketedPasteMode` permanently false for that view, and a
- * multi-line paste submitted one line at a time. `#{bracket_paste_flag}` is
- * tmux's OWN per-pane record of the identical fact `mouse_any_flag` already
- * rides this line for -- "has the program in the pane asked the terminal
- * for X" -- so `seedWithCursor` can re-emit the SAME `CSI ?2004h` xterm
- * would have parsed had it been attached from the start, rather than the
- * seed inventing a client-side guess or a second, tmux-side paste primitive
- * of its own. MEASURED on tmux 3.7b over a private `-L` socket: toggling
- * `printf '\033[?2004h'` / `\033[?2004l'` in a pane flips
- * `#{bracket_paste_flag}` between `1` and `0` on the very next
+ * `bracket_paste_flag` IS THE SIXTH, and it originally answered a DIFFERENT
+ * streaming bug entirely: `terminal/stream/seed.ts`'s own seed carried no
+ * notion of xterm's bracketed-paste MODE, so attaching to a session whose
+ * program already turned bracketed paste on (before this client ever
+ * connected -- the enable sequence reaches the pty once, at the program's
+ * own startup, and this client's `-C` connection may attach long after
+ * that) left xterm's `modes.bracketedPasteMode` permanently false for that
+ * view, and a multi-line paste submitted one line at a time.
+ * `#{bracket_paste_flag}` is tmux's OWN per-pane record of the identical
+ * fact `mouse_any_flag` already rides this line for -- "has the program in
+ * the pane asked the terminal for X" -- so `seedWithCursor` re-emits the
+ * SAME `CSI ?2004h` xterm would have parsed had it been attached from the
+ * start.
+ *
+ * THAT FIX WAS LATER SUPERSEDED for the actual paste bug: a paste now goes
+ * through `terminalStreamPaste` -> `sendPasteArgv`'s `paste-buffer -p`
+ * (`main/terminal/stream-ipc.ts`), which asks tmux itself whether the pane
+ * wants bracketing rather than trusting xterm's OWN, client-side mode --
+ * version-independent (no format key to read at all), where this field's
+ * own read is not: `#{bracket_paste_flag}` was added to tmux in 3.7 and
+ * expands to empty on anything older (CI's Ubuntu apt tmux, 3.4, measured
+ * expanding it empty -- see `readCursorLine`'s `bracketPaste: null` case).
+ * The re-emission above is kept anyway, on tmux new enough to answer it: it
+ * is still the one thing that keeps xterm's OWN reported
+ * `modes.bracketedPasteMode` truthful for a freshly attached view, cheap
+ * and correct even though nothing in this codebase currently reads that
+ * mode for paste correctness anymore. MEASURED on tmux 3.7b over a private
+ * `-L` socket: toggling `printf '\033[?2004h'` / `\033[?2004l'` in a pane
+ * flips `#{bracket_paste_flag}` between `1` and `0` on the very next
  * `display-message`, independent of `cursor_flag`.
  *
  * MEASURED on tmux 3.7b: all six keys exist and expand, and a key tmux does

@@ -440,6 +440,19 @@ export const CHANNELS = {
    */
   terminalStreamWrite: 'vam:terminal:stream:write',
   /**
+   * ONE PASTE (`streamId, bytes`) delivered through tmux's OWN `paste-buffer
+   * -p` (`sendPasteArgv`, `sources/tmux/argv.ts`) rather than xterm's own
+   * `onData` path `terminalStreamWrite` carries keystrokes on. A pane's
+   * bracketed-paste request is server-side, per-pane tmux state; a freshly
+   * ATTACHED stream's own xterm instance never saw the escape that turned it
+   * on, so deciding "wrap or not" client-side (reading xterm's OWN, possibly
+   * stale `modes.bracketedPasteMode`) could ship a paste unbracketed into a
+   * pane that asked for one. `-p` asks tmux itself, which never has to
+   * guess. Silently ignored for an unknown/closed `streamId`, same posture
+   * as `terminalStreamWrite`.
+   */
+  terminalStreamPaste: 'vam:terminal:stream:paste',
+  /**
    * PUSH: decoded `%output` for one open stream, `(streamId, chunk)`. Main
    * sends unprompted, the same shape `vam:stream:change` already uses for a
    * push channel, keyed per stream here rather than global.

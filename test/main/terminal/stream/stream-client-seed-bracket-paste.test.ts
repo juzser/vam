@@ -30,6 +30,7 @@ import { execFileSync } from 'node:child_process';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { StreamClient } from '../../../../src/main/terminal/stream/client.js';
 import { seedWithCursor } from '../../../../src/main/terminal/stream/seed.js';
+import { parseTmuxVersion } from '../../../../src/main/terminal/stream-ipc.js';
 
 describe('seedWithCursor: bracketed paste (pure)', () => {
   it('re-emits CSI ?2004h when the sixth field says the pane asked for bracketed paste', () => {
@@ -61,12 +62,14 @@ describe('seedWithCursor: bracketed paste (pure)', () => {
   });
 });
 
-const tmuxWorks = (): boolean => {
+/** `tmux -V`'s own text, or `''` when tmux is not on `PATH` at all -- the
+ * one probe both `live` and `supportsBracketPasteFlag` below are read from,
+ * so a single `execFileSync` failure (no tmux) answers both. */
+const tmuxVersionText = (): string => {
   try {
-    execFileSync('tmux', ['-V'], { stdio: 'ignore' });
-    return true;
+    return execFileSync('tmux', ['-V'], { encoding: 'utf8' });
   } catch {
-    return false;
+    return '';
   }
 };
 
@@ -79,13 +82,11 @@ const tmux = (...argv: string[]): string =>
   execFileSync('tmux', ['-L', SOCKET, ...argv], { encoding: 'utf8' });
 
 /** The same generous, condition-based poll `stream-client-pause-after.test.ts`
- * already uses for exactly this class of real-tmux timing: a CI runner can
- * be slow enough that the fake program's own `printf` has not yet run by
- * the time a FIXED wait would have given up (MEASURED failure: CI's own run
- * saw the ground-truth query still reading `bracket_paste_flag=0` after a
- * flat 300ms). Polling the actual condition, rather than gambling on one
- * wall-clock number, is what makes this hold on a loaded runner and a fast
- * laptop alike. */
+ * already uses for real-tmux timing in general: a loaded runner can be slow
+ * enough that the fake program's own `printf` has not yet run by the time a
+ * FIXED wait would have given up. Polling the actual condition, rather than
+ * gambling on one wall-clock number, is what makes this hold on a loaded
+ * runner and a fast laptop alike. */
 const pollUntil = async (
   check: () => boolean,
   deadlineMs: number,
@@ -98,9 +99,32 @@ const pollUntil = async (
   return check();
 };
 
-const live = tmuxWorks();
+const versionText = tmuxVersionText();
+const live = versionText !== '';
+/** `#{bracket_paste_flag}` was ADDED IN TMUX 3.7 (MEASURED: `git grep` over
+ * the installed tmux's own `CHANGES` file finds it exactly once, under the
+ * "CHANGES FROM 3.6b TO 3.7" section, nowhere earlier) -- older than that,
+ * the key is one this parse does not know, which `readCursorLine`'s own
+ * "a key tmux does not know expands to the empty string" rule already
+ * degrades gracefully (`bracketPaste` reads `null`, exactly like an old
+ * tmux with no `#{mouse_any_flag}` either): the SHIPPED fix does the right,
+ * safe thing on tmux 3.2-3.6 (nothing -- no CSI seeded, no crash), it is
+ * only THIS TEST's ground-truth assertion that needs tmux new enough to
+ * answer the question at all. Ubuntu 24.04's own `apt` tmux (CI's own
+ * runner, MEASURED against a real failure: `juzser/vam#540` run
+ * 36378584146 read back `bracket_paste_flag` as an empty field, five tokens
+ * instead of six, on tmux 3.4) is one minor version short of it. */
+const version = parseTmuxVersion(versionText);
+const supportsBracketPasteFlag =
+  version !== null && (version.major > 3 || (version.major === 3 && version.minor >= 7));
 
-describe.skipIf(!live)(
+if (live && !supportsBracketPasteFlag) {
+  console.warn(
+    `SKIP  stream-client-seed-bracket-paste.test.ts's real-tmux test: tmux ${versionText.trim()} predates 3.7, which is what added #{bracket_paste_flag} -- this test cannot ask tmux the question it needs answered, though the shipped fix itself still degrades safely on it (readCursorLine's own null case).`,
+  );
+}
+
+describe.skipIf(!live || !supportsBracketPasteFlag)(
   'StreamClient#connect seed: bracketed paste, ATTACHING to an already-running pane (real tmux)',
   () => {
     beforeAll(() => {
