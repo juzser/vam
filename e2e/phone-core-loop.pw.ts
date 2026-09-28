@@ -1256,3 +1256,61 @@ test.describe('what the session screen no longer spends room on', () => {
     ).toEqual([]);
   });
 });
+
+test.describe('the option preview panel is collapsed by default, on phone', () => {
+  // docs/design/phone-core-loop.md §3.3: "collapse-by-default, one line
+  // (`preview ↓` hint, unchanged copy) that expands the same `Fenced`-styled
+  // panel on tap." `s1`'s Transport question (`QUESTIONS[0]`, above) is the
+  // one fixture in this file with `preview` text on more than one option --
+  // exactly what `hasPreview` needs to draw anything here at all.
+  test('shows a one-line disclosure, not the full panel, until it is tapped', async ({ page }) => {
+    await stubRemote(page);
+    await openWaiting(page);
+
+    const toggle = page.locator('[data-question-preview-toggle]');
+    await expect(toggle).toBeVisible();
+    await expect(toggle).toHaveText('preview ↓');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    // Never both at once: a reader landing on the panel while it is still
+    // "collapsed" copy would be shown content the row itself says is hidden.
+    await expect(page.locator('[data-question-preview-panel]')).toHaveCount(0);
+
+    // 44px floor, the same rule every other tap target on this shell answers
+    // to (`Tap targets`, §1) -- a one-line disclosure is still a real control.
+    const hit = await toggle.boundingBox();
+    expect(hit?.height, 'the collapsed disclosure’s own tap height').toBeGreaterThanOrEqual(44);
+
+    await toggle.click();
+    const panel = page.locator('[data-question-preview-panel]');
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText('GET /events');
+    await expect(page.locator('[data-question-preview-toggle]')).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    await expect(
+      page.locator('[data-question-preview-toggle]'),
+      'the collapsed row is gone once the panel itself is showing, not stacked above it',
+    ).toHaveCount(1);
+  });
+
+  test('a fresh option starts collapsed again, even after a previous one was expanded', async ({
+    page,
+  }) => {
+    await stubRemote(page);
+    await openWaiting(page);
+    await page.locator('[data-question-preview-toggle]').click();
+    await expect(page.locator('[data-question-preview-panel]')).toBeVisible();
+
+    // Focus the option with NO preview (`Web socket`, `QUESTIONS[0]`
+    // above) -- `activeOption` follows focus, so this is a different
+    // preview row than the one just expanded, and the doc's own rule is
+    // "disclose PER-OPTION on tap", not "stays open across options".
+    await page.locator('[data-question-option]').nth(2).focus();
+    await expect(page.locator('[data-question-preview-toggle]')).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    await expect(page.locator('[data-question-preview-panel]')).toHaveCount(0);
+  });
+});

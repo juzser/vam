@@ -184,3 +184,64 @@ describe('the Submit button is still reachable and still native', () => {
     expect(submit()?.tabIndex).not.toBe(-1);
   });
 });
+
+describe('a second Submit while the first write is still in flight', () => {
+  /**
+   * TWO DELIBERATE DEVIATIONS FROM THIS FILE'S OWN `fireEvent.click`, both
+   * load-bearing -- drop either and the test stops proving anything:
+   *
+   * 1. A CONTROLLED PROMISE, NOT `answering`'s instant `Promise.resolve`.
+   *    Holding the write open makes the overlap unconditional: `onAnswer` is
+   *    GUARANTEED still in flight for the second click, on any machine,
+   *    every run, rather than a timing bet against how fast a microtask
+   *    settles.
+   *
+   * 2. THE RAW DOM `button.click()`, NOT `fireEvent.click(button)`. RTL's
+   *    `fireEvent` wraps every dispatch in its own `act()`, which flushes
+   *    React's state synchronously before the call returns -- so two
+   *    `fireEvent.click()`s in a row are never actually racing each other;
+   *    the SECOND one always sees the FIRST one's `setSending(true)` already
+   *    committed. That is `sending`'s own "eager update" escape hatch, and
+   *    it is exactly why THIS test used `fireEvent` would stay green even
+   *    on the old, unguarded `sending`-only check (measured: it did). Two
+   *    bare `button.click()`s, called back to back with no `act()` boundary
+   *    between them, are what a real browser actually delivers for two fast
+   *    keydowns or two fast clicks -- no synchronization point forces
+   *    React to flush between them, so the race is real here too. Verified
+   *    against `sendingRef.current` reverted to plain `sending`: this
+   *    assertion fails there ("called 2 times"), and passes once the ref
+   *    guard is back.
+   */
+  it('calls onAnswer only once for two clicks fired before the first write resolves', async () => {
+    // Definite-assignment (`!`), not `| null`: TypeScript's control-flow
+    // analysis narrows a `let` reassigned only inside a nested closure to
+    // its INITIAL value at every later read it can see (it cannot tell the
+    // Promise executor below runs synchronously, inside `send()`'s own
+    // `await onAnswer(...)` call, before this test reads `settle` again) --
+    // `| null` on the declaration turns every later `settle(...)` into a
+    // call on `never`. The assignment always happens before use here (the
+    // executor runs synchronously the moment `new Promise` executes, which
+    // is the moment `answer()` is invoked, before either `.click()` below
+    // returns), so the assertion is accurate, not a lie to the checker.
+    let settle!: (result: AnswerResult) => void;
+    const answer = vi.fn(
+      () =>
+        new Promise<AnswerResult>((resolve) => {
+          settle = resolve;
+        }),
+    );
+    draw(QUESTION, { answer });
+    fireEvent.click(options()[1] as HTMLElement);
+    const button = submit() as HTMLButtonElement;
+    button.click();
+    button.click();
+    expect(answer).toHaveBeenCalledTimes(1);
+    settle({ kind: 'sent', answer: 'Cobalt' });
+    await waitFor(() => expect(q('[data-question-outcome]')).not.toBeNull());
+    // The gate is released once the write settles -- a THIRD click now goes
+    // through, which is what proves this is an in-flight guard and not a
+    // one-shot latch.
+    fireEvent.click(button);
+    expect(answer).toHaveBeenCalledTimes(2);
+  });
+});

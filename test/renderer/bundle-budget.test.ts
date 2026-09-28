@@ -615,6 +615,36 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * zlib) plus ~350 B (~0.16%) of the same slack. The next PR to land here
  * should expect to remeasure rather than assume either number still has
  * room.
+ *
+ * A SEVENTH, SMALL, ORDINARY GROWTH: the question card's double-submit fix
+ * and its phone preview-collapse fix, together. The double-submit fix adds
+ * `sendingRef` (a `useRef` guard) plus a `try`/`finally` around `send`'s own
+ * `await` -- a few lines, no new dependency. The preview-collapse fix adds
+ * `usePhoneViewport()` (already imported elsewhere; this is a second CALLER,
+ * not new code for it to pull in), one more piece of state
+ * (`previewExpanded`), its own reset effect, and a second render branch for
+ * the preview panel (a one-line `[data-question-preview-toggle]` disclosure
+ * in place of the panel on phone, until tapped) -- category-consistent with
+ * the picker/marker bumps already in this history, not a new dependency or a
+ * new chunk.
+ *
+ * Measured, `electron-vite build --mode production`, this PR's own branch
+ * (forked from `origin/main` at 66ce28c7) -- this test's own failure is the
+ * measurement, not a separate before/after build: it already reruns on
+ * every `vitest run` and reported the real entry size the previous budget
+ * had no room left for:
+ *
+ *     entry, this branch (both fixes)   723,917 B  (216,836 B gzip)
+ *
+ * -- 417 B / 136 B gzip over the PREVIOUS `723,500` / `216,700` budget this
+ * paragraph is replacing, not a fresh baseline.
+ *
+ * `ENTRY_BUDGET_BYTES` moves 723,500 -> 725,500: the measured figure
+ * (723,917 B) plus ~1.6 KB (~0.2%) of slack, the same small-headroom
+ * convention every bump above uses. `ENTRY_GZIP_BUDGET_BYTES` moves
+ * 216,700 -> 217,200: the measured gzip figure (216,836 B) plus ~364 B
+ * (~0.17%) of the same slack. The next PR to land here should expect to
+ * remeasure rather than assume either number still has room.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -625,8 +655,8 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 // depends on is even present, decided BEFORE anything tries to build.
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
-const ENTRY_BUDGET_BYTES = 723_500;
-const ENTRY_GZIP_BUDGET_BYTES = 216_700;
+const ENTRY_BUDGET_BYTES = 725_500;
+const ENTRY_GZIP_BUDGET_BYTES = 217_200;
 
 // The one string this repo's markdown stack ships that nothing else in the
 // dependency graph or vam's own source does: `gfmTable`, the extension name
