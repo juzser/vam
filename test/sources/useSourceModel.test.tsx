@@ -672,7 +672,9 @@ describe('useSourceModel', () => {
           vi.advanceTimersByTime(1); // reaches exactly 40_000ms
         });
         expect(pending).toHaveLength(i + 1);
-        await act(async () => pending[i]?.resolve(projectsWithClocks(1_000 + i * 1_000, `${i * 10}s`)));
+        await act(async () =>
+          pending[i]?.resolve(projectsWithClocks(1_000 + i * 1_000, `${i * 10}s`)),
+        );
       }
     });
   });
