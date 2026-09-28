@@ -17,6 +17,7 @@
  * `ELECTRON_RENDERER_URL`, the one path this criterion exists to catch a
  * regression in.
  */
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import { createServer } from 'node:net';
 import os from 'node:os';
@@ -27,6 +28,212 @@ import { _electron as electron, expect, test } from '@playwright/test';
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const distAppDir = path.join(repoRoot, 'dist-app');
 const OFF_ORIGIN = 'https://example.invalid/';
+
+/**
+ * ISOLATES EVERY TMUX CALL THIS SPEC'S LAUNCH MAKES from the operator's own
+ * default tmux server -- see `test/support/tmux-harness-env.ts`'s header for
+ * the full rationale and the measured evidence; this file inlines the
+ * identical, small mechanism rather than importing across the `e2e/` /
+ * root-`test/` boundary, which nothing else in this directory does (`e2e/`
+ * keeps its own toolchain -- `e2e/node_modules`, no shared `tsconfig` --
+ * exactly so a spec here never depends on the root project's own test tree).
+ *
+ * THIS SPEC IS THE ONE MOST LIKELY TO ACTUALLY REACH TMUX FOR REAL: unlike
+ * every `test/electron/*.test.ts` launch, it sets NO `VAM_FIXTURE_SOURCE` --
+ * `src/main/index.ts`'s `DESKTOP_SOURCES` therefore serves the operator's
+ * REAL Claude Code and Codex sessions, and a live one on screen is exactly
+ * what drives vam's Terminal machinery (`createControlTmuxRunner`,
+ * `src/main/sources/tmux/control.ts`) to open its `-C new-session -A -s
+ * vamctl` control connection -- the exact session the evidence for this fix
+ * found sitting on the operator's real default server, with a pane cwd
+ * inside an agent's worktree.
+ */
+const TMUX_SOCKET_ROOT = '/tmp';
+const NO_SERVER = /no server running|error connecting to .*\(no such file/i;
+
+function tmuxAvailable(): boolean {
+  try {
+    execFileSync('tmux', ['-V'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function stderrOf(error: unknown): string {
+  return error !== null && typeof error === 'object' && 'stderr' in error
+    ? String((error as { stderr: unknown }).stderr)
+    : '';
+}
+
+function isolatedTmuxEnv(base: NodeJS.ProcessEnv, tmuxTmpdir: string): NodeJS.ProcessEnv {
+  const next: NodeJS.ProcessEnv = { ...base, TMUX_TMPDIR: tmuxTmpdir };
+  delete next.TMUX;
+  return next;
+}
+
+function defaultServerPaneCwds(): string[] {
+  try {
+    const stdout = execFileSync('tmux', ['list-sessions', '-F', '#{pane_current_path}'], {
+      env: process.env,
+      encoding: 'utf8',
+    });
+    return stdout
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line !== '');
+  } catch (error) {
+    if (NO_SERVER.test(stderrOf(error))) return [];
+    throw error;
+  }
+}
+
+function assertNoNewSessionUnderOnDefaultServer(input: {
+  before: readonly string[];
+  after: readonly string[];
+  watchDir: string;
+}): void {
+  const { before, after, watchDir } = input;
+  const beforeSet = new Set(before);
+  const isUnder = (cwd: string): boolean => cwd === watchDir || cwd.startsWith(watchDir + path.sep);
+  const introduced = after.filter((cwd) => !beforeSet.has(cwd) && isUnder(cwd));
+  if (introduced.length > 0) {
+    throw new Error(
+      `a new session appeared on the OPERATOR'S DEFAULT tmux server with a pane cwd under ` +
+        `${watchDir}, which the isolated launch must never reach: ${introduced.join(', ')}`,
+    );
+  }
+}
+
+/**
+ * THE INCIDENT THIS GUARDS AGAINST -- identical mechanism to `test/support/
+ * tmux-harness-env.ts`'s own `resolveIsolatedSocket`, inlined here rather
+ * than imported (see this file's own header). tmux resolves a NAMED socket
+ * (`-L name`, including the implicit `default` name a bare `tmux` call
+ * always uses) by searching `"$TMUX_TMPDIR:/tmp/"` for the first entry whose
+ * `realpath` succeeds, SKIPPING rather than erroring on one that fails (a
+ * deleted directory). So `TMUX_TMPDIR=<a deleted dir> tmux -L default
+ * kill-server` falls through to `/tmp/tmux-<uid>/default` -- the OPERATOR'S
+ * REAL default server -- and kills it. This computes the absolute socket
+ * path itself and addresses it with `-S`, which opens that exact path
+ * directly with no search-list fallback at all; a `tmuxTmpdir` that no
+ * longer resolves to a real socket does nothing, rather than ever letting
+ * tmux guess. Defence in depth: throws if the computed path is not safely
+ * under `/tmp`/`os.tmpdir()`, or if it exactly equals either real
+ * default-server path -- both checks run before any filesystem check, so
+ * they fire even when a real default socket happens to sit there.
+ */
+function defaultTmpRoots(): ReadonlySet<string> {
+  const roots = new Set<string>(['/tmp', os.tmpdir()]);
+  if (process.env.TMPDIR) roots.add(process.env.TMPDIR);
+  return roots;
+}
+
+function resolveIsolatedSocket(
+  tmuxTmpdir: string,
+  uid: number = process.getuid?.() ?? 0,
+  tmpRoots: ReadonlySet<string> = defaultTmpRoots(),
+): string | null {
+  const socketPath = path.join(tmuxTmpdir, `tmux-${uid}`, 'default');
+
+  const underATmpRoot = [...tmpRoots].some(
+    (root) => socketPath === path.join(root, `tmux-${uid}`, 'default') || socketPath.startsWith(`${root}${path.sep}`),
+  );
+  if (!underATmpRoot) {
+    throw new Error(
+      `refusing to resolve a tmux socket outside /tmp or os.tmpdir(): ${socketPath} (from tmuxTmpdir=${tmuxTmpdir})`,
+    );
+  }
+
+  const forbiddenDefaultPaths = [...tmpRoots].map((root) => path.join(root, `tmux-${uid}`, 'default'));
+  if (forbiddenDefaultPaths.includes(socketPath)) {
+    throw new Error(
+      `refusing to target the operator's own default tmux socket (${socketPath}) -- ` +
+        `an isolated/destructive call must never be able to reach it, even via TMUX_TMPDIR's own fallback`,
+    );
+  }
+
+  // REALPATH ALIAS CHECK -- see `test/support/tmux-harness-env.ts`'s
+  // identical `resolveIsolatedSocket` for the full rationale: the checks
+  // above compare strings, so a `tmuxTmpdir` that is itself a symlink
+  // aliasing one of `tmpRoots` under a different name would otherwise sail
+  // straight through them.
+  const socketDir = path.dirname(socketPath);
+  if (fs.existsSync(socketDir)) {
+    const realSocketDir = fs.realpathSync(socketDir);
+    for (const root of tmpRoots) {
+      const forbiddenDir = path.join(root, `tmux-${uid}`);
+      if (forbiddenDir === socketDir || !fs.existsSync(forbiddenDir)) continue;
+      if (fs.realpathSync(forbiddenDir) === realSocketDir) {
+        throw new Error(
+          `refusing to target the operator's own default tmux socket directory -- ` +
+            `${socketDir} is a symlink alias of ${forbiddenDir} (both realpath to ${realSocketDir})`,
+        );
+      }
+    }
+  }
+
+  try {
+    return fs.lstatSync(socketPath).isSocket() ? socketPath : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Strips `TMUX` and `TMUX_PANE` from the env handed to an explicit-socket
+ *  tmux call, so nothing about this process's own possible tmux nesting
+ *  leaks into it. */
+function withoutTmuxNesting(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const next = { ...base };
+  delete next.TMUX;
+  delete next.TMUX_PANE;
+  return next;
+}
+
+function isolatedServerSessionCount(tmuxTmpdir: string): number {
+  const socket = resolveIsolatedSocket(tmuxTmpdir);
+  if (socket === null) return 0;
+  try {
+    const stdout = execFileSync('tmux', ['-S', socket, 'list-sessions'], {
+      env: withoutTmuxNesting(process.env),
+      encoding: 'utf8',
+    });
+    return stdout.split('\n').filter((line) => line.trim() !== '').length;
+  } catch (error) {
+    if (NO_SERVER.test(stderrOf(error))) return 0;
+    throw error;
+  }
+}
+
+function killIsolatedServer(tmuxTmpdir: string): void {
+  const socket = resolveIsolatedSocket(tmuxTmpdir);
+  if (socket === null) return;
+  try {
+    execFileSync('tmux', ['-S', socket, 'kill-server'], {
+      env: withoutTmuxNesting(process.env),
+      stdio: 'ignore',
+    });
+  } catch {
+    // Gone already between the isSocket() check and this call -- fine.
+  }
+}
+
+/** `/tmp` itself, never `os.tmpdir()` -- see `TMUX_SOCKET_ROOT`'s own note:
+ *  a tmux socket is a real AF_UNIX path, and macOS's per-process
+ *  `os.tmpdir()` is already close to the kernel's ~104-byte `sun_path`
+ *  ceiling before this file's own `tmux-<uid>/<name>` suffix is added. */
+function mkIsolatedTmuxTmpdir(prefix: string): string {
+  const dir = fs.mkdtempSync(path.join(TMUX_SOCKET_ROOT, `${prefix}-`));
+  // PRE-CREATE TMUX'S OWN `tmux-<uid>` SOCKET DIRECTORY -- see
+  // `test/support/tmux-harness-env.ts`'s identical `mkIsolatedTmuxTmpdir`
+  // for the full CI-measured rationale (main, run 36396039883): a launch
+  // makes several near-simultaneous tmux calls that can all reach a
+  // brand-new `tmuxTmpdir` before any of them has created this
+  // subdirectory on its own, which is exactly the shape of gap the
+  // incident's own mechanism has no obligation to lose safely under.
+  fs.mkdirSync(path.join(dir, `tmux-${process.getuid?.() ?? 0}`), { recursive: true, mode: 0o700 });
+  return dir;
+}
 
 /**
  * electron-builder's `--dir` output layout is platform-specific; this walks
@@ -107,13 +314,21 @@ test('the packaged app launches, is packaged, and stays locked down', async () =
   // spec too.
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vam-electron-et-userdata-'));
   const remotePort = await allocatePort();
+  // ISOLATES EVERY TMUX CALL THIS LAUNCH MAKES -- see this file's own header
+  // note above for why this spec, of every launch in this repo, is the one
+  // most likely to actually reach tmux for real.
+  const tmuxTmpdir = mkIsolatedTmuxTmpdir('vam-electron-et-tmux');
+  const defaultServerBefore = tmuxAvailable() ? defaultServerPaneCwds() : [];
   const electronApp = await electron.launch({
     executablePath: resolveExecutablePath(),
-    env: {
-      ...process.env,
-      VAM_USER_DATA_DIR: userDataDir,
-      VAM_REMOTE_PORT: String(remotePort),
-    },
+    env: isolatedTmuxEnv(
+      {
+        ...process.env,
+        VAM_USER_DATA_DIR: userDataDir,
+        VAM_REMOTE_PORT: String(remotePort),
+      },
+      tmuxTmpdir,
+    ),
   });
 
   try {
@@ -155,8 +370,23 @@ test('the packaged app launches, is packaged, and stays locked down', async () =
     }, OFF_ORIGIN);
     await window.waitForTimeout(700);
     expect(window.url()).toBe(urlBeforeNavigate);
+
+    // THE TMUX ISOLATION, PROVEN AT RUNTIME -- see `test/electron/
+    // launch.test.ts`'s identical assertion for the full rationale.
+    if (tmuxAvailable()) {
+      assertNoNewSessionUnderOnDefaultServer({
+        before: defaultServerBefore,
+        after: defaultServerPaneCwds(),
+        watchDir: repoRoot,
+      });
+      expect(() => isolatedServerSessionCount(tmuxTmpdir)).not.toThrow();
+    }
   } finally {
     await electronApp.close();
     fs.rmSync(userDataDir, { recursive: true, force: true });
+    if (tmuxAvailable()) {
+      killIsolatedServer(tmuxTmpdir);
+      fs.rmSync(tmuxTmpdir, { recursive: true, force: true });
+    }
   }
 });

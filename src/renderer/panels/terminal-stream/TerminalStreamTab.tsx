@@ -7,9 +7,10 @@
  * theme/font that tracks the shared prefs stores, insert/select-mode marks,
  * scrollback chords and visibility-driven connect/disconnect. Paste WAS
  * refused outright; the operator asked for it back, and it now goes through
- * `terminal-paste.ts`'s shared sanitiser and xterm's own bracketed-paste mode
- * (see the paste listener below). IME composition is covered separately (see
- * this file's own commits). The `Terminal` instance's lifecycle is React's
+ * `terminal-paste.ts`'s shared sanitiser and tmux's own `paste-buffer -p`,
+ * over a dedicated `terminalStreamPaste` channel (see the paste listener
+ * below). IME composition is covered separately (see this file's own
+ * commits). The `Terminal` instance's lifecycle is React's
  * mount/unmount; the STREAM's lifecycle is additionally gated on
  * `document.visibilityState`, below.
  *
@@ -42,6 +43,11 @@ import {
   withAlpha,
 } from '../../prefs/terminal-scheme.js';
 import { preparePastedText } from '../terminal-paste.js';
+import {
+  TERMINAL_STREAM_HIGH_WATER_MARK,
+  TERMINAL_STREAM_LOW_WATER_MARK,
+  TERMINAL_STREAM_SCROLLBACK,
+} from './terminal-stream-tuning.js';
 
 /**
  * The scheme's twenty-three colours plus `backgroundOpacity`, reduced to what
@@ -104,30 +110,20 @@ const SCROLL_CHORD_KEYS = new Set(['PageUp', 'PageDown', 'Home', 'End']);
  * below tracks exactly that: bytes handed to `term.write` but not yet
  * parsed, never merely "received over IPC".
  *
- * `HIGH_WATER_MARK` -- the low end of the operator's own suggested 1-2MB
- * range. `LOW_WATER_MARK` -- a quarter of it, a wide hysteresis gap so
- * draining right at the edge does not flap between dropping and forwarding
- * on every single chunk.
- *
- * DROP AND RESEED, not "ask main to pause the stream" (the coordinator's own
- * other option): once dropping starts, no new chunk is EVER handed to
- * `term.write()`, so `pendingBytes` can only fall from there -- renderer
- * memory is bounded with no new main<->renderer pause/resume IPC round trip
- * at all. Once it drains back under the low mark the screen is PROVABLY
- * stale (real data was silently dropped in between), so "resume" means
- * reconnecting -- the exact `teardownStream()`-then-`connect()` pair this
- * file already runs for a hidden pane becoming visible again, reused rather
- * than inventing a second, narrower resync primitive.
- *
- * `chunk.length` (UTF-16 code units), NOT a real UTF-8 byte count, is what
- * this file adds to `pendingBytes` -- measuring the exact byte length would
- * cost a `TextEncoder().encode()` pass over every chunk, real CPU work
- * paid on exactly the hot path this exists to protect, for a threshold
- * whose whole point is an order-of-magnitude guard rail, not an exact
- * count.
+ * THE SCROLLBACK AND WATER-MARK NUMBERS THEMSELVES LIVE IN `terminal-
+ * stream-tuning.ts` NOW, not here -- a guard-quality finding: `e2e/
+ * terminal-stream-resource-shots.mjs`'s own flood measurement used to
+ * construct its OWN `Terminal` at the LATENCY harness's unrelated default
+ * scrollback and hand-copy these two water marks inline, so it measured a
+ * smaller buffer than this file ships and could silently drift from either
+ * number without that guard ever noticing. Re-exported below, unchanged,
+ * so every existing importer of these two names keeps working.
  */
-export const TERMINAL_STREAM_HIGH_WATER_MARK = 2 * 1024 * 1024;
-export const TERMINAL_STREAM_LOW_WATER_MARK = TERMINAL_STREAM_HIGH_WATER_MARK / 4;
+export {
+  TERMINAL_STREAM_HIGH_WATER_MARK,
+  TERMINAL_STREAM_LOW_WATER_MARK,
+  TERMINAL_STREAM_SCROLLBACK,
+} from './terminal-stream-tuning.js';
 
 /** The four ways `terminalStreamOpen` refuses (`main/terminal/stream-ipc.ts`'s
  *  own `StreamOpenRefusal`), named here rather than imported: that module
@@ -354,7 +350,7 @@ export function TerminalStreamTab(props: {
           // a different engine underneath the same face.
           lineHeight: TERMINAL_STREAM_LINE_HEIGHT,
           fontFamily: TERMINAL_FONT_FAMILY,
-          scrollback: 5000,
+          scrollback: TERMINAL_STREAM_SCROLLBACK,
           // A STEADY BLOCK, NOT A BLINK -- matching `TerminalTab.tsx`'s own
           // cursor exactly (that file's header: "IT DOES NOT BLINK"). That
           // file's reason (a poll cannot honestly animate liveness) does not
@@ -474,13 +470,20 @@ export function TerminalStreamTab(props: {
         // permission this app's policy denies (`composer-paste.ts` carries
         // the same argument for the prompt box's own image paste).
         //
-        // BRACKETING IS THIS COMPONENT'S OWN DECISION, unlike the
-        // capture-pane renderer's `sendPasteArgv`, which leaves it to tmux's
-        // `paste-buffer -p`: there is no tmux verb on this path at all, only
-        // a write of raw bytes to the control-mode connection, so xterm's own
-        // `modes.bracketedPasteMode` -- the SAME fact tmux tracks per pane,
-        // read here instead of there -- is what this component consults
-        // before deciding whether to wrap.
+        // BRACKETING IS TMUX'S OWN DECISION, made server-side by
+        // `openBridge.paste` -> `terminalStreamPaste` -> `sendPasteArgv`'s
+        // `paste-buffer -p` (`main/terminal/stream-ipc.ts`), NOT this
+        // component's. It used to be: read xterm's OWN
+        // `modes.bracketedPasteMode` and wrap here before writing raw bytes
+        // to the control-mode connection -- but a freshly ATTACHED stream's
+        // `liveTerm` starts with that mode false regardless of the PANE's
+        // actual, server-side state (a review finding: attaching to a
+        // session where the running program had already turned bracketed
+        // paste on shipped the paste unbracketed, since this component's own
+        // xterm instance never saw the escape that turned it on). tmux
+        // itself always has the pane's real answer, so asking tmux to wrap
+        // can never guess it wrong the way reading a fresh xterm's own,
+        // possibly-stale mode could.
         liveTerm.textarea?.addEventListener(
           'paste',
           (event) => {
@@ -490,10 +493,9 @@ export function TerminalStreamTab(props: {
             if (raw === '') return;
             const text = preparePastedText(raw);
             if (text === '') return;
-            const payload = liveTerm.modes.bracketedPasteMode ? `\x1b[200~${text}\x1b[201~` : text;
             const currentStreamId = streamIdRef.current;
             if (currentStreamId !== null) {
-              openBridge.write(currentStreamId, new TextEncoder().encode(payload));
+              openBridge.paste(currentStreamId, new TextEncoder().encode(text));
             }
           },
           { capture: true },
