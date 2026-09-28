@@ -125,17 +125,44 @@ function spawnProbe(env: NodeJS.ProcessEnv): ChildProcessWithoutNullStreams {
   }) as ChildProcessWithoutNullStreams;
 }
 
-/** Kills `child`'s WHOLE PROCESS GROUP, not just its own pid -- see
- *  `spawnProbe`'s own `detached: true` note for why a bare `child.kill()`
- *  is not enough. `-child.pid` is POSIX's own "signal the whole group"
- *  spelling; a group with nothing left to signal (already exited) is not a
- *  failure here, just nothing left to do. */
-function killTree(child: ChildProcessWithoutNullStreams): void {
-  try {
-    if (child.pid !== undefined) process.kill(-child.pid, 'SIGKILL');
-  } catch {
-    // Already gone -- the group has no members left to signal.
-  }
+/**
+ * Kills `child`'s WHOLE PROCESS GROUP, not just its own pid -- see
+ * `spawnProbe`'s own `detached: true` note for why a bare `child.kill()`
+ * is not enough. `-child.pid` is POSIX's own "signal the whole group"
+ * spelling; a group with nothing left to signal (already exited) is not a
+ * failure here, just nothing left to do.
+ *
+ * RESOLVES ONLY ONCE `child` ITSELF HAS ACTUALLY EXITED (`close`), not
+ * merely once the signal was sent -- a coordinator review of this same
+ * fix: `process.kill()` returning does not mean the kernel has finished
+ * delivering SIGKILL to every member of the group yet, so a caller that
+ * raced ahead of THIS (deleting `tmuxTmpdir` in the same tick, before the
+ * signal had actually landed) could still lose the exact race this whole
+ * fix exists to close. Every caller below now `await`s it before its own
+ * `tmuxTmpdir` cleanup runs.
+ */
+function killTree(child: ChildProcessWithoutNullStreams): Promise<void> {
+  return new Promise((resolve) => {
+    // Already exited (its own `close` already fired, which a NEW listener
+    // here would never see again) -- nothing left to wait for.
+    if (child.exitCode !== null || child.signalCode !== null) {
+      resolve();
+      return;
+    }
+    child.once('close', () => resolve());
+    try {
+      if (child.pid === undefined) {
+        // Never got a pid at all -- nothing was spawned to signal, and the
+        // `close` listener above still covers the (unlikely) case that one
+        // arrives later anyway.
+        return;
+      }
+      process.kill(-child.pid, 'SIGKILL');
+    } catch {
+      // Already gone -- the group has no members left to signal, and the
+      // `close` listener above will still fire for `child` itself.
+    }
+  });
 }
 
 function waitForExit(child: ChildProcessWithoutNullStreams): Promise<ProbeRun> {
@@ -149,10 +176,13 @@ function waitForExit(child: ChildProcessWithoutNullStreams): Promise<ProbeRun> {
   });
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
-      killTree(child);
-      reject(
-        new Error(`userdata-probe did not exit within 30s\nstdout:\n${stdout}\nstderr:\n${stderr}`),
-      );
+      void killTree(child).finally(() => {
+        reject(
+          new Error(
+            `userdata-probe did not exit within 30s\nstdout:\n${stdout}\nstderr:\n${stderr}`,
+          ),
+        );
+      });
     }, 30_000);
     child.on('error', reject);
     child.on('close', (code) => {
@@ -255,7 +285,11 @@ describe('the Electron harness gets its own throwaway userData', () => {
       // directories rather than throwing or colliding).
       expect(existsSync(path.join(userDataA, 'Local Storage'))).toBe(true);
     } finally {
-      killTree(childA);
+      // AWAITED -- this file's `afterAll` deletes `tmuxTmpdir` once every
+      // `it()` here has settled, and must never run while childA's own
+      // process group could still be alive to race it (`killTree`'s own
+      // header explains why "signal sent" is not "process gone").
+      await killTree(childA);
     }
   }, 40_000);
 
