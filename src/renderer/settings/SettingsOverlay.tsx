@@ -60,7 +60,7 @@
  * both, so the theme still has exactly one path onto `<html>`.
  */
 
-import { ChevronLeft, ChevronRight, Minus, Plus, RotateCcw } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, Minus, Plus, RotateCcw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { TERMINAL_FONT_CURATED, UI_FONT_CURATED } from '../../shared/fonts.js';
 import {
@@ -746,6 +746,7 @@ export function SettingsOverlay({
             visibleSections={visibleSections}
             onGo={go}
             onStep={step}
+            onClose={onClose}
           />
         ) : null}
         {/* Named, because it is the scrollport a `sticky` child measures
@@ -1837,18 +1838,37 @@ function navItemProps(props: NavProps, id: SectionId) {
  * `sidebar` against `panel` is 1.03:1 in dark — the fill alone cannot separate
  * the columns and the `border-r` does the separating, which is exactly how the
  * app's real sidebar seam is drawn.
+ *
+ * ITS EYEBROW IS A ROW NOW, NOT A LABEL (operator request, with a reference
+ * screenshot): "Back to app" — a left arrow, muted ink that goes to full ink
+ * on hover, a divider under it — REPLACES the plain "Sections" caption this
+ * used to draw. It calls `onClose` DIRECTLY, the identical function the
+ * header's own Esc/`×` button already calls, so there is exactly one close
+ * path and therefore exactly one place the "return focus to whatever was
+ * focused before Settings opened" effect (this file's own mount effect,
+ * above) has to run — a second, parallel close function here would be a
+ * second chance for that restore to be forgotten. `h-[44px]` clears the
+ * touch floor unconditionally rather than only under `.vam-phone`
+ * (`styles.css`): the rail never mounts on the phone shell at all
+ * (`wide && !phone`, `SettingsOverlay`'s own render), but a touch-capable
+ * desktop or tablet width still reads this as `wide`, and that reader gets no
+ * second chance either.
  */
-function SectionRail(props: NavProps) {
+function SectionRail(props: NavProps & { readonly onClose: () => void }) {
   return (
     <nav
       data-settings-nav
       className="hidden w-[168px] flex-none flex-col border-line border-r bg-sidebar md:flex"
     >
-      <div className="flex flex-none items-center border-line border-b px-3 py-2">
-        <span className="font-mono text-meta text-ink-dim uppercase tracking-[0.12em]">
-          {t('settings.nav.heading')}
-        </span>
-      </div>
+      <button
+        type="button"
+        data-settings-back
+        onClick={props.onClose}
+        className={`flex h-[44px] w-full flex-none cursor-pointer items-center gap-2 border-line border-b px-3 text-control text-ink-dim hover:text-ink ${FOCUS_RING}`}
+      >
+        <ArrowLeft size={14} strokeWidth={1.8} aria-hidden="true" />
+        {t('settings.nav.back')}
+      </button>
       <div role="toolbar" aria-orientation="vertical" className="flex flex-col gap-0.5 p-1.5">
         {props.visibleSections.map(({ id, label, Icon }) => {
           const current = props.section === id;

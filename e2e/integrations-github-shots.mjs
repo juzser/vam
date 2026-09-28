@@ -173,34 +173,83 @@ for (const theme of ['dark', 'light']) {
 // THE THIRD PILL STATE (item F): "gh not installed", painted with the one
 // letter-case exception `GithubStatusPill`'s own comment argues for -- `gh`
 // stays lower case rather than being title-cased by this surface's shared
-// `capitalize` rule.
-console.log('\n=== the "gh not installed" pill, dark');
-{
-  const page = await openIntegrations(CLI_MISSING, 'dark');
+// `capitalize` rule. AND, per the gh-missing GUIDE (operator request): the
+// short sentence, the `brew install gh` code block with its copy button, the
+// `gh auth login` step, "Check again" and both links (cli.github.com,
+// brew.sh) all have to actually PAINT -- not merely exist in `github-panel
+// .test.tsx`'s happy-dom tree, which cannot measure a box at all. Both
+// themes, since the operator asked for before/after shots in both.
+console.log('\n=== the "gh not installed" pill and its guide, both themes');
+for (const theme of ['dark', 'light']) {
+  const page = await openIntegrations(CLI_MISSING, theme);
   const state = await page.evaluate(() => {
+    const box = (sel) => {
+      const el = document.querySelector(sel);
+      return el === null ? null : el.getBoundingClientRect();
+    };
     const pill = document.querySelector('[data-github-status-pill]');
     return {
       kind: pill?.getAttribute('data-github-status-pill') ?? null,
       text: pill?.textContent ?? null,
       verbatim: pill?.hasAttribute('data-verbatim') ?? false,
       connect: document.querySelector('[data-github-connect]') !== null,
+      guide: box('[data-github-cli-guide]'),
+      brewCode: document.querySelector('[data-github-guide-brew]')?.textContent ?? null,
+      brewCodeBox: box('[data-github-guide-brew]'),
+      copyBrew: box('[data-github-guide-copy-brew]'),
+      loginCode: document.querySelector('[data-github-guide-login]')?.textContent ?? null,
+      checkAgain: box('[data-github-guide-check]'),
+      cliLink: document.querySelector('[data-github-cli-guide] a[href="https://cli.github.com"]') !== null,
+      brewLink: document.querySelector('[data-github-cli-guide] a[href="https://brew.sh"]') !== null,
+      mark: box('[data-github-mark]'),
     };
   });
-  console.log(`  pill=${state.kind} text="${state.text}" verbatim=${state.verbatim}`);
+  console.log(`  [${theme}] pill=${state.kind} text="${state.text}" verbatim=${state.verbatim}`);
   if (state.kind !== 'cli-missing') {
-    throw new Error(`the pill reads ${state.kind}, not "cli-missing"`);
+    throw new Error(`[${theme}] the pill reads ${state.kind}, not "cli-missing"`);
   }
   if (state.text !== 'gh not installed') {
-    throw new Error(`the pill reads ${JSON.stringify(state.text)}, not the literal "gh not installed"`);
+    throw new Error(
+      `[${theme}] the pill reads ${JSON.stringify(state.text)}, not the literal "gh not installed"`,
+    );
   }
   if (!state.verbatim) {
-    throw new Error('the "gh not installed" pill is not marked data-verbatim, so capitalize would title-case "gh"');
+    throw new Error(
+      `[${theme}] the "gh not installed" pill is not marked data-verbatim, so capitalize would title-case "gh"`,
+    );
   }
   if (state.connect) {
-    throw new Error('a Connect button drew with the CLI itself missing, nothing to press');
+    throw new Error(`[${theme}] a Connect button drew with the CLI itself missing, nothing to press`);
   }
-  await page.screenshot({ path: `${outDir}/settings-integrations-github-dark-cli-missing.png` });
-  console.log(`${outDir}/settings-integrations-github-dark-cli-missing.png`);
+  if (state.mark === null || state.mark.height === 0) {
+    throw new Error(`[${theme}] the GitHub mark did not paint on the card`);
+  }
+  if (state.guide === null || state.guide.height === 0) {
+    throw new Error(`[${theme}] the gh-missing guide did not paint`);
+  }
+  if (state.brewCode !== 'brew install gh') {
+    throw new Error(`[${theme}] the guide's brew command reads ${JSON.stringify(state.brewCode)}`);
+  }
+  if (state.brewCodeBox === null || state.brewCodeBox.height === 0) {
+    throw new Error(`[${theme}] the brew command did not paint`);
+  }
+  if (state.copyBrew === null || state.copyBrew.height === 0) {
+    throw new Error(`[${theme}] the guide's copy button did not paint`);
+  }
+  if (state.loginCode !== 'gh auth login') {
+    throw new Error(`[${theme}] the guide's second step reads ${JSON.stringify(state.loginCode)}`);
+  }
+  if (state.checkAgain === null || state.checkAgain.height === 0) {
+    throw new Error(`[${theme}] "Check again" did not paint`);
+  }
+  if (!state.cliLink) {
+    throw new Error(`[${theme}] the guide draws no link to cli.github.com`);
+  }
+  if (!state.brewLink) {
+    throw new Error(`[${theme}] the guide draws no link to brew.sh`);
+  }
+  await page.screenshot({ path: `${outDir}/settings-integrations-github-${theme}-cli-missing.png` });
+  console.log(`${outDir}/settings-integrations-github-${theme}-cli-missing.png`);
   await page.close();
 }
 
@@ -217,17 +266,23 @@ console.log('\n=== the "gh not installed" pill, dark');
 // the narrowest width the desktop shell actually draws itself at.
 const NARROWEST_DESKTOP = 520;
 console.log(`\n=== no horizontal overflow at ${NARROWEST_DESKTOP}px (narrowest desktop width)`);
-{
-  const page = await openIntegrations(LOGGED_IN, 'dark');
+for (const [name, status] of [
+  ['logged-in', LOGGED_IN],
+  // THE GUIDE'S OWN CODE BLOCKS, the width risk this file's other narrow
+  // check cannot see: `LOGGED_IN` never mounts `[data-github-cli-guide]` at
+  // all.
+  ['cli-missing', CLI_MISSING],
+]) {
+  const page = await openIntegrations(status, 'dark');
   await page.setViewportSize({ width: NARROWEST_DESKTOP, height: 844 });
   const overflowX = await page.evaluate(() => {
     const port = document.querySelector('[data-settings-scroll]');
     return port === null ? 0 : port.scrollWidth - port.clientWidth;
   });
-  console.log(`  ${NARROWEST_DESKTOP}px overflowX=${overflowX}`);
+  console.log(`  [${name}] ${NARROWEST_DESKTOP}px overflowX=${overflowX}`);
   if (overflowX > 1) {
     throw new Error(
-      `the Integrations panel overflows sideways by ${overflowX}px at ${NARROWEST_DESKTOP}px`,
+      `[${name}] the Integrations panel overflows sideways by ${overflowX}px at ${NARROWEST_DESKTOP}px`,
     );
   }
   await page.close();

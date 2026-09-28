@@ -269,3 +269,41 @@ describe('the overlay draws a focus indicator', () => {
     }
   });
 });
+
+/**
+ * "BACK TO APP", replacing the rail's own "Sections" eyebrow. Operator: put a
+ * left-arrow row reading "Back to app" at the top of the desktop rail, in
+ * place of the plain label, closing Settings the same way Esc/`×` already do.
+ */
+describe('the rail\'s own "Back to app" row', () => {
+  const back = () => document.querySelector<HTMLElement>('[data-settings-back]');
+
+  it('replaces the "Sections" eyebrow rather than sitting beside it', () => {
+    open();
+    expect(document.querySelector('[data-settings-nav]')?.textContent).not.toContain('Sections');
+    expect(back()).not.toBeNull();
+    expect(back()?.textContent).toContain('Back to app');
+  });
+
+  it('is a real button, reachable by keyboard, with a visible focus ring', () => {
+    open();
+    expect(back()?.tagName).toBe('BUTTON');
+    expect(back()?.className).toContain('focus-visible:outline-ink');
+  });
+
+  it('clears the 44px touch floor', () => {
+    open();
+    const rect = back()?.getBoundingClientRect();
+    // happy-dom lays out nothing, so the floor is read off the class that
+    // sets it rather than a measured box — `Canvas.settings.test.tsx` and
+    // the e2e chrome shots are what prove the paint.
+    expect(back()?.className).toContain('h-[44px]');
+    expect(rect).toBeDefined();
+  });
+
+  it('closes the overlay on click — the same path Esc and `×` already use', () => {
+    const { onClose } = open();
+    fireEvent.click(back() as HTMLElement);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});

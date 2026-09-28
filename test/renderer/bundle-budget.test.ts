@@ -645,6 +645,40 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * 216,700 -- both measurements land under the existing budgets with the
  * same order of headroom the previous entry left, so this is not the "moves
  * the number" category of change.
+ *
+ * THE "BACK TO APP" ROW AND THE GH-MISSING GUIDE (PR 550's own follow-up)
+ * DOES move it, for a reason none of the entries above are: both are new
+ * CATALOGUE STRINGS (`i18n/strings.ts`), not new component code behind a
+ * lazy boundary. `DetailPanel.tsx` -- eager, not lazy -- imports `t()` from
+ * the same module `SettingsOverlay.tsx` and `GithubPanel.tsx` read their own
+ * copy from, and a bundler cannot tree-shake individual properties out of
+ * one exported object literal: the WHOLE English catalogue ships in the
+ * entry, Settings-only keys included, whichever component happens to import
+ * `t` first. `GithubMark`'s own SVG path and the guide's JSX markup are NOT
+ * part of this bump -- confirmed by grep, `brew install gh` appears once, in
+ * `SettingsOverlay-*.js`, never in the entry -- only the strings are.
+ *
+ * Measured, `electron-vite build --mode production`, this branch against its
+ * own base (`ea4f6613`, before this diff):
+ *
+ *     entry, base (no guide, no Back-to-app string)   723,449 B  (216,698 B gzip, THIS machine's zlib)
+ *     entry, with this diff                           723,692 B  (216,801 B gzip)  (+243 B / +0.034%, +103 B gzip / +0.048%)
+ *
+ * The base figure itself already left only 51 B / 2 B of headroom under the
+ * existing 723,500 / 216,700 budgets -- this diff did not create the tight
+ * margin, it spent the last of it. One new nav string (`settings.nav.back`
+ * replacing the deleted `settings.nav.heading`, a near wash) and three new
+ * `settings.integrations.github.guide.*` keys for the gh-missing guide are
+ * the whole delta; the guide's own copy button reuses the existing
+ * `copyCommand`/`copied` pair rather than adding a fourth, for exactly this
+ * reason.
+ *
+ * `ENTRY_BUDGET_BYTES` moves 723,500 -> 725,000: the real figure (723,692 B)
+ * plus ~1.3 KB (~0.18%) of slack, the same small-headroom convention every
+ * bump above uses. `ENTRY_GZIP_BUDGET_BYTES` moves 216,700 -> 217,100: the
+ * measured gzip figure (216,801 B, this machine's zlib) plus ~300 B (~0.14%)
+ * of the same slack. The next PR to land here should expect to remeasure
+ * rather than assume either number still has room.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -655,8 +689,8 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 // depends on is even present, decided BEFORE anything tries to build.
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
-const ENTRY_BUDGET_BYTES = 723_500;
-const ENTRY_GZIP_BUDGET_BYTES = 216_700;
+const ENTRY_BUDGET_BYTES = 725_000;
+const ENTRY_GZIP_BUDGET_BYTES = 217_100;
 
 // The one string this repo's markdown stack ships that nothing else in the
 // dependency graph or vam's own source does: `gfmTable`, the extension name

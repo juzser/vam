@@ -114,6 +114,31 @@ describe(', opens the settings overlay', () => {
     press('Escape');
     expect(document.activeElement).toBe(row);
   });
+
+  /** The rail's own "Back to app" row (replacing the "Sections" eyebrow) is
+   *  wired through the exact same `onClose` prop Esc and the header `×`
+   *  already call -- proven here, through the real `Canvas` wiring, rather
+   *  than against a mock `onClose` the way `settings-nav.test.tsx` checks the
+   *  row exists at all. */
+  it('the "Back to app" row closes the overlay the same way Escape does, restoring focus', async () => {
+    render(<Canvas model={MODEL} />);
+    const row =
+      document.querySelector<HTMLElement>('[data-session-row] button') ??
+      document.querySelector<HTMLElement>('[data-session-row]') ??
+      undefined;
+    expect(row, 'no focusable session control to return to').toBeTruthy();
+    act(() => row?.focus());
+
+    press(',');
+    await waitFor(() => {
+      expect(overlay()?.contains(document.activeElement)).toBe(true);
+    });
+    const back = overlay()?.querySelector<HTMLElement>('[data-settings-back]');
+    expect(back, 'no "Back to app" control on the rail').toBeTruthy();
+    fireEvent.click(back as HTMLElement);
+    expect(overlay()).toBeNull();
+    expect(document.activeElement).toBe(row);
+  });
 });
 
 describe('the settings overlay is reachable and drawable', () => {

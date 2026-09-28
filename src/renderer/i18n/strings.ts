@@ -74,7 +74,13 @@ const EN = {
   // ── The dialog's own chrome ──────────────────────────────────────────────
   'settings.title': 'settings',
   'settings.status.stored': 'stored in this browser, not in a session',
-  'settings.nav.heading': 'Sections',
+  // `settings.nav.heading` ("Sections") is gone: the operator asked for the
+  // rail's own eyebrow to become a "Back to app" ROW rather than a label
+  // beside one, so `SectionRail` in `SettingsOverlay.tsx` draws this instead
+  // now, closing Settings the same way Esc/`×` already do.
+  // `SectionStrip` (narrow desktop) never drew this heading at all -- its own
+  // toolbar has no room for one -- so nothing there changes.
+  'settings.nav.back': 'Back to app',
   // The accessible name of the close control, which the i18n pass walked past
   // because the button's whole label was the hard-coded string `Esc` -- a key
   // a phone does not have. Lower, like every other name on this surface.
@@ -555,6 +561,17 @@ const EN = {
   'settings.integrations.github.copyCommand': 'copy command',
   'settings.integrations.github.copied': 'copied',
   'settings.integrations.github.pane.ended': 're-check above',
+  // THE GH-MISSING GUIDE (operator request): what to DO once the pill and
+  // the status sentence above have already said `gh` itself is not on PATH.
+  // Its own "copy" button reuses `copyCommand`/`copied` above rather than a
+  // fourth pair of strings -- both buttons copy one shell command into the
+  // clipboard, and the entry bundle budget (`bundle-budget.test.ts`) is the
+  // reason this is not just tidiness: every catalogue byte ships eagerly,
+  // whichever section reads it.
+  'settings.integrations.github.guide.intro':
+    'GitHub CLI (gh) is not installed. Install it, then sign in.',
+  'settings.integrations.github.guide.noBrew': 'no Homebrew yet? see',
+  'settings.integrations.github.guide.checkAgain': 'check again',
   'settings.integrations.repo.heading': 'repository',
   'settings.integrations.repo.current': 'reading pull requests from {name}',
   'settings.integrations.repo.own': "this project's own repository",

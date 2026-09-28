@@ -38,15 +38,20 @@
  * component's own comment calls "the one exception" to this dialog's flat
  * rows; it is the second exception now, for the same reason.
  *
- * NO BRAND MARK, ON PURPOSE. lucide-react (installed here) dropped every
- * vendor logo including GitHub's own octocat some versions back --
- * `PROVIDER_MARKS` (`sources/provider-marks.tsx`) carries a HAND-COPIED
- * Simple Icons outline instead, pinned to an exact tag and checked verbatim
- * by `test/sources/provider-marks.test.tsx` against that tag's own file.
- * Adding a second, unverified copy of a trademarked mark to satisfy one
- * icon tile is a worse trade than using `GitPullRequest` -- a real lucide
- * glyph already imported in this codebase (`StatsPanel.tsx`) for the exact
- * same subject this card is about.
+ * THE BRAND MARK, NOW DRAWN (operator request; this paragraph used to argue
+ * the opposite, on the grounds that lucide-react dropped GitHub's own
+ * octocat and a second, unverified trademarked outline was a worse trade
+ * than `GitPullRequest`, a real lucide glyph already imported elsewhere for
+ * the same subject). `GithubMark` below is that outline, this time carried
+ * the way `PROVIDER_MARKS` (`sources/provider-marks.tsx`) already carries
+ * four others: copied verbatim from Simple Icons, CC0, with its source noted
+ * at the definition. It is NOT added to `PROVIDER_MARKS` itself -- that table
+ * answers "which agent ran this session", a `SourceId`-keyed question this
+ * card is not asking; a GitHub host icon and a GitHub Copilot session-source
+ * icon are two different pictures for two different facts, and folding this
+ * one into a table built for the other would have this card's own icon
+ * fetched by an id that has never meant "GitHub the host" anywhere else in
+ * the app.
  *
  * TOKENS NEVER RENDERED, NEVER LOGGED. `gh` keeps the credential in the
  * Keychain and this component never asks it for one -- `GithubAuthStatus`'s
@@ -54,7 +59,6 @@
  * there is no string here that COULD leak one by being printed.
  */
 
-import { GitPullRequest } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import type { GithubApi } from '../../preload/api.js';
 import type { GithubAuthPaneView, GithubAuthStatus, GithubRemote } from '../../shared/github.js';
@@ -67,6 +71,27 @@ const FOCUS_RING =
   'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink';
 
 const BUTTON = `vam-tap flex h-[28px] w-fit cursor-pointer items-center rounded border border-line px-3 text-control text-ink-dim capitalize hover:border-line-strong hover:text-ink disabled:cursor-default disabled:opacity-60 ${FOCUS_RING}`;
+
+// GitHub's own mark, path data copied verbatim from Simple Icons (CC0 1.0): https://github.com/simple-icons/simple-icons/blob/16.32.0/icons/github.svg
+function GithubMark({ size = 16 }: { readonly size?: number }) {
+  return (
+    <svg
+      data-github-mark
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+      focusable="false"
+      className="text-ink-dim"
+    >
+      <path
+        fill="currentColor"
+        d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"
+      />
+    </svg>
+  );
+}
 
 /**
  * THE STATUS PILL'S OWN THREE STATES -- coarser than `GithubAuthStatusKind`
@@ -203,7 +228,12 @@ export function GithubPanel({
   const [pane, setPane] = useState<GithubAuthPaneView>({ kind: 'none' });
   const [connecting, setConnecting] = useState(false);
   const [confirmingLogout, setConfirmingLogout] = useState(false);
-  const [copied, setCopied] = useState(false);
+  /** WHICH command was last copied, not a bare flag -- the login/logout
+   *  command and the guide's own `brew install gh` are two independent
+   *  buttons now, and a single `copied` boolean would have flipped BOTH to
+   *  "copied" from either press. `null` covers "neither, or the 2s window
+   *  already closed". */
+  const [copied, setCopied] = useState<'command' | 'brew' | null>(null);
 
   const check = useCallback(async () => {
     if (api === undefined) return;
@@ -254,12 +284,14 @@ export function GithubPanel({
     }
   };
 
-  const copy = async (command: string) => {
+  const copy = async (command: string, which: 'command' | 'brew') => {
     if (copyText === undefined) return;
     const ok = await copyText(command);
     if (ok) {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2_000);
+      setCopied(which);
+      // Clears only ITS OWN "copied" -- if the other button was pressed
+      // again in between, its own timeout (not this one) owns the reset.
+      setTimeout(() => setCopied((current) => (current === which ? null : current)), 2_000);
     }
   };
 
@@ -281,12 +313,7 @@ export function GithubPanel({
       <div className="flex flex-col gap-3 rounded border border-line bg-card p-4">
         <div className="flex items-start gap-3">
           <div className="flex h-8 w-8 flex-none items-center justify-center rounded border border-line-strong">
-            <GitPullRequest
-              size={16}
-              strokeWidth={1.8}
-              aria-hidden="true"
-              className="text-ink-dim"
-            />
+            <GithubMark size={16} />
           </div>
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             <div className="flex flex-wrap items-center gap-2">
@@ -339,16 +366,6 @@ export function GithubPanel({
                     ? t('settings.integrations.github.rechecking')
                     : statusSentence(status)}
                 </span>
-                {status?.kind === 'cli-missing' ? (
-                  <a
-                    href="https://cli.github.com"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-control text-ink-dim underline"
-                  >
-                    {t('settings.integrations.github.status.installLink')}
-                  </a>
-                ) : null}
               </div>
               {status?.kind !== 'cli-missing' ? (
                 <button
@@ -374,6 +391,89 @@ export function GithubPanel({
                     scopes: missingScopes.join(', '),
                   })}
                 </p>
+              ) : null}
+              {/* THE GH-MISSING GUIDE (operator request): the pill and the
+                  status sentence above already say `gh` is not on PATH; this
+                  is what to DO about it -- install, sign in, then ask again,
+                  never run for the operator. `brew install gh` is the one
+                  command vam offers to copy; `gh auth login` is shown but not
+                  copy-wired, since it is the second STEP, not a fix the
+                  operator would run before `gh` exists to run it against. */}
+              {status?.kind === 'cli-missing' ? (
+                <div
+                  data-github-cli-guide
+                  className="flex flex-col gap-2 rounded border border-line bg-well p-3"
+                >
+                  <p className="vam-sentence m-0 max-w-[52ch] text-control text-ink-dim">
+                    {t('settings.integrations.github.guide.intro')}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <code
+                      data-github-guide-brew
+                      data-verbatim
+                      className="rounded border border-line bg-panel px-2 py-1 font-mono text-control text-ink"
+                    >
+                      brew install gh
+                    </code>
+                    {copyText !== undefined ? (
+                      <button
+                        type="button"
+                        data-github-guide-copy-brew
+                        onClick={() => void copy('brew install gh', 'brew')}
+                        className={BUTTON}
+                      >
+                        {copied === 'brew'
+                          ? t('settings.integrations.github.copied')
+                          : t('settings.integrations.github.copyCommand')}
+                      </button>
+                    ) : null}
+                  </div>
+                  {/* NO Homebrew DETECTION -- checking that would need a second
+                      main-process spawn (`brew --version` or similar) this
+                      panel has no bridge for today, and the operator's own
+                      instruction covers exactly this case: link out rather
+                      than build the check. */}
+                  <p className="vam-sentence m-0 max-w-[52ch] text-control text-ink-faint">
+                    {t('settings.integrations.github.guide.noBrew')}{' '}
+                    <a
+                      href="https://brew.sh"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline"
+                    >
+                      https://brew.sh
+                    </a>
+                  </p>
+                  <code
+                    data-github-guide-login
+                    data-verbatim
+                    className="w-fit rounded border border-line bg-panel px-2 py-1 font-mono text-control text-ink"
+                  >
+                    gh auth login
+                  </code>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      data-github-guide-check
+                      disabled={checking}
+                      aria-busy={checking}
+                      onClick={() => void check()}
+                      className={BUTTON}
+                    >
+                      {checking
+                        ? t('settings.integrations.github.rechecking')
+                        : t('settings.integrations.github.guide.checkAgain')}
+                    </button>
+                    <a
+                      href="https://cli.github.com"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-control text-ink-dim underline"
+                    >
+                      {t('settings.integrations.github.status.installLink')}
+                    </a>
+                  </div>
+                </div>
               ) : null}
             </div>
 
@@ -433,11 +533,14 @@ export function GithubPanel({
                       type="button"
                       data-github-copy-command
                       onClick={() =>
-                        void copy(isLoggedIn ? GITHUB_LOGOUT_COMMAND : GITHUB_LOGIN_COMMAND)
+                        void copy(
+                          isLoggedIn ? GITHUB_LOGOUT_COMMAND : GITHUB_LOGIN_COMMAND,
+                          'command',
+                        )
                       }
                       className={BUTTON}
                     >
-                      {copied
+                      {copied === 'command'
                         ? t('settings.integrations.github.copied')
                         : t('settings.integrations.github.copyCommand')}
                     </button>
