@@ -216,6 +216,15 @@ function formatCodexWindow(window: CodexWindowDisplay, mode: UsageDisplayMode): 
  * `statusBarShowCodexUsage` gates whether it is drawn at all, and
  * `statusBarUsageMode` (shared with Claude's own cell, `describeUsage`) is
  * this function's own `mode`.
+ *
+ * THE CELL MUST NEVER BE AN UNEXPLAINED DASH. `snapshot.kind !== 'ok'`
+ * already carries its own reason (below); the case this guards is
+ * `kind: 'ok'` -- main DID read a rollout -- with BOTH windows `'unknown'`,
+ * which without this check rendered the exact same `— · —` a healthy
+ * reading with two blank windows would, telling an operator nothing about
+ * why. `'reset'` is deliberately excluded: a window that rolled over already
+ * had a real reading once, and needs no further explanation than the dash
+ * itself.
  */
 export function describeCodexStatusUsage(
   snapshot: CodexUsageSnapshot,
@@ -223,7 +232,10 @@ export function describeCodexStatusUsage(
   mode: UsageDisplayMode = 'used',
 ): CodexStatusUsageDisplay {
   const display = describeCodexUsage(snapshot, now);
-  if (display.reason !== null) return { text: '—', reason: display.reason, highUsage: false };
+  const bothUnknown = display.primary.state === 'unknown' && display.secondary.state === 'unknown';
+  if (display.reason !== null || bothUnknown) {
+    return { text: '—', reason: display.reason ?? 'no Codex usage found yet', highUsage: false };
+  }
   const high = (w: CodexWindowDisplay) => w.state === 'known' && w.percent >= 90;
   return {
     text: `${formatCodexWindow(display.primary, mode)} · ${formatCodexWindow(display.secondary, mode)}`,

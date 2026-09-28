@@ -10,7 +10,7 @@
  * under `e2e/`, and `e2e/` is read-only for this task (AC-11).
  */
 
-import { execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -245,7 +245,8 @@ describe('the Electron shell launches', () => {
   let userDataDir: string;
 
   beforeAll(async () => {
-    execFileSync(bin('electron-vite'), ['build'], { cwd: repoRoot, stdio: 'pipe' });
+    // Built ONCE for the whole run by `vitest.app.config.ts`'s globalSetup
+    // (`test/electron/global-build.ts`) -- never per file, see its header.
     const started = await startNoCorsServer();
     server = started.server;
     const startedStream = await startChangeStreamServer();
@@ -259,7 +260,7 @@ describe('the Electron shell launches', () => {
     server?.close();
     streamServer?.close();
     if (userDataDir !== undefined) {
-      rmSync(userDataDir, { recursive: true, force: true });
+      rmSync(userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     }
   });
 
