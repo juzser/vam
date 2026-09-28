@@ -82,12 +82,26 @@ type OpenResult =
       reason: 'bad-request' | 'unavailable' | 'unresolved-session' | 'unsupported-tmux';
     };
 
+/**
+ * `liveSubscriptions()` tracks `onData`/`onSeed`/`onDown` subscribe-minus-
+ * unsubscribe calls -- additive to the three existing cases (none of them
+ * reads it), needed by the new "superseded attempt leaves nothing live"
+ * case below, which the original three fakes (returning a bare `() => {}`)
+ * cannot observe on their own.
+ */
 function withBridge(over: {
   open?: (projectId: string, rowId?: string) => Promise<OpenResult>;
   close?: (streamId: string) => void;
 }) {
   const close = vi.fn();
   const resize = vi.fn(async () => true);
+  let subscriptions = 0;
+  const subscribe = () => {
+    subscriptions += 1;
+    return () => {
+      subscriptions -= 1;
+    };
+  };
   Object.defineProperty(window, 'api', {
     configurable: true,
     value: {
@@ -96,13 +110,13 @@ function withBridge(over: {
         open: over.open ?? (async () => ({ ok: true, streamId: 's1', seed: '', name: 'vam-a1' })),
         close: over.close ?? close,
         write: vi.fn(),
-        onData: () => () => {},
-        onSeed: () => () => {},
-        onDown: () => () => {},
+        onData: subscribe,
+        onSeed: subscribe,
+        onDown: subscribe,
       },
     },
   });
-  return { close, resize };
+  return { close, resize, liveSubscriptions: () => subscriptions };
 }
 
 beforeEach(() => {
@@ -206,6 +220,173 @@ describe('finding cbd56848: a cancelled/superseded open closes what it opened', 
 
       // Attached to the surviving stream -- the status rule shows its name.
       expect(document.querySelector('[data-terminal-stream-badge]')?.textContent).toBe('vam-new');
+    } finally {
+      visibility.mockRestore();
+    }
+  });
+
+  it('a duplicate visible while an open is pending adopts one stream and closes the other', async () => {
+    const visibility = vi.spyOn(document, 'visibilityState', 'get');
+    let resolveFirst: ((value: OpenResult) => void) | undefined;
+    let resolveSecond: ((value: OpenResult) => void) | undefined;
+    let openCount = 0;
+    const { close, liveSubscriptions } = withBridge({
+      open: () => {
+        openCount += 1;
+        if (openCount === 1) {
+          return new Promise((resolve) => {
+            resolveFirst = resolve;
+          });
+        }
+        return new Promise((resolve) => {
+          resolveSecond = resolve;
+        });
+      },
+    });
+    try {
+      visibility.mockReturnValue('visible');
+      const { unmount } = render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(openCount).toBe(1);
+
+      // A SECOND 'visible' event, WITH NO 'hidden' BEFORE IT, while the
+      // mount's own open is still pending.
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+        await Promise.resolve();
+      });
+      expect(openCount).toBe(2);
+
+      // The FIRST (superseded) open resolves ok first.
+      await act(async () => {
+        resolveFirst?.({ ok: true, streamId: 's-a', seed: 'seed-a', name: 'vam-a' });
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(close).toHaveBeenCalledWith('s-a');
+      expect(close).not.toHaveBeenCalledWith('s-b');
+
+      // The SECOND (current) open resolves ok after.
+      await act(async () => {
+        resolveSecond?.({ ok: true, streamId: 's-b', seed: 'seed-b', name: 'vam-b' });
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(document.querySelector('[data-terminal-stream-badge]')?.textContent).toBe('vam-b');
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(close).not.toHaveBeenCalledWith('s-b');
+
+      // Exactly one subscription set (onData+onSeed+onDown) is live: the
+      // superseded attempt never subscribed at all.
+      expect(liveSubscriptions()).toBe(3);
+
+      unmount();
+      expect(close).toHaveBeenCalledTimes(2);
+      expect(close).toHaveBeenCalledWith('s-b');
+      expect(liveSubscriptions()).toBe(0);
+    } finally {
+      visibility.mockRestore();
+    }
+  });
+
+  it('a duplicate visible while pending: the second open resolves first, the first closes when it resolves late', async () => {
+    const visibility = vi.spyOn(document, 'visibilityState', 'get');
+    let resolveFirst: ((value: OpenResult) => void) | undefined;
+    let resolveSecond: ((value: OpenResult) => void) | undefined;
+    let openCount = 0;
+    const { close } = withBridge({
+      open: () => {
+        openCount += 1;
+        if (openCount === 1) {
+          return new Promise((resolve) => {
+            resolveFirst = resolve;
+          });
+        }
+        return new Promise((resolve) => {
+          resolveSecond = resolve;
+        });
+      },
+    });
+    try {
+      visibility.mockReturnValue('visible');
+      const { unmount } = render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(openCount).toBe(1);
+
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+        await Promise.resolve();
+      });
+      expect(openCount).toBe(2);
+
+      // The SECOND (current) open resolves ok first.
+      await act(async () => {
+        resolveSecond?.({ ok: true, streamId: 's-b', seed: 'seed-b', name: 'vam-b' });
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(close).not.toHaveBeenCalled();
+      expect(document.querySelector('[data-terminal-stream-badge]')?.textContent).toBe('vam-b');
+
+      // The FIRST (superseded) open resolves ok late.
+      await act(async () => {
+        resolveFirst?.({ ok: true, streamId: 's-a', seed: 'seed-a', name: 'vam-a' });
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(close).toHaveBeenCalledWith('s-a');
+      expect(close).not.toHaveBeenCalledWith('s-b');
+
+      unmount();
+      expect(close).toHaveBeenCalledTimes(2);
+      expect(close).toHaveBeenCalledWith('s-b');
+    } finally {
+      visibility.mockRestore();
+    }
+  });
+
+  it('a duplicate visible after the stream is already live closes it and reconnects', async () => {
+    const visibility = vi.spyOn(document, 'visibilityState', 'get');
+    let openCount = 0;
+    const { close } = withBridge({
+      open: async () => {
+        openCount += 1;
+        return openCount === 1
+          ? { ok: true, streamId: 's-a', seed: 'seed-a', name: 'vam-a' }
+          : { ok: true, streamId: 's-b', seed: 'seed-b', name: 'vam-b' };
+      },
+    });
+    try {
+      visibility.mockReturnValue('visible');
+      const { unmount } = render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(document.querySelector('[data-terminal-stream-badge]')?.textContent).toBe('vam-a');
+      expect(close).not.toHaveBeenCalled();
+
+      // A duplicate 'visible', with no 'hidden' before it, arrives once the
+      // stream is already live.
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(close).toHaveBeenCalledWith('s-a');
+      expect(document.querySelector('[data-terminal-stream-badge]')?.textContent).toBe('vam-b');
+
+      unmount();
+      expect(close).toHaveBeenCalledTimes(2);
+      expect(close).toHaveBeenCalledWith('s-b');
     } finally {
       visibility.mockRestore();
     }

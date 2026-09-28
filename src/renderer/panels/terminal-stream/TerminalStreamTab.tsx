@@ -714,6 +714,22 @@ export function TerminalStreamTab(props: {
       if (document.visibilityState === 'hidden') {
         teardownStream();
       } else {
+        // GENERATION MUST ADVANCE HERE TOO (finding vam-audit-6-task-5-f1,
+        // residual of cbd56848): without this `teardownStream()`, a
+        // 'visible' event with no 'hidden' before it (two tab-switches, or
+        // two windows reporting visible in a row) called `connect()` a
+        // second time while the FIRST one's `myGeneration` was still the
+        // current `generation` -- both successful opens then passed the
+        // stale check at `connect()`'s own `if (cancelled || myGeneration
+        // !== generation)` line, and whichever adopted last silently
+        // stranded the other's stream (and, once live, its own
+        // data/seed/down subscriptions) running forever. Bumping the
+        // generation first is the SAME pair the backpressure reconnect
+        // above already runs, and the one a hidden->visible cycle already
+        // produces -- an in-flight superseded attempt now fails that stale
+        // check and closes its own result; an already-live stream is closed
+        // by this call itself.
+        teardownStream();
         void connect().catch((error: unknown) => {
           console.error('vam: terminal stream reconnect failed:', error);
         });
