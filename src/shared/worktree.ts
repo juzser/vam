@@ -173,4 +173,15 @@ export type RemoveWorktreeOutcome = {
    *  feature's operator decision requires. The worktree itself is always
    *  gone by the time this resolves; only the branch's fate varies. */
   readonly preservedBranch: boolean;
+  /**
+   * The short branch name (`vam-kept/<name>`, collision-safe suffixed) vam
+   * created to keep a DETACHED worktree's commit reachable, when its `HEAD`
+   * pointed at a commit no other `refs/heads`/`refs/remotes`/`refs/tags` ref
+   * already contained -- `null` whenever no rescue was needed: a worktree
+   * with a real branch (`preservedBranch` above already covers that one), or
+   * a detached worktree whose commit was already reachable from something
+   * else. `worktrees.ts`'s own `removeWorktree` header has the full S1
+   * data-loss story this field closes.
+   */
+  readonly keptRef: string | null;
 };
