@@ -115,6 +115,8 @@ describe('the accessor is defined exactly once', () => {
       rel,
     );
     expect(definers).toEqual(['prefs/local-storage.ts']);
-    expect(resolve(SRC, definers[0]!)).toBe(HELPER);
+    const [definer] = definers;
+    expect(definer).toBeDefined();
+    expect(resolve(SRC, definer as string)).toBe(HELPER);
   });
 });
