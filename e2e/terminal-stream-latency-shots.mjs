@@ -64,6 +64,7 @@ import { tmpdir } from 'node:os';
 import { extname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { chromium } from 'playwright-core';
+import { privateTmuxSocket } from './support/tmux-socket.mjs';
 
 /**
  * `argv[3] ?? argv[2]`, not a bare `argv[2]` -- `run-web-guards.mjs` calls
@@ -79,7 +80,7 @@ import { chromium } from 'playwright-core';
  */
 const outDir = process.argv[3] ?? process.argv[2] ?? 'docs/ui';
 
-const SOCKET = 'vam-stream-e2e-latency';
+const SOCKET = privateTmuxSocket('vam-stream-e2e-latency');
 const TMUX_SESSION = 'vam-stream-e2e-latency-a1b2c3';
 const COLUMNS = 137;
 const ROWS = 41;
@@ -199,15 +200,35 @@ function percentile(values, p) {
  * would only hide a real defect. `measure` is re-invoked in full (a fresh
  * sample of the same size, not a re-read of the same numbers) so a retry
  * genuinely tests whether the first miss was a one-off.
+ *
+ * A REVIEW FINDING OF THIS FILE'S OWN: this used to `let result = await
+ * measure(); ...; result = await measure(); return result` -- a WHOLESALE
+ * replace, so a retry that happened to read cleanly erased whatever the
+ * FIRST pass's structural numbers said, and the caller's own `matched`/
+ * `writeCount` checks (run once, against whatever this returned) saw only
+ * the retry. A first pass with 2,000 batched writes, or with half its
+ * samples unmatched, is not a "maybe" -- it is the defect this guard exists
+ * to catch, and a clean retry must not be allowed to un-catch it. Structural
+ * fields below take the WORSE of the two measurements, from EITHER pass, not
+ * only the first: `matched` is a floor ("at least N of M"), so the lower
+ * count wins; `writeCount` is a ceiling ("under N calls"), so the higher
+ * count wins. Only `p95` (and the informational `p50`) come from the retry
+ * outright -- that is the one number this helper exists to give a second
+ * chance to.
  */
 async function withP95RetryOnce(label, boundMs, measure) {
-  let result = await measure();
-  if (result.p95 !== null && result.p95 < boundMs) return result;
+  const first = await measure();
+  if (first.p95 !== null && first.p95 < boundMs) return first;
   console.warn(
-    `  retry: ${label} p95 (${result.p95 === null ? 'n/a' : `${result.p95.toFixed(2)}ms`}) missed the ${boundMs}ms bound on the first pass -- re-measuring once, alone, before failing for real`,
+    `  retry: ${label} p95 (${first.p95 === null ? 'n/a' : `${first.p95.toFixed(2)}ms`}) missed the ${boundMs}ms bound on the first pass -- re-measuring once, alone, before failing for real`,
   );
-  result = await measure();
-  return result;
+  const retry = await measure();
+  const worseOf = (a, b, pick) => (a !== undefined && b !== undefined ? pick(a, b) : (a ?? b));
+  return {
+    ...retry,
+    matched: worseOf(first.matched, retry.matched, Math.min),
+    writeCount: worseOf(first.writeCount, retry.writeCount, Math.max),
+  };
 }
 
 /** Polls `list-clients` until it reports `expected` control-mode clients
