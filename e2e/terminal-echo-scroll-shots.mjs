@@ -81,6 +81,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { chromium } from 'playwright-core';
+import { privateTmuxSocket } from './support/tmux-socket.mjs';
 
 const origin = process.argv[2] ?? 'http://localhost:5520';
 const outDir = process.argv[3] ?? 'docs/ui';
@@ -89,8 +90,9 @@ const SESSION = 'atlas-echo-scroll';
 const BRANCH = 'work/atlas-echo-scroll';
 /** The project id vam records on the tmux session and matches back (`@vam-project`). */
 const PROJECT = 'p1';
-/** A private tmux server, so nothing here can see or touch the operator's own. */
-const SOCKET = 'vam-e2e-scroll';
+/** A private tmux server, so nothing here can see or touch the operator's own -- and
+ *  unique per run (pid-suffixed), so two concurrent runs never share one either. */
+const SOCKET = privateTmuxSocket('vam-e2e-scroll');
 const TMUX_SESSION = 'vam-e2e-scroll-a1b2c3';
 const COLUMNS = 200;
 const ROWS = 50;
