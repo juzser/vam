@@ -23,6 +23,15 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import {
+  assertNoNewSessionUnderOnDefaultServer,
+  defaultServerPaneCwds,
+  isolatedServerSessionCount,
+  isolatedTmuxEnv,
+  killIsolatedServer,
+  mkIsolatedTmuxTmpdir,
+  tmuxAvailable,
+} from '../support/tmux-harness-env.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const bin = (name: string) => path.join(repoRoot, 'node_modules', '.bin', name);
@@ -74,18 +83,21 @@ async function freePort(): Promise<number> {
  * the instant the line appears; a slow-to-close child process afterwards is
  * `app.exit`'s own concern, not this section's.
  */
-function runProbe(userDataDir: string, remotePort: number): Promise<ProbeRun> {
+function runProbe(userDataDir: string, remotePort: number, tmuxTmpdir: string): Promise<ProbeRun> {
   return new Promise((resolve, reject) => {
     const child = spawn(bin('electron'), [probePath], {
       cwd: repoRoot,
-      env: {
-        ...process.env,
-        // A session, and therefore the sidebar's settings gear -- the same
-        // fixture `launch.test.ts` uses, for the same reason.
-        VAM_FIXTURE_SOURCE: '1',
-        VAM_USER_DATA_DIR: userDataDir,
-        VAM_REMOTE_PORT: String(remotePort),
-      },
+      env: isolatedTmuxEnv(
+        {
+          ...process.env,
+          // A session, and therefore the sidebar's settings gear -- the same
+          // fixture `launch.test.ts` uses, for the same reason.
+          VAM_FIXTURE_SOURCE: '1',
+          VAM_USER_DATA_DIR: userDataDir,
+          VAM_REMOTE_PORT: String(remotePort),
+        },
+        tmuxTmpdir,
+      ),
     });
     let stdout = '';
     let stderr = '';
@@ -145,15 +157,32 @@ function runProbe(userDataDir: string, remotePort: number): Promise<ProbeRun> {
 
 describe('Settings -> Update, under the real shell', () => {
   let userDataDir: string;
+  let tmuxTmpdir: string;
+  let defaultServerBefore: readonly string[];
 
   beforeAll(() => {
     execFileSync(bin('electron-vite'), ['build'], { cwd: repoRoot, stdio: 'pipe' });
     userDataDir = mkdtempSync(path.join(tmpdir(), 'vam-settings-update-userdata-'));
+    tmuxTmpdir = mkIsolatedTmuxTmpdir('vam-settings-update-tmux');
+    // READ-ONLY, before this describe's isolated Electron process exists at
+    // all -- see `test/electron/launch.test.ts`'s own note on the identical
+    // pair. This probe is the one killed with `SIGKILL` (`runProbe`'s own
+    // header) rather than allowed to quit gracefully, so any control-mode
+    // tmux connection it made would NOT be disposed by the app's own
+    // `before-quit` handling -- exactly the shape most likely to leave a
+    // session sitting on whatever server it reached, which is why this
+    // describe carries its own before/after pair rather than relying on
+    // `launch.test.ts`'s alone.
+    defaultServerBefore = tmuxAvailable() ? defaultServerPaneCwds() : [];
   }, 180_000);
 
   afterAll(() => {
     if (userDataDir !== undefined) {
       rmSync(userDataDir, { recursive: true, force: true });
+    }
+    if (tmuxTmpdir !== undefined) {
+      killIsolatedServer(tmuxTmpdir);
+      rmSync(tmuxTmpdir, { recursive: true, force: true });
     }
   });
 
@@ -164,7 +193,7 @@ describe('Settings -> Update, under the real shell', () => {
   // already busy running other work, measured directly rather than assumed.
   it('opens, reaches the Update card, checks for an update, and never crashes', async () => {
     const remotePort = await freePort();
-    const run = await runProbe(userDataDir, remotePort);
+    const run = await runProbe(userDataDir, remotePort, tmuxTmpdir);
     expect(`${run.code} ${run.stderr}`).toBe(`0 ${run.stderr}`);
     expect(
       run.result,
@@ -202,5 +231,20 @@ describe('Settings -> Update, under the real shell', () => {
     expect(result.outcomeText).not.toMatch(/^[a-z-]+$/);
     expect(result.outcomeText?.toLowerCase()).not.toContain('error:');
     expect(result.outcomeText).not.toMatch(/\bat\s+\S+:\d+:\d+/);
+
+    // THE TMUX ISOLATION, PROVEN AT RUNTIME -- see `launch.test.ts`'s
+    // identical assertion for the full rationale. This probe is killed with
+    // `SIGKILL` above rather than quit gracefully, so it is the harness in
+    // this repo most likely to leave an un-disposed tmux session behind --
+    // exactly why this check belongs here and not only on a gracefully
+    // exited launch.
+    if (tmuxAvailable()) {
+      assertNoNewSessionUnderOnDefaultServer({
+        before: defaultServerBefore,
+        after: defaultServerPaneCwds(),
+        watchDir: repoRoot,
+      });
+      expect(() => isolatedServerSessionCount(tmuxTmpdir)).not.toThrow();
+    }
   }, 100_000);
 });
