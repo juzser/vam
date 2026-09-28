@@ -573,10 +573,14 @@ export function SettingsOverlay({
         className="absolute inset-0 cursor-default bg-ground/70"
         onMouseDown={onClose}
       />
-      {/* Fixed height, not `max-h`: with a nav column, a box that resizes per
-          section makes the nav jump under the cursor between a short pane and a
-          long one. One height, one nav position; the cards column scrolls. */}
-      <div className="relative flex h-[min(600px,80vh)] w-[min(880px,94vw)] flex-col overflow-hidden rounded-md border border-line bg-panel">
+      {/* `vam-modal-lg` (`styles.css`): the shared large-modal size, the same
+          class `StatsScreen.tsx` wears -- "the same size" is now a fact about
+          one declaration, not two Tailwind arbitrary values that happened to
+          agree. Fixed height, not `max-h`: with a nav column, a box that
+          resizes per section makes the nav jump under the cursor between a
+          short pane and a long one. One height, one nav position; the cards
+          column scrolls. */}
+      <div className="vam-modal-lg relative flex flex-col overflow-hidden rounded-md border border-line bg-panel">
         <div className="flex h-[38px] flex-none items-center gap-2 border-line border-b px-3">
           {/* The dialog's own name, in the rank above the panel heading and
               wearing the same treatment: uppercase with tracking, which this

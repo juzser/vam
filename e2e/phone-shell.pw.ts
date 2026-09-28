@@ -1005,7 +1005,8 @@ test.describe('the overlay sheets at 390px', () => {
       // padding, which is 0 in a browser with no inset).
       expect(Math.round(geometry.bottom)).toBe(Math.round(geometry.viewport));
       // Capped at 85dvh and never taller than the screen -- the fixed
-      // `h-[min(600px,80vh)]` on settings' own panel must not win.
+      // height `vam-modal-lg` (`styles.css`) gives settings' own panel must
+      // not win.
       expect(geometry.height).toBeLessThanOrEqual(geometry.viewport * 0.85 + 1);
       expect(geometry.top).toBeGreaterThanOrEqual(0);
       expect(geometry.maxHeight).toBeCloseTo(geometry.viewport * 0.85, 0);
