@@ -530,6 +530,84 @@ describe('readOpenQuestion -- chunked catch-up', () => {
     // The report quotes this order: under the fix the timer fires first.
     expect(order).toEqual(['timer', 'resolved']);
   });
+
+  it('does not spend a tick yielding when the whole catch-up fits in one chunk', async () => {
+    const initial = fillerOfExactly(512);
+    const index = createQuestionIndex();
+    const firstReader = recordingSourceOf(initial);
+    await readOpenQuestion(index, 'sess-1', firstReader.bytes(), 1, firstReader, SCAN_CAP);
+
+    // A small delta well under the cap: exactly one chunk, so the loop
+    // breaks after its first (and only) iteration -- BEFORE the `!first`
+    // check ever lets a `yieldToEventLoop` run.
+    const growth = fillerOfExactly(200);
+    const grown = initial + growth;
+    const reader = recordingSourceOf(grown);
+
+    const order: string[] = [];
+    setImmediate(() => order.push('immediate'));
+    await readOpenQuestion(index, 'sess-1', reader.bytes(), 2, reader, SCAN_CAP);
+    order.push('resolved');
+    // Flush the pending `setImmediate` so its callback, if it has not
+    // already fired, gets its turn before the assertion below.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    // Resolving through nothing but `await source.read(...)` -- no
+    // `setImmediate` round trip of its own -- finishes before the
+    // competing `setImmediate` callback queued alongside it gets its turn.
+    expect(order).toEqual(['resolved', 'immediate']);
+  });
+
+  it('persists progress after each chunk, so an interrupted catch-up resumes rather than rescanning', async () => {
+    const initial = fillerOfExactly(512);
+    const index = createQuestionIndex();
+    const firstReader = recordingSourceOf(initial);
+    await readOpenQuestion(index, 'sess-1', firstReader.bytes(), 1, firstReader, SCAN_CAP);
+    const consumedAfterFirst = index.get('sess-1')?.consumedThrough;
+
+    // Several chunks' worth of growth, so catch-up must loop more than once.
+    const growth = fillerOfExactly(SCAN_CAP * 3);
+    const grown = initial + growth;
+    const bytes = Buffer.from(grown, 'utf8');
+
+    let reads = 0;
+    // A source that answers the first chunk normally, then fails as if the
+    // process were interrupted mid-catch-up (crash, cancellation).
+    const flaky = {
+      size: async () => bytes.length,
+      read: async (from: number, to: number) => {
+        reads += 1;
+        if (reads === 2) throw new Error('interrupted');
+        return readWindowOf(bytes, from, to);
+      },
+    };
+
+    await expect(
+      readOpenQuestion(index, 'sess-1', bytes.length, 2, flaky, SCAN_CAP),
+    ).rejects.toThrow('interrupted');
+
+    // The index already reflects the FIRST chunk's progress, not only the
+    // point the interrupted call started from -- proof the write happens
+    // after every chunk, not only when the whole catch-up finishes.
+    const afterInterruption = index.get('sess-1')?.consumedThrough;
+    expect(afterInterruption).toBeGreaterThan(consumedAfterFirst as number);
+    expect(afterInterruption).toBeLessThan(bytes.length);
+
+    // The next call, given a working source, resumes from exactly that
+    // persisted offset rather than the original `consumedAfterFirst`.
+    const seenFrom: number[] = [];
+    const resuming = {
+      size: async () => bytes.length,
+      read: async (from: number, to: number) => {
+        seenFrom.push(from);
+        return readWindowOf(bytes, from, to);
+      },
+    };
+    await readOpenQuestion(index, 'sess-1', bytes.length, 3, resuming, SCAN_CAP);
+
+    expect(seenFrom[0]).toBe(afterInterruption);
+    expect(index.get('sess-1')?.consumedThrough).toBe(bytes.length);
+  });
 });
 
 describe('mergeOpenQuestion', () => {
