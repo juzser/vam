@@ -40,8 +40,9 @@ describe('the overlay sheet rules', () => {
   it('caps the sheet and lets it scroll within itself', () => {
     expect(sheetRules).toMatch(/max-height: 85dvh;/);
     expect(sheetRules).toMatch(/overflow-y: auto;/);
-    // SettingsOverlay's panel is `h-[min(600px,80vh)]`, a fixed height that
-    // would win over a max-height and reintroduce the unreachable bottom.
+    // SettingsOverlay's panel wears `vam-modal-lg` (`styles.css`), a fixed
+    // height that would win over a max-height and reintroduce the
+    // unreachable bottom.
     expect(sheetRules).toMatch(/height: auto;/);
   });
 

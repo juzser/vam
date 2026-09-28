@@ -459,7 +459,12 @@ export function StatsScreen({ onClose }: StatsScreenProps) {
       aria-modal="true"
       tabIndex={-1}
       onKeyDown={onEscape}
-      className="absolute inset-0 z-50 flex items-start justify-center pt-10 focus:outline-none"
+      // `pt-16`, matching `SettingsOverlay.tsx`'s own host exactly: with both
+      // panels now the same fixed `vam-modal-lg` size, a different top
+      // padding here would still offset the two panels' rects vertically --
+      // `e2e/modal-size-shots.mjs` asserts the two IDENTICAL, not merely the
+      // same size.
+      className="absolute inset-0 z-50 flex items-start justify-center pt-16 focus:outline-none"
     >
       <button
         type="button"
@@ -467,8 +472,17 @@ export function StatsScreen({ onClose }: StatsScreenProps) {
         className="absolute inset-0 cursor-default bg-ground/70"
         onMouseDown={onClose}
       />
-      <div className="relative flex max-h-[85vh] w-[min(920px,94vw)] flex-col gap-4 overflow-y-auto rounded-md border border-line bg-panel p-4">
-        <div className="flex items-baseline justify-between">
+      {/* `vam-modal-lg` (`styles.css`): the shared large-modal size,
+          `SettingsOverlay.tsx`'s own panel wears the identical class -- "the
+          same size" is a fact about one declaration, not two Tailwind
+          arbitrary values that used to merely agree (`min(920px,94vw)` here,
+          `min(880px,94vw)` there). Fixed height, not `max-h`: the header
+          below stays put and only the body scrolls, the same reason
+          `SettingsOverlay.tsx`'s nav column needs one, and what makes the two
+          panels' rects comparable at all -- `e2e/modal-size-shots.mjs`
+          measures them pixel-IDENTICAL. */}
+      <div className="vam-modal-lg relative flex flex-col overflow-hidden rounded-md border border-line bg-panel">
+        <div className="flex flex-none items-baseline justify-between border-line border-b px-4 py-3">
           <div>
             <h2 className="font-semibold text-heading text-ink">Stats & Usage</h2>
             <p className="text-control text-ink-dim">
@@ -485,24 +499,35 @@ export function StatsScreen({ onClose }: StatsScreenProps) {
           </button>
         </div>
 
-        {bridge === undefined ? (
-          <p data-stats-unavailable className="text-control text-ink-dim">
-            stats are only available in the desktop app on macOS
-          </p>
-        ) : result === null ? (
-          <p className="text-control text-ink-dim">reading this machine's transcripts…</p>
-        ) : result.kind === 'error' ? (
-          <p className="text-control text-failed">{result.message}</p>
-        ) : (
-          <ScreenBody
-            snapshot={
-              prsOverride === null
-                ? result.snapshot
-                : { ...result.snapshot, prsCreated: prsOverride }
-            }
-            onRefresh={onRefresh}
-          />
-        )}
+        {/* Named the same way `data-settings-scroll` is: the one region that
+            actually scrolls, so a guard asking what is on screen has
+            something narrower to point at than the whole dialog. */}
+        <div data-stats-scroll className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+          {/* A readable ceiling, not the full box -- `vam-modal-lg` gives this
+              panel nearly the whole window so it can share Settings' exact
+              rect; a stats grid stretched to 1800+px would only widen the
+              gaps between numbers, never add anything to read. */}
+          <div className="mx-auto flex w-full max-w-[760px] flex-col gap-4">
+            {bridge === undefined ? (
+              <p data-stats-unavailable className="text-control text-ink-dim">
+                stats are only available in the desktop app on macOS
+              </p>
+            ) : result === null ? (
+              <p className="text-control text-ink-dim">reading this machine's transcripts…</p>
+            ) : result.kind === 'error' ? (
+              <p className="text-control text-failed">{result.message}</p>
+            ) : (
+              <ScreenBody
+                snapshot={
+                  prsOverride === null
+                    ? result.snapshot
+                    : { ...result.snapshot, prsCreated: prsOverride }
+                }
+                onRefresh={onRefresh}
+              />
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
