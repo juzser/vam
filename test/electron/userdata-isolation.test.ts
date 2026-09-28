@@ -103,8 +103,39 @@ interface ProbeRun {
 function spawnProbe(env: NodeJS.ProcessEnv): ChildProcessWithoutNullStreams {
   return spawn(bin('electron'), [probePath], {
     cwd: repoRoot,
+    // ITS OWN PROCESS GROUP -- CI evidence (PR #548, runs 36402029062 and
+    // 36403787763): killing only the Electron MAIN process (a bare
+    // `child.kill('SIGKILL')`, this function's own prior shape) left its
+    // own tmux control-mode GRANDCHILD (`spawnRealControlChild`,
+    // `src/main/sources/tmux/control.ts`) running, orphaned, reparented to
+    // init (`ps` showed `PPID=1`). That orphan resolves/opens its tmux
+    // connection on its OWN schedule, independent of its dead parent -- and
+    // when that happens to land AFTER this file's own `afterAll` already
+    // `rmSync`'d `tmuxTmpdir`, tmux's own `TMUX_TMPDIR` resolution falls
+    // through to `/tmp` (the exact incident this whole harness exists to
+    // prevent), even though the orphan's own env still names the (by then
+    // deleted) private directory -- confirmed directly: the diagnostic
+    // `describeDefaultServerLeak` prints for the leaked session reported
+    // "its claimed private socket ... does NOT exist" both times. `settings-
+    // update.test.ts`'s own `runProbe` already carries the identical fix,
+    // for the identical reason (its own comment: "SIGKILL on the main
+    // process alone left them running").
+    detached: true,
     env: isolatedTmuxEnv({ ...process.env, VAM_FIXTURE_SOURCE: '1', ...env }, tmuxTmpdir),
   }) as ChildProcessWithoutNullStreams;
+}
+
+/** Kills `child`'s WHOLE PROCESS GROUP, not just its own pid -- see
+ *  `spawnProbe`'s own `detached: true` note for why a bare `child.kill()`
+ *  is not enough. `-child.pid` is POSIX's own "signal the whole group"
+ *  spelling; a group with nothing left to signal (already exited) is not a
+ *  failure here, just nothing left to do. */
+function killTree(child: ChildProcessWithoutNullStreams): void {
+  try {
+    if (child.pid !== undefined) process.kill(-child.pid, 'SIGKILL');
+  } catch {
+    // Already gone -- the group has no members left to signal.
+  }
 }
 
 function waitForExit(child: ChildProcessWithoutNullStreams): Promise<ProbeRun> {
@@ -118,7 +149,7 @@ function waitForExit(child: ChildProcessWithoutNullStreams): Promise<ProbeRun> {
   });
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
-      child.kill('SIGKILL');
+      killTree(child);
       reject(
         new Error(`userdata-probe did not exit within 30s\nstdout:\n${stdout}\nstderr:\n${stderr}`),
       );
@@ -224,7 +255,7 @@ describe('the Electron harness gets its own throwaway userData', () => {
       // directories rather than throwing or colliding).
       expect(existsSync(path.join(userDataA, 'Local Storage'))).toBe(true);
     } finally {
-      childA.kill('SIGKILL');
+      killTree(childA);
     }
   }, 40_000);
 
