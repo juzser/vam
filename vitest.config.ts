@@ -30,11 +30,18 @@ export default defineConfig({
     // `electron-vite build` has not produced yet at this point in the gate.
     // Left in, it fails with ENOENT on a clean checkout rather than testing
     // anything.
+    //
+    // `test/electron/settings-update.test.ts` is the same bargain again: a
+    // real Electron binary, `out/main/index.cjs` built first, and a per-test
+    // timeout (`vitest.app.config.ts`'s own 100s) the default suite's much
+    // shorter one cannot give it -- measured directly (a spurious timeout,
+    // unexcluded, is what said so).
     exclude: [
       'test/electron/launch.test.ts',
       'test/electron/userdata-isolation.test.ts',
       'test/electron/getting-started-image.test.ts',
       'test/electron/stats-worker.test.ts',
+      'test/electron/settings-update.test.ts',
       '**/node_modules/**',
       '**/dist/**',
     ],

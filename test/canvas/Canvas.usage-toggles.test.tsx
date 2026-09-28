@@ -68,11 +68,19 @@ const CODEX_SNAPSHOT: CodexUsageSnapshot = {
   observedAt: new Date().toISOString(),
 };
 
-function serve(): void {
+/** No reading at all -- the `—` + tooltip state both cells must still draw
+ *  their provider mark in. */
+const CLAUDE_UNKNOWN: UsageSnapshot = { kind: 'unknown', reason: 'unavailable' };
+const CODEX_UNKNOWN: CodexUsageSnapshot = { kind: 'unknown', reason: 'no-session' };
+
+function serve(
+  claude: UsageSnapshot = CLAUDE_SNAPSHOT,
+  codex: CodexUsageSnapshot = CODEX_SNAPSHOT,
+): void {
   (window as unknown as { api: unknown }).api = {
     usage: {
-      get: vi.fn(async () => CLAUDE_SNAPSHOT),
-      getCodex: vi.fn(async () => CODEX_SNAPSHOT),
+      get: vi.fn(async () => claude),
+      getCodex: vi.fn(async () => codex),
     },
   };
 }
@@ -112,6 +120,46 @@ describe('statusBarShowCodexUsage', () => {
     render(<Canvas model={EMPTY} />);
     await act(async () => {});
     expect(codexCell()?.textContent).toContain('11% used');
+  });
+});
+
+describe('the provider mark beside the value', () => {
+  // The operator's own complaint: turning the toggle on drew a value with no
+  // icon beside it. Assert the ELEMENT `SourceMark` actually paints (an
+  // `svg`), never a class name or a colour token -- the same idiom
+  // `test/sources/provider-marks.test.tsx` and
+  // `test/canvas/Canvas.tab-indicators.test.tsx` already use for this exact
+  // resolver.
+  it('draws the Claude mark beside a real reading', async () => {
+    serve();
+    render(<Canvas model={EMPTY} />);
+    await act(async () => {});
+    expect(claudeCell()?.querySelector('svg')).not.toBeNull();
+  });
+
+  it('still draws the Claude mark when there is nothing to report -- the em-dash is not the only thing in the cell', async () => {
+    serve(CLAUDE_UNKNOWN);
+    render(<Canvas model={EMPTY} />);
+    await act(async () => {});
+    expect(claudeCell()?.textContent).toContain('—');
+    expect(claudeCell()?.querySelector('svg')).not.toBeNull();
+  });
+
+  it('draws the Codex mark beside a real reading', async () => {
+    serve(CLAUDE_SNAPSHOT, CODEX_SNAPSHOT);
+    seed({ statusBarShowCodexUsage: true });
+    render(<Canvas model={EMPTY} />);
+    await act(async () => {});
+    expect(codexCell()?.querySelector('svg')).not.toBeNull();
+  });
+
+  it('still draws the Codex mark in the no-data state -- the icon is never conditional on there being a number', async () => {
+    serve(CLAUDE_SNAPSHOT, CODEX_UNKNOWN);
+    seed({ statusBarShowCodexUsage: true });
+    render(<Canvas model={EMPTY} />);
+    await act(async () => {});
+    expect(codexCell()?.textContent).toContain('—');
+    expect(codexCell()?.querySelector('svg')).not.toBeNull();
   });
 });
 
