@@ -143,6 +143,7 @@ import { SplitResizer } from '../panels/SplitResizer.js';
 import { StatusMark } from '../panels/status-mark.js';
 import { halfPageTarget } from '../panels/stick-to-bottom.js';
 import { TABS, tabForDigit, visibleTabs } from '../panels/tabs.js';
+import { ConfirmCloseSession } from '../phone/ConfirmCloseSession.js';
 import { PhoneShell } from '../phone/PhoneShell.js';
 import { usePhoneViewport } from '../phone/viewport.js';
 import { type AgentPermissions, isDesktopShell } from '../prefs/agent-permissions.js';
@@ -2315,10 +2316,17 @@ function CanvasInner({
     setErrorLogOpen,
     confirmForceClose,
     setConfirmForceClose,
+    confirmCloseSession,
+    setConfirmCloseSession,
   } = useCanvasOverlays();
   /** Any full-screen overlay on screen. See the keydown handler for the rule. */
   const overlayOpen =
-    paletteOpen || keySheetOpen || settingsOpen || errorLogOpen || confirmForceClose !== null;
+    paletteOpen ||
+    keySheetOpen ||
+    settingsOpen ||
+    errorLogOpen ||
+    confirmForceClose !== null ||
+    confirmCloseSession !== null;
   /**
    * Whether the source has a terminal to draw, which decides how many tabs the
    * bar has. Read in two places -- the pane is told, and `Mod-<digit>` counts
@@ -3191,17 +3199,40 @@ function CanvasInner({
             if (cancelled || view.kind !== 'ok' || startingPaneByKeyRef.current[key] !== wait) {
               return;
             }
-            if (view.screen === 'ready') {
+            // `view.provider === undefined` -- THE COORDINATOR'S OWN BUG
+            // REPORT (A): the pane's foreground is still a plain shell
+            // (`readStartScreen`'s own three-state header, `main/terminal/
+            // start-screen.ts`), which a starship/pure prompt can make
+            // `screen` read as `ready` on its own (an echoed `❯ claude` an
+            // operator has typed but not yet run) -- `detectStartScreen`'s
+            // READY_CARET is deliberately blind to the foreground command.
+            // NOTHING IS WRITTEN here on purpose: `key in current` above
+            // would freeze a false confirmation in place forever, and a
+            // LATER, genuine ready read (the operator actually presses
+            // Enter) would then find the key already "confirmed" and never
+            // correct it. Leaving the map untouched is what keeps this key
+            // pollable -- the ordinary "not yet confirmed" path every other
+            // unresolved wait already takes.
+            if (view.screen === 'ready' && view.provider !== undefined) {
+              // NARROWED HERE, in the outer closure, and read back through
+              // this binding rather than `view.provider` inside the updater
+              // below -- the identical reason `screen` a few lines down does
+              // the same: TypeScript does not carry a narrowing into a
+              // callback that may run later, so re-reading the union member
+              // through it would still widen back to `ProviderId | null |
+              // undefined`.
+              const provider: ProviderId | null = view.provider;
               setProviderRunningByKey((current) =>
                 key in current
                   ? current
                   : {
                       ...current,
-                      [key]: { provider: view.provider, confirmedAt: Date.now() },
+                      [key]: { provider, confirmedAt: Date.now() },
                     },
               );
               return;
             }
+            if (view.screen === 'ready') return;
             // Narrowed here, in the OUTER closure, and read back through this
             // binding rather than `view.screen` inside the updater below:
             // TypeScript does not carry a narrowing into a callback that may
@@ -5174,12 +5205,17 @@ function CanvasInner({
   /**
    * Stop the focused session — really, when the source can.
    *
-   * NO CONFIRM STEP, and that is a decision rather than an omission. `claude
-   * stop` keeps the conversation and `claude attach <id>` brings it back, so
-   * this is not a delete; the status line names the session it acted on and
-   * says the conversation is kept, which is what a confirm dialog would have
-   * been for. A modal in front of a resumable, named, undoable action is a
-   * keystroke tax on the common case.
+   * A CONFIRM STEP ONLY WHILE THE AGENT IS MID-TURN, per DECISION 1
+   * (`docs/design/vam-owns-the-session.md` §5, "Confirm only when the agent
+   * is mid-turn") — the operator's own words: "ask for confirmation before
+   * closing a session ONLY while the agent is running, on every device." A
+   * session that is `waiting` has already finished its turn and put the ball
+   * back with the operator — nothing in flight would be lost by closing it —
+   * so it closes exactly as it always did: no modal, `claude stop` keeps the
+   * conversation and `claude attach <id>` brings it back. `running` is the
+   * one status where a close can cut off work the operator cannot get back
+   * by reopening, and that gate is `closeSession` below, BEFORE
+   * `performCloseSession` is ever called — see its own comment.
    *
    * WHAT IT WILL NOT DO is decide for itself which sessions are stoppable.
    * `claude stop` stops BACKGROUND sessions only; an interactive one is a
@@ -5235,7 +5271,15 @@ function CanvasInner({
     [allEntries, prefs, savePrefs, setStatus],
   );
 
-  const closeSession = useCallback(
+  /**
+   * THE ACTUAL WRITE, gated by `closeSession` below rather than calling the
+   * source directly. Split out so a confirmed "yes, close it anyway" (from
+   * `confirmCloseSession`'s own `onConfirm`) can reach this without walking
+   * back through the running-status check it already answered — the same
+   * shape `confirmForceClose`'s `onConfirm` already uses to call THIS
+   * function with `force: true` after ITS OWN question.
+   */
+  const performCloseSession = useCallback(
     async (sessionId: string, title: string, force = false): Promise<boolean> => {
       if (pendingAction !== null) {
         // NAMED, and named for the session the operator just clicked: only
@@ -5316,6 +5360,50 @@ function CanvasInner({
       }
     },
     [source, pendingAction, dismissSession, setStatus, setConfirmForceClose],
+  );
+
+  /**
+   * THE ONE HELPER EVERY CLOSE PATH CALLS -- the tab's `×` (`closePaneTab`),
+   * the sidebar row's `×` (`onSidebarClose`), the `x` chord below, the tab's
+   * context menu ("Close session"), and the phone's app-bar `×` (routed
+   * through `sidebar.onClose`, the same `onSidebarClose`). Because all five
+   * already called `closeSession` before this existed, putting DECISION 1's
+   * gate here — rather than in each caller — is what makes it impossible for
+   * a sixth close button to bypass the question: there is nowhere else to
+   * plug in a source write.
+   *
+   * READS THE ROW'S STATUS OFF `allEntries`, the unfiltered list, on
+   * `dismissSession`'s own precedent above: a row reached through the
+   * command palette or a background tab may not be in today's filtered view.
+   *
+   * `running` IS THE ONLY STATUS THAT ASKS. `waiting` means the session
+   * already finished its turn and put the ball back with the operator
+   * (`domain/model.ts`'s own definition) — closing it loses nothing in
+   * flight, so it is treated exactly like `idle`/`done`/`terminal`/etc. and
+   * closes without a question. See this function's own doc comment above for
+   * the operator's words.
+   *
+   * NEVER RE-ASKS ON `force`. A `force: true` call only ever arrives from
+   * `confirmForceClose`'s own `onConfirm` — itself reachable only through an
+   * UNFORCED call that already passed (or skipped) this gate — so gating it a
+   * second time would be a second, redundant question about the same act.
+   *
+   * RETURNS `false` AND OPENS THE PROMPT rather than attempting anything: no
+   * "stopping…" status, no write, until `confirmCloseSession`'s own
+   * `onConfirm` calls `performCloseSession` directly.
+   */
+  const closeSession = useCallback(
+    async (sessionId: string, title: string, force = false): Promise<boolean> => {
+      if (!force) {
+        const entry = allEntries.find((e) => e.session.id === sessionId);
+        if (entry !== undefined && entry.session.status === 'running') {
+          setConfirmCloseSession({ sessionId, title });
+          return false;
+        }
+      }
+      return performCloseSession(sessionId, title, force);
+    },
+    [allEntries, performCloseSession, setConfirmCloseSession],
   );
 
   /**
@@ -7745,6 +7833,19 @@ function CanvasInner({
           entry === null
             ? null
             : (startingPaneByKey[entry.session.pane ?? entry.session.id] ?? null),
+        // `startingPane`'s OWN CLEAR -- a review-found S2
+        // (`onStartingPaneCleared`'s own header, `DetailPanel.tsx`): declining
+        // the trust dialog quits the CLI back to a bare shell, so neither of
+        // `clearStartingPane`'s two ordinary triggers (the row leaving
+        // `unstarted`/`terminal`, or a failed write) was ever going to fire,
+        // and Start stayed disabled for good. `DetailPanel` cannot call
+        // `clearStartingPane` itself -- only `Canvas.tsx` owns
+        // `startingPaneByKey` -- so this hands down the identical act, bound
+        // to THIS pane's own key.
+        onStartingPaneCleared:
+          entry === null
+            ? undefined
+            : () => clearStartingPane(entry.session.pane ?? entry.session.id),
         // CONFIRMED RUNNING, EVEN THOUGH THE ROW STILL READS `unstarted`/
         // `terminal` -- `runningProvider`'s own three-way computation just
         // above, and `DetailPanelProps.runningProvider`'s own header for the
@@ -7903,6 +8004,7 @@ function CanvasInner({
       hasOwnSession,
       sidebarLoading,
       pendingAction,
+      clearStartingPane,
     ],
   );
 
@@ -8260,6 +8362,22 @@ function CanvasInner({
         />
       )}
 
+      {/* DECISION 1's one prompt, on every device: a sibling of the phone
+          conditional above rather than a child of either branch, so it draws
+          over whichever layout is on screen -- `confirmForceClose`'s own
+          reason, restated for this overlay. See `closeSession` above. */}
+      {confirmCloseSession !== null && (
+        <ConfirmCloseSession
+          title={confirmCloseSession.title}
+          onCancel={() => setConfirmCloseSession(null)}
+          onConfirm={() => {
+            const target = confirmCloseSession;
+            setConfirmCloseSession(null);
+            void performCloseSession(target.sessionId, target.title);
+          }}
+        />
+      )}
+
       {confirmForceClose !== null && (
         <ConfirmForceClose
           title={confirmForceClose.title}
@@ -8472,8 +8590,17 @@ function CanvasInner({
           {prefs.statusBarShowClaudeUsage && (
             <>
               <span className="h-3 w-px bg-line" />
+              {/* The provider mark, in EVERY state -- including the bare `—`
+                  with its tooltip. `SourceMark` is the same resolver the
+                  sidebar row and the Stats screen's `ProviderCard` already
+                  draw from (`sources/provider-marks.tsx`), never a copied
+                  path: one glyph for `claude-code`, drawn once. */}
               {usage.reason === null ? (
-                <span data-usage className={usage.highUsage ? 'text-failed' : undefined}>
+                <span
+                  data-usage
+                  className={`flex items-center gap-1${usage.highUsage ? ' text-failed' : ''}`}
+                >
+                  <SourceMark source="claude-code" lane={12} />
                   {usage.text}
                 </span>
               ) : (
@@ -8484,9 +8611,11 @@ function CanvasInner({
                       hover on touch it was unreachable at all. */}
                   <span
                     data-usage
+                    className="flex items-center gap-1"
                     // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see `StatusCell`.
                     tabIndex={0}
                   >
+                    <SourceMark source="claude-code" lane={12} />
                     {usage.text}
                   </span>
                 </Note>
@@ -8515,18 +8644,30 @@ function CanvasInner({
                   are not `UsageWindow`s, and a second bar widget over a shape
                   `describeCodexStatusUsage` already collapsed to one line is
                   more than this cell earns -- the popover (`UsagePopover.tsx`)
-                  is where the per-window detail lives. */}
+                  is where the per-window detail lives.
+
+                  The provider mark draws in EVERY state here too, including
+                  the bare `—` with its tooltip -- the same `SourceMark`
+                  resolver, `source="codex"`, so this cell and Claude's read
+                  as one family rather than two different widgets that
+                  happen to sit beside each other. */}
               {codexUsage.reason === null ? (
-                <span data-codex-usage className={codexUsage.highUsage ? 'text-failed' : undefined}>
+                <span
+                  data-codex-usage
+                  className={`flex items-center gap-1${codexUsage.highUsage ? ' text-failed' : ''}`}
+                >
+                  <SourceMark source="codex" lane={12} />
                   {codexUsage.text}
                 </span>
               ) : (
                 <Note text={codexUsage.reason}>
                   <span
                     data-codex-usage
+                    className="flex items-center gap-1"
                     // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see `StatusCell`.
                     tabIndex={0}
                   >
+                    <SourceMark source="codex" lane={12} />
                     {codexUsage.text}
                   </span>
                 </Note>

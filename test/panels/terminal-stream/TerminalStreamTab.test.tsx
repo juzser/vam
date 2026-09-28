@@ -60,10 +60,11 @@ class FakeTerminal {
    * FIFO, matching real xterm's own in-order parse. */
   writeCallbacks: Array<() => void> = [];
   customKeyEventHandler: ((event: KeyboardEvent) => boolean) | undefined;
-  // The one field of the real `Terminal.modes` getter the paste handler
-  // reads -- a plain, test-settable property standing in for xterm's own
-  // computed one. Defaults to `false`: most panes are not running a program
-  // that asked for bracketed paste.
+  // A plain, test-settable property standing in for xterm's own computed
+  // `Terminal.modes` getter. The paste handler no longer reads this (S2 fix:
+  // bracketing is tmux's own `paste-buffer -p` decision now) -- kept so the
+  // "a real paste" tests below can set it and prove exactly that: the
+  // listener's own behaviour is unchanged by this field either way.
   modes: { bracketedPasteMode: boolean } = { bracketedPasteMode: false };
   // The real `Terminal.unicode` API surface this component touches:
   // `activeVersion` starts at xterm's own built-in default ('6') until a
@@ -146,6 +147,7 @@ function withBridge(over: {
   >;
   close?: (streamId: string) => void;
   write?: (streamId: string, bytes: Uint8Array) => void;
+  paste?: (streamId: string, bytes: Uint8Array) => void;
   onData?: (streamId: string, listener: (chunk: string) => void) => () => void;
   onSeed?: (streamId: string, listener: (seed: string) => void) => () => void;
   onDown?: (streamId: string, listener: (event: StreamDownEvent) => void) => () => void;
@@ -167,6 +169,7 @@ function withBridge(over: {
           })),
         close: over.close ?? close,
         write: over.write ?? vi.fn(),
+        paste: over.paste ?? vi.fn(),
         onData: over.onData ?? (() => () => {}),
         onSeed: over.onSeed ?? (() => () => {}),
         onDown: over.onDown ?? (() => () => {}),
@@ -547,9 +550,10 @@ describe('mounted with a bridge', () => {
       expect(stopImmediatePropagation).toHaveBeenCalled();
     });
 
-    it('writes the sanitised clipboard text, unwrapped, when the pane has not asked for bracketed paste', async () => {
+    it('pastes the sanitised clipboard text through openBridge.paste, unwrapped, regardless of the pane having asked for bracketed paste (S2 fix: tmux decides bracketing, never this component)', async () => {
+      const paste = vi.fn();
       const write = vi.fn();
-      withBridge({ write });
+      withBridge({ paste, write });
       render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
       await act(async () => {
         await Promise.resolve();
@@ -557,40 +561,27 @@ describe('mounted with a bridge', () => {
       });
       const textarea = lastTerm?.textarea;
       if (textarea === undefined || lastTerm === undefined) throw new Error('no textarea');
-      lastTerm.modes.bracketedPasteMode = false;
+      // A freshly-attached view's own `modes.bracketedPasteMode` starts
+      // false regardless of the PANE's real, server-side state -- exactly
+      // the staleness the old client-side wrap decision could get wrong.
+      // Set true here to prove the listener no longer reads it at all.
+      lastTerm.modes.bracketedPasteMode = true;
       act(() => {
         textarea.dispatchEvent(pasteEvent('line one\r\nline two'));
       });
-      // CRLF -> one CR, exactly `terminal-paste.ts`'s own `preparePastedText`.
-      expect(write).toHaveBeenCalledWith(
+      // CRLF -> one CR, exactly `terminal-paste.ts`'s own `preparePastedText`,
+      // and NEVER wrapped in `\x1b[200~...\x1b[201~` here -- that decision now
+      // belongs to tmux's own `paste-buffer -p`, server-side.
+      expect(paste).toHaveBeenCalledWith(
         'stream-1',
         new TextEncoder().encode('line one\rline two'),
       );
-    });
-
-    it('wraps the write in bracketed-paste codes when the pane HAS asked for it', async () => {
-      const write = vi.fn();
-      withBridge({ write });
-      render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
-      await act(async () => {
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-      const textarea = lastTerm?.textarea;
-      if (textarea === undefined || lastTerm === undefined) throw new Error('no textarea');
-      lastTerm.modes.bracketedPasteMode = true;
-      act(() => {
-        textarea.dispatchEvent(pasteEvent('hello'));
-      });
-      expect(write).toHaveBeenCalledWith(
-        'stream-1',
-        new TextEncoder().encode('\x1b[200~hello\x1b[201~'),
-      );
+      expect(write).not.toHaveBeenCalled();
     });
 
     it('does nothing for an empty clipboard', async () => {
-      const write = vi.fn();
-      withBridge({ write });
+      const paste = vi.fn();
+      withBridge({ paste });
       render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
       await act(async () => {
         await Promise.resolve();
@@ -601,7 +592,7 @@ describe('mounted with a bridge', () => {
       act(() => {
         textarea.dispatchEvent(pasteEvent(''));
       });
-      expect(write).not.toHaveBeenCalled();
+      expect(paste).not.toHaveBeenCalled();
     });
 
     it('draws no refusal text -- a real paste is not a refusal', async () => {
@@ -627,8 +618,8 @@ describe('mounted with a bridge', () => {
       // the CONTAINER -- what a real paste would target while the textarea
       // does not hold DOM focus -- never reaches it: a `paste` event does not
       // propagate to a descendant, only to ancestors.
-      const write = vi.fn();
-      withBridge({ write });
+      const paste = vi.fn();
+      withBridge({ paste });
       render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
       await act(async () => {
         await Promise.resolve();
@@ -639,7 +630,7 @@ describe('mounted with a bridge', () => {
       act(() => {
         container.dispatchEvent(pasteEvent('nope'));
       });
-      expect(write).not.toHaveBeenCalled();
+      expect(paste).not.toHaveBeenCalled();
     });
   });
 

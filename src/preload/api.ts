@@ -787,6 +787,13 @@ export type TerminalStreamApi = {
    *  bytes arrives on `onData` regardless. */
   write(streamId: string, bytes: Uint8Array): void;
   /**
+   * A PASTE, not a keystroke -- routed to `terminalStreamPaste`, which
+   * delivers it through tmux's OWN `paste-buffer -p` rather than `write`'s
+   * `onData` path (see that channel's own header in `main/ipc/channels.ts`).
+   * Fire-and-forget for the same reason `write` is.
+   */
+  paste(streamId: string, bytes: Uint8Array): void;
+  /**
    * `CHANNELS.terminalStreamData` is SHARED across every currently-open
    * stream -- main pushes `(streamId, chunk)` on one channel, not one
    * channel per stream -- so the returned listener here filters by
@@ -862,6 +869,11 @@ export function createTerminalStreamApi(ipc: InvokerLike & ListenerLike): Termin
     write: (streamId, bytes) => {
       ipc.invoke(CHANNELS.terminalStreamWrite, streamId, bytes).catch((error: unknown) => {
         console.error('vam: terminal stream write failed:', error);
+      });
+    },
+    paste: (streamId, bytes) => {
+      ipc.invoke(CHANNELS.terminalStreamPaste, streamId, bytes).catch((error: unknown) => {
+        console.error('vam: terminal stream paste failed:', error);
       });
     },
     onData: (streamId, listener) =>

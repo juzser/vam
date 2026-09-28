@@ -40,6 +40,21 @@ export function useCanvasOverlays() {
      *  second, disconnected one -- see `closeSession`'s own dismissal path. */
     reason: string;
   } | null>(null);
+  /**
+   * DECISION 1 (docs/design/vam-owns-the-session.md §5, "Confirm only when
+   * the agent is mid-turn"): the one prompt every close route -- the tab's
+   * `×`, the sidebar row's `×`, the `x` chord, the tab's context menu, and
+   * the phone's app-bar `×` -- shows FIRST when the session it targets is
+   * `running`. `null` means no such prompt is on screen. Set only by
+   * `closeSession` in `Canvas.tsx`, which is the one place that reads a
+   * row's status before acting -- see its own comment for why routing every
+   * caller through that single function is what keeps this from being
+   * bypassable by a sixth close button somebody adds later.
+   */
+  const [confirmCloseSession, setConfirmCloseSession] = useState<{
+    sessionId: string;
+    title: string;
+  } | null>(null);
 
   return {
     jumping,
@@ -60,5 +75,7 @@ export function useCanvasOverlays() {
     setErrorLogOpen,
     confirmForceClose,
     setConfirmForceClose,
+    confirmCloseSession,
+    setConfirmCloseSession,
   };
 }

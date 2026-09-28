@@ -17,6 +17,7 @@
  * `ELECTRON_RENDERER_URL`, the one path this criterion exists to catch a
  * regression in.
  */
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import { createServer } from 'node:net';
 import os from 'node:os';
@@ -27,6 +28,114 @@ import { _electron as electron, expect, test } from '@playwright/test';
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const distAppDir = path.join(repoRoot, 'dist-app');
 const OFF_ORIGIN = 'https://example.invalid/';
+
+/**
+ * ISOLATES EVERY TMUX CALL THIS SPEC'S LAUNCH MAKES from the operator's own
+ * default tmux server -- see `test/support/tmux-harness-env.ts`'s header for
+ * the full rationale and the measured evidence; this file inlines the
+ * identical, small mechanism rather than importing across the `e2e/` /
+ * root-`test/` boundary, which nothing else in this directory does (`e2e/`
+ * keeps its own toolchain -- `e2e/node_modules`, no shared `tsconfig` --
+ * exactly so a spec here never depends on the root project's own test tree).
+ *
+ * THIS SPEC IS THE ONE MOST LIKELY TO ACTUALLY REACH TMUX FOR REAL: unlike
+ * every `test/electron/*.test.ts` launch, it sets NO `VAM_FIXTURE_SOURCE` --
+ * `src/main/index.ts`'s `DESKTOP_SOURCES` therefore serves the operator's
+ * REAL Claude Code and Codex sessions, and a live one on screen is exactly
+ * what drives vam's Terminal machinery (`createControlTmuxRunner`,
+ * `src/main/sources/tmux/control.ts`) to open its `-C new-session -A -s
+ * vamctl` control connection -- the exact session the evidence for this fix
+ * found sitting on the operator's real default server, with a pane cwd
+ * inside an agent's worktree.
+ */
+const TMUX_SOCKET_ROOT = '/tmp';
+const NO_SERVER = /no server running|error connecting to .*\(no such file/i;
+
+function tmuxAvailable(): boolean {
+  try {
+    execFileSync('tmux', ['-V'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function stderrOf(error: unknown): string {
+  return error !== null && typeof error === 'object' && 'stderr' in error
+    ? String((error as { stderr: unknown }).stderr)
+    : '';
+}
+
+function isolatedTmuxEnv(base: NodeJS.ProcessEnv, tmuxTmpdir: string): NodeJS.ProcessEnv {
+  const next: NodeJS.ProcessEnv = { ...base, TMUX_TMPDIR: tmuxTmpdir };
+  delete next.TMUX;
+  return next;
+}
+
+function defaultServerPaneCwds(): string[] {
+  try {
+    const stdout = execFileSync('tmux', ['list-sessions', '-F', '#{pane_current_path}'], {
+      env: process.env,
+      encoding: 'utf8',
+    });
+    return stdout
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line !== '');
+  } catch (error) {
+    if (NO_SERVER.test(stderrOf(error))) return [];
+    throw error;
+  }
+}
+
+function assertNoNewSessionUnderOnDefaultServer(input: {
+  before: readonly string[];
+  after: readonly string[];
+  watchDir: string;
+}): void {
+  const { before, after, watchDir } = input;
+  const beforeSet = new Set(before);
+  const isUnder = (cwd: string): boolean => cwd === watchDir || cwd.startsWith(watchDir + path.sep);
+  const introduced = after.filter((cwd) => !beforeSet.has(cwd) && isUnder(cwd));
+  if (introduced.length > 0) {
+    throw new Error(
+      `a new session appeared on the OPERATOR'S DEFAULT tmux server with a pane cwd under ` +
+        `${watchDir}, which the isolated launch must never reach: ${introduced.join(', ')}`,
+    );
+  }
+}
+
+function isolatedServerSessionCount(tmuxTmpdir: string): number {
+  try {
+    const stdout = execFileSync('tmux', ['-L', 'default', 'list-sessions'], {
+      env: isolatedTmuxEnv(process.env, tmuxTmpdir),
+      encoding: 'utf8',
+    });
+    return stdout.split('\n').filter((line) => line.trim() !== '').length;
+  } catch (error) {
+    if (NO_SERVER.test(stderrOf(error))) return 0;
+    throw error;
+  }
+}
+
+function killIsolatedServer(tmuxTmpdir: string): void {
+  try {
+    execFileSync('tmux', ['-L', 'default', 'kill-server'], {
+      env: isolatedTmuxEnv(process.env, tmuxTmpdir),
+      stdio: 'ignore',
+    });
+  } catch {
+    // Nothing running on this private socket -- nothing to clean up.
+  }
+}
+
+/** `/tmp` itself, never `os.tmpdir()` -- see `TMUX_SOCKET_ROOT`'s own note:
+ *  a tmux socket is a real AF_UNIX path, and macOS's per-process
+ *  `os.tmpdir()` is already close to the kernel's ~104-byte `sun_path`
+ *  ceiling before this file's own `tmux-<uid>/<name>` suffix is added. */
+function mkIsolatedTmuxTmpdir(prefix: string): string {
+  return fs.mkdtempSync(path.join(TMUX_SOCKET_ROOT, `${prefix}-`));
+}
 
 /**
  * electron-builder's `--dir` output layout is platform-specific; this walks
@@ -107,13 +216,21 @@ test('the packaged app launches, is packaged, and stays locked down', async () =
   // spec too.
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vam-electron-et-userdata-'));
   const remotePort = await allocatePort();
+  // ISOLATES EVERY TMUX CALL THIS LAUNCH MAKES -- see this file's own header
+  // note above for why this spec, of every launch in this repo, is the one
+  // most likely to actually reach tmux for real.
+  const tmuxTmpdir = mkIsolatedTmuxTmpdir('vam-electron-et-tmux');
+  const defaultServerBefore = tmuxAvailable() ? defaultServerPaneCwds() : [];
   const electronApp = await electron.launch({
     executablePath: resolveExecutablePath(),
-    env: {
-      ...process.env,
-      VAM_USER_DATA_DIR: userDataDir,
-      VAM_REMOTE_PORT: String(remotePort),
-    },
+    env: isolatedTmuxEnv(
+      {
+        ...process.env,
+        VAM_USER_DATA_DIR: userDataDir,
+        VAM_REMOTE_PORT: String(remotePort),
+      },
+      tmuxTmpdir,
+    ),
   });
 
   try {
@@ -155,8 +272,23 @@ test('the packaged app launches, is packaged, and stays locked down', async () =
     }, OFF_ORIGIN);
     await window.waitForTimeout(700);
     expect(window.url()).toBe(urlBeforeNavigate);
+
+    // THE TMUX ISOLATION, PROVEN AT RUNTIME -- see `test/electron/
+    // launch.test.ts`'s identical assertion for the full rationale.
+    if (tmuxAvailable()) {
+      assertNoNewSessionUnderOnDefaultServer({
+        before: defaultServerBefore,
+        after: defaultServerPaneCwds(),
+        watchDir: repoRoot,
+      });
+      expect(() => isolatedServerSessionCount(tmuxTmpdir)).not.toThrow();
+    }
   } finally {
     await electronApp.close();
     fs.rmSync(userDataDir, { recursive: true, force: true });
+    if (tmuxAvailable()) {
+      killIsolatedServer(tmuxTmpdir);
+      fs.rmSync(tmuxTmpdir, { recursive: true, force: true });
+    }
   }
 });

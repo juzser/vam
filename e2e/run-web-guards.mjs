@@ -198,6 +198,7 @@ const GUARDS = [
   'composer-bar-shots',
   'settings-chrome-shots',
   'settings-panels-shots',
+  'settings-update-shots',
   // SETTINGS FILLS THE WHOLE WINDOW, MEASURED: the operator's own ask
   // (settings-views restructure, item A — "like a separate screen ... no
   // card-modal look, no backdrop margins"), asserted as a `getBoundingClientRect()`

@@ -233,6 +233,16 @@ export function WorktreesSection({
   const [pendingDelete, setPendingDelete] = useState<WorktreeInfo | null>(null);
   const [deleteDirty, setDeleteDirty] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  /**
+   * S1 DATA-LOSS FIX'S OWN FOLLOW-UP MESSAGE -- `RemoveWorktreeOutcome.
+   * keptRef` (`worktrees.ts`'s own header), the short branch name
+   * `removeWorktree` minted for a DETACHED worktree's otherwise-unreachable
+   * commit. `null` draws nothing (the ordinary case: a branch worktree, or a
+   * detached one already reachable elsewhere) -- never a placeholder while
+   * a delete is in flight, the same "say nothing rather than guess" rule
+   * `deleteError` already follows.
+   */
+  const [keptRefMessage, setKeptRefMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (forceOpenCreate) setCreating(true);
@@ -330,7 +340,7 @@ export function WorktreesSection({
     setBusy(true);
     setDeleteError(null);
     try {
-      await api.remove({
+      const outcome = await api.remove({
         projectId: project.id,
         worktreeId: pendingDelete.worktreeId,
         force: confirmName !== undefined,
@@ -338,6 +348,7 @@ export function WorktreesSection({
       });
       setPendingDelete(null);
       setDeleteDirty(false);
+      setKeptRefMessage(outcome.keptRef ?? null);
       reload();
     } catch (error) {
       if (errorCode(error) === 'dirty' && confirmName === undefined) {
@@ -426,6 +437,7 @@ export function WorktreesSection({
               onClick={() => {
                 setDeleteError(null);
                 setDeleteDirty(false);
+                setKeptRefMessage(null);
                 setPendingDelete(worktree);
               }}
               className="vam-tap vam-hit-24 flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-[5px] text-ink-faint hover:text-danger"
@@ -672,6 +684,12 @@ export function WorktreesSection({
             </p>
           )}
 
+          {keptRefMessage !== null && (
+            <p data-worktrees-kept-ref className="px-1 pb-1 text-control text-ink-dim">
+              Its unmerged commits are kept on branch {keptRefMessage}.
+            </p>
+          )}
+
           <div className="flex flex-col gap-1">
             {plainWorktrees.map((worktree) => renderRow(worktree))}
           </div>
@@ -735,6 +753,7 @@ export function WorktreesSection({
         <ConfirmDeleteWorktree
           name={displayName(pendingDelete.path)}
           branch={pendingDelete.branch}
+          detached={pendingDelete.detached}
           dirty={deleteDirty}
           onConfirm={(confirmName) => void confirmDelete(confirmName)}
           onCancel={() => {

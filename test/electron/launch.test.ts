@@ -10,7 +10,7 @@
  * under `e2e/`, and `e2e/` is read-only for this task (AC-11).
  */
 
-import { execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -18,6 +18,15 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DEMO_MODEL } from '../../src/renderer/fixtures/demo.js';
+import {
+  assertNoNewSessionUnderOnDefaultServer,
+  defaultServerPaneCwds,
+  isolatedServerSessionCount,
+  isolatedTmuxEnv,
+  killIsolatedServer,
+  mkIsolatedTmuxTmpdir,
+  tmuxAvailable,
+} from '../support/tmux-harness-env.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const bin = (name: string) => path.join(repoRoot, 'node_modules', '.bin', name);
@@ -187,27 +196,31 @@ function launch(
   streamPort: number,
   userDataDir: string,
   remotePort: number,
+  tmuxTmpdir: string,
 ): Promise<Launch> {
   return new Promise((resolve, reject) => {
     const child = spawn(bin('electron'), [path.join('test', 'electron', 'probe.cjs')], {
       cwd: repoRoot,
-      env: {
-        ...process.env,
-        VAM_SMOKE_PORT: String(port),
-        VAM_STREAM_URL: `http://127.0.0.1:${streamPort}/api/stream`,
-        // A clean runner (this one, and CI) has no Claude Code sessions on
-        // disk, so the real source's load() legitimately answers `[]` and
-        // "resolves to at least the Project/Session shape" below has nothing
-        // to check. This seeds a deterministic one-project fixture instead,
-        // per src/main/index.ts's LAUNCH_FIXTURE_SOURCE.
-        VAM_FIXTURE_SOURCE: '1',
-        // A throwaway `userData` for this one launch, never the operator's
-        // real profile -- see `src/main/index.ts`'s `VAM_USER_DATA_DIR`
-        // handling and `test/electron/userdata-isolation.test.ts` for the
-        // dedicated proof.
-        VAM_USER_DATA_DIR: userDataDir,
-        VAM_REMOTE_PORT: String(remotePort),
-      },
+      env: isolatedTmuxEnv(
+        {
+          ...process.env,
+          VAM_SMOKE_PORT: String(port),
+          VAM_STREAM_URL: `http://127.0.0.1:${streamPort}/api/stream`,
+          // A clean runner (this one, and CI) has no Claude Code sessions on
+          // disk, so the real source's load() legitimately answers `[]` and
+          // "resolves to at least the Project/Session shape" below has nothing
+          // to check. This seeds a deterministic one-project fixture instead,
+          // per src/main/index.ts's LAUNCH_FIXTURE_SOURCE.
+          VAM_FIXTURE_SOURCE: '1',
+          // A throwaway `userData` for this one launch, never the operator's
+          // real profile -- see `src/main/index.ts`'s `VAM_USER_DATA_DIR`
+          // handling and `test/electron/userdata-isolation.test.ts` for the
+          // dedicated proof.
+          VAM_USER_DATA_DIR: userDataDir,
+          VAM_REMOTE_PORT: String(remotePort),
+        },
+        tmuxTmpdir,
+      ),
     });
     let stdout = '';
     let stderr = '';
@@ -243,23 +256,47 @@ describe('the Electron shell launches', () => {
   let streamServer: Server;
   let launched: Launch;
   let userDataDir: string;
+  let tmuxTmpdir: string;
+  let defaultServerBefore: readonly string[];
+  let defaultServerAfter: readonly string[];
 
   beforeAll(async () => {
-    execFileSync(bin('electron-vite'), ['build'], { cwd: repoRoot, stdio: 'pipe' });
+    // Built ONCE for the whole run by `vitest.app.config.ts`'s globalSetup
+    // (`test/electron/global-build.ts`) -- never per file, see its header.
     const started = await startNoCorsServer();
     server = started.server;
     const startedStream = await startChangeStreamServer();
     streamServer = startedStream.server;
     userDataDir = mkdtempSync(path.join(tmpdir(), 'vam-launch-test-userdata-'));
+    tmuxTmpdir = mkIsolatedTmuxTmpdir('vam-launch-test-tmux');
     const remotePort = await allocatePort();
-    launched = await launch(started.port, startedStream.port, userDataDir, remotePort);
+    // READ-ONLY, before this launch's isolated Electron process exists at
+    // all -- the "before" half of the runtime proof that this launch never
+    // reaches the operator's real tmux server (AC evidence: a stray
+    // `vamctl` control session, and stray `-y 4 -x 10 cat` clients, both
+    // measured on the operator's OWN default server with a pane cwd inside
+    // an agent's worktree -- exactly what an unisolated launch from a
+    // worktree like this one would produce).
+    defaultServerBefore = tmuxAvailable() ? defaultServerPaneCwds() : [];
+    launched = await launch(started.port, startedStream.port, userDataDir, remotePort, tmuxTmpdir);
+    // AND AFTER: still read-only, and still against the DEFAULT socket only
+    // -- `assertNoNewSessionUnderOnDefaultServer` (its own test below) is
+    // what actually asserts the two agree.
+    defaultServerAfter = tmuxAvailable() ? defaultServerPaneCwds() : [];
   }, 180_000);
 
   afterAll(() => {
     server?.close();
     streamServer?.close();
     if (userDataDir !== undefined) {
-      rmSync(userDataDir, { recursive: true, force: true });
+      rmSync(userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
+    if (tmuxTmpdir !== undefined) {
+      // Torn down by the SAME TMUX_TMPDIR this launch was given, never by a
+      // bare session or socket name -- the one thing that could reach
+      // something else on a server this harness does not own.
+      killIsolatedServer(tmuxTmpdir);
+      rmSync(tmuxTmpdir, { recursive: true, force: true });
     }
   });
 
@@ -622,6 +659,42 @@ describe('the Electron shell launches', () => {
     expect(smoke().zoomLevelAfterReload).toBe(0);
     expect(smoke().zoomFactorAfterReload).toBe(1);
   });
+
+  /**
+   * THE TMUX ISOLATION ITSELF, PROVEN AT RUNTIME rather than only by the
+   * corpus guard (`test/electron/tmux-isolation-guard.test.ts`): a launch
+   * that spawns tmux at all must never let a session with a pane cwd inside
+   * this repository reach the OPERATOR'S REAL default server. `tmuxAvailable
+   * ()` gates it the same way every real-tmux guard in this repo degrades --
+   * CI's `test:app` job installs no tmux at all (only the `web-guards` job
+   * does), so this is a named skip there, never a false pass or a false red.
+   */
+  (tmuxAvailable() ? it : it.skip)(
+    'never lets this launch reach the operator’s real default tmux server',
+    () => {
+      assertNoNewSessionUnderOnDefaultServer({
+        before: defaultServerBefore,
+        after: defaultServerAfter,
+        watchDir: repoRoot,
+      });
+    },
+  );
+
+  // THE OTHER HALF: this launch's own tmux call really landed on the
+  // PRIVATE socket this test built and owns, never the shared default one --
+  // MEASURED, reproducing the evidence exactly: this fixture (a session vam
+  // never actually started) drives the sidebar to poll it through
+  // `createControlTmuxRunner`, which opens `vamctl` -- a real session, `cat`
+  // in its pane's foreground, cwd the repo root this Electron process was
+  // spawned with -- on whatever socket its env resolves to. With
+  // `TMUX_TMPDIR` isolation in place that session lands here, on the
+  // private socket, and `list-sessions` on it answers with exactly one.
+  (tmuxAvailable() ? it : it.skip)(
+    'really opens the control-mode `vamctl` session on the private socket',
+    () => {
+      expect(isolatedServerSessionCount(tmuxTmpdir)).toBeGreaterThan(0);
+    },
+  );
 
   /**
    * `TerminalOnlyStart` NO LONGER DRAWS AN `<img>` AT ALL -- "start-polish"

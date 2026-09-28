@@ -182,6 +182,45 @@ describe('a vam pane no source row is paired to', () => {
     expect(projects.flatMap((p) => p.sessions).map((s) => s.id)).toEqual(['sess-1#100']);
   });
 
+  /**
+   * THE COORDINATOR'S OWN BUG REPORT (C): unlike the test above, tmux DOES
+   * know this pane's cwd -- but the shell has `cd`'d into a subdirectory
+   * since `@vam-project` was stamped, so the pane's TAG and its CURRENT cwd
+   * now name two different digests. The bucket this pane builds must still
+   * be filed under its own TAG -- the identical id `paneProjectDirectory`
+   * (`create-session.ts`) resolves a directory FROM, tag first -- never a
+   * fresh digest of the drifted cwd, which no pane on this listing is
+   * tagged with and which that same lookup would never match. Get this
+   * wrong and the sidebar shows an id "New session" can never resolve back
+   * to a directory (`unknown-project`, `tmux-create-session.test.ts`'s own
+   * round-trip proof).
+   */
+  it('files a tagged pane with no live agent under its OWN tag, not a fresh digest of its drifted (cd’d) cwd', async () => {
+    const TAG = projectIdOf('/w/orchard');
+    const projects = await load(
+      [agent()],
+      [
+        {
+          project: TAG,
+          pid: '9',
+          name: 'vam-orchard-000001',
+          command: 'zsh',
+          cwd: '/w/orchard/sub',
+        },
+      ],
+    );
+    const bucket = projects.find((p) => p.id === TAG);
+    expect(bucket, 'the sidebar’s own id for this bucket must be the pane’s tag').toBeDefined();
+    expect(bucket?.sessions.map((s) => s.id)).toEqual([paneRowId('vam-orchard-000001')]);
+    // NEVER ALSO under a fresh digest of the drifted cwd -- no pane names
+    // that id at all, so nothing could ever resolve a directory back from
+    // it.
+    expect(projects.some((p) => p.id === projectIdOf('/w/orchard/sub'))).toBe(false);
+    // Alpha's own row is untouched by the new bucket's arrival.
+    const alpha = projects.find((p) => p.id === ALPHA_ID);
+    expect(alpha?.sessions.map((s) => s.id)).toEqual(['sess-1#100']);
+  });
+
   it('lets the legacy fallback claim a pane whose listing carried no command -- absence is not a shell', async () => {
     // A three-field listing (an older tmux, or every stub that predates the
     // fourth field): one unpublished agent, one tagged pane, nothing said

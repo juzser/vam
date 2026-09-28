@@ -52,6 +52,42 @@
  * rows than that already points `cursor_y` at the wrong line before this
  * file is ever reached -- `-N` is what `client.ts`'s own `#reseed` now asks
  * for instead.
+ *
+ * ── THE THIRD BUG, A HIDDEN CURSOR SEEDED WITHOUT ITS POSITION (review
+ * finding) ──────────────────────────────────────────────────────────────
+ * The `hidden` branch below used to emit `HIDE_CURSOR` alone, with no CUP
+ * at all -- because `readCursorLine` itself discarded `cursor_x`/`cursor_y`
+ * the moment `cursor_flag` read 0 (`spawn.ts`'s own history). Claude Code's
+ * UI hides the real cursor and draws its own box-drawn one, redrawn
+ * RELATIVELY against wherever xterm's cursor already sits -- so a reseed
+ * that left it wherever the text happened to end (exactly THE FIRST bug
+ * above, just for the hidden case) put every later relative redraw on the
+ * wrong row. tmux keeps tracking the real cell the whole time the cursor is
+ * hidden (MEASURED, a real tmux 3.7b on a private `-L` socket: hiding the
+ * cursor, then moving it with a CUP, both changed `#{cursor_x}`/
+ * `#{cursor_y}` on the very next `display-message`), so `spawn.ts`'s
+ * `PaneMark.position` now carries it regardless of `cursor_flag`, and this
+ * file places it -- THEN hides it, DECTCEM's own documented order (a
+ * program is free to move the cursor while it is invisible; showing it
+ * again later should not also relocate it).
+ *
+ * ── THE FOURTH BUG, BRACKETED PASTE NEVER SEEDED (review finding) ────────
+ * `TerminalStreamTab.tsx`'s own paste listener wraps a paste in `CSI
+ * 200~`/`201~` only when xterm's `modes.bracketedPasteMode` is already
+ * true -- which xterm sets ONLY by parsing `CSI ?2004h` out of data this
+ * component actually wrote to it. A program requests that mode ONCE, at
+ * its own startup; ATTACHING to an already-running session (this client's
+ * whole reason for being, `client.ts`'s own header) never sees that
+ * request, so a paste into an already-running `claude` submitted one line
+ * at a time -- multi-line text with no bracketing at all. `#{bracket_paste_
+ * flag}` (`argv.ts`'s own `CURSOR_FORMAT`) is tmux's own per-pane record of
+ * the identical fact, read here and re-emitted as the SAME `CSI ?2004h` the
+ * program's own startup would have sent had this client been attached from
+ * the beginning -- so xterm's mode is primed the instant the seed lands,
+ * with no new IPC round trip and no client-side guessing. Only ever turns
+ * IT ON: xterm's own `term.reset()` (`TerminalStreamTab.tsx`, before every
+ * later seed) already puts the mode back to its own default (off), so
+ * there is nothing to explicitly turn off here.
  */
 
 import { readCursorLine } from '../../sources/tmux/spawn.js';
@@ -59,6 +95,11 @@ import { readCursorLine } from '../../sources/tmux/spawn.js';
 /** `CSI ?25h`/`CSI ?25l` -- DECTCEM, show/hide the text cursor. */
 const SHOW_CURSOR = '\x1b[?25h';
 const HIDE_CURSOR = '\x1b[?25l';
+
+/** `CSI ?2004h` -- DECSET 2004, the SAME sequence a program's own startup
+ * sends to ask a terminal for bracketed paste. Only ever emitted, never its
+ * `l` counterpart -- see this file's own header. */
+const ENABLE_BRACKETED_PASTE = '\x1b[?2004h';
 
 /**
  * `screenBody` is `capture-pane -p -e -N`'s own raw block body (bare `\n`
@@ -76,14 +117,29 @@ const HIDE_CURSOR = '\x1b[?25l';
  * malformed reply) appends nothing beyond the newline drop -- exactly
  * today's shape, the same "never draw a position vam did not really read"
  * rule `PaneCursor`'s own header states for the polling path.
+ *
+ * BRACKETED PASTE RIDES ALONG, unconditionally appended after whichever
+ * cursor branch below runs (module header, "THE FOURTH BUG"): it is
+ * orthogonal to where -- or whether -- a caret gets drawn, so it never
+ * changes which of the branches below fires.
  */
 export function seedWithCursor(screenBody: string, cursorLine: string): string {
   const withoutTrailingNewline = screenBody.endsWith('\n') ? screenBody.slice(0, -1) : screenBody;
   const firstLine = cursorLine.split('\n', 1)[0] ?? '';
   const mark = readCursorLine(firstLine);
-  if (mark.cursor.kind === 'hidden') return `${withoutTrailingNewline}${HIDE_CURSOR}`;
-  if (mark.cursor.kind !== 'at') return withoutTrailingNewline;
+  const bracketedPaste = mark.bracketPaste === true ? ENABLE_BRACKETED_PASTE : '';
+  if (mark.cursor.kind === 'hidden') {
+    // KEEP THE COORDINATES (module header, "THE THIRD BUG"): `position` is
+    // read independently of `cursor_flag` now, so a hidden cursor still
+    // places xterm's own cursor on the real cell -- THEN hides it, never
+    // the reverse (DECTCEM's own order: moving while invisible must not
+    // itself become visible, and showing later must not also relocate).
+    const cup =
+      mark.position === null ? '' : `\x1b[${mark.position.row + 1};${mark.position.column + 1}H`;
+    return `${withoutTrailingNewline}${cup}${HIDE_CURSOR}${bracketedPaste}`;
+  }
+  if (mark.cursor.kind !== 'at') return `${withoutTrailingNewline}${bracketedPaste}`;
   const row = mark.cursor.row + 1;
   const column = mark.cursor.column + 1;
-  return `${withoutTrailingNewline}\x1b[${row};${column}H${SHOW_CURSOR}`;
+  return `${withoutTrailingNewline}\x1b[${row};${column}H${SHOW_CURSOR}${bracketedPaste}`;
 }

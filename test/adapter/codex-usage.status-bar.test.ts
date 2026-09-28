@@ -78,6 +78,29 @@ describe('describeCodexStatusUsage', () => {
     expect(result.highUsage).toBe(false);
   });
 
+  /**
+   * The operator's own bug: `kind: 'ok'` (main DID read a rollout) but
+   * BOTH windows come back `unknown` -- previously rendered as a silent,
+   * unexplained `— · —`, indistinguishable from a healthy reading with two
+   * blank windows. The cell must carry a reason so the tooltip
+   * (`Canvas.tsx`'s `Note` wrapper) has something to say, the same as the
+   * `kind: 'unknown'` case already does.
+   */
+  it('gives a reason when both windows are unknown, so the dash is never unexplained', () => {
+    const snapshot: CodexUsageSnapshot = {
+      kind: 'ok',
+      limits: {
+        primary: { kind: 'unknown' },
+        secondary: { kind: 'unknown' },
+      },
+      observedAt: now.toISOString(),
+    };
+    const result = describeCodexStatusUsage(snapshot, now);
+    expect(result.text).toBe('—');
+    expect(result.reason).toMatch(/no codex usage/i);
+    expect(result.highUsage).toBe(false);
+  });
+
   it('reads a window that has rolled over as reset, never as a stale percentage', () => {
     const snapshot: CodexUsageSnapshot = {
       kind: 'ok',

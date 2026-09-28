@@ -1110,6 +1110,22 @@ export type DetailPanelProps = {
    */
   readonly startingPane?: StartingPaneWait | null;
   /**
+   * `startingPane`'s OWN CLEAR, reached for directly by this panel's
+   * `onAnswerTrust` -- a review-found S2. Declining the trust dialog used to
+   * discard `window.api.terminal.answerTrust`'s result outright, and nothing
+   * ELSE ever ends this particular wait: `claude`'s own "No, exit" quits the
+   * CLI back to a bare shell, so the row never leaves `unstarted` (no agent
+   * ever registers) and the model never reports a `runningProvider` for it
+   * either -- neither of `startingPane`'s own two ordinary exits was ever
+   * going to fire, and Start stayed disabled forever (`ProviderStartControls`
+   * disables on `starting !== null` alone). `Canvas.tsx` is what owns
+   * `startingPaneByKey` and can actually clear it (`clearStartingPane`, the
+   * identical act a failed Start/Resume write already triggers) -- this prop
+   * is that same act, handed down for the ONE further case only this panel
+   * can see resolve: the trust answer's own promise settling.
+   */
+  readonly onStartingPaneCleared?: () => void;
+  /**
    * CONFIRMED RUNNING, even while `entry.session.status` still reads
    * `unstarted`/`terminal` -- `Canvas.tsx`'s own merge, never `entry.session.
    * runningProvider` (`model.ts`) taken on its own. THE PROCESS NAME IS NOT
@@ -3419,7 +3435,11 @@ function StartSession({
           chosenPermission={chosenPermission}
           onChosenPermissionChange={setChosenPermission}
           onStart={onStart}
-          disabled={starting !== null}
+          // `timedOut` ALSO RE-ENABLES THIS -- a review-found S2: a wait
+          // that already admits vam has nothing further to wait on
+          // (`StartTimeoutHint`'s own header) must not go on disabling the
+          // operator's own retry, whatever path got it there.
+          disabled={starting !== null && !starting.timedOut}
           starting={
             starting?.kind === 'start'
               ? {
@@ -3576,7 +3596,11 @@ function TerminalOnlyStart({
           chosenPermission={chosenPermission}
           onChosenPermissionChange={setChosenPermission}
           onStart={onStart}
-          disabled={starting !== null}
+          // `timedOut` ALSO RE-ENABLES THIS -- a review-found S2: a wait
+          // that already admits vam has nothing further to wait on
+          // (`StartTimeoutHint`'s own header) must not go on disabling the
+          // operator's own retry, whatever path got it there.
+          disabled={starting !== null && !starting.timedOut}
           starting={
             starting?.kind === 'start'
               ? {
@@ -3592,7 +3616,11 @@ function TerminalOnlyStart({
           type="button"
           data-resume-in-pane
           onClick={onResumeInPane}
-          disabled={starting !== null}
+          // `timedOut` ALSO RE-ENABLES THIS -- a review-found S2: a wait
+          // that already admits vam has nothing further to wait on
+          // (`StartTimeoutHint`'s own header) must not go on disabling the
+          // operator's own retry, whatever path got it there.
+          disabled={starting !== null && !starting.timedOut}
           aria-busy={starting?.kind === 'resume'}
           className="vam-tap flex cursor-pointer items-center gap-1.5 text-control text-ink-dim underline decoration-line-strong underline-offset-2 hover:text-ink disabled:cursor-progress disabled:no-underline disabled:opacity-70"
         >
@@ -6509,6 +6537,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
     onStartSession,
     onResumeInPane,
     startingPane = null,
+    onStartingPaneCleared,
     runningProvider,
     gettingStarted,
     paneFocused = true,
@@ -7087,12 +7116,28 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
    * which may already have moved on to a different id by the time this
    * fires. ABSENT when there is no wait at all, which the card is never
    * drawn without one to begin with.
+   *
+   * ON `trust: false`, THE RESULT IS NO LONGER DISCARDED -- a review-found
+   * S2 (`onStartingPaneCleared`'s own header on `DetailPanelProps`):
+   * declining quits the CLI back to a bare shell, and nothing else was ever
+   * going to end this wait, so Start stayed disabled for good. Cleared only
+   * once the write itself RESOLVES, "verify then act" applied to the
+   * OPERATOR's own wait rather than to a single keystroke: a press that
+   * never lands (the pane closed underneath it, tmux refused) must not hand
+   * control back on the strength of a click alone. `trust: true` is left
+   * exactly as it was -- the fast poll (`Canvas.tsx`) is still what confirms
+   * an accept, because only a REAL `ready` read proves the folder is
+   * actually trusted now, which a resolved write alone does not.
    */
   const onAnswerTrust =
     startingPane === null
       ? undefined
       : (trust: boolean) => {
-          void window.api?.terminal?.answerTrust(startingPane.projectId, startingPane.rowId, trust);
+          void window.api?.terminal
+            ?.answerTrust(startingPane.projectId, startingPane.rowId, trust)
+            .then(() => {
+              if (!trust) onStartingPaneCleared?.();
+            });
         };
 
   /** Whether the step counter has been asked for the sentence it abbreviates. */

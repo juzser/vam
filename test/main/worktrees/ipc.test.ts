@@ -191,9 +191,9 @@ describe('registerWorktreesIpc — the envelope, end to end against a real repo'
     const removed = (await handlers.get(CHANNELS.worktreeRemove)?.(
       {},
       { projectId, worktreeId },
-    )) as IpcResult<{ preservedBranch: boolean }>;
+    )) as IpcResult<{ preservedBranch: boolean; keptRef: string | null }>;
 
-    expect(removed).toEqual({ ok: true, value: { preservedBranch: false } });
+    expect(removed).toEqual({ ok: true, value: { preservedBranch: false, keptRef: null } });
   });
 
   it('status answers ok:true with a dirty:false, ahead/behind:null row for a fresh worktree', async () => {

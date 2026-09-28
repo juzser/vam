@@ -13,6 +13,7 @@
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
+import type { CanvasModel } from '../../src/renderer/domain/model.js';
 import {
   chips,
   FIVE_STEPS,
@@ -20,8 +21,29 @@ import {
   MODEL,
   phoneSource,
   rows,
+  session,
   views,
 } from './harness.js';
+
+/**
+ * DECISION 1's own model, distinct from `MODEL`: `MODEL`'s `a1` is `waiting`
+ * (finished its turn, ball with the operator) so it is the fixture the
+ * "closes with no question" cases below want. These two cases are about the
+ * OTHER status -- `running`, mid-turn -- so they need their own session
+ * rather than a shared `MODEL` every other file in this suite also renders.
+ */
+const RUNNING_MODEL: CanvasModel = {
+  projects: [
+    {
+      id: 'p1',
+      name: 'alpha',
+      source: 'claude-code',
+      sessions: [
+        session('a1', { title: 'nightly sweep', status: 'running', decisions: FIVE_STEPS }),
+      ],
+    },
+  ],
+};
 
 beforeAll(installPhoneGlobals);
 beforeEach(() => localStorage.clear());
@@ -174,7 +196,7 @@ describe('the phone session screen', () => {
   });
 
   /**
-   * CLOSING A SESSION, AND THE QUESTION IN FRONT OF IT.
+   * CLOSING A SESSION, AND THE QUESTION IN FRONT OF IT -- WHILE IT IS RUNNING.
    *
    * The control's own comment used to claim it "goes through the same confirm
    * the `x` chord does". There was no confirm on either path -- `Canvas`'s
@@ -183,12 +205,17 @@ describe('the phone session screen', () => {
    * from the Agents icon, ended a running agent with no undo and no question.
    * The claim is true now, and it is true because of this test rather than
    * because of the comment.
+   *
+   * `RUNNING_MODEL`, not `MODEL` -- DECISION 1 gates the question on the
+   * session's own status (`running` asks, everything else does not), so this
+   * needs a session actually `running` rather than `MODEL`'s `waiting` one.
+   * See the case right after this one for the status that does NOT ask.
    */
   it('carries closing a session where it can be seen, and only there', async () => {
     const closed: string[] = [];
     render(
       <Canvas
-        model={MODEL}
+        model={RUNNING_MODEL}
         source={phoneSource({
           closeSession: async (id) => {
             closed.push(id);
@@ -233,8 +260,38 @@ describe('the phone session screen', () => {
     expect(closed).toEqual(['a1']);
   });
 
+  /**
+   * THE OTHER HALF OF DECISION 1: `waiting` has already finished its turn --
+   * the ball is with the operator, per `domain/model.ts`'s own definition --
+   * so closing it loses nothing in flight and the phone must not ask, exactly
+   * like idle/done/terminal. `MODEL`'s own `a1` is `waiting`, which is why
+   * every OTHER case in this file (all opened through `openSession`, all
+   * against `MODEL`) never had to think about this dialog at all.
+   */
+  it('closes a waiting session at once: the ball is already with the operator', async () => {
+    const closed: string[] = [];
+    render(
+      <Canvas
+        model={MODEL}
+        source={phoneSource({
+          closeSession: async (id) => {
+            closed.push(id);
+          },
+        })}
+      />,
+    );
+    act(() => {
+      fireEvent.click(rows()[0] as Element);
+    });
+    await act(async () => {
+      fireEvent.click(document.querySelector('[data-phone-close]') as Element);
+    });
+    expect(document.querySelector('[data-confirm-close-session]')).toBeNull();
+    expect(closed).toEqual(['a1']);
+  });
+
   it('names the session in the question, and keeps the confirm out of the close-rule’s reach', () => {
-    render(<Canvas model={MODEL} source={phoneSource({ closeSession: async () => {} })} />);
+    render(<Canvas model={RUNNING_MODEL} source={phoneSource({ closeSession: async () => {} })} />);
     act(() => {
       fireEvent.click(rows()[0] as Element);
     });

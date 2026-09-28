@@ -138,10 +138,32 @@ function timestampOf(line: Line): string | null {
 }
 
 /**
- * One file's newest `token_count` reading, or `null` when this file carries
- * none at all within its allowed budget -- the same widening loop
+ * Whether a `rate_limits` object is worth showing at all -- `true` when at
+ * least ONE of `primary`/`secondary` parses to a real window.
+ *
+ * MEASURED LIVE ON THIS MACHINE: a freshly started Codex thread's FIRST
+ * `token_count` event carries `rate_limits.primary` AND `.secondary` as
+ * literal `null` -- present, not malformed, just not populated yet (the real
+ * numbers arrive with the NEXT turn). That event is still the NEWEST thing
+ * `newestRateLimitsIn` would otherwise find, so without this check a reading
+ * only one line older -- with real numbers -- never got a chance: the cell
+ * rendered a silent `— · —` for however long the new thread's first turn
+ * took, which is exactly the operator's report ("I turn on Codex usage... I
+ * don't see the Codex icon appear").
+ */
+function isUsableRateLimits(raw: unknown): boolean {
+  const limits = parseCodexRateLimits(raw);
+  return limits.primary.kind === 'known' || limits.secondary.kind === 'known';
+}
+
+/**
+ * One file's newest USABLE `token_count` reading, or `null` when this file
+ * carries none at all within its allowed budget -- the same widening loop
  * `readRolloutTail` uses, stopped the moment a match is found rather than run
  * to a turn boundary, since a usage reading has no "whole turn" to complete.
+ * An event whose `rate_limits` parse to nothing usable (see
+ * `isUsableRateLimits`) is treated exactly like one carrying no `rate_limits`
+ * at all: skipped, not returned, so the caller keeps looking further back.
  */
 async function newestRateLimitsIn(
   source: TranscriptSource,
@@ -157,7 +179,7 @@ async function newestRateLimitsIn(
       const lines = parseRolloutLines(window.text);
       for (let i = lines.length - 1; i >= 0; i -= 1) {
         const rateLimits = rateLimitsOf(lines[i] as Line);
-        if (rateLimits !== undefined) {
+        if (rateLimits !== undefined && isUsableRateLimits(rateLimits)) {
           return { rateLimits, timestamp: timestampOf(lines[i] as Line) };
         }
       }
@@ -170,11 +192,15 @@ async function newestRateLimitsIn(
 }
 
 /**
- * Codex's usage snapshot: the newest `rate_limits` reading this reader can
- * find, or the specific reason it cannot -- `'no-session'` when there is
- * simply nothing to read yet (no `~/.codex/sessions`, or every scanned
- * rollout carries no `token_count` event), `'unavailable'` when the attempt
- * itself failed (a directory that exists but cannot be listed). Never throws.
+ * Codex's usage snapshot: the newest USABLE `rate_limits` reading this reader
+ * can find, or the specific reason it cannot -- `'no-session'` when there is
+ * simply nothing to read yet: no `~/.codex/sessions`, every scanned rollout
+ * carries no `token_count` event, or every `token_count` event found carries
+ * `rate_limits` with no usable window (`isUsableRateLimits` -- the common
+ * case is a brand-new thread whose first reading hasn't arrived yet, within
+ * `MAX_FILES_SCANNED` rollouts of the newest). `'unavailable'` when the
+ * attempt itself failed (a directory that exists but cannot be listed). Never
+ * throws.
  */
 export async function readCodexUsage(
   deps: CodexUsageReaderDeps = DEFAULT_CODEX_USAGE_DEPS,
