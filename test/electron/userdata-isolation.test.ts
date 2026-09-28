@@ -41,6 +41,7 @@ import { DEFAULT_REMOTE_PORT } from '../../src/main/remote/launch.js';
 import {
   assertNoNewSessionUnderOnDefaultServer,
   defaultServerPaneCwds,
+  describeDefaultServerLeak,
   isolatedServerSessionCount,
   isolatedTmuxEnv,
   killIsolatedServer,
@@ -102,8 +103,66 @@ interface ProbeRun {
 function spawnProbe(env: NodeJS.ProcessEnv): ChildProcessWithoutNullStreams {
   return spawn(bin('electron'), [probePath], {
     cwd: repoRoot,
+    // ITS OWN PROCESS GROUP -- CI evidence (PR #548, runs 36402029062 and
+    // 36403787763): killing only the Electron MAIN process (a bare
+    // `child.kill('SIGKILL')`, this function's own prior shape) left its
+    // own tmux control-mode GRANDCHILD (`spawnRealControlChild`,
+    // `src/main/sources/tmux/control.ts`) running, orphaned, reparented to
+    // init (`ps` showed `PPID=1`). That orphan resolves/opens its tmux
+    // connection on its OWN schedule, independent of its dead parent -- and
+    // when that happens to land AFTER this file's own `afterAll` already
+    // `rmSync`'d `tmuxTmpdir`, tmux's own `TMUX_TMPDIR` resolution falls
+    // through to `/tmp` (the exact incident this whole harness exists to
+    // prevent), even though the orphan's own env still names the (by then
+    // deleted) private directory -- confirmed directly: the diagnostic
+    // `describeDefaultServerLeak` prints for the leaked session reported
+    // "its claimed private socket ... does NOT exist" both times. `settings-
+    // update.test.ts`'s own `runProbe` already carries the identical fix,
+    // for the identical reason (its own comment: "SIGKILL on the main
+    // process alone left them running").
+    detached: true,
     env: isolatedTmuxEnv({ ...process.env, VAM_FIXTURE_SOURCE: '1', ...env }, tmuxTmpdir),
   }) as ChildProcessWithoutNullStreams;
+}
+
+/**
+ * Kills `child`'s WHOLE PROCESS GROUP, not just its own pid -- see
+ * `spawnProbe`'s own `detached: true` note for why a bare `child.kill()`
+ * is not enough. `-child.pid` is POSIX's own "signal the whole group"
+ * spelling; a group with nothing left to signal (already exited) is not a
+ * failure here, just nothing left to do.
+ *
+ * RESOLVES ONLY ONCE `child` ITSELF HAS ACTUALLY EXITED (`close`), not
+ * merely once the signal was sent -- a coordinator review of this same
+ * fix: `process.kill()` returning does not mean the kernel has finished
+ * delivering SIGKILL to every member of the group yet, so a caller that
+ * raced ahead of THIS (deleting `tmuxTmpdir` in the same tick, before the
+ * signal had actually landed) could still lose the exact race this whole
+ * fix exists to close. Every caller below now `await`s it before its own
+ * `tmuxTmpdir` cleanup runs.
+ */
+function killTree(child: ChildProcessWithoutNullStreams): Promise<void> {
+  return new Promise((resolve) => {
+    // Already exited (its own `close` already fired, which a NEW listener
+    // here would never see again) -- nothing left to wait for.
+    if (child.exitCode !== null || child.signalCode !== null) {
+      resolve();
+      return;
+    }
+    child.once('close', () => resolve());
+    try {
+      if (child.pid === undefined) {
+        // Never got a pid at all -- nothing was spawned to signal, and the
+        // `close` listener above still covers the (unlikely) case that one
+        // arrives later anyway.
+        return;
+      }
+      process.kill(-child.pid, 'SIGKILL');
+    } catch {
+      // Already gone -- the group has no members left to signal, and the
+      // `close` listener above will still fire for `child` itself.
+    }
+  });
 }
 
 function waitForExit(child: ChildProcessWithoutNullStreams): Promise<ProbeRun> {
@@ -117,10 +176,13 @@ function waitForExit(child: ChildProcessWithoutNullStreams): Promise<ProbeRun> {
   });
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
-      child.kill('SIGKILL');
-      reject(
-        new Error(`userdata-probe did not exit within 30s\nstdout:\n${stdout}\nstderr:\n${stderr}`),
-      );
+      void killTree(child).finally(() => {
+        reject(
+          new Error(
+            `userdata-probe did not exit within 30s\nstdout:\n${stdout}\nstderr:\n${stderr}`,
+          ),
+        );
+      });
     }, 30_000);
     child.on('error', reject);
     child.on('close', (code) => {
@@ -223,7 +285,11 @@ describe('the Electron harness gets its own throwaway userData', () => {
       // directories rather than throwing or colliding).
       expect(existsSync(path.join(userDataA, 'Local Storage'))).toBe(true);
     } finally {
-      childA.kill('SIGKILL');
+      // AWAITED -- this file's `afterAll` deletes `tmuxTmpdir` once every
+      // `it()` here has settled, and must never run while childA's own
+      // process group could still be alive to race it (`killTree`'s own
+      // header explains why "signal sent" is not "process gone").
+      await killTree(childA);
     }
   }, 40_000);
 
@@ -287,11 +353,20 @@ describe('the Electron harness gets its own throwaway userData', () => {
   (tmuxAvailable() ? it : it.skip)(
     'never lets any of this file’s launches reach the operator’s real default tmux server',
     () => {
-      assertNoNewSessionUnderOnDefaultServer({
-        before: defaultServerBefore,
-        after: defaultServerPaneCwds(),
-        watchDir: repoRoot,
-      });
+      // DIAGNOSTICS ON FAILURE ONLY -- see `launch.test.ts`'s identical
+      // wrap for the full rationale (CI evidence, PR #548 run 36399341676).
+      try {
+        assertNoNewSessionUnderOnDefaultServer({
+          before: defaultServerBefore,
+          after: defaultServerPaneCwds(),
+          watchDir: repoRoot,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `${message}\n\n--- DIAGNOSTICS ---\n${describeDefaultServerLeak(repoRoot)}`,
+        );
+      }
       expect(() => isolatedServerSessionCount(tmuxTmpdir)).not.toThrow();
     },
   );
