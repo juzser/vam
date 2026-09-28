@@ -59,7 +59,7 @@
  */
 
 import { join } from 'node:path';
-import type { Decision } from '../../../renderer/domain/model.js';
+import type { Decision } from '../../../shared/model.js';
 import type { AgentRoster } from './agent-roster.js';
 import { extractCommands } from './commands.js';
 import {

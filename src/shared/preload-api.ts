@@ -38,7 +38,6 @@
  * is the only place it *can* be kept.
  */
 
-import type { Project, SourceId } from '../renderer/domain/model.js';
 import type {
   SessionSource,
   SourceCapabilities,
@@ -47,6 +46,7 @@ import type {
 } from '../renderer/sources/port.js';
 import type { AgentWork } from './agent-work.js';
 import type { HistoryCursor, TranscriptPage } from './history.js';
+import type { Project, SourceId } from './model.js';
 
 /**
  * Everything about a source that is data rather than behaviour: exactly the

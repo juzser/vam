@@ -83,7 +83,7 @@
  * widen this.
  */
 
-import type { Decision } from '../../../renderer/domain/model.js';
+import type { Decision } from '../../../shared/model.js';
 import {
   type Located,
   parseTranscriptLines,

@@ -14,7 +14,7 @@
  */
 
 import { type ExecFileException, execFile } from 'node:child_process';
-import type { SessionStatus } from '../../../renderer/domain/model.js';
+import type { SessionStatus } from '../../../shared/model.js';
 import { cliMissingMessage } from '../../env/cli-missing.js';
 
 /** One live process, normalised. Not one session -- see `key`. */

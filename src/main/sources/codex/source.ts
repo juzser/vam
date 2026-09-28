@@ -75,7 +75,7 @@
 
 import { createHash } from 'node:crypto';
 import { basename, join } from 'node:path';
-import type { Project, Session } from '../../../renderer/domain/model.js';
+import type { Project, Session } from '../../../shared/model.js';
 import type { SourceDescriptor } from '../../../shared/preload-api.js';
 import type { SourceError } from '../../ipc/channels.js';
 import { isAgentWorktreeCwd } from '../agent-worktree.js';

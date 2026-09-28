@@ -22,7 +22,7 @@
 
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { SessionAgent } from '../../../renderer/domain/model.js';
+import type { SessionAgent } from '../../../shared/model.js';
 
 /** A subagent transcript touched this recently belongs to an agent still working. */
 const RUNNING_WINDOW_MS = 5 * 60_000;
