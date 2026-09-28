@@ -19,6 +19,7 @@ import {
   createFilesApi,
   createFontsApi,
   createGithubApi,
+  createGitlabApi,
   createIssueApi,
   createLinkApi,
   createMainErrorsApi,
@@ -51,6 +52,9 @@ contextBridge.exposeInMainWorld('api', {
   // Settings -> Integrations -> GitHub. Desktop-only, the same standing as
   // `update` above -- see `CHANNELS.githubAuthStatus`'s own comment.
   github: createGithubApi(ipcRenderer),
+  // Settings -> Integrations -> GitLab. Desktop-only, the same standing as
+  // `github` above -- see `CHANNELS.glabAuthStatus`'s own comment.
+  gitlab: createGitlabApi(ipcRenderer),
   clipboard: createClipboardApi(ipcRenderer),
   // Opens a PREFILLED issue form in the operator's own browser, and posts
   // nothing. Takes text, never a location -- see `CHANNELS.issueOpen`.

@@ -583,6 +583,41 @@ const EN = {
   'settings.integrations.repo.suggested': 'suggested — this project’s own remotes',
   'settings.integrations.repo.noProject': 'open a project first to choose its repository',
 
+  // THE GITLAB CARD (operator: "GitLab now via glab, Bitbucket later"), the
+  // GitHub card's own shape narrowed: status and Connect/Disconnect only --
+  // no repo picker, no scopes warning, since `glab auth status` reports no
+  // scopes and this card was never asked for merge requests or PR status.
+  'settings.integrations.gitlab.heading': 'GitLab',
+  'settings.integrations.gitlab.hint':
+    'connect with the `glab` CLI; vam stores no token of its own',
+  'settings.integrations.gitlab.pill.connected': 'Connected',
+  'settings.integrations.gitlab.pill.notConnected': 'Not connected',
+  'settings.integrations.gitlab.pill.cliMissing': 'glab not installed',
+  'settings.integrations.gitlab.loggedInAs': 'logged in as',
+  'settings.integrations.gitlab.status.missing': '`glab` is not installed',
+  'settings.integrations.gitlab.status.installLink': 'install glab',
+  'settings.integrations.gitlab.status.loggedOut': 'not logged in',
+  'settings.integrations.gitlab.status.loggedIn': 'logged in as {login} on {host}',
+  'settings.integrations.gitlab.status.unknown': 'vam could not tell — {message}',
+  'settings.integrations.gitlab.recheck': 're-check',
+  'settings.integrations.gitlab.rechecking': 'checking…',
+  'settings.integrations.gitlab.connect': 'connect',
+  'settings.integrations.gitlab.connecting': 'starting…',
+  'settings.integrations.gitlab.disconnect': 'disconnect',
+  'settings.integrations.gitlab.disconnect.confirm': 'disconnect this account?',
+  'settings.integrations.gitlab.disconnect.yes': 'yes, disconnect',
+  'settings.integrations.gitlab.disconnect.cancel': 'cancel',
+  'settings.integrations.gitlab.copyCommand': 'copy command',
+  'settings.integrations.gitlab.copied': 'copied',
+  'settings.integrations.gitlab.pane.ended': 're-check above',
+  // THE GLAB-MISSING GUIDE, `settings.integrations.github.guide.*`'s own
+  // shape: what to DO once the pill and the status sentence above have
+  // already said `glab` itself is not on PATH.
+  'settings.integrations.gitlab.guide.intro':
+    'GitLab CLI (glab) is not installed. Install it, then sign in.',
+  'settings.integrations.gitlab.guide.noBrew': 'no Homebrew yet? see',
+  'settings.integrations.gitlab.guide.checkAgain': 'check again',
+
   // ── Remote ───────────────────────────────────────────────────────────────
   'settings.remote.hint': 'pair a phone over your tailnet — in person, at this machine',
 

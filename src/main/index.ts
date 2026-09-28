@@ -45,6 +45,9 @@ import {
   readGithubRepos,
 } from './integrations/github-repos.js';
 import { createGhAuthRun, readGithubAuthStatus } from './integrations/github-status.js';
+import { registerGitlabIntegrationIpc } from './integrations/gitlab-ipc.js';
+import { readGitlabAuthPane, startGitlabAuthPane } from './integrations/gitlab-pane.js';
+import { createGlabAuthRun, readGitlabAuthStatus } from './integrations/gitlab-status.js';
 import { registerGithubIntegrationIpc } from './integrations/ipc.js';
 import { registerSourceIpc } from './ipc/handlers.js';
 import { registerIssueIpc } from './issue/ipc.js';
@@ -934,6 +937,22 @@ void app.whenReady().then(async () => {
       const cwd = await resolveWorktreeProjectDirectory(projectId);
       return cwd === null ? [] : readOneProjectsRemotes(cwd);
     },
+  });
+  /**
+   * Settings -> Integrations -> GitLab. `channels.ts`'s own note on the
+   * three channels above carries the whole argument for why they are
+   * desktop-only; this is only the wiring. A SEPARATE `createTmuxRunner()`,
+   * not `githubTmuxRunner`: `gitlab-pane.ts` tracks its own `activePane`
+   * module-level state, so a GitHub sign-in and a GitLab sign-in can run in
+   * two panes at once without either module's "one pane at a time" rule
+   * seeing the other's -- a fresh runner instance costs nothing (it wraps a
+   * stateless `execFile`) and keeps that independence visible here too.
+   */
+  const glabTmuxRunner = createTmuxRunner();
+  registerGitlabIntegrationIpc(ipcMain, {
+    authStatus: readGitlabAuthStatus(createGlabAuthRun()),
+    connectStart: (kind) => startGitlabAuthPane(glabTmuxRunner, kind),
+    connectRead: () => readGitlabAuthPane(glabTmuxRunner),
   });
   // The Terminal tab's only route to tmux. Registered unconditionally, but it
   // spawns nothing until the renderer asks -- and the renderer asks only while

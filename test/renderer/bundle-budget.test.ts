@@ -696,6 +696,26 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * gzip figure (217,186 B) plus ~364 B (~0.17%) of the same slack. The next
  * PR to land here should still expect to remeasure rather than assume
  * either number still has room.
+ *
+ * A TWELFTH GROWTH: THE GITLAB CARD (operator: "GitLab now via glab,
+ * Bitbucket later"). `GitlabPanel.tsx` itself is NOT eager -- it is mounted
+ * by `SettingsOverlay.tsx`, already proven out of the entry by the guard
+ * below -- and neither is `GitlabMark`'s SVG, which lives in that same lazy
+ * chunk. What DOES move the budget is the ninth paragraph's own mechanism
+ * again: a new run of CATALOGUE STRINGS (`settings.integrations.gitlab.*`,
+ * ~26 keys covering the card's heading, hint, pill, status sentences and
+ * the glab-missing guide) added to `i18n/strings.ts`'s one exported object
+ * literal, which ships whole in the eager entry regardless of which
+ * component reads which key from it. Measured, `electron-vite build --mode
+ * production`, this branch against `main`'s tip (`99b989ae`, the commit
+ * this branch was cut from): entry 724,790 B -> 726,418 B (+1,628 B,
+ * +0.22%); gzip 217,187 B -> 217,412 B (+225 B, +0.10%, this machine's
+ * zlib). `ENTRY_BUDGET_BYTES` moves 726,100 -> 727,700: the measured figure
+ * (726,418 B) plus ~1,282 B (~0.18%) of the same small-headroom convention
+ * every bump above uses. `ENTRY_GZIP_BUDGET_BYTES` is NOT moved -- the
+ * measured gzip figure (217,412 B) still clears the existing 217,550
+ * budget, if only by 138 B, so this PR bumps only the number its own build
+ * actually tripped rather than one that still holds.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -706,7 +726,7 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 // depends on is even present, decided BEFORE anything tries to build.
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
-const ENTRY_BUDGET_BYTES = 726_100;
+const ENTRY_BUDGET_BYTES = 727_700;
 const ENTRY_GZIP_BUDGET_BYTES = 217_550;
 
 // The one string this repo's markdown stack ships that nothing else in the

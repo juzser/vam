@@ -207,6 +207,11 @@ const GUARDS = [
   // two). `modal-size-shots.mjs`'s own header holds the rest.
   'modal-size-shots',
   'integrations-github-shots',
+  // Settings -> Integrations -> GitLab, `integrations-github-shots.mjs`'s
+  // own sibling: not-installed/logged-out/connected, both themes, no
+  // sideways overflow at the narrowest desktop width. See
+  // `integrations-gitlab-shots.mjs`'s own header.
+  'integrations-gitlab-shots',
   'favicon-shots',
   'key-truth-shots',
   'mode-truth-shots',
