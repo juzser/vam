@@ -19,14 +19,27 @@
  * unit-testable without `window`; what is not decoupled is which bridge
  * member this component reaches for.
  *
- * `allEntries` is how a worktree with a LIVE session gets its count: a
+ * `entries` is how a worktree with a LIVE session gets its count: a
  * worktree's session is created through the unmodified
  * `createSessionInDirectory`, which derives its OWN project id from the
  * worktree's cwd (`docs/design/worktrees.md` §4) -- so its sessions show up
- * in `allEntries` under a DIFFERENT `project.id` than this section's own
- * `project`, and the only way to find them is to look, the same way
- * `allEntries` is already the flat list every other selector in this file
- * reads from.
+ * in `entries` under a DIFFERENT `project.id` than this section's own
+ * `project`, and the only way to find them is to look.
+ *
+ * `entries`, NEVER `allEntries` -- A REVIEW-FOUND S2. This section used to
+ * take `allEntries` (`SessionList.tsx`'s own UNFILTERED prop) here, which
+ * contradicted that file's own rule for itself ("everything this component
+ * DRAWS comes from `entries`", `SessionListProps.entries`'s own header):
+ * an ended session (hidden by default), a dismissed row, and a search miss
+ * all kept drawing nested under a worktree regardless of the operator's own
+ * filters, closing an ended one appeared to do nothing (its row was never
+ * gone), "Start a session here" stayed suppressed (the unfiltered count was
+ * never zero), and `j`/`k` skipped rows that were never in `entries` to walk
+ * over in the first place. NOTHING in this file needs the unfiltered,
+ * WHOLE-PROJECT list `allEntries` on `SessionListProps` still exists for
+ * (its own header: the removal dialog's counts, and the restore strip) --
+ * this section never removes a project or restores one, so `entries` is the
+ * only list it ever needed.
  *
  * A WORKTREE'S SESSIONS NO LONGER ALSO DRAW THEIR OWN TOP-LEVEL PROJECT
  * SECTION (UI1, closed after the v1 report disclosed it): `SessionList.tsx`'s
@@ -149,7 +162,13 @@ function isAgentWorktreeRow(worktree: WorktreeInfo): boolean {
 
 export type WorktreesSectionProps = {
   readonly project: Project;
-  readonly allEntries: readonly SessionEntry[];
+  /**
+   * THE FILTERED SET -- `SessionList.tsx`'s own `entries` prop, forwarded
+   * whole (never `allEntries`, that file's own UNFILTERED one -- see this
+   * file's header on `entries` above `WorktreesSection` itself for the S2
+   * this fixes and why nothing here needs the broader list).
+   */
+  readonly entries: readonly SessionEntry[];
   readonly forceOpenCreate: boolean;
   readonly onCloseCreate: () => void;
   /**
@@ -183,15 +202,14 @@ export type WorktreesSectionProps = {
   /**
    * THIS PROJECT'S OWN top-level sessions -- ones running in the repo's MAIN
    * checkout, never inside any worktree (those carry a DIFFERENT `Project
-   * .id`, this file's own header on `allEntries`). `SessionList.tsx`'s own
+   * .id`, this file's own header on `entries`). `SessionList.tsx`'s own
    * `section.items` for `groupBy === 'project'` mode, threaded down whole
    * rather than recomputed here: `section.items` is already the correctly
    * filtered/ordered/status-narrowed subset (`visibleEntries`, `applyView
    * Order`'s own contract) that `renderSessionRow` would otherwise draw
-   * directly; re-deriving the same set from `allEntries` (which is
-   * DELIBERATELY the broader, unfiltered list -- see this file's own header)
-   * would risk drifting from whatever narrowing SessionList.tsx applies next
-   * without this file ever finding out. Defaults to `[]` so every existing
+   * directly; re-deriving the same set from `entries` alone would risk
+   * drifting from whatever narrowing SessionList.tsx applies next without
+   * this file ever finding out. Defaults to `[]` so every existing
    * caller/test that predates the external-worktree tree keeps rendering
    * exactly as before (nothing between the plain list and the external
    * group).
@@ -215,7 +233,7 @@ export type WorktreesSectionProps = {
 
 export function WorktreesSection({
   project,
-  allEntries,
+  entries,
   forceOpenCreate,
   onCloseCreate,
   renderSessionRow,
@@ -248,21 +266,57 @@ export function WorktreesSection({
     if (forceOpenCreate) setCreating(true);
   }, [forceOpenCreate]);
 
+  /**
+   * THE WAITING EXCEPTION, CARRIED TO THE ROW LEVEL (S2, CROSS-PROVIDER
+   * REVIEW; PR 504's own rule: the agent-worktree filter "stands down for a
+   * `waiting` session" and it "must stay reachable regardless of the
+   * toggle"). `session-filter.ts`'s own `isHiddenByAgentWorktreeFilter`
+   * already stands down for a SESSION whose own `status === 'waiting'`, but
+   * that answer never reached either ROW-level filter below: both
+   * `hideAgentWorktrees` and `hideExternalWorktrees` used to drop the whole
+   * WORKTREE ROW outright, with no exception of their own -- so a waiting
+   * session's only way onto the screen (this file's own header: nesting is
+   * now the sole route once `SessionList.tsx`'s `useWorktreeParents`
+   * suppresses its top-level section) was removed a level above where the
+   * session-level rule had already, correctly, decided to keep it. Net
+   * effect: a session asking the operator something could be drawn nowhere
+   * at all.
+   *
+   * `entries` here is `SessionList.tsx`'s own FILTERED set (this file's
+   * header on `entries`), so a waiting session some OTHER rule already
+   * hides (search, a dismiss, `hideAgentStarted`) correctly does not force
+   * this row open either -- only one actually headed for the screen does.
+   */
+  const holdsWaitingSession = (worktree: WorktreeInfo): boolean =>
+    entries.some(
+      (entry) => entry.project.id === worktree.projectId && entry.session.status === 'waiting',
+    );
+
   // FILTERED BEFORE ANYTHING BELOW READS `worktrees` -- the row count next
   // to "Worktrees", the empty-section early return, AND the status poll
   // below all have to agree with what actually gets a row, or the count
   // would name a worktree the section itself never draws.
   const rawWorktrees = state.kind === 'ok' ? state.worktrees : [];
   const worktrees = hideAgentWorktrees
-    ? rawWorktrees.filter((worktree) => !isAgentWorktreeRow(worktree))
+    ? rawWorktrees.filter(
+        (worktree) => !isAgentWorktreeRow(worktree) || holdsWaitingSession(worktree),
+      )
     : rawWorktrees;
 
   // PHASE 2B'S OWN SPLIT -- an ordinary row draws in the plain list above;
   // an external-or-locked one (`worktree-visibility.ts`) either does not
   // draw at all (the shipped default) or draws in its OWN nested, collapsible
-  // group below, never mixed into the plain list either way.
-  const plainWorktrees = worktrees.filter((worktree) => !isExternalOrLockedWorktree(worktree));
-  const externalWorktrees = worktrees.filter((worktree) => isExternalOrLockedWorktree(worktree));
+  // group below, never mixed into the plain list either way -- UNLESS it
+  // holds a waiting session (the exception above), in which case it draws
+  // in the PLAIN list instead: never gated by `hideExternalWorktrees`,
+  // never folded away behind the tree's own collapse state, and excluded
+  // from `externalWorktrees` so it is never ALSO drawn there.
+  const plainWorktrees = worktrees.filter(
+    (worktree) => !isExternalOrLockedWorktree(worktree) || holdsWaitingSession(worktree),
+  );
+  const externalWorktrees = worktrees.filter(
+    (worktree) => isExternalOrLockedWorktree(worktree) && !holdsWaitingSession(worktree),
+  );
   const showExternalGroup = !hideExternalWorktrees && externalWorktrees.length > 0;
 
   const [externalCollapsed, setExternalCollapsed] = useState(() =>
@@ -394,7 +448,7 @@ export function WorktreesSection({
     worktree: WorktreeInfo,
     opts: { readonly compact: boolean } = { compact: false },
   ) {
-    const worktreeSessions = allEntries.filter((entry) => entry.project.id === worktree.projectId);
+    const worktreeSessions = entries.filter((entry) => entry.project.id === worktree.projectId);
     const status: WorktreeStatus | undefined = statuses.get(worktree.worktreeId);
     const { compact } = opts;
     return (

@@ -5158,7 +5158,14 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                       {viewOptions.groupBy === 'project' ? (
                         <WorktreesSection
                           project={section.project}
-                          allEntries={allEntries}
+                          // THE FILTERED SET, never `allEntries` (an S2: a
+                          // nested worktree row used to bypass every session
+                          // filter -- see `WorktreesSection.tsx`'s own header
+                          // on `entries`). `entries` here is THIS file's own
+                          // prop -- already through search, the status pills
+                          // and the origin rules, exactly the set
+                          // `renderSessionRow` draws everywhere else.
+                          entries={entries}
                           forceOpenCreate={creatingWorktreeFor === section.project.id}
                           onCloseCreate={() =>
                             setCreatingWorktreeFor((current) =>

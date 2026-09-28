@@ -27,16 +27,43 @@ export const AGENT_WORKTREE_PATH_SEGMENT = '/.claude/worktrees/';
 const AGENT_WORKTREE_BRANCH_PREFIX = 'worktree-agent-';
 
 /**
+ * What Claude Code itself names the DIRECTORY of one of its own agent
+ * worktrees -- `agent-<id>`, confirmed against real worktree admin
+ * directories on this machine (`.git/worktrees/agent-<hex>`, each on a
+ * `worktree-agent-<hex>` branch). The SAME prefix `AGENT_WORKTREE_BRANCH_
+ * PREFIX` uses for the branch signal, stated once here since the path
+ * signal below only ever tests it against the one path segment right after
+ * the container directory, never the whole tail.
+ */
+const AGENT_WORKTREE_DIR_PREFIX = 'agent-';
+
+/**
  * Does this (already realpath'd, or raw when the caller has no realpath to
  * give) path carry a Claude Code agent worktree segment?
  *
- * THE CONSTANT'S OWN TRAILING SLASH is what keeps this from matching the
- * CONTAINER directory itself (`/repo/.claude/worktrees`, with nothing after
- * it): that path names where Claude Code keeps its worktrees, not a
- * worktree, and is not a row anything here would ever draw for.
+ * S2, CROSS-PROVIDER REVIEW: this used to be `path.includes
+ * (AGENT_WORKTREE_PATH_SEGMENT)` -- true for ANY path under `/.claude/
+ * worktrees/`, not only one of Claude Code's own `agent-<id>` dirs. `docs/
+ * design/workspace-options.md`'s own promise is narrower: only an agent
+ * worktree is hidden. A worktree a PERSON makes in that same container
+ * directory -- by hand, or with `claude --worktree <name>` -- carries no
+ * `agent-` prefix on its own dir name and must stay visible; the old check
+ * hid it anyway, with `hideAgentWorktrees` on by default and no way back.
+ *
+ * Only the FIRST path segment after the container is tested, and it must
+ * START WITH `agent-` -- not merely appear somewhere in the tail. That is
+ * also what keeps this from matching the CONTAINER directory itself
+ * (`/repo/.claude/worktrees`, with nothing after it, or with a trailing
+ * slash and nothing after that): the segment there is empty, which does not
+ * start with anything, and that path names where Claude Code keeps its
+ * worktrees, not a worktree -- never a row anything here would draw for.
  */
 export function hasAgentWorktreeSegment(path: string): boolean {
-  return path.includes(AGENT_WORKTREE_PATH_SEGMENT);
+  const index = path.indexOf(AGENT_WORKTREE_PATH_SEGMENT);
+  if (index === -1) return false;
+  const tail = path.slice(index + AGENT_WORKTREE_PATH_SEGMENT.length);
+  const worktreeDirName = tail.split('/')[0] ?? '';
+  return worktreeDirName.startsWith(AGENT_WORKTREE_DIR_PREFIX);
 }
 
 /** Does this branch name say "an isolated agent worktree", by Claude Code's
