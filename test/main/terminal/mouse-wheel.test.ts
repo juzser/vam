@@ -86,6 +86,11 @@ describe('the read says whether the pane asked for the mouse', () => {
       cursor: { kind: 'at', column: 2, row: 46 },
       depth: 0,
       mouse: true,
+      // No sixth field on this line -- `bracket_paste_flag` unread, and
+      // `position` mirrors `cursor` for the reason `spawn.ts`'s own header
+      // gives (read independently of `cursor_flag`, kept here too).
+      bracketPaste: null,
+      position: { column: 2, row: 46 },
     });
     expect(readCursorLine('@vam-cursor 1 14 20 304 0').mouse).toBe(false);
     // Four fields is every stubbed runner in this suite and any older tmux:
@@ -94,10 +99,15 @@ describe('the read says whether the pane asked for the mouse', () => {
     expect(readCursorLine('@vam-cursor 1 14 20').mouse).toBeNull();
     // Anything but 0 or 1 is a tmux this parse does not understand.
     expect(readCursorLine('@vam-cursor 1 14 20 304 2').mouse).toBeNull();
-    expect(readCursorLine('@vam-cursor 1 14 20 304 1 7')).toEqual({
+    // Six fields (a sixth, `bracket_paste_flag`) is the ordinary answer now
+    // (`argv.ts`'s own `CURSOR_FORMAT`) -- SEVEN is one more than this
+    // format can produce.
+    expect(readCursorLine('@vam-cursor 1 14 20 304 1 7 9')).toEqual({
       cursor: { kind: 'unreadable' },
       depth: null,
       mouse: null,
+      bracketPaste: null,
+      position: null,
     });
   });
 
