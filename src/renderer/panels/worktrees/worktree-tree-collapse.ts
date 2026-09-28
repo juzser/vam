@@ -7,10 +7,10 @@
  * `prefs.ts` OWNS: `WorktreesSection.tsx`'s own header already states its
  * self-containment principle -- it reads `window.api?.worktrees` directly
  * rather than growing `SessionListProps`/`Canvas.tsx` -- and this is the
- * identical trade-off `prefs/foreign-hidden-note.ts` already made for its own
- * per-viewer number: direct `localStorage`, wrapped in try/catch, rather than
- * a new prop threaded through every call site between here and the top of
- * the tree.
+ * identical trade-off `prefs/local-storage.ts` exists to share: direct
+ * `localStorage`, wrapped in that one fail-open policy, rather than a new
+ * prop threaded through every call site between here and the top of the
+ * tree.
  *
  * KEYED BY THE BARE PROJECT ID, unlike `Prefs.collapsedProjects`'s own
  * `source -> [id]` two-level shape: `Project.id` already embeds its source
@@ -19,22 +19,12 @@
  * multi-field store from.
  */
 
+import { readItem, writeItem } from '../../prefs/local-storage.js';
+
 const KEY = 'vam.worktrees.externalTreeCollapsed';
 
-function store(): Storage | null {
-  try {
-    return globalThis.localStorage ?? null;
-  } catch {
-    // Access ITSELF throws in some privacy modes, before any method runs --
-    // `foreign-hidden-note.ts`'s own reason.
-    return null;
-  }
-}
-
 function readMap(): Record<string, boolean> {
-  try {
-    const raw = store()?.getItem(KEY) ?? null;
-    if (raw === null) return {};
+  return readItem(KEY, {}, (raw) => {
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== 'object' || parsed === null) return {};
     const out: Record<string, boolean> = {};
@@ -42,11 +32,7 @@ function readMap(): Record<string, boolean> {
       if (typeof value === 'boolean') out[id] = value;
     }
     return out;
-  } catch {
-    // Corrupt JSON, or a `getItem` that throws -- reads back as "nothing
-    // folded", the same fail-open direction `foreign-hidden-note.ts` takes.
-    return {};
-  }
+  });
 }
 
 /** Has this project's own external-worktree tree been folded shut? Absent is
@@ -63,16 +49,11 @@ export function isWorktreeTreeCollapsed(projectId: string): boolean {
  * residue behind for a later reader to trip on.
  */
 export function setWorktreeTreeCollapsed(projectId: string, collapsed: boolean): void {
-  try {
-    const map = readMap();
-    if (collapsed) {
-      map[projectId] = true;
-    } else {
-      delete map[projectId];
-    }
-    store()?.setItem(KEY, JSON.stringify(map));
-  } catch {
-    // Same shape as `foreign-hidden-note.ts`: a viewer who cannot persist
-    // this is asked again next launch, which is not a broken tree.
+  const map = readMap();
+  if (collapsed) {
+    map[projectId] = true;
+  } else {
+    delete map[projectId];
   }
+  writeItem(KEY, JSON.stringify(map));
 }

@@ -19,8 +19,8 @@
  *     source's own words for why.
  */
 
-import type { Decision } from '../renderer/domain/model.js';
 import type { SourceError } from '../renderer/sources/port.js';
+import type { Decision } from './model.js';
 
 export type AgentWork =
   | {

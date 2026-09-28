@@ -19,12 +19,83 @@
  * it and does not import it.
  */
 
-import { readdir } from 'node:fs/promises';
+import { readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 /** Where Claude Code keeps transcripts. Derived, never a literal home path. */
 export const defaultTranscriptRoot = (): string => join(homedir(), '.claude', 'projects');
+
+/**
+ * A ceiling on how many resolved session paths one root's cache keeps. The
+ * renderer polls every four seconds per open pane; without a bound the cache
+ * would grow with every distinct session a long-lived process ever looked
+ * up. Past the ceiling the oldest entries are evicted -- a lookup for an
+ * evicted session simply costs one index refresh, same as a true miss.
+ */
+export const transcriptCacheCeiling = 200;
+
+interface RootCache {
+  /** sessionId -> resolved path, oldest-first (`Map` insertion order is an LRU order here). */
+  readonly paths: Map<string, string>;
+  /** The one in-flight `indexTranscripts` scan for this root, if any, shared by concurrent lookups. */
+  inflight: Promise<Map<string, string>> | null;
+}
+
+const rootCaches = new Map<string, RootCache>();
+
+function getRootCache(root: string): RootCache {
+  let cache = rootCaches.get(root);
+  if (!cache) {
+    cache = { paths: new Map(), inflight: null };
+    rootCaches.set(root, cache);
+  }
+  return cache;
+}
+
+/** Records/refreshes one session's path, evicting the oldest entries past the ceiling. */
+function rememberPath(cache: RootCache, sessionId: string, path: string): void {
+  cache.paths.delete(sessionId);
+  cache.paths.set(sessionId, path);
+  while (cache.paths.size > transcriptCacheCeiling) {
+    const oldest = cache.paths.keys().next().value;
+    if (oldest === undefined) break;
+    cache.paths.delete(oldest);
+  }
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Runs (or joins) one `indexTranscripts` scan for `root` and refreshes the cache from it. */
+async function refreshIndex(root: string, cache: RootCache): Promise<Map<string, string>> {
+  if (!cache.inflight) {
+    cache.inflight = indexTranscripts(root).finally(() => {
+      cache.inflight = null;
+    });
+  }
+  const fresh = await cache.inflight;
+  for (const [sessionId, path] of fresh) {
+    rememberPath(cache, sessionId, path);
+  }
+  return fresh;
+}
+
+/** Test-only: clears every root's cache so a test starts cold. */
+export function __resetTranscriptCacheForTests(): void {
+  rootCaches.clear();
+}
+
+/** Test-only: the number of session paths currently cached for `root`. */
+export function __transcriptCacheSizeForTests(root: string): number {
+  return rootCaches.get(root)?.paths.size ?? 0;
+}
 
 /**
  * Where each session id's transcript lives, by walking the slug directories
@@ -65,13 +136,36 @@ export async function indexTranscripts(root: string): Promise<Map<string, string
  * The index is consulted BEFORE the `#` is trusted, because a session id
  * containing one would otherwise be cut in half by a rule meant for the
  * suffix.
+ *
+ * CACHED, NOT TRUSTED: a per-root cache of resolved paths (bounded by
+ * `transcriptCacheCeiling`) means a repeat lookup whose file still exists
+ * costs one `stat`, not a rescan. A cache hit is validated by that `stat`
+ * before being returned; a stale or absent entry falls through to one
+ * `indexTranscripts` refresh, shared by any concurrent lookups against the
+ * same root. There is no negative cache: a row with no transcript yet
+ * refreshes on every call, since nothing was ever recorded for it to miss.
  */
 export async function locateTranscript(
   root: string,
   rowId: string,
 ): Promise<{ readonly sessionId: string; readonly path: string | undefined }> {
-  const index = await indexTranscripts(root);
+  const cache = getRootCache(root);
   const hash = rowId.lastIndexOf('#');
-  const sessionId = index.has(rowId) || hash === -1 ? rowId : rowId.slice(0, hash);
-  return { sessionId, path: index.get(sessionId) };
+
+  const cachedCandidate = cache.paths.has(rowId)
+    ? rowId
+    : hash === -1
+      ? rowId
+      : rowId.slice(0, hash);
+  const cachedPath = cache.paths.get(cachedCandidate);
+  if (cachedPath !== undefined && (await pathExists(cachedPath))) {
+    rememberPath(cache, cachedCandidate, cachedPath);
+    return { sessionId: cachedCandidate, path: cachedPath };
+  }
+
+  const fresh = await refreshIndex(root, cache);
+  const sessionId = fresh.has(rowId) || hash === -1 ? rowId : rowId.slice(0, hash);
+  const path = fresh.get(sessionId);
+  if (path === undefined) cache.paths.delete(sessionId);
+  return { sessionId, path };
 }

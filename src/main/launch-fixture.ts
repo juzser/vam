@@ -12,7 +12,7 @@
  * TYPE-ONLY IMPORT, the same discipline `sources/source.ts` already states:
  * nothing under `src/renderer/` may be a runtime import from main (AC-16a).
  */
-import type { Project } from '../renderer/domain/model.js';
+import type { Project } from '../shared/model.js';
 
 /**
  * One project, one session -- `src/main/index.ts`'s `LAUNCH_FIXTURE_SOURCE`

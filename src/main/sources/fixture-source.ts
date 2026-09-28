@@ -13,7 +13,7 @@
  * with every field intact.
  */
 
-import type { Project } from '../../renderer/domain/model.js';
+import type { Project } from '../../shared/model.js';
 import type { SourceDescriptor } from '../../shared/preload-api.js';
 import type { MainSource } from './source.js';
 

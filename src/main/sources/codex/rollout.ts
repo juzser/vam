@@ -38,7 +38,7 @@
  * is exactly what `Decision.output === null` already means.
  */
 
-import type { Decision, TurnStep } from '../../../renderer/domain/model.js';
+import type { Decision, TurnStep } from '../../../shared/model.js';
 import type { TranscriptSource } from '../claude-code/window.js';
 
 /**

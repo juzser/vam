@@ -51,9 +51,9 @@
 import { readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
-import type { Project, Session, SlashCommand } from '../../../renderer/domain/model.js';
 import type { AgentWork } from '../../../shared/agent-work.js';
 import type { HistoryCursor, TranscriptPage } from '../../../shared/history.js';
+import type { Project, Session, SlashCommand } from '../../../shared/model.js';
 import type { SourceDescriptor } from '../../../shared/preload-api.js';
 import type { SourceError } from '../../ipc/channels.js';
 import { isAgentWorktreeCwd } from '../agent-worktree.js';

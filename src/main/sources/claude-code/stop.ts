@@ -27,7 +27,7 @@
 import { execFile } from 'node:child_process';
 import { access } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { SessionStatus } from '../../../renderer/domain/model.js';
+import type { SessionStatus } from '../../../shared/model.js';
 import { cliMissingMessage } from '../../env/cli-missing.js';
 import type { SourceError } from '../../ipc/channels.js';
 import { killSessionArgv } from '../tmux/argv.js';

@@ -75,7 +75,7 @@
  * rather than a stale, already-closed card.
  */
 
-import type { AgentQuestion } from '../../../renderer/domain/model.js';
+import type { AgentQuestion } from '../../../shared/model.js';
 import { contentParts, nextEffectiveId, questionsFromToolUse } from './questions.js';
 import { parseTranscriptLines } from './transcript.js';
 import type { TranscriptSource, TranscriptWindow } from './window.js';
@@ -150,8 +150,12 @@ const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? 
  * whose tail is a line still being written contributes nothing for that
  * fragment, and the next call is handed the SAME bytes again alongside
  * whatever completed them.
+ *
+ * Exported so a test can compute the single-fold expectation a chunked catch
+ * up must match, over the WHOLE delta in one call -- `readOpenQuestion`
+ * itself never calls it that way once a cache exists.
  */
-function foldQuestionWindow(
+export function foldQuestionWindow(
   initialOpen: OpenQuestion | null,
   initialOccurrences: ReadonlyMap<string, number>,
   window: TranscriptWindow,
@@ -196,6 +200,85 @@ function foldQuestionWindow(
   return { open, occurrences, consumedThrough };
 }
 
+/** One awaited macrotask -- see `readCatchUpChunk`'s own header for why. */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+/**
+ * One catch-up chunk: `[from, size)`, capped at `scanCapBytes` -- unless that
+ * one cap's worth holds no complete line at all, which only a single line
+ * longer than the cap can cause. That line's own end is then located with
+ * further cap-sized, non-overlapping probes (never re-reading what an
+ * earlier probe already covered), and read -- ONLY that line -- whole in one
+ * final call. Every other call this makes is `<= scanCapBytes`.
+ */
+async function readCatchUpChunk(
+  source: TranscriptSource,
+  from: number,
+  size: number,
+  scanCapBytes: number,
+): Promise<TranscriptWindow> {
+  const to = Math.min(from + scanCapBytes, size);
+  const window = await source.read(from, to);
+  if (to >= size || window.text.lastIndexOf('\n') !== -1) return window;
+
+  // No line completes within one cap's worth: probe forward, cap-sized step
+  // by cap-sized step, for the newline that ends this one long line.
+  let probeFrom = to;
+  while (probeFrom < size) {
+    const probeTo = Math.min(probeFrom + scanCapBytes, size);
+    const probe = await source.read(probeFrom, probeTo);
+    // `probe.text !== ''` means `window.ts` found a newline somewhere in
+    // this probe -- the first one since `from`, since none exists before
+    // `probeFrom`, so `probe.start` is exactly that line's end + 1.
+    if (probe.text !== '') return source.read(from, probe.start);
+    probeFrom = probeTo;
+  }
+  return window; // still being written: nothing complete to offer yet.
+}
+
+/**
+ * The delta `[from, size)` folded onto `initialOpen`, one `scanCapBytes`
+ * chunk at a time, yielding to the event loop between chunks so a large
+ * burst of transcript output never costs one unbounded allocation and one
+ * unbounded synchronous parse on the main thread. The index is written after
+ * EVERY chunk, not only at the end, so a caller that stops awaiting
+ * mid-catch-up leaves the index resumable from the last folded chunk rather
+ * than forced to rescan.
+ */
+async function readCatchUp(
+  index: QuestionIndex,
+  path: string,
+  mtimeMs: number,
+  initialOpen: OpenQuestion | null,
+  initialOccurrences: ReadonlyMap<string, number>,
+  from: number,
+  size: number,
+  scanCapBytes: number,
+  source: TranscriptSource,
+): Promise<OpenQuestion | null> {
+  let open = initialOpen;
+  let occurrences = initialOccurrences;
+  let chunkFrom = from;
+  let first = true;
+
+  while (chunkFrom < size) {
+    if (!first) await yieldToEventLoop();
+    first = false;
+
+    const window = await readCatchUpChunk(source, chunkFrom, size, scanCapBytes);
+    const folded = foldQuestionWindow(open, occurrences, window);
+    open = folded.open;
+    occurrences = folded.occurrences;
+    index.set(path, { consumedThrough: folded.consumedThrough, mtimeMs, open, occurrences });
+    if (folded.consumedThrough === chunkFrom) break; // a trailing partial line: retried next poll
+    chunkFrom = folded.consumedThrough;
+  }
+
+  return open;
+}
+
 /**
  * The newest open `AskUserQuestion` for one transcript, or `null` when its
  * newest one (within this module's bounded memory) has been answered or none
@@ -232,15 +315,29 @@ export async function readOpenQuestion(
   // entire point of keeping this state at all -- zero reads.
   if (cached !== undefined && size === cached.consumedThrough) return cached.open;
 
-  const from = cached === undefined ? Math.max(0, size - scanCapBytes) : cached.consumedThrough;
-  const window = await source.read(from, size);
-  const { open, occurrences, consumedThrough } = foldQuestionWindow(
-    cached?.open ?? null,
-    cached?.occurrences ?? new Map(),
-    window,
+  // FIRST LOOK: a single bounded read, exactly as before -- nothing to chunk
+  // when there is no prior state to catch up from.
+  if (cached === undefined) {
+    const from = Math.max(0, size - scanCapBytes);
+    const window = await source.read(from, size);
+    const { open, occurrences, consumedThrough } = foldQuestionWindow(null, new Map(), window);
+    index.set(path, { consumedThrough, mtimeMs, open, occurrences });
+    return open;
+  }
+
+  // CATCH-UP: the delta since the last look may be arbitrarily large -- see
+  // `readCatchUp`.
+  return readCatchUp(
+    index,
+    path,
+    mtimeMs,
+    cached.open,
+    cached.occurrences,
+    cached.consumedThrough,
+    size,
+    scanCapBytes,
+    source,
   );
-  index.set(path, { consumedThrough, mtimeMs, open, occurrences });
-  return open;
 }
 
 /**

@@ -21,7 +21,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { SlashCommand } from '../../../renderer/domain/model.js';
+import type { SlashCommand } from '../../../shared/model.js';
 
 /** Where Claude Code keeps the operator's own custom commands. */
 export const defaultUserCommandsDir = (): string => join(homedir(), '.claude', 'commands');

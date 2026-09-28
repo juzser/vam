@@ -31,7 +31,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import type { AgentQuestion, Decision } from '../../../renderer/domain/model.js';
+import type { AgentQuestion, Decision } from '../../../shared/model.js';
 import { type CacheActivity, detectCacheActivity, NO_CACHE_ACTIVITY } from './cache-activity.js';
 import { extractCommands } from './commands.js';
 import { collectQuestions } from './questions.js';

@@ -26,6 +26,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   createQuestionIndex,
+  foldQuestionWindow,
   mergeOpenQuestion,
   readOpenQuestion,
 } from '../../src/main/sources/claude-code/question-index.js';
@@ -99,6 +100,68 @@ function readerOf(text: string) {
 }
 
 const CAP = 4096;
+
+/** A recording transcript source: every `read(from, to)` range, in order. */
+function recordingSourceOf(text: string) {
+  const bytes = Buffer.from(text, 'utf8');
+  const ranges: { from: number; to: number }[] = [];
+  return {
+    ranges,
+    bytes: () => bytes.length,
+    size: async () => bytes.length,
+    read: async (from: number, to: number) => {
+      ranges.push({ from, to });
+      return readWindowOf(bytes, from, to);
+    },
+  };
+}
+
+/** A fixed-length complete JSONL line, so many of them sum predictably. */
+const shortLine = (n: number) =>
+  `${JSON.stringify({ type: 'c', n: String(n).padStart(6, '0') })}\n`;
+const SHORT_LINE_BYTES = Buffer.byteLength(shortLine(0), 'utf8');
+
+/** One complete JSONL line of exactly `bytes` bytes, padded in a text field. */
+function paddedLine(bytes: number): string {
+  const prefix = '{"type":"p","t":"';
+  const suffix = '"}';
+  const padLen = bytes - prefix.length - suffix.length - 1; // -1 for the trailing newline
+  expect(padLen).toBeGreaterThanOrEqual(0);
+  return `${prefix}${'x'.repeat(padLen)}${suffix}\n`;
+}
+
+/** `total` bytes of complete JSONL filler lines, summed exactly. */
+function fillerOfExactly(total: number): string {
+  let count = Math.floor(total / SHORT_LINE_BYTES);
+  let remainder = total - count * SHORT_LINE_BYTES;
+  // A remainder too small to hold a padded line's own envelope borrows one
+  // more short line's worth of room from the count above it.
+  if (remainder > 0 && remainder < 24) {
+    count -= 1;
+    remainder += SHORT_LINE_BYTES;
+  }
+  let out = '';
+  for (let i = 0; i < count; i += 1) out += shortLine(i);
+  if (remainder > 0) out += paddedLine(remainder);
+  return out;
+}
+
+/** An `AskUserQuestion` tool_use line, padded to exactly `bytes` bytes. */
+function askLineOfExactly(id: string, bytes: number): string {
+  const zero = ask(id, [{ ...PROVIDERS, options: [{ label: 'Codex CLI', description: '' }] }]);
+  const baseLen = Buffer.byteLength(`${JSON.stringify(zero)}\n`, 'utf8');
+  const padLen = bytes - baseLen;
+  expect(padLen).toBeGreaterThan(0);
+  const padded = ask(id, [
+    { ...PROVIDERS, options: [{ label: 'Codex CLI', description: 'x'.repeat(padLen) }] },
+  ]);
+  const line = `${JSON.stringify(padded)}\n`;
+  expect(Buffer.byteLength(line, 'utf8')).toBe(bytes);
+  return line;
+}
+
+const maxRangeBytes = (ranges: { from: number; to: number }[]) =>
+  Math.max(...ranges.map((r) => r.to - r.from));
 
 describe('readOpenQuestion', () => {
   it('finds a question asked, then buried under more filler than the read window', async () => {
@@ -346,6 +409,204 @@ describe('readOpenQuestion', () => {
       );
       expect(rebuilt?.toolUseId).toBe('toolu_9');
     });
+  });
+});
+
+/**
+ * FINDING a5dda874: the catch-up scan chunks a large delta rather than
+ * folding it in one unbounded read. See the module's chunking helpers.
+ */
+describe('readOpenQuestion -- chunked catch-up', () => {
+  const SCAN_CAP = 1024;
+
+  it('caps every incremental read range at the scan cap, even for a burst far bigger than it', async () => {
+    const initial = fillerOfExactly(512);
+    const index = createQuestionIndex();
+    const firstReader = recordingSourceOf(initial);
+    await readOpenQuestion(index, 'sess-1', firstReader.bytes(), 1, firstReader, SCAN_CAP);
+
+    const growth = fillerOfExactly(SCAN_CAP * 3 + 1);
+    const grown = initial + growth;
+    const reader = recordingSourceOf(grown);
+    await readOpenQuestion(index, 'sess-1', reader.bytes(), 2, reader, SCAN_CAP);
+
+    // The report quotes this: the largest recorded range under the fix.
+    expect(maxRangeBytes(reader.ranges)).toBeLessThanOrEqual(SCAN_CAP);
+  });
+
+  it('preserves the same open result and final consumedThrough as one whole fold, across several chunks', async () => {
+    const initial = fillerOfExactly(200);
+    const index = createQuestionIndex();
+    const firstReader = recordingSourceOf(initial);
+    await readOpenQuestion(index, 'sess-1', firstReader.bytes(), 1, firstReader, SCAN_CAP);
+    const consumedAfterFirst = firstReader.bytes();
+
+    // Chunk 1: the ask, sized to exactly fill one chunk on its own.
+    const askChunk = askLineOfExactly('toolu_hist', SCAN_CAP);
+    // Chunk 2: pure filler -- the question stays open across it.
+    const middleChunk = fillerOfExactly(SCAN_CAP);
+    // Chunk 3 (and a little more): the answer, then trailing filler.
+    const answerL = `${JSON.stringify(answerLine('toolu_hist', 'Codex CLI'))}\n`;
+    const tailChunk = fillerOfExactly(SCAN_CAP);
+    const growth = askChunk + middleChunk + answerL + tailChunk;
+    const grown = initial + growth;
+
+    // The single-fold expectation, computed directly with `foldQuestionWindow`
+    // over the WHOLE delta in one call.
+    const wholeBytes = Buffer.from(grown, 'utf8');
+    const wholeWindow = readWindowOf(wholeBytes, consumedAfterFirst, wholeBytes.length);
+    const expected = foldQuestionWindow(null, new Map(), wholeWindow);
+
+    const reader = recordingSourceOf(grown);
+    const open = await readOpenQuestion(index, 'sess-1', reader.bytes(), 2, reader, SCAN_CAP);
+
+    expect(reader.ranges.length).toBeGreaterThan(1); // several chunks really ran
+    expect(open).toEqual(expected.open);
+    expect(open).toBeNull(); // answered by the third chunk
+    expect(index.get('sess-1')?.consumedThrough).toBe(expected.consumedThrough);
+  });
+
+  it('folds an AskUserQuestion line bigger than the cap whole, deciding the oversized-line case', async () => {
+    const initial = fillerOfExactly(200);
+    const index = createQuestionIndex();
+    const firstReader = recordingSourceOf(initial);
+    await readOpenQuestion(index, 'sess-1', firstReader.bytes(), 1, firstReader, SCAN_CAP);
+    const consumedAfterFirst = firstReader.bytes();
+
+    const shortBefore = fillerOfExactly(SCAN_CAP * 3);
+    const bigLine = askLineOfExactly('toolu_big', SCAN_CAP * 2 + 37);
+    const shortAfter = shortLine(9001) + shortLine(9002) + shortLine(9003);
+    const growth = shortBefore + bigLine + shortAfter;
+    const grown = initial + growth;
+
+    const lineStart = consumedAfterFirst + Buffer.byteLength(shortBefore, 'utf8');
+    const lineEnd = lineStart + Buffer.byteLength(bigLine, 'utf8'); // one past the line's own newline
+
+    const wholeBytes = Buffer.from(grown, 'utf8');
+    const wholeWindow = readWindowOf(wholeBytes, consumedAfterFirst, wholeBytes.length);
+    const expected = foldQuestionWindow(null, new Map(), wholeWindow);
+
+    const reader = recordingSourceOf(grown);
+    const open = await readOpenQuestion(index, 'sess-1', reader.bytes(), 2, reader, SCAN_CAP);
+
+    // (a) the same question surfaces as the single fold's -- same id, same
+    // question, same options.
+    expect(open).toEqual(expected.open);
+    expect(open?.toolUseId).toBe('toolu_big');
+    expect(open?.questions[0]?.question).toBe(PROVIDERS.question);
+
+    // (b) the same final consumedThrough.
+    expect(index.get('sess-1')?.consumedThrough).toBe(expected.consumedThrough);
+
+    // (c) every recorded range is either within the cap, or lies entirely
+    // inside the long line's own byte span. The report quotes this against
+    // HEAD, where the one recorded range of about 5x the cap starts in the
+    // short lines before it, failing this same assertion.
+    for (const range of reader.ranges) {
+      const withinCap = range.to - range.from <= SCAN_CAP;
+      const withinLine = range.from >= lineStart && range.to <= lineEnd;
+      expect(withinCap || withinLine).toBe(true);
+    }
+  });
+
+  it('yields to the event loop before an unbounded catch-up resolves', async () => {
+    const initial = fillerOfExactly(512);
+    const index = createQuestionIndex();
+    const firstReader = recordingSourceOf(initial);
+    await readOpenQuestion(index, 'sess-1', firstReader.bytes(), 1, firstReader, SCAN_CAP);
+
+    // Many chunks, not a handful: under CPU contention (the full suite runs
+    // hundreds of files in parallel) a few `setImmediate` round trips can
+    // race ahead of a 1 ms-clamped timer. A hundred-plus round trips cannot.
+    const growth = fillerOfExactly(SCAN_CAP * 150 + 1);
+    const grown = initial + growth;
+    const reader = recordingSourceOf(grown);
+
+    const order: string[] = [];
+    setTimeout(() => order.push('timer'), 0);
+    await readOpenQuestion(index, 'sess-1', reader.bytes(), 2, reader, SCAN_CAP);
+    order.push('resolved');
+
+    // The report quotes this order: under the fix the timer fires first.
+    expect(order).toEqual(['timer', 'resolved']);
+  });
+
+  it('does not spend a tick yielding when the whole catch-up fits in one chunk', async () => {
+    const initial = fillerOfExactly(512);
+    const index = createQuestionIndex();
+    const firstReader = recordingSourceOf(initial);
+    await readOpenQuestion(index, 'sess-1', firstReader.bytes(), 1, firstReader, SCAN_CAP);
+
+    // A small delta well under the cap: exactly one chunk, so the loop
+    // breaks after its first (and only) iteration -- BEFORE the `!first`
+    // check ever lets a `yieldToEventLoop` run.
+    const growth = fillerOfExactly(200);
+    const grown = initial + growth;
+    const reader = recordingSourceOf(grown);
+
+    const order: string[] = [];
+    setImmediate(() => order.push('immediate'));
+    await readOpenQuestion(index, 'sess-1', reader.bytes(), 2, reader, SCAN_CAP);
+    order.push('resolved');
+    // Flush the pending `setImmediate` so its callback, if it has not
+    // already fired, gets its turn before the assertion below.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    // Resolving through nothing but `await source.read(...)` -- no
+    // `setImmediate` round trip of its own -- finishes before the
+    // competing `setImmediate` callback queued alongside it gets its turn.
+    expect(order).toEqual(['resolved', 'immediate']);
+  });
+
+  it('persists progress after each chunk, so an interrupted catch-up resumes rather than rescanning', async () => {
+    const initial = fillerOfExactly(512);
+    const index = createQuestionIndex();
+    const firstReader = recordingSourceOf(initial);
+    await readOpenQuestion(index, 'sess-1', firstReader.bytes(), 1, firstReader, SCAN_CAP);
+    const consumedAfterFirst = index.get('sess-1')?.consumedThrough;
+
+    // Several chunks' worth of growth, so catch-up must loop more than once.
+    const growth = fillerOfExactly(SCAN_CAP * 3);
+    const grown = initial + growth;
+    const bytes = Buffer.from(grown, 'utf8');
+
+    let reads = 0;
+    // A source that answers the first chunk normally, then fails as if the
+    // process were interrupted mid-catch-up (crash, cancellation).
+    const flaky = {
+      size: async () => bytes.length,
+      read: async (from: number, to: number) => {
+        reads += 1;
+        if (reads === 2) throw new Error('interrupted');
+        return readWindowOf(bytes, from, to);
+      },
+    };
+
+    await expect(
+      readOpenQuestion(index, 'sess-1', bytes.length, 2, flaky, SCAN_CAP),
+    ).rejects.toThrow('interrupted');
+
+    // The index already reflects the FIRST chunk's progress, not only the
+    // point the interrupted call started from -- proof the write happens
+    // after every chunk, not only when the whole catch-up finishes.
+    const afterInterruption = index.get('sess-1')?.consumedThrough;
+    expect(afterInterruption).toBeGreaterThan(consumedAfterFirst as number);
+    expect(afterInterruption).toBeLessThan(bytes.length);
+
+    // The next call, given a working source, resumes from exactly that
+    // persisted offset rather than the original `consumedAfterFirst`.
+    const seenFrom: number[] = [];
+    const resuming = {
+      size: async () => bytes.length,
+      read: async (from: number, to: number) => {
+        seenFrom.push(from);
+        return readWindowOf(bytes, from, to);
+      },
+    };
+    await readOpenQuestion(index, 'sess-1', bytes.length, 3, resuming, SCAN_CAP);
+
+    expect(seenFrom[0]).toBe(afterInterruption);
+    expect(index.get('sess-1')?.consumedThrough).toBe(bytes.length);
   });
 });
 

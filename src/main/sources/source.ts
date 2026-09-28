@@ -10,9 +10,9 @@
  * import from main (AC-16a): types are erased at build time, values are not.
  */
 
-import type { Project } from '../../renderer/domain/model.js';
 import type { AgentWork } from '../../shared/agent-work.js';
 import type { HistoryCursor, TranscriptPage } from '../../shared/history.js';
+import type { Project } from '../../shared/model.js';
 import type { SourceDescriptor } from '../../shared/preload-api.js';
 import type { SourceError } from '../ipc/channels.js';
 
