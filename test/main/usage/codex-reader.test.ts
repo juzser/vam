@@ -202,6 +202,112 @@ describe('readCodexUsage', () => {
     const snapshot = await readCodexUsage(deps);
     expect(snapshot).toEqual({ kind: 'unknown', reason: 'no-session' });
   });
+
+  /**
+   * THE OPERATOR'S OWN BUG. Measured live on this machine: a freshly started
+   * Codex thread's FIRST `token_count` event carries `rate_limits.primary`
+   * AND `.secondary` as literal `null` -- not absent, not malformed, just not
+   * populated yet (the real numbers arrive on the NEXT turn). Before this
+   * test, `readCodexUsage` took whatever `rate_limits` object it found on the
+   * newest event and returned it verbatim, so turning on "show Codex usage"
+   * right after starting a new thread rendered the status bar's Codex cell as
+   * a silent `— · —` even though a perfectly good, recent reading sat one
+   * line above it in the very same file.
+   */
+  it('skips a token_count event whose rate_limits are both null, and uses the older reading in the SAME file', async () => {
+    const path = '/home/.codex/sessions/2026/09/28/rollout-a.jsonl';
+    const goodReading = {
+      limit_id: 'codex',
+      limit_name: null,
+      primary: { used_percent: 11, window_minutes: 300, resets_at: 1_790_000_000 },
+      secondary: { used_percent: 2, window_minutes: 10_080, resets_at: 1_790_500_000 },
+      credits: { has_credits: false, unlimited: false, balance: '0' },
+      individual_limit: null,
+      spend_control_reached: null,
+      plan_type: 'plus',
+      rate_limit_reached_type: null,
+    };
+    const placeholderReading = {
+      limit_id: 'codex',
+      limit_name: null,
+      primary: null,
+      secondary: null,
+      credits: { has_credits: false, unlimited: false, balance: '0' },
+      individual_limit: null,
+      spend_control_reached: null,
+      plan_type: 'plus',
+      rate_limit_reached_type: null,
+    };
+    const deps = fakeDeps(
+      {
+        '/home/.codex/sessions': ['2026'],
+        '/home/.codex/sessions/2026': ['09'],
+        '/home/.codex/sessions/2026/09': ['28'],
+        '/home/.codex/sessions/2026/09/28': ['rollout-a.jsonl'],
+      },
+      {
+        [path]: [
+          tokenCountLine(goodReading, '2026-09-28T09:11:00.000Z'),
+          // The newest line in the file -- a brand-new thread's first
+          // token_count, with no usable window yet.
+          tokenCountLine(placeholderReading, '2026-09-28T09:19:00.000Z'),
+        ].join('\n'),
+      },
+    );
+
+    const snapshot = await readCodexUsage(deps);
+    expect(snapshot.kind).toBe('ok');
+    if (snapshot.kind !== 'ok') throw new Error('unreachable');
+    expect(snapshot.limits.primary).toMatchObject({ kind: 'known', percent: 11 });
+    expect(snapshot.limits.secondary).toMatchObject({ kind: 'known', percent: 2 });
+    expect(snapshot.observedAt).toBe('2026-09-28T09:11:00.000Z');
+  });
+
+  it('falls back to an OLDER FILE when the newest file carries only null-window token_count events', async () => {
+    const newestPath = '/home/.codex/sessions/2026/09/28/rollout-b-newer.jsonl';
+    const olderPath = '/home/.codex/sessions/2026/09/28/rollout-a-older.jsonl';
+    const placeholderReading = { primary: null, secondary: null };
+    const goodReading = {
+      primary: { used_percent: 40, window_minutes: 300, resets_at: 1_790_000_000 },
+      secondary: { used_percent: 5, window_minutes: 10_080, resets_at: 1_790_500_000 },
+    };
+    const deps = fakeDeps(
+      {
+        '/home/.codex/sessions': ['2026'],
+        '/home/.codex/sessions/2026': ['09'],
+        '/home/.codex/sessions/2026/09': ['28'],
+        '/home/.codex/sessions/2026/09/28': ['rollout-a-older.jsonl', 'rollout-b-newer.jsonl'],
+      },
+      {
+        [newestPath]: `${tokenCountLine(placeholderReading, '2026-09-28T09:19:00.000Z')}\n`,
+        [olderPath]: `${tokenCountLine(goodReading, '2026-09-28T09:05:00.000Z')}\n`,
+      },
+    );
+
+    const snapshot = await readCodexUsage(deps);
+    expect(snapshot.kind).toBe('ok');
+    if (snapshot.kind !== 'ok') throw new Error('unreachable');
+    expect(snapshot.limits.primary).toMatchObject({ kind: 'known', percent: 40 });
+    expect(snapshot.observedAt).toBe('2026-09-28T09:05:00.000Z');
+  });
+
+  it('answers no-session when every scanned event carries only null windows', async () => {
+    const path = '/home/.codex/sessions/2026/09/28/rollout-a.jsonl';
+    const deps = fakeDeps(
+      {
+        '/home/.codex/sessions': ['2026'],
+        '/home/.codex/sessions/2026': ['09'],
+        '/home/.codex/sessions/2026/09': ['28'],
+        '/home/.codex/sessions/2026/09/28': ['rollout-a.jsonl'],
+      },
+      {
+        [path]: `${tokenCountLine({ primary: null, secondary: null }, '2026-09-28T09:19:00.000Z')}\n`,
+      },
+    );
+
+    const snapshot = await readCodexUsage(deps);
+    expect(snapshot).toEqual({ kind: 'unknown', reason: 'no-session' });
+  });
 });
 
 describe('DEFAULT_CODEX_USAGE_DEPS', () => {
