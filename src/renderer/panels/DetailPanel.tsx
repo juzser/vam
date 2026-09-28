@@ -149,6 +149,7 @@ import { insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
 import { PHONE_KEY_LABELS, phoneKeyLabelNodes } from '../keyboard/phone-key-labels.js';
 import { questionKeys, resolveQuestionKey } from '../keyboard/question-keys.js';
 import { ChordGlyphs, ShortcutTip } from '../keyboard/ShortcutTip.js';
+import { usePhoneViewport } from '../phone/viewport.js';
 import { type AgentPermissions, isDesktopShell } from '../prefs/agent-permissions.js';
 import {
   activeFocusView,
@@ -4721,6 +4722,21 @@ function QuestionCard({
   const [outcome, setOutcome] = useState<AnswerResult | null>(null);
   const [sending, setSending] = useState(false);
   /**
+   * THE SAME FACT AS `sending`, BUT SYNCHRONOUS. `sending` is `useState` --
+   * read through a closure captured at the LAST render, so two calls into
+   * `send()` that both start before React has re-rendered (two real keydowns
+   * dispatched back to back, or two clicks on a button whose `disabled`
+   * attribute has not committed yet) both read `sending === false` and both
+   * go through. A `ref` has no such gap: it is one mutable cell every closure
+   * reads and writes immediately, so the SECOND call sees the FIRST call's
+   * write even when no render has happened between them. Set the instant
+   * `send` decides to go, cleared only once `onAnswer` has resolved or
+   * thrown -- never on a timer, never optimistically -- so a slow write still
+   * blocks a second one for exactly as long as the first is actually in
+   * flight.
+   */
+  const sendingRef = useRef(false);
+  /**
    * WHY THE LAST SUBMIT DID NOT GO, when the reason is on this side.
    *
    * Separate from `outcome`, which is what the SESSION'S PICKER said: a set
@@ -4921,6 +4937,37 @@ function QuestionCard({
           ? undefined
           : question.options.find((one) => one.label === picked[0])) ??
         question.options.find((one) => (one.preview ?? null) !== null));
+  /**
+   * IS THE VIEWPORT ITSELF PHONE-SIZED (docs/design/phone-core-loop.md §3.3,
+   * "Preview: collapse-by-default ... disclose per-option on tap") -- read
+   * independently of the `phone` PROP above, deliberately. That prop only
+   * ever reaches `true` from the ONE inline mount on the Response view (see
+   * its own doc); the fixed-footer mount phone's Agents view still uses
+   * (`current !== 'Response'`) passes no `phone` prop at all, yet can be
+   * sitting in the exact same ≤519px window. A collapse driven by the prop
+   * would leave that mount's preview panel permanently expanded on a phone.
+   * `usePhoneViewport` is the same canonical reader `Canvas`, `SessionList`,
+   * `SettingsOverlay` and `PairingPanel` already use for this fact, so this
+   * is a second CALLER of one source of truth, not a second SOURCE of it.
+   */
+  const phoneViewport = usePhoneViewport();
+  /**
+   * WHETHER THE PANEL IS OPEN, phone only -- desktop never collapses (the
+   * side-by-side/stacked panel has always been "always open" there, and
+   * this spec does not touch that). `false` at rest so a fresh option's
+   * preview is always the one-line "preview ↓" disclosure first, never
+   * pre-opened -- "disclose per-option on tap", not "stays open across
+   * options". Reset on `activeOption` itself changing (covers both a walk
+   * to a new step, which changes `question`, and a pick/focus move within
+   * the same step) for the identical reason `focusedLabel` resets on
+   * `question?.id` above: a stale `true` surviving onto a DIFFERENT
+   * option's preview would open content the operator never asked to see.
+   */
+  const [previewExpanded, setPreviewExpanded] = useState(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: see above -- only `activeOption?.label` should re-run this.
+  useEffect(() => {
+    setPreviewExpanded(false);
+  }, [activeOption?.label]);
   useEffect(() => {
     if (landing === null) return;
     setLanding(null);
@@ -4956,17 +5003,29 @@ function QuestionCard({
         .filter((label) => (marksOverride[one.id] ?? []).includes(label)),
       multiSelect: one.multiSelect,
     }));
-    if (onAnswer === null || sending || steps.length === 0) return;
+    // `sendingRef`, not `sending`, is what actually stops a second call from
+    // going out -- see its own comment. `sending` stays as the SECOND guard
+    // (kept, not redundant: it is what `disabled`/`aria-busy` below read, and
+    // a ref cannot drive a render) rather than the only one.
+    if (onAnswer === null || sendingRef.current || steps.length === 0) return;
     if (steps.some((one) => one.labels.length === 0)) return;
+    sendingRef.current = true;
     setRefusal(null);
     setSending(true);
-    const result = await onAnswer({ steps });
-    setOutcome(result);
-    // What the picker took in before it stopped is not offered again: those
-    // questions are behind the CLI's own cursor now.
-    const got = result.kind === 'sent' ? undefined : result.committed;
-    if (got !== undefined) setTaken((already) => [...already, ...got]);
-    setSending(false);
+    try {
+      const result = await onAnswer({ steps });
+      setOutcome(result);
+      // What the picker took in before it stopped is not offered again: those
+      // questions are behind the CLI's own cursor now.
+      const got = result.kind === 'sent' ? undefined : result.committed;
+      if (got !== undefined) setTaken((already) => [...already, ...got]);
+    } finally {
+      // Cleared here ONLY -- resolve or throw, never a timer, never
+      // optimistically -- so a slow write still blocks a second send for
+      // exactly as long as the first one is actually in flight.
+      sendingRef.current = false;
+      setSending(false);
+    }
   };
 
   /**
@@ -5603,25 +5662,68 @@ function QuestionCard({
                   announce -- `aria-label` names WHICH option it is showing
                   instead, which is what actually needs to be read once the
                   operator asks for it. */}
-              {hasPreview && activeOption !== undefined && (
-                <section
-                  data-question-preview-panel
-                  data-for={question.options.indexOf(activeOption)}
-                  aria-label={`preview of ${activeOption.label}`}
-                  className={[
-                    'vam-no-scrollbar min-w-0 max-h-[40vh] overflow-auto whitespace-pre rounded-[7px] border border-line bg-ground px-2.5 py-2 font-mono text-[0.917em] text-ink-dim leading-[1.55]',
-                    sideBySide ? '@min-[720px]:flex-1' : '',
-                  ].join(' ')}
-                >
-                  {(activeOption.preview ?? null) !== null ? (
-                    activeOption.preview
-                  ) : (
-                    <span data-question-preview-empty className={OPTION_QUIET_INK}>
-                      no preview for this option
-                    </span>
-                  )}
-                </section>
-              )}
+              {/* PHONE, COLLAPSED: docs/design/phone-core-loop.md §3.3 --
+                  "collapse-by-default, one line (`preview ↓` hint, unchanged
+                  copy) that expands the same `Fenced`-styled panel on tap".
+                  A one-line BUTTON, not the section itself made `hidden`: the
+                  section's own `aria-label` reads "preview of <option>" which
+                  is exactly wrong copy for a row that is not showing one yet,
+                  and a real disclosure control (not a `details`/`summary`,
+                  to keep the same `Fenced`-styled panel underneath rather
+                  than swap elements) is what lets a screen reader and this
+                  file's own `.vam-tap` floor both apply to the SAME element
+                  the operator presses. Desktop is untouched: `phoneViewport`
+                  is `false` there, so this branch never renders and the
+                  `<section>` below is exactly what shipped before this
+                  disclosure existed. */}
+              {hasPreview &&
+                activeOption !== undefined &&
+                (phoneViewport && !previewExpanded ? (
+                  <button
+                    type="button"
+                    data-question-preview-toggle
+                    aria-expanded="false"
+                    aria-label={`preview of ${activeOption.label} — collapsed`}
+                    onClick={() => setPreviewExpanded(true)}
+                    className={`vam-tap flex w-full items-center justify-start rounded-[7px] border border-line bg-ground px-2.5 py-1 text-left text-control ${OPTION_QUIET_INK}`}
+                  >
+                    preview ↓
+                  </button>
+                ) : (
+                  <section
+                    data-question-preview-panel
+                    data-for={question.options.indexOf(activeOption)}
+                    aria-label={`preview of ${activeOption.label}`}
+                    className={[
+                      'vam-no-scrollbar min-w-0 max-h-[40vh] overflow-auto whitespace-pre rounded-[7px] border border-line bg-ground px-2.5 py-2 font-mono text-[0.917em] text-ink-dim leading-[1.55]',
+                      sideBySide ? '@min-[720px]:flex-1' : '',
+                    ].join(' ')}
+                  >
+                    {/* The way back to collapsed -- phone only. Desktop's
+                        panel has never had a fold control and does not gain
+                        one here: `phoneViewport` gates it the same way it
+                        gates the collapsed row above. */}
+                    {phoneViewport && (
+                      <button
+                        type="button"
+                        data-question-preview-toggle
+                        aria-expanded="true"
+                        aria-label={`preview of ${activeOption.label} — expanded`}
+                        onClick={() => setPreviewExpanded(false)}
+                        className={`vam-tap -mx-2.5 -mt-2 mb-1 flex w-[calc(100%+20px)] items-center justify-start px-2.5 py-1 text-left font-sans text-control ${OPTION_QUIET_INK}`}
+                      >
+                        preview ↑
+                      </button>
+                    )}
+                    {(activeOption.preview ?? null) !== null ? (
+                      activeOption.preview
+                    ) : (
+                      <span data-question-preview-empty className={OPTION_QUIET_INK}>
+                        no preview for this option
+                      </span>
+                    )}
+                  </section>
+                ))}
             </div>
           )}
           {/* Not in the transcript: `AskUserQuestion`'s tool_use records the
