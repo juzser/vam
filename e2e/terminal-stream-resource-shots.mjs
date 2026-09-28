@@ -40,6 +40,7 @@ import { tmpdir } from 'node:os';
 import { extname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { chromium } from 'playwright-core';
+import { privateTmuxSocket } from './support/tmux-socket.mjs';
 
 const which = spawnSync('tmux', ['-V'], { encoding: 'utf8' });
 if (which.error || which.status !== 0) {
@@ -50,7 +51,7 @@ if (which.error || which.status !== 0) {
   process.exit(0);
 }
 
-const SOCKET = 'vam-stream-e2e-resource';
+const SOCKET = privateTmuxSocket('vam-stream-e2e-resource');
 const TMUX_SESSION = 'vam-stream-e2e-resource-a1b2c3';
 const COLUMNS = 100;
 const ROWS = 30;

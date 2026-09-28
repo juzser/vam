@@ -61,6 +61,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { chromium } from 'playwright-core';
+import { privateTmuxSocket } from './support/tmux-socket.mjs';
 
 const origin = process.argv[2] ?? 'http://localhost:5520';
 const outDir = process.argv[3] ?? 'docs/ui';
@@ -68,7 +69,7 @@ const outDir = process.argv[3] ?? 'docs/ui';
 const SESSION = 'atlas-latency';
 const BRANCH = 'work/atlas-latency';
 const PROJECT = 'p1';
-const SOCKET = 'vam-e2e-latency';
+const SOCKET = privateTmuxSocket('vam-e2e-latency');
 const TMUX_SESSION = 'vam-e2e-latency-a1b2c3';
 const COLUMNS = 137;
 const ROWS = 41;

@@ -199,6 +199,13 @@ const GUARDS = [
   'settings-chrome-shots',
   'settings-panels-shots',
   'settings-update-shots',
+  // SETTINGS AND STATS & USAGE ARE THE SAME SIZE, MEASURED: the operator's
+  // own ask ("Make the Settings popup bigger. The Stats & Usage screen
+  // should be the same size"), asserted as pixel-identical
+  // `getBoundingClientRect()`s at 1280x800 and 1920x1080, each clearing 90%
+  // of the viewport's own width. `modal-size-shots.mjs`'s own header holds
+  // the rest.
+  'modal-size-shots',
   'integrations-github-shots',
   'favicon-shots',
   'key-truth-shots',

@@ -387,8 +387,8 @@ phone route is the `N failures` button, which `PhoneShell` draws when
 a `failure`, so the count is structurally 0. `ProjectPicker` opens from
 `onAddToGroup`, which needs a group, which needs a source that accepts writes.
 The shared sheet RULE is now measured on two real panels — a short one and one
-with a fixed `h-[min(600px,80vh)]` of its own — but each unopened panel's own
-inner layout is not.
+with a fixed height of its own (`vam-modal-lg`, `styles.css`) — but each
+unopened panel's own inner layout is not.
 
 Nor is any of this a device. It is one engine at one width with square pixels
 and no rubber-band scrolling; Safari's own sheet behaviour, the accessory bar,

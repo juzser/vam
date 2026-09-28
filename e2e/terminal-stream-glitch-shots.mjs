@@ -119,11 +119,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { chromium } from 'playwright-core';
+import { privateTmuxSocket } from './support/tmux-socket.mjs';
 
 const origin = process.argv[2] ?? 'http://localhost:5520';
 const outDir = process.argv[3] ?? 'docs/ui';
 
-const SOCKET = 'vam-stream-glitch-e2e';
+const SOCKET = privateTmuxSocket('vam-stream-glitch-e2e');
 const TMUX_SESSION = 'vam-stream-glitch-e2e-a1b2c3';
 const COLUMNS = 80;
 const ROWS = 24;
@@ -141,6 +142,15 @@ console.log(`tmux: ${which.stdout.trim()} on private socket -L ${SOCKET}`);
 const tmux = (...args) => execFileSync('tmux', ['-L', SOCKET, ...args], { encoding: 'utf8' });
 const killServer = () => spawnSync('tmux', ['-L', SOCKET, 'kill-server']);
 killServer();
+// Unlike every sibling real-tmux guard, this script's body is not wrapped in
+// a `try { ... } finally { killServer(); }` (it would mean re-indenting the
+// whole file). `process.on('exit', ...)` is Node's own guarantee that this
+// still runs on the way out -- a thrown assertion, an unhandled rejection or
+// the ordinary end of the script all fire it -- so a socket this run's own
+// process opened can never outlive it. `killServer()` is idempotent (a
+// dead/absent socket just fails silently), so running it a second time from
+// here after the script's own unconditional call near the bottom is harmless.
+process.on('exit', killServer);
 
 const failures = [];
 function check(label, ok, detail) {

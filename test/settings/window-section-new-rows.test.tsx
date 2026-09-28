@@ -7,12 +7,22 @@
  * this file holds the rest, in the same idiom.
  */
 
-import { fireEvent, render } from '@testing-library/react';
+import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EMPTY_PREFS, type Prefs } from '../../src/renderer/prefs/prefs.js';
 import { SettingsOverlay } from '../../src/renderer/settings/SettingsOverlay.js';
 
 afterEach(() => {
+  // `cleanup()` unmounts every root this file rendered -- not decoration:
+  // React's scheduler defers some commits to a macrotask
+  // (`performWorkOnRootViaSchedulerTask`/`setImmediate`), and an un-unmounted
+  // root can still have one pending when this FILE's happy-dom `window` is
+  // torn down, throwing "window is not defined" from inside react-dom
+  // (reproduced under load: `vitest run test/settings/`, ~1 in 12 runs). A
+  // bare `document.body.innerHTML = ''` removes the DOM but never tells React
+  // to unmount, so that pending work survives the wipe. `cleanup()` cancels
+  // it per root, the same idiom `test/canvas/Canvas.*` already uses.
+  cleanup();
   document.body.innerHTML = '';
 });
 

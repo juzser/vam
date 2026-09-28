@@ -445,14 +445,15 @@ console.log('\n=== the ADHD skill card, not installed and installed, dark and li
 // ---------------------------------------------------------------------------
 // AND EACH CARD IS INSIDE THE BOX THAT SCROLLS.
 //
-// The overlay is `h-[min(600px,80vh)]` with one scrolling child
+// The overlay wears `vam-modal-lg` (`styles.css`) with one scrolling child
 // (`[data-settings-scroll]`) that now holds all ten cards end to end rather
 // than one panel at a time. A card whose rows overflow sideways is clipped
 // rather than reachable by the one scroll gesture this dialog offers.
 // Measured at the narrowest width the desktop shell still draws a nav at,
-// where the section strip (not the rail) takes a row out of the same 600px
-// -- Agents, for the widest row of controls any card in `ROWS` draws (the
-// provider picker, the chord glyphs, the ADHD skill card's own buttons).
+// where the section strip (not the rail) takes a row out of the same fixed
+// height -- Agents, for the widest row of controls any card in `ROWS` draws
+// (the provider picker, the chord glyphs, the ADHD skill card's own
+// buttons).
 console.log('\n=== a card fits the scrollport, sideways, at the narrowest desktop width');
 {
   const NARROWEST_DESKTOP = 520;
