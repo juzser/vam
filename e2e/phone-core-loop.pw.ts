@@ -777,11 +777,27 @@ test.describe('the card names controls that exist', () => {
   });
 });
 
+/**
+ * DECISION 1 (`docs/design/vam-owns-the-session.md` §5, "Confirm only when
+ * the agent is mid-turn"): the question below is gated on the session's own
+ * `running` status, not on being a phone. `s2` ("alpha-running") is the
+ * fixture that status actually belongs to; `s1` ("alpha-waiting", opened by
+ * `openWaiting`) finished its turn already, so it is the OTHER half's
+ * fixture, in the case right after these two.
+ */
+async function openRunningSession(page: Page): Promise<void> {
+  await page
+    .locator('[data-phone-shell] [data-session-row]', { hasText: 'alpha-running' })
+    .first()
+    .click();
+  await expect(page.locator('[data-phone-shell]')).toHaveAttribute('data-phone-shell', 'session');
+}
+
 test.describe('stopping a session is a decision, not a tap', () => {
   test('the × asks first, and sends nothing until it is answered', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: SHELL_H });
     const writes = await stubRemote(page);
-    await openWaiting(page);
+    await openRunningSession(page);
 
     // THE GEOMETRY THAT MAKES THIS AN S2: the Agents icon and the × are
     // neighbours on one 390px bar, so the tap that switches a view and the
@@ -820,7 +836,7 @@ test.describe('stopping a session is a decision, not a tap', () => {
   test('both of the confirm’s own controls are touch targets', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: SHELL_H });
     await stubRemote(page);
-    await openWaiting(page);
+    await openRunningSession(page);
     await page.locator('[data-phone-close]').tap();
     await expect(page.locator('[data-confirm-close-session]')).toBeVisible();
 
@@ -843,6 +859,28 @@ test.describe('stopping a session is a decision, not a tap', () => {
       boxes.filter((b) => b.w < TOUCH_MIN || b.h < TOUCH_MIN),
       'confirm controls under 44x44',
     ).toEqual([]);
+  });
+
+  /**
+   * THE OTHER HALF OF DECISION 1. `s1` ("alpha-waiting") already finished its
+   * turn -- `domain/model.ts`'s own definition of `waiting`: the ball is with
+   * the operator, not the agent -- so closing it loses nothing in flight and
+   * the phone must not ask, on the operator's own rule ("ONLY while the
+   * agent is running, on every device"). `openWaiting` is the harness this
+   * whole file already uses to reach `s1`.
+   */
+  test('a waiting session closes at once: nothing in flight to lose', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: SHELL_H });
+    const writes = await stubRemote(page);
+    await openWaiting(page);
+
+    await page.locator('[data-phone-close]').tap();
+    await expect(page.locator('[data-confirm-close-session]')).toHaveCount(0);
+    await expect
+      .poll(() => writes.urls.filter((u) => u.includes('close-session')).length, {
+        message: 'a waiting session sends its close at once, with no question in front of it',
+      })
+      .toBeGreaterThan(0);
   });
 });
 

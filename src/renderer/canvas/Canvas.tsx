@@ -143,6 +143,7 @@ import { SplitResizer } from '../panels/SplitResizer.js';
 import { StatusMark } from '../panels/status-mark.js';
 import { halfPageTarget } from '../panels/stick-to-bottom.js';
 import { TABS, tabForDigit, visibleTabs } from '../panels/tabs.js';
+import { ConfirmCloseSession } from '../phone/ConfirmCloseSession.js';
 import { PhoneShell } from '../phone/PhoneShell.js';
 import { usePhoneViewport } from '../phone/viewport.js';
 import { type AgentPermissions, isDesktopShell } from '../prefs/agent-permissions.js';
@@ -2325,6 +2326,8 @@ function CanvasInner({
     setStatsOpen,
     confirmForceClose,
     setConfirmForceClose,
+    confirmCloseSession,
+    setConfirmCloseSession,
   } = useCanvasOverlays();
   /** Any full-screen overlay on screen. See the keydown handler for the rule. */
   const overlayOpen =
@@ -2333,7 +2336,8 @@ function CanvasInner({
     settingsOpen ||
     errorLogOpen ||
     statsOpen ||
-    confirmForceClose !== null;
+    confirmForceClose !== null ||
+    confirmCloseSession !== null;
   /**
    * Whether the source has a terminal to draw, which decides how many tabs the
    * bar has. Read in two places -- the pane is told, and `Mod-<digit>` counts
@@ -5212,12 +5216,17 @@ function CanvasInner({
   /**
    * Stop the focused session — really, when the source can.
    *
-   * NO CONFIRM STEP, and that is a decision rather than an omission. `claude
-   * stop` keeps the conversation and `claude attach <id>` brings it back, so
-   * this is not a delete; the status line names the session it acted on and
-   * says the conversation is kept, which is what a confirm dialog would have
-   * been for. A modal in front of a resumable, named, undoable action is a
-   * keystroke tax on the common case.
+   * A CONFIRM STEP ONLY WHILE THE AGENT IS MID-TURN, per DECISION 1
+   * (`docs/design/vam-owns-the-session.md` §5, "Confirm only when the agent
+   * is mid-turn") — the operator's own words: "ask for confirmation before
+   * closing a session ONLY while the agent is running, on every device." A
+   * session that is `waiting` has already finished its turn and put the ball
+   * back with the operator — nothing in flight would be lost by closing it —
+   * so it closes exactly as it always did: no modal, `claude stop` keeps the
+   * conversation and `claude attach <id>` brings it back. `running` is the
+   * one status where a close can cut off work the operator cannot get back
+   * by reopening, and that gate is `closeSession` below, BEFORE
+   * `performCloseSession` is ever called — see its own comment.
    *
    * WHAT IT WILL NOT DO is decide for itself which sessions are stoppable.
    * `claude stop` stops BACKGROUND sessions only; an interactive one is a
@@ -5273,7 +5282,15 @@ function CanvasInner({
     [allEntries, prefs, savePrefs, setStatus],
   );
 
-  const closeSession = useCallback(
+  /**
+   * THE ACTUAL WRITE, gated by `closeSession` below rather than calling the
+   * source directly. Split out so a confirmed "yes, close it anyway" (from
+   * `confirmCloseSession`'s own `onConfirm`) can reach this without walking
+   * back through the running-status check it already answered — the same
+   * shape `confirmForceClose`'s `onConfirm` already uses to call THIS
+   * function with `force: true` after ITS OWN question.
+   */
+  const performCloseSession = useCallback(
     async (sessionId: string, title: string, force = false): Promise<boolean> => {
       if (pendingAction !== null) {
         // NAMED, and named for the session the operator just clicked: only
@@ -5354,6 +5371,50 @@ function CanvasInner({
       }
     },
     [source, pendingAction, dismissSession, setStatus, setConfirmForceClose],
+  );
+
+  /**
+   * THE ONE HELPER EVERY CLOSE PATH CALLS -- the tab's `×` (`closePaneTab`),
+   * the sidebar row's `×` (`onSidebarClose`), the `x` chord below, the tab's
+   * context menu ("Close session"), and the phone's app-bar `×` (routed
+   * through `sidebar.onClose`, the same `onSidebarClose`). Because all five
+   * already called `closeSession` before this existed, putting DECISION 1's
+   * gate here — rather than in each caller — is what makes it impossible for
+   * a sixth close button to bypass the question: there is nowhere else to
+   * plug in a source write.
+   *
+   * READS THE ROW'S STATUS OFF `allEntries`, the unfiltered list, on
+   * `dismissSession`'s own precedent above: a row reached through the
+   * command palette or a background tab may not be in today's filtered view.
+   *
+   * `running` IS THE ONLY STATUS THAT ASKS. `waiting` means the session
+   * already finished its turn and put the ball back with the operator
+   * (`domain/model.ts`'s own definition) — closing it loses nothing in
+   * flight, so it is treated exactly like `idle`/`done`/`terminal`/etc. and
+   * closes without a question. See this function's own doc comment above for
+   * the operator's words.
+   *
+   * NEVER RE-ASKS ON `force`. A `force: true` call only ever arrives from
+   * `confirmForceClose`'s own `onConfirm` — itself reachable only through an
+   * UNFORCED call that already passed (or skipped) this gate — so gating it a
+   * second time would be a second, redundant question about the same act.
+   *
+   * RETURNS `false` AND OPENS THE PROMPT rather than attempting anything: no
+   * "stopping…" status, no write, until `confirmCloseSession`'s own
+   * `onConfirm` calls `performCloseSession` directly.
+   */
+  const closeSession = useCallback(
+    async (sessionId: string, title: string, force = false): Promise<boolean> => {
+      if (!force) {
+        const entry = allEntries.find((e) => e.session.id === sessionId);
+        if (entry !== undefined && entry.session.status === 'running') {
+          setConfirmCloseSession({ sessionId, title });
+          return false;
+        }
+      }
+      return performCloseSession(sessionId, title, force);
+    },
+    [allEntries, performCloseSession, setConfirmCloseSession],
   );
 
   /**
@@ -8303,6 +8364,22 @@ function CanvasInner({
           }}
           hasFocusedSession={focusedEntry !== null}
           onClose={() => setPaletteOpen(false)}
+        />
+      )}
+
+      {/* DECISION 1's one prompt, on every device: a sibling of the phone
+          conditional above rather than a child of either branch, so it draws
+          over whichever layout is on screen -- `confirmForceClose`'s own
+          reason, restated for this overlay. See `closeSession` above. */}
+      {confirmCloseSession !== null && (
+        <ConfirmCloseSession
+          title={confirmCloseSession.title}
+          onCancel={() => setConfirmCloseSession(null)}
+          onConfirm={() => {
+            const target = confirmCloseSession;
+            setConfirmCloseSession(null);
+            void performCloseSession(target.sessionId, target.title);
+          }}
         />
       )}
 
