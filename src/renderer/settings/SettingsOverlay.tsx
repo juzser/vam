@@ -159,6 +159,7 @@ import type { SourceDeclines } from '../sources/port.js';
 import { StatsPanel } from '../stats/StatsPanel.js';
 import { AdhdSkillCard, desktopAdhdSkillApi } from './AdhdSkillCard.js';
 import { desktopGithubApi, GithubPanel } from './GithubPanel.js';
+import { desktopGitlabApi, GitlabPanel } from './GitlabPanel.js';
 import { readLastSection, writeLastSection } from './last-section.js';
 import { desktopNotifyApi, NotifyTest } from './NotifyTest.js';
 import { AdvancedDisclosure, SettingsCard, SettingsRow, SettingsSubgroup } from './primitives.js';
@@ -1609,6 +1610,16 @@ export function SettingsOverlay({
                     projects={projects}
                     copyText={window.api?.clipboard?.writeText}
                     chooseDirectory={window.api?.dialog?.chooseDirectory}
+                    openExternal={window.api?.link?.open}
+                  />
+                  {/* GitLab, next to GitHub -- operator: "GitLab now via glab,
+                    Bitbucket later." `GitlabPanel`'s own header carries the
+                    scope this card was actually asked for: status and
+                    Connect/Disconnect, never a repo picker. */}
+                  <GitlabPanel
+                    api={desktopGitlabApi()}
+                    active={true}
+                    copyText={window.api?.clipboard?.writeText}
                     openExternal={window.api?.link?.open}
                   />
                 </SettingsCard>
