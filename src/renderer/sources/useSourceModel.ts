@@ -50,13 +50,20 @@
  * with `{ slowBy: 4 }`, never `'pause'`: 10s becomes 40s hidden, not 0.
  *
  * THE UNCHANGED-STREAK BACKOFF, VISIBLE ONLY. Three consecutive loads that
- * read back byte-identical (`JSON.stringify`-equal on the resolved
- * `projects` array -- cheap enough at this size and this cadence, and the
- * simplest correct comparison) double the visible interval once, 10s to
- * 20s, capped there: a quiet session list does not need four spawns a
- * minute forever, but doubling more than once would let a long-idle window
- * drift far enough that a fresh `waiting` took uncomfortably long to
- * surface. Any load that differs from the one before it resets to 10s
+ * read back equal under a STABLE KEY (`stable-projects.ts`'s
+ * `stableProjectsKey`, a `JSON.stringify` of the resolved `projects` array
+ * with `Session.age` and `Session.cacheSourceNowMs` OMITTED) double the
+ * visible interval once, 10s to 20s, capped there: a quiet session list
+ * does not need four spawns a minute forever, but doubling more than once
+ * would let a long-idle window drift far enough that a fresh `waiting`
+ * took uncomfortably long to surface. The two fields are left out on
+ * purpose, not by oversight: main stamps `cacheSourceNowMs` with the
+ * current poll time on every load with cache activity
+ * (`main/sources/claude-code/source.ts`), and `age` is a display string
+ * recomputed from that same clock every poll -- so a whole-object
+ * `JSON.stringify` differs on every single load even for an idle session,
+ * and the backoff could never engage at all (affe8f37). Any load that
+ * differs from the one before it under that same key resets to 10s
  * immediately -- `streakRef` below is reassigned to 1, not decremented, so
  * one differing load undoes the whole backoff in a single tick.
  *
@@ -80,6 +87,7 @@ import type { CanvasModel } from '../domain/model.js';
 import { noteFailure } from '../errors/log.js';
 import { useVisibilityInterval } from '../useVisibilityInterval.js';
 import type { SessionSource } from './port.js';
+import { stableProjectsKey } from './stable-projects.js';
 
 /**
  * How often to re-read the source WHILE VISIBLE AND CHANGING.
@@ -229,7 +237,7 @@ export function useSourceModel(source: SessionSource | null): {
             // THE UNCHANGED-STREAK BACKOFF -- see this file's header. Tracked
             // on every successful load regardless of visibility; only what it
             // is COMPOSED WITH (below, at the call site) is visibility-gated.
-            const json = JSON.stringify(projects);
+            const json = stableProjectsKey(projects);
             if (json === lastJson.current) {
               unchangedStreak.current += 1;
             } else {
