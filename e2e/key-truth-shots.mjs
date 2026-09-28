@@ -1780,14 +1780,35 @@ for (const theme of ['dark', 'light']) {
   await narrow.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
   await narrow.waitForSelector('[data-phone-shell] [data-session-row]');
   await narrow.locator(`[data-phone-shell] [data-session-row="${PREVIEW_SESSION}"]`).click();
-  await narrow.waitForSelector('[data-question-preview-panel]', { timeout: 4000 });
+  await narrow.waitForSelector('[data-question-preview-toggle]', { timeout: 4000 });
 
-  // Focus alone moves the panel, same as the wide page above -- landed on
-  // `Long poll` (option 1), the multi-line one, so the two checks below are
-  // against a preview that actually HAS a long line to scroll, not the
-  // default one-liner (`Server-sent events`, kept short precisely so the
-  // card does not crowd the composer -- see its own comment in the fixture).
+  // PHONE, COLLAPSED BY DEFAULT (docs/design/phone-core-loop.md §3.3): the
+  // panel itself is not in the DOM at all until the toggle is tapped --
+  // checked here, not only in the Playwright unit-runner suite
+  // (`e2e/phone-core-loop.pw.ts`), because THIS file is what the header
+  // calls the source of truth for a real keydown/paint fact, and a
+  // collapse that silently regressed back to "always open" would still
+  // leave every rect check below green (a bigger box passes a
+  // "big enough" bound too).
+  check(
+    'at 390px the preview starts collapsed -- a one-line toggle, not the panel',
+    (await narrow.locator('[data-question-preview-panel]').count()) === 0,
+  );
+  const collapsedCopy = await narrow.locator('[data-question-preview-toggle]').innerText();
+  check(
+    "the collapsed row reads the doc's own copy, unchanged",
+    collapsedCopy === 'preview ↓',
+    collapsedCopy,
+  );
+
+  // Focus alone moves WHICH option the (still-collapsed) row is about --
+  // landed on `Long poll` (option 1), the multi-line one, so the two
+  // checks below are against a preview that actually HAS a long line to
+  // scroll, not the default one-liner (`Server-sent events`, kept short
+  // precisely so the card does not crowd the composer -- see its own
+  // comment in the fixture). The tap is what expands it.
   await narrow.locator('[data-question-option]').nth(1).focus();
+  await narrow.locator('[data-question-preview-toggle]').click();
   await narrow.waitForFunction(
     () => document.querySelector('[data-question-preview-panel]')?.getAttribute('data-for') === '1',
   );
@@ -1825,8 +1846,16 @@ for (const theme of ['dark', 'light']) {
   // `Web socket` (option 2) is the option the fixture deliberately left
   // without a preview -- checked last, after the screenshot, so the
   // committed picture shows the feature (a real diagram) rather than its
-  // empty state.
+  // empty state. A new option means a new "disclose per-option on tap"
+  // cycle (§3.3): focus alone collapses the panel back to its own toggle
+  // (`previewExpanded` resets on `activeOption` -- `DetailPanel.tsx`), so
+  // this needs its own tap rather than reusing the one already spent above.
   await narrow.locator('[data-question-option]').nth(2).focus();
+  check(
+    'a focus move onto a DIFFERENT option collapses the panel again -- per-option, not sticky',
+    (await narrow.locator('[data-question-preview-panel]').count()) === 0,
+  );
+  await narrow.locator('[data-question-preview-toggle]').click();
   await narrow.waitForFunction(
     () => document.querySelector('[data-question-preview-panel]')?.getAttribute('data-for') === '2',
   );
