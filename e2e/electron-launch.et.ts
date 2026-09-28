@@ -105,10 +105,97 @@ function assertNoNewSessionUnderOnDefaultServer(input: {
   }
 }
 
-function isolatedServerSessionCount(tmuxTmpdir: string): number {
+/**
+ * THE INCIDENT THIS GUARDS AGAINST -- identical mechanism to `test/support/
+ * tmux-harness-env.ts`'s own `resolveIsolatedSocket`, inlined here rather
+ * than imported (see this file's own header). tmux resolves a NAMED socket
+ * (`-L name`, including the implicit `default` name a bare `tmux` call
+ * always uses) by searching `"$TMUX_TMPDIR:/tmp/"` for the first entry whose
+ * `realpath` succeeds, SKIPPING rather than erroring on one that fails (a
+ * deleted directory). So `TMUX_TMPDIR=<a deleted dir> tmux -L default
+ * kill-server` falls through to `/tmp/tmux-<uid>/default` -- the OPERATOR'S
+ * REAL default server -- and kills it. This computes the absolute socket
+ * path itself and addresses it with `-S`, which opens that exact path
+ * directly with no search-list fallback at all; a `tmuxTmpdir` that no
+ * longer resolves to a real socket does nothing, rather than ever letting
+ * tmux guess. Defence in depth: throws if the computed path is not safely
+ * under `/tmp`/`os.tmpdir()`, or if it exactly equals either real
+ * default-server path -- both checks run before any filesystem check, so
+ * they fire even when a real default socket happens to sit there.
+ */
+function defaultTmpRoots(): ReadonlySet<string> {
+  const roots = new Set<string>(['/tmp', os.tmpdir()]);
+  if (process.env.TMPDIR) roots.add(process.env.TMPDIR);
+  return roots;
+}
+
+function resolveIsolatedSocket(
+  tmuxTmpdir: string,
+  uid: number = process.getuid?.() ?? 0,
+  tmpRoots: ReadonlySet<string> = defaultTmpRoots(),
+): string | null {
+  const socketPath = path.join(tmuxTmpdir, `tmux-${uid}`, 'default');
+
+  const underATmpRoot = [...tmpRoots].some(
+    (root) => socketPath === path.join(root, `tmux-${uid}`, 'default') || socketPath.startsWith(`${root}${path.sep}`),
+  );
+  if (!underATmpRoot) {
+    throw new Error(
+      `refusing to resolve a tmux socket outside /tmp or os.tmpdir(): ${socketPath} (from tmuxTmpdir=${tmuxTmpdir})`,
+    );
+  }
+
+  const forbiddenDefaultPaths = [...tmpRoots].map((root) => path.join(root, `tmux-${uid}`, 'default'));
+  if (forbiddenDefaultPaths.includes(socketPath)) {
+    throw new Error(
+      `refusing to target the operator's own default tmux socket (${socketPath}) -- ` +
+        `an isolated/destructive call must never be able to reach it, even via TMUX_TMPDIR's own fallback`,
+    );
+  }
+
+  // REALPATH ALIAS CHECK -- see `test/support/tmux-harness-env.ts`'s
+  // identical `resolveIsolatedSocket` for the full rationale: the checks
+  // above compare strings, so a `tmuxTmpdir` that is itself a symlink
+  // aliasing one of `tmpRoots` under a different name would otherwise sail
+  // straight through them.
+  const socketDir = path.dirname(socketPath);
+  if (fs.existsSync(socketDir)) {
+    const realSocketDir = fs.realpathSync(socketDir);
+    for (const root of tmpRoots) {
+      const forbiddenDir = path.join(root, `tmux-${uid}`);
+      if (forbiddenDir === socketDir || !fs.existsSync(forbiddenDir)) continue;
+      if (fs.realpathSync(forbiddenDir) === realSocketDir) {
+        throw new Error(
+          `refusing to target the operator's own default tmux socket directory -- ` +
+            `${socketDir} is a symlink alias of ${forbiddenDir} (both realpath to ${realSocketDir})`,
+        );
+      }
+    }
+  }
+
   try {
-    const stdout = execFileSync('tmux', ['-L', 'default', 'list-sessions'], {
-      env: isolatedTmuxEnv(process.env, tmuxTmpdir),
+    return fs.lstatSync(socketPath).isSocket() ? socketPath : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Strips `TMUX` and `TMUX_PANE` from the env handed to an explicit-socket
+ *  tmux call, so nothing about this process's own possible tmux nesting
+ *  leaks into it. */
+function withoutTmuxNesting(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const next = { ...base };
+  delete next.TMUX;
+  delete next.TMUX_PANE;
+  return next;
+}
+
+function isolatedServerSessionCount(tmuxTmpdir: string): number {
+  const socket = resolveIsolatedSocket(tmuxTmpdir);
+  if (socket === null) return 0;
+  try {
+    const stdout = execFileSync('tmux', ['-S', socket, 'list-sessions'], {
+      env: withoutTmuxNesting(process.env),
       encoding: 'utf8',
     });
     return stdout.split('\n').filter((line) => line.trim() !== '').length;
@@ -119,13 +206,15 @@ function isolatedServerSessionCount(tmuxTmpdir: string): number {
 }
 
 function killIsolatedServer(tmuxTmpdir: string): void {
+  const socket = resolveIsolatedSocket(tmuxTmpdir);
+  if (socket === null) return;
   try {
-    execFileSync('tmux', ['-L', 'default', 'kill-server'], {
-      env: isolatedTmuxEnv(process.env, tmuxTmpdir),
+    execFileSync('tmux', ['-S', socket, 'kill-server'], {
+      env: withoutTmuxNesting(process.env),
       stdio: 'ignore',
     });
   } catch {
-    // Nothing running on this private socket -- nothing to clean up.
+    // Gone already between the isSocket() check and this call -- fine.
   }
 }
 
@@ -134,7 +223,16 @@ function killIsolatedServer(tmuxTmpdir: string): void {
  *  `os.tmpdir()` is already close to the kernel's ~104-byte `sun_path`
  *  ceiling before this file's own `tmux-<uid>/<name>` suffix is added. */
 function mkIsolatedTmuxTmpdir(prefix: string): string {
-  return fs.mkdtempSync(path.join(TMUX_SOCKET_ROOT, `${prefix}-`));
+  const dir = fs.mkdtempSync(path.join(TMUX_SOCKET_ROOT, `${prefix}-`));
+  // PRE-CREATE TMUX'S OWN `tmux-<uid>` SOCKET DIRECTORY -- see
+  // `test/support/tmux-harness-env.ts`'s identical `mkIsolatedTmuxTmpdir`
+  // for the full CI-measured rationale (main, run 36396039883): a launch
+  // makes several near-simultaneous tmux calls that can all reach a
+  // brand-new `tmuxTmpdir` before any of them has created this
+  // subdirectory on its own, which is exactly the shape of gap the
+  // incident's own mechanism has no obligation to lose safely under.
+  fs.mkdirSync(path.join(dir, `tmux-${process.getuid?.() ?? 0}`), { recursive: true, mode: 0o700 });
+  return dir;
 }
 
 /**

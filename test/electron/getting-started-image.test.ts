@@ -30,6 +30,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   assertNoNewSessionUnderOnDefaultServer,
   defaultServerPaneCwds,
+  describeDefaultServerLeak,
   isolatedServerSessionCount,
   isolatedTmuxEnv,
   killIsolatedServer,
@@ -175,11 +176,20 @@ describe('the getting-started screen’s own mark, under the real file:// docume
   (tmuxAvailable() ? it : it.skip)(
     'never lets this launch reach the operator’s real default tmux server',
     () => {
-      assertNoNewSessionUnderOnDefaultServer({
-        before: defaultServerBefore,
-        after: defaultServerPaneCwds(),
-        watchDir: repoRoot,
-      });
+      // DIAGNOSTICS ON FAILURE ONLY -- see `launch.test.ts`'s identical
+      // wrap for the full rationale (CI evidence, PR #548 run 36399341676).
+      try {
+        assertNoNewSessionUnderOnDefaultServer({
+          before: defaultServerBefore,
+          after: defaultServerPaneCwds(),
+          watchDir: repoRoot,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `${message}\n\n--- DIAGNOSTICS ---\n${describeDefaultServerLeak(repoRoot)}`,
+        );
+      }
       expect(() => isolatedServerSessionCount(tmuxTmpdir)).not.toThrow();
     },
   );
