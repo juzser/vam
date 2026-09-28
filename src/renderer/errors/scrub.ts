@@ -127,6 +127,7 @@ const OWN_WORDS: ReadonlySet<string> = new Set([
   'claude',
   'tmux',
   'gh',
+  'glab',
   'git',
   'tailscale',
   // The subcommands those failures actually print.

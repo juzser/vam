@@ -51,6 +51,11 @@ import type {
   GithubRemote,
   GithubReposResult,
 } from '../shared/github.js';
+import type {
+  GitlabAuthPaneRefusal,
+  GitlabAuthPaneView,
+  GitlabAuthStatus,
+} from '../shared/gitlab.js';
 import type { HistoryCursor, TranscriptPage } from '../shared/history.js';
 import type { LinkOutcome } from '../shared/link.js';
 import type { Project } from '../shared/model.js';
@@ -472,6 +477,31 @@ export function createGithubApi(ipc: InvokerLike): GithubApi {
     orgsList: () => ipc.invoke(CHANNELS.githubOrgsList) as Promise<GithubOrgsResult>,
     projectRemotes: (projectId) =>
       ipc.invoke(CHANNELS.githubProjectRemotes, projectId) as Promise<readonly GithubRemote[]>,
+  };
+}
+
+/**
+ * Settings -> Integrations -> GitLab's three channels: whether `glab` is
+ * signed in, and Connect/Disconnect run in a pane -- `GithubApi`'s own
+ * standing, narrowed: no repo picker, so only three channels rather than six.
+ * Desktop only -- see `channels.ts`'s own note -- so none of these three are
+ * on `PreloadSourceApi`, and a paired phone never gets a route to trigger a
+ * `glab` run of its own.
+ */
+export type GitlabApi = {
+  authStatus(): Promise<GitlabAuthStatus>;
+  connectStart(kind: 'login' | 'logout'): Promise<GitlabAuthPaneRefusal | null>;
+  connectRead(): Promise<GitlabAuthPaneView>;
+};
+
+/** Every member forwards straight through -- no `unwrap`: none of these
+ *  three channels answer an `IpcResult`, exactly like `github` above. */
+export function createGitlabApi(ipc: InvokerLike): GitlabApi {
+  return {
+    authStatus: () => ipc.invoke(CHANNELS.glabAuthStatus) as Promise<GitlabAuthStatus>,
+    connectStart: (kind) =>
+      ipc.invoke(CHANNELS.glabConnectStart, kind) as Promise<GitlabAuthPaneRefusal | null>,
+    connectRead: () => ipc.invoke(CHANNELS.glabConnectRead) as Promise<GitlabAuthPaneView>,
   };
 }
 

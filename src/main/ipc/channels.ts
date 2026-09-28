@@ -124,6 +124,19 @@ export const CHANNELS = {
   githubOrgsList: 'vam:github:orgs-list',
   githubProjectRemotes: 'vam:github:project-remotes',
   /**
+   * Settings -> Integrations -> GitLab, three channels, ALL DESKTOP-ONLY and
+   * none of them a member of `PreloadSourceApi` -- the six GitHub channels'
+   * own standing just above, restated: `remote/server.ts` registers no route
+   * for any of them, and `glab` is spawned on THIS machine with the
+   * operator's own credentials. Only three, not six: this card is status and
+   * Connect/Disconnect ONLY -- no repo picker, so there is no
+   * `glabReposList`/`glabOrgsList`/`glabProjectRemotes` sibling. See
+   * `main/integrations/gitlab-pane.ts` and `main/integrations/gitlab-status.ts`.
+   */
+  glabAuthStatus: 'vam:glab:auth-status',
+  glabConnectStart: 'vam:glab:connect-start',
+  glabConnectRead: 'vam:glab:connect-read',
+  /**
    * The usage channel. Unlike every channel above, it answers with a bare
    * `UsageSnapshot`, never an `IpcResult` -- see `src/main/usage/ipc.ts`.
    */

@@ -206,5 +206,14 @@ describe('scrub', () => {
       expect(scrub('the `tmux` command was not found')).toContain('`tmux`');
       expect(scrub("Use 'claude attach' to attach to it")).toContain("'claude attach'");
     });
+
+    it('keeps `glab`, the GitLab card’s own binary, the same way `gh` survives', () => {
+      // `gitlab-status.ts`'s own CLI-missing message: "the `glab` command was
+      // not found on PATH -- install it from ... and relaunch vam." Without
+      // `glab` on this allowlist the one actionable word in that sentence is
+      // the one word a report would lose -- `gh`'s own hole, HOLE 1 in
+      // `scrub.real-messages.test.ts`, restated for the sibling card.
+      expect(scrub('the `glab` command was not found on PATH')).toContain('`glab`');
+    });
   });
 });
