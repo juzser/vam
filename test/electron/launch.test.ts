@@ -21,6 +21,7 @@ import { DEMO_MODEL } from '../../src/renderer/fixtures/demo.js';
 import {
   assertNoNewSessionUnderOnDefaultServer,
   defaultServerPaneCwds,
+  describeDefaultServerLeak,
   isolatedServerSessionCount,
   isolatedTmuxEnv,
   killIsolatedServer,
@@ -672,11 +673,27 @@ describe('the Electron shell launches', () => {
   (tmuxAvailable() ? it : it.skip)(
     'never lets this launch reach the operator’s real default tmux server',
     () => {
-      assertNoNewSessionUnderOnDefaultServer({
-        before: defaultServerBefore,
-        after: defaultServerAfter,
-        watchDir: repoRoot,
-      });
+      // DIAGNOSTICS ON FAILURE ONLY (CI evidence, PR #548 run 36399341676,
+      // re-run): the bare "a new session appeared" message named the
+      // introduced cwd but nothing about WHICH session, its start command,
+      // its pid, or whether the process that created it carried
+      // TMUX_TMPDIR at all -- see `describeDefaultServerLeak`'s own header.
+      // Read-only, appended to the SAME thrown error rather than replacing
+      // it, so a green run pays nothing extra and a red one carries the
+      // evidence needed to find the real mechanism without a second CI
+      // round-trip.
+      try {
+        assertNoNewSessionUnderOnDefaultServer({
+          before: defaultServerBefore,
+          after: defaultServerAfter,
+          watchDir: repoRoot,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `${message}\n\n--- DIAGNOSTICS ---\n${describeDefaultServerLeak(repoRoot)}`,
+        );
+      }
     },
   );
 

@@ -39,7 +39,7 @@
  * trigger.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, realpathSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -187,6 +187,131 @@ export function assertNoNewSessionUnderOnDefaultServer(input: {
         `${watchDir}, which the isolated launch must never reach: ${introduced.join(', ')}`,
     );
   }
+}
+
+/** One process's environment, as `/proc/<pid>/environ` spells it (`KEY=value`
+ *  entries, NUL-separated) -- `Readonly` because this is a diagnostic
+ *  snapshot, never something a caller should mutate and reuse. */
+export type ProcEnv = Readonly<Record<string, string>>;
+
+/**
+ * Reads `/proc/<pid>/environ` -- Linux only (CI's `check` job runs on
+ * `ubuntu-latest`, which is the one place this diagnostic is actually
+ * needed), and only for a process this UID owns; `null` for anything that
+ * stops it (macOS/Windows, the process already gone, no permission), never
+ * a thrown error -- a diagnostic that cannot read must say so, not turn an
+ * already-failing assertion into a DIFFERENT crash.
+ */
+export function readProcEnviron(pid: number): ProcEnv | null {
+  try {
+    const raw = readFileSync(`/proc/${pid}/environ`, 'utf8');
+    const env: Record<string, string> = {};
+    for (const entry of raw.split('\0')) {
+      if (entry === '') continue;
+      const eq = entry.indexOf('=');
+      if (eq === -1) continue;
+      env[entry.slice(0, eq)] = entry.slice(eq + 1);
+    }
+    return env;
+  } catch {
+    return null;
+  }
+}
+
+/** The minimal shape a diagnostic exec call needs: a command, its args, and
+ *  a string answer -- narrower than `execFileSync`'s own type for the same
+ *  reason `TmuxExec` is, and injectable so `describeDefaultServerLeak`'s
+ *  own tests never run a real `tmux`/`ps`. */
+export type DiagnosticExec = (file: string, args: readonly string[]) => string;
+
+/** The real diagnostic exec: `execFileSync`, with a failure turned into
+ *  TEXT describing itself rather than a thrown error -- every diagnostic
+ *  step below must produce SOME line of output, never abort the ones after
+ *  it. */
+const runDiagnostic: DiagnosticExec = (file, args) => {
+  try {
+    return execFileSync(file, args as string[], { encoding: 'utf8' });
+  } catch (error) {
+    return `<${file} ${args.join(' ')} failed: ${error instanceof Error ? error.message : String(error)}>`;
+  }
+};
+
+/**
+ * DIAGNOSTIC ONLY, READ-ONLY, appended to an ALREADY-FAILING
+ * `assertNoNewSessionUnderOnDefaultServer` -- CI evidence (PR #548, run
+ * 36399341676) that the bare "a new session appeared" message was not
+ * enough to find the real mechanism a second time. Gathers, for every pane
+ * on the real default server whose cwd is under `watchDir`:
+ *  - the session's own NAME and its pane's START COMMAND and PID
+ *    (`tmux list-panes -a`, the one call that carries all three at once);
+ *  - the OS-level `ps` row for that pane process, and for ITS OWN PARENT
+ *    (panes are forked by the tmux SERVER, so the parent row is the
+ *    server's own process);
+ *  - whether that PARENT's environment carried `TMUX_TMPDIR` at all
+ *    (`readProcEnviron`) -- the one fact that tells apart "isolation never
+ *    reached this spawn" (absent) from "isolation reached it and tmux's
+ *    own resolution fell through anyway" (present, but not honoured).
+ *
+ * Never throws on its own: `exec`'s default (`runDiagnostic`) turns a
+ * failed command into descriptive text instead of an exception, and every
+ * other branch here resolves to a string for any shape the injected `exec`
+ * answers with. This must only ever ADD information to a failure already in
+ * progress, never become a second, different one.
+ */
+export function describeDefaultServerLeak(
+  watchDir: string,
+  exec: DiagnosticExec = runDiagnostic,
+  readEnviron: (pid: number) => ProcEnv | null = readProcEnviron,
+): string {
+  const listing = exec('tmux', [
+    'list-panes',
+    '-a',
+    '-F',
+    '#{session_name}\t#{pane_start_command}\t#{pane_pid}\t#{pane_current_path}',
+  ]);
+  const isUnder = (cwd: string): boolean => cwd === watchDir || cwd.startsWith(watchDir + path.sep);
+  const matches = listing
+    .split('\n')
+    .map((line) => line.split('\t'))
+    .filter(
+      (fields): fields is [string, string, string, string] =>
+        fields.length === 4 && isUnder(fields[3] ?? ''),
+    );
+  if (matches.length === 0) {
+    return `no pane under ${watchDir} found by \`tmux list-panes -a\` -- raw listing:\n${listing}`;
+  }
+  const blocks = matches.map(([sessionName, startCommand, panePidText, cwd]) => {
+    const lines = [
+      `session=${sessionName} startCommand=${startCommand} panePid=${panePidText} cwd=${cwd}`,
+    ];
+    const panePid = Number(panePidText);
+    if (!Number.isFinite(panePid)) {
+      lines.push('(pane_pid was not a number -- cannot inspect its process tree)');
+      return lines.join('\n');
+    }
+    lines.push(
+      `ps (pane process):\n${exec('ps', ['-o', 'pid,ppid,command', '-p', String(panePid)])}`,
+    );
+    const ppidText = exec('ps', ['-o', 'ppid=', '-p', String(panePid)]).trim();
+    const ppid = Number(ppidText);
+    if (!Number.isFinite(ppid)) {
+      lines.push(`(could not read the pane process's ppid: "${ppidText}")`);
+      return lines.join('\n');
+    }
+    lines.push(
+      `ps (parent ${ppid}, likely the tmux server itself):\n` +
+        `${exec('ps', ['-o', 'pid,ppid,command', '-p', String(ppid)])}`,
+    );
+    const env = readEnviron(ppid);
+    lines.push(
+      env === null
+        ? `/proc/${ppid}/environ unavailable (not Linux, process already gone, or no permission)`
+        : `parent(${ppid}) env: TMUX_TMPDIR=${env.TMUX_TMPDIR ?? '<absent>'} TMUX=${env.TMUX ?? '<absent>'} ` +
+            `PWD=${env.PWD ?? '<absent>'} SHELL=${env.SHELL ?? '<absent>'}`,
+    );
+    return lines.join('\n');
+  });
+  return blocks.join('\n\n');
 }
 
 /**

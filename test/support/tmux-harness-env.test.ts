@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   assertNoNewSessionUnderOnDefaultServer,
   defaultServerPaneCwds,
+  describeDefaultServerLeak,
   isolatedServerSessionCount,
   isolatedTmuxEnv,
   killIsolatedServer,
@@ -154,6 +155,77 @@ describe('assertNoNewSessionUnderOnDefaultServer', () => {
         after: ['/Users/op/work/vam-worktree-other'],
         watchDir: '/Users/op/work/vam-worktree',
       }),
+    ).not.toThrow();
+  });
+});
+
+// CI EVIDENCE (main / PR #548, run 36399341676, re-run): the same
+// "OPERATOR'S DEFAULT tmux server" assertion above keeps failing with only
+// the introduced CWD to go on -- not which session, not its start command,
+// not what created it. `describeDefaultServerLeak` exists to answer that,
+// entirely with FAKE injected `exec`/`readEnviron` functions here, so this
+// suite's own tests never make a real tmux/ps call or read a real /proc
+// entry.
+describe('describeDefaultServerLeak, with injected exec/readEnviron (no real tmux or /proc needed)', () => {
+  it('says plainly when list-panes finds nothing under watchDir', () => {
+    const exec = vi.fn(() => 'other-session\tzsh\t123\t/Users/op/somewhere-else\n');
+    const text = describeDefaultServerLeak('/home/runner/work/vam/vam', exec, () => null);
+    expect(text).toMatch(/no pane under/i);
+    expect(exec).toHaveBeenCalledWith('tmux', expect.arrayContaining(['list-panes', '-a']));
+  });
+
+  it('names the session, start command, pid, and the ps rows for the pane and its parent', () => {
+    const calls: (readonly [string, readonly string[]])[] = [];
+    const exec = (file: string, args: readonly string[]): string => {
+      calls.push([file, args]);
+      if (file === 'tmux') return 'vamctl\tcat\t4242\t/home/runner/work/vam/vam\n';
+      if (args.includes('ppid=')) return '999\n';
+      return 'PID PPID COMMAND\n4242 999 cat\n';
+    };
+    const text = describeDefaultServerLeak('/home/runner/work/vam/vam', exec, () => null);
+    expect(text).toContain('session=vamctl');
+    expect(text).toContain('startCommand=cat');
+    expect(text).toContain('panePid=4242');
+    expect(text).toContain('parent 999');
+    expect(calls.some(([file, args]) => file === 'ps' && args.includes('4242'))).toBe(true);
+    expect(calls.some(([file, args]) => file === 'ps' && args.includes('999'))).toBe(true);
+  });
+
+  it('reports the parent env, so TMUX_TMPDIR presence/absence is directly visible', () => {
+    const exec = (file: string, args: readonly string[]): string => {
+      if (file === 'tmux') return 'vamctl\tcat\t4242\t/home/runner/work/vam/vam\n';
+      if (args.includes('ppid=')) return '999\n';
+      return 'PID PPID COMMAND\n4242 999 cat\n';
+    };
+    const withTmpdir = describeDefaultServerLeak('/home/runner/work/vam/vam', exec, () => ({
+      TMUX_TMPDIR: '/tmp/vam-launch-test-tmux-abc123',
+      PWD: '/home/runner/work/vam/vam',
+    }));
+    expect(withTmpdir).toContain('TMUX_TMPDIR=/tmp/vam-launch-test-tmux-abc123');
+
+    const withoutTmpdir = describeDefaultServerLeak('/home/runner/work/vam/vam', exec, () => ({
+      PWD: '/home/runner/work/vam/vam',
+    }));
+    expect(withoutTmpdir).toContain('TMUX_TMPDIR=<absent>');
+
+    const unavailable = describeDefaultServerLeak('/home/runner/work/vam/vam', exec, () => null);
+    expect(unavailable).toMatch(/unavailable/i);
+  });
+
+  it('never throws even when every exec call fails', () => {
+    const exec = (): string => {
+      throw new Error('boom');
+    };
+    expect(() =>
+      describeDefaultServerLeak('/home/runner/work/vam/vam', exec, () => null),
+    ).toThrow();
+    // `describeDefaultServerLeak` itself does not swallow a THROWING exec --
+    // that is `runDiagnostic`'s own job, exercised in the next test -- but
+    // it must still resolve to a STRING, never leave a partial write, for
+    // every OTHER injected exec shape (empty output, malformed lines).
+    const emptyExec = (): string => '';
+    expect(() =>
+      describeDefaultServerLeak('/home/runner/work/vam/vam', emptyExec, () => null),
     ).not.toThrow();
   });
 });
