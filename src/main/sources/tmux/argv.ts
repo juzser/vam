@@ -771,6 +771,39 @@ export function sendPasteArgv(
   return steps;
 }
 
+/**
+ * READS BACK the buffer name one `sendPasteArgv` call generated for its own
+ * steps -- off the final `paste-buffer` step's own `-b` argument, the one
+ * every step already agrees on, rather than widening `sendPasteArgv`'s
+ * return type (a second return value threaded through both of its own
+ * callers, `terminal/pane.ts`'s `sendToPane` and `terminal/stream-ipc.ts`'s
+ * `terminalStreamPaste`, for the sole benefit of the one caller that needs
+ * to name the buffer again after the fact). `undefined` for anything that
+ * is not actually a `sendPasteArgv` step -- a caller with nothing to clean
+ * up, not a caller that has to guess a name.
+ */
+export function pasteBufferNameOf(steps: readonly (readonly string[])[]): string | undefined {
+  const pasteStep = steps.find((step) => step[0] === 'paste-buffer');
+  if (pasteStep === undefined) return undefined;
+  const at = pasteStep.indexOf('-b');
+  return at === -1 ? undefined : pasteStep[at + 1];
+}
+
+/**
+ * BEST-EFFORT CLEANUP for a `sendPasteArgv` call that failed partway --
+ * `set-buffer`'s own chunks (or `paste-buffer` itself) can fail after the
+ * buffer already exists on the tmux server, and `paste-buffer`'s own `-d`
+ * (the ONLY thing that deletes it on the success path) never ran to do it.
+ * Left alone, a failed paste orphans one named buffer per attempt, forever
+ * -- `delete-buffer` on a buffer that was never created (the very first
+ * `set-buffer` failed) is refused by tmux itself and costs nothing beyond
+ * the one wasted call; callers are expected to await this and ignore its
+ * own result, exactly the "best-effort" the name promises.
+ */
+export function deleteBufferArgv(bufferName: string): readonly string[] {
+  return ['delete-buffer', '-b', bufferName];
+}
+
 export function promptKeystrokes(name: string, prompt: string): readonly (readonly string[])[] {
   const lines = prompt.split('\n');
   const steps: (readonly string[])[] = [];

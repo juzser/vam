@@ -18,11 +18,13 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   capturePaneArgv,
+  deleteBufferArgv,
   hasSessionArgv,
   killSessionArgv,
   listClientsArgv,
   listSessionsArgv,
   newSessionArgv,
+  pasteBufferNameOf,
   promptKeystrokes,
   sendBackspaceArgv,
   sendBackTabArgv,
@@ -728,5 +730,35 @@ describe('sendPasteArgv', () => {
   it('addresses the pane exactly, with the `=`…`:` target every send-keys/paste-buffer uses', () => {
     const steps = sendPasteArgv('vam-a1b2c3', 'hi');
     expect(pasteBufferStep(steps)).toContain(PANE);
+  });
+});
+
+describe('pasteBufferNameOf', () => {
+  it('reads back the same buffer name sendPasteArgv generated for its own steps', () => {
+    const steps = sendPasteArgv('vam-a1b2c3', 'hello');
+    const name = pasteBufferNameOf(steps);
+    expect(name).toBeDefined();
+    expect(name).toMatch(/^vam-paste-[a-z0-9]+$/);
+    // The SAME name every step in this call's own chain used -- not a
+    // second, independent guess.
+    for (const step of steps) {
+      const at = step.indexOf('-b');
+      if (at !== -1) expect(step[at + 1]).toBe(name);
+    }
+  });
+
+  it('answers undefined for a list of steps with no paste-buffer step at all', () => {
+    expect(pasteBufferNameOf([['list-sessions']])).toBeUndefined();
+    expect(pasteBufferNameOf([])).toBeUndefined();
+  });
+});
+
+describe('deleteBufferArgv', () => {
+  it('names the exact buffer, nothing else', () => {
+    expect(deleteBufferArgv('vam-paste-a1b2c3')).toEqual([
+      'delete-buffer',
+      '-b',
+      'vam-paste-a1b2c3',
+    ]);
   });
 });
