@@ -38,7 +38,6 @@ import { CHANNELS, type IpcResult } from '../main/ipc/channels.js';
 // `tsconfig.web.json`, which carries no `node` types.
 import type { UnsavedReport } from '../main/quit/unsaved.js';
 import type { RemoteState } from '../main/remote/state.js';
-import type { Project } from '../renderer/domain/model.js';
 import type { SourceError } from '../renderer/sources/port.js';
 import type { AdhdSkillActionResult, AdhdSkillStatus } from '../shared/adhd-skill.js';
 import type { AgentWork } from '../shared/agent-work.js';
@@ -54,6 +53,7 @@ import type {
 } from '../shared/github.js';
 import type { HistoryCursor, TranscriptPage } from '../shared/history.js';
 import type { LinkOutcome } from '../shared/link.js';
+import type { Project } from '../shared/model.js';
 import type { NotifyVerdict } from '../shared/notify.js';
 import type { KeepAwakeMode } from '../shared/power.js';
 import type { PrAction, PrActionOutcome } from '../shared/pr-action.js';

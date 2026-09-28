@@ -44,7 +44,7 @@
  * when a row it did not know arrives. This row is that row.
  */
 
-import type { Session } from '../../../renderer/domain/model.js';
+import type { Session } from '../../../shared/model.js';
 import { identifyRunningProvider } from '../tmux/shell.js';
 import type { TmuxSession } from '../tmux/spawn.js';
 

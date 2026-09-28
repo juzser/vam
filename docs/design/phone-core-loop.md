@@ -432,15 +432,28 @@ brief reopens that scope.
    there is exactly one `flex-none` element below the scroller when a
    question is open (the composer, hidden) and the question content has
    height `<= its own content`, not a fixed 313px regardless of content.
-3. **AC-3 (space returned).** With AC-1's session, the scrollable region's
-   `scrollHeight` minus its own top offset, measured from the app bar's
-   bottom edge to the shell's bottom edge (minus whatever `flex-none`
-   siblings remain, i.e. the hidden composer's reserved 0px), is
-   **≥ 650px** of combined transcript+question flow, vs the 426px+313px=
-   739px split-into-two-boxes total measured today (this AC is about it
-   being ONE region an operator can read continuously, not merely about a
-   raw pixel sum, since today's 739px was already numerically large but
-   split across two competing boxes).
+3. **AC-3 (space returned, keyboard up) — restated; see §4.3's own
+   correction.** The scrollHeight-sum framing this AC originally carried
+   ("≥650px of combined transcript+question flow") described the
+   keyboard-DOWN region §3.2 already measures, not what a coder could
+   actually gate a PR on once a keyboard is open — the keyboard-open case
+   is the one AC-4 flags as unmeasured, and it is the one `e2e/phone-
+   core-loop.pw.ts`'s "the answer survives the keyboard" tests actually
+   shipped a guard for. Restated to match that guard exactly: with a
+   question answered by tapping through "Chat about this" into free text
+   (`intoTheBox`) and a keyboard open, the VISIBLE portion of the agent's
+   most recent answer (`[data-detail-body]`, clamped to whatever band the
+   keyboard actually leaves on screen — `Math.min(bottom, viewport) -
+   Math.max(top, band-start)`, never the element's raw height) is **≥
+   120px** (`ANSWER_MIN_PX` — six lines at `--text-body`'s own
+   line-height) at every one of the three keyboard heights this spec
+   measures (291/336/380px) and under BOTH keyboard models: SHRUNK
+   (Android — the layout viewport itself loses the keyboard's height) and
+   iOS (the layout viewport stays 844 and the keyboard instead pans the
+   page, leaving the band `[keyboard, 844]` on screen). See §4.3 for the
+   actual measured figures; there is no single flat threshold this AC can
+   state independent of keyboard height, which is why "≥650px" was never
+   re-derivable from the suite that ships against this AC.
 4. **AC-4 (real device, keyboard up)** — manual/real-device check, not
    headless: on an actual phone (iOS Safari or Android Chrome) over
    Tailscale Serve, focusing the composer with a question NOT open, at
@@ -452,12 +465,27 @@ brief reopens that scope.
    Submit button each have a `getBoundingClientRect()` ≥ 44×44, measured on
    the PAINTED element's own ancestor button (not the visual skin inside
    it) — same method `PhoneShell.tsx`'s existing guard already uses.
-6. **AC-6 (keystrokes unchanged).** For a fixed fixture question (reuse
-   `?demo=1`'s `factory-sse-1`), tapping option 2 then Submit produces the
-   IDENTICAL `AnswerRequest` object (`{steps: [{question, labels: [...],
+6. **AC-6 (keystrokes unchanged) — restated; see §4.3's own note.** For an
+   ORDINARY option, tapping it then Submit produces the IDENTICAL
+   `AnswerRequest` object (`{steps: [{question, labels: [...],
    multiSelect}]}`) that today's desktop `QuestionCard` would produce for
    the same tap sequence — assert by diffing the object passed to
-   `onAnswer`, not by re-deriving `answer.ts`'s internals.
+   `onAnswer`, not by re-deriving `answer.ts`'s internals. **`?demo=1`'s
+   `factory-sse-1` is NOT that case**, and this AC originally named it as
+   one: its option 2 is `"Yes, and do not ask again for
+   scripts/rebuild-index.sh"` (`fixtures/demo.ts`'s `DEMO_PROMPT`) — a
+   PERSISTENT-PERMISSION label (`isPersistentPermissionOption`), which §4.4
+   deliberately makes phone-only two-tap (arm, then confirm within
+   `ARM_TIMEOUT_MS`) rather than one. For THAT option the keystroke COUNT is
+   not identical — phone takes two taps where desktop takes one — and this
+   AC's own claim is narrower than its original wording: once each side
+   reaches "marked" (by however many taps its own grammar needs), Submit
+   produces the identical `AnswerRequest` on both. A fixture with no
+   persistent-permission option (`toolu_1:0`'s `Cobalt`, the parity test's
+   actual fixture) is the case where "the same tap sequence" is also true
+   literally, one tap either way — see the added armed-path test in
+   `DetailPanel.phone-question-inline.test.tsx` for the two-tap case this
+   paragraph now describes.
 7. **AC-7 (composer height).** Composer bar height with no question open,
    keyboard down, ≤ 108px (from 145px today), and contains exactly 4
    controls (textarea, "+", mic, Send) rather than 6.
@@ -589,7 +617,8 @@ question instead (§5).
 
 ### 4.3 PR 3 — QuestionCard inline
 
-Shipped as designed. `QuestionCard` gained one new prop,
+Shipped as designed FOR THE STRUCTURAL MOVE — **but not for the preview
+panel, corrected below.** `QuestionCard` gained one new prop,
 `phone = false`, that changes *only* the root `className` (the bordered
 desktop card vs. a left-edge `border-l-2` accent bar on phone) — no
 change to any state, handler, or the JSX of the interactive rows. On
@@ -601,21 +630,50 @@ The old fixed-footer mount (`data-question-bar`) is now conditioned
 `(!phone || current !== 'Response')`, so it still renders for phone's
 Agents view and for desktop everywhere — unchanged there.
 
+**CORRECTION.** §3.3's own preview row ("collapse-by-default, one line
+(`preview ↓` hint, unchanged copy) that expands the same `Fenced`-styled
+panel on tap") did NOT ship with this PR: `[data-question-preview-panel]`
+rendered fully open on phone, byte-identical to desktop, from PR 3 until
+a later defect-fix pass closed the gap. That pass added
+`usePhoneViewport()` (not the `phone` prop above — see the fix's own
+comment in `DetailPanel.tsx`, next to `QuestionCard`'s preview-panel
+render) as an independent signal gating a `[data-question-preview-toggle]`
+disclosure, `previewExpanded` state reset per option, so this one piece of
+"no change to any state, handler, or JSX" no longer holds for the preview
+panel specifically — it was never true in practice, only in this section's
+own prose, until the gap was noticed and closed.
+
 AC-6 (identical `AnswerRequest`) is asserted directly:
 `test/panels/DetailPanel.phone-question-inline.test.tsx` renders the same
 question through both the phone and desktop mount points and asserts the
 captured `onAnswer` payloads with `.toEqual()`, not just "both call
-onAnswer."
+onAnswer." (Untouched by the preview-panel correction above: the write
+path is not what changed.) **That test's own fixture is `Cobalt` — an
+ORDINARY option, one tap either way — not `factory-sse-1`'s
+persistent-permission option AC-6 (§3.6) originally named; a second test
+in the same file now covers the armed path directly: tap a
+persistent-permission-labelled option once on phone (arms, does not
+mark), tap it again (confirms), Submit — diffed against a single desktop
+click on the same option — see AC-6's own restated text for why the
+keystroke COUNT differs while the `AnswerRequest` does not.**
 
 **Measured**: the retired fixed footer cost a separate 313px band
 (desktop-shaped card + disclosure sentence + border, per §3.2's audit);
-today's inline mount is content-sized, no fixed height, and the combined
-out+question scroller measures **≥650px** of visible content at a 291px
-SHRUNK keyboard (390×844 shell, per the `bands().column` measurement in
-`e2e/phone-core-loop.pw.ts`'s "the answer survives the keyboard" tests,
-asserted at all three `KEYBOARDS` heights) — up from the 426px transcript
-+ 313px separately-capped card (739px combined, but two regions, per
-§3.3's audit) the design doc measured before this PR.
+today's inline mount is content-sized, no fixed height. The **≥650px**
+figure once claimed here for "a 291px keyboard" was never a real
+measurement — 844−291 leaves a 553px viewport, so 650px of anything
+cannot be visible in it at once; that was the keyboard-DOWN figure from
+§3.2 misattributed to a keyboard-UP band. What the suite actually
+measures at a 291px SHRUNK keyboard (`bands().answer`, clamped to the
+band the keyboard leaves on screen, in `e2e/phone-core-loop.pw.ts`'s "the
+answer survives the keyboard" tests) is the AC-3 figure: **≥120px**
+(`ANSWER_MIN_PX`) of the agent's answer stays visible, at all three
+`KEYBOARDS` heights and under both keyboard models — up from a keyboard-up
+figure §1's own audit explicitly did NOT measure ("this spec treats 'how
+much further the out shrinks under a real keyboard' as **unverified**",
+§1; AC-4 flagged the same gap for a real device). This is the first pass
+with an actual number for that case, not an improvement on a prior one.
+See AC-3 (§3.6) for the restated criterion this figure answers.
 
 ### 4.4 PR 4 — jump pill + persistent-permission marker
 

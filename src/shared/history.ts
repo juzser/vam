@@ -25,8 +25,8 @@
  *     any of the above, carrying the source's own words for why.
  */
 
-import type { Decision } from '../renderer/domain/model.js';
 import type { SourceError } from '../renderer/sources/port.js';
+import type { Decision } from './model.js';
 
 /**
  * Where a backward read starts, exclusive: nothing at or after it is returned.

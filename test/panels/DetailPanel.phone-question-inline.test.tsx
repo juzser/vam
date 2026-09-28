@@ -31,6 +31,28 @@ const QUESTION: AgentQuestion = {
   answer: null,
 };
 
+/**
+ * `?demo=1`'s `factory-sse-1` shape, not `QUESTION` above — the label is
+ * `DEMO_PROMPT`'s own option 2 verbatim (`fixtures/demo.ts`), which is what
+ * `docs/design/phone-core-loop.md`'s AC-6 originally (and wrongly) cited as
+ * an "ordinary" option. It matches `isPersistentPermissionOption`
+ * (`DetailPanel.tsx`, "do not ask again"), which is the one property this
+ * fixture exists to carry: phone arms it on the first tap rather than
+ * marking it.
+ */
+const RISKY_LABEL = 'Yes, and do not ask again for scripts/rebuild-index.sh';
+const PERMISSION_QUESTION: AgentQuestion = {
+  id: 'toolu_2:0',
+  header: null,
+  question: 'Do you want to run this command?',
+  multiSelect: false,
+  options: [
+    { label: 'Yes', description: null },
+    { label: RISKY_LABEL, description: null },
+  ],
+  answer: null,
+};
+
 const PRIOR_TURN: Decision = {
   id: 'd1',
   label: 'plan',
@@ -177,5 +199,70 @@ describe('AC-6: the same tap sequence produces the identical AnswerRequest eithe
     const picked = all('[data-question-option]')[0];
     expect(picked?.querySelector('[data-question-picked-mark]')).not.toBeNull();
     expect(q('[data-question-submit]')?.querySelector('[data-question-submit-key]')).not.toBeNull();
+  });
+
+  /**
+   * THE ARMED PATH -- what the two tests above do NOT cover, and what
+   * `factory-sse-1` actually is (see `PERMISSION_QUESTION`'s own comment).
+   * §4.4's two-tap guard (`isPersistentPermissionOption`, `armedLabel`) is
+   * phone-only and deliberately makes ONE tap insufficient to mark a
+   * persistent-permission option there, where desktop marks it in one --
+   * so "the same tap sequence" (this describe block's own title) is not
+   * literally true for this fixture, only "the same RESULT once each
+   * side's own grammar reaches 'marked'" is. AC-6's restated text
+   * (phone-core-loop.md §3.6) states exactly that; this is its test.
+   */
+  it('AC-6, armed path: phone needs two taps (arm, confirm) where desktop needs one, same AnswerRequest', async () => {
+    const phoneAnswer = answering({ kind: 'sent', answer: RISKY_LABEL });
+    draw({ phone: true, answer: phoneAnswer, width: 390 }, [PERMISSION_QUESTION]);
+    // Re-queried before each tap, not a cached reference -- matching
+    // `DetailPanel.phone-risk-option.test.tsx`'s own `optionFor` convention
+    // for this exact two-tap sequence.
+    const risky = () => all('[data-question-option]')[1] as HTMLElement;
+
+    // First tap: ARMS, does not mark, does not send.
+    fireEvent.click(risky(), { detail: 1 });
+    expect(risky().getAttribute('data-question-armed')).toBe('true');
+    expect(risky().getAttribute('data-picked')).toBeNull();
+    expect(phoneAnswer).not.toHaveBeenCalled();
+
+    // Second tap: CONFIRMS -- the same row, within ARM_TIMEOUT_MS. A REAL
+    // mark on a single-select question folds the list on a pointer pick
+    // (`toggle`'s own `viaPointer && !multiSelect` rule -- true of BOTH
+    // phone and desktop, not part of what this AC is about), so the option
+    // buttons themselves are gone from the DOM afterward; the fold summary
+    // (`[data-question-marked]`) is what `DetailPanel.phone-risk-
+    // option.test.tsx`'s own equivalent test reads instead, and so does
+    // this one.
+    fireEvent.click(risky(), { detail: 1 });
+    expect(q('[data-question-marked]')?.textContent).toContain(RISKY_LABEL);
+
+    fireEvent.click(q('[data-question-submit]') as HTMLButtonElement);
+    await waitFor(() => expect(phoneAnswer).toHaveBeenCalledTimes(1));
+    const phoneRequest = phoneAnswer.mock.calls[0]?.[1];
+
+    cleanup();
+
+    // DESKTOP: one tap marks directly -- `risky`/`armed` are `phone &&`
+    // gated (`DetailPanel.tsx`), so this row never arms at all.
+    const desktopAnswer = answering({ kind: 'sent', answer: RISKY_LABEL });
+    draw({ phone: false, answer: desktopAnswer, width: 700 }, [PERMISSION_QUESTION]);
+    const desktopOption = all('[data-question-option]')[1] as HTMLElement;
+    expect(desktopOption.hasAttribute('data-question-armed')).toBe(false);
+    fireEvent.click(desktopOption, { detail: 1 });
+    expect(q('[data-question-marked]')?.textContent).toContain(RISKY_LABEL);
+
+    fireEvent.click(q('[data-question-submit]') as HTMLButtonElement);
+    await waitFor(() => expect(desktopAnswer).toHaveBeenCalledTimes(1));
+    const desktopRequest = desktopAnswer.mock.calls[0]?.[1];
+
+    const expected = {
+      steps: [
+        { question: PERMISSION_QUESTION.question, labels: [RISKY_LABEL], multiSelect: false },
+      ],
+    };
+    expect(phoneRequest).toEqual(expected);
+    expect(desktopRequest).toEqual(expected);
+    expect(phoneRequest).toEqual(desktopRequest);
   });
 });

@@ -619,66 +619,83 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * THE SETTINGS-VIEWS RESTRUCTURE (items A-D: a full-window screen replacing
  * the centred modal, Stats & Usage folded in as one of its sections, single-
  * section-view navigation replacing the always-mounted cards, a new Skills
- * section) TOUCHES NEITHER BUDGET, for the same reason the cards restructure
- * above did not: every line of it is a re-layout of code already behind
- * `SettingsOverlay`'s own lazy boundary, plus the deletion of `StatsScreen`'s
- * own separate lazy chunk -- its content (`StatsPanel.tsx`) is a static
- * import inside `SettingsOverlay.tsx` now, so it moved FROM its own chunk
- * INTO this one rather than into the eager entry (confirmed by grep:
- * `data-stats-panel` is absent from the entry chunk and present exactly once
- * in `SettingsOverlay-*.js`). Measured, `electron-vite build --mode
- * production`, this branch against `main`:
+ * section) TOUCHES NEITHER BUDGET: every line is a re-layout of code already
+ * behind `SettingsOverlay`'s own lazy boundary, plus `StatsScreen`'s own
+ * separate lazy chunk folding INTO this one rather than into the eager entry
+ * (confirmed: `data-stats-panel` is absent from the entry, present once in
+ * `SettingsOverlay-*.js`). Measured, `electron-vite build --mode production`,
+ * this branch against `main`: entry 722,046 B (unmoved) -> 721,741 B
+ * (-305 B); gzip 216,344 B -> 216,312 B (-32 B, this machine's zlib). Both
+ * budgets stay at 723,500 / 216,700.
  *
- *     entry                722,046 B (unmoved) -> 721,741 B  (-305 B)
- *     entry gzip           216,344 B (unmoved) -> 216,312 B  (-32 B, this
- *                          machine's zlib)
- *     SettingsOverlay chunk                       103,854 B  (was 76,458 B
- *                          at the cards-restructure measurement above --
- *                          the growth is Stats & Usage's own content plus
- *                          Skills, both newly inside this chunk)
+ * A NINTH, SMALL GROWTH: "BACK TO APP" (replacing the Sections rail with a
+ * closable row) AND THE GH-MISSING GUIDE (PR 550's own follow-up, later also
+ * gaining an S2 security fix routing the guide's two external links through
+ * `ExternalLink`/`window.api.link.open` instead of a bare `target="_blank"`
+ * the app's own `setWindowOpenHandler` silently refuses) DOES move the
+ * budget -- both are new CATALOGUE STRINGS (`i18n/strings.ts`), not new
+ * component code behind a lazy boundary: `DetailPanel.tsx` (eager) imports
+ * `t()` from the same module `SettingsOverlay.tsx`/`GithubPanel.tsx` read
+ * their own copy from, and a bundler cannot tree-shake individual properties
+ * out of one exported object literal -- the WHOLE English catalogue ships in
+ * the entry. `GithubMark`'s SVG and the guide's JSX are NOT part of this
+ * bump (confirmed by grep: `brew install gh` appears once, in
+ * `SettingsOverlay-*.js`, never in the entry) -- only the strings are.
+ * Measured, this branch against its own base (`ea4f6613`): entry 723,449 B
+ * -> 723,692 B (+243 B, base already left only 51 B of headroom); gzip
+ * 216,698 B -> 216,801 B (+103 B). `ENTRY_BUDGET_BYTES` moved
+ * 723,500 -> 725,000 (723,692 B + ~0.18% slack); `ENTRY_GZIP_BUDGET_BYTES`
+ * moved 216,700 -> 217,100 (216,801 B + ~0.14% slack).
  *
- * The eager entry shrank slightly rather than grew: `Canvas.tsx` no longer
- * carries a SECOND `React.lazy` declaration and `Suspense` boundary for the
- * now-deleted `StatsScreen`, which is marginally less eager wiring than
- * before, and nothing this restructure added touches the entry at all.
- * `ENTRY_BUDGET_BYTES` and `ENTRY_GZIP_BUDGET_BYTES` stay at 723,500 /
- * 216,700 -- both measurements land under the existing budgets with the
- * same order of headroom the previous entry left, so this is not the "moves
- * the number" category of change.
+ * A TENTH, SMALL, ORDINARY GROWTH, ON A SIBLING BRANCH: the sidebar's
+ * worktree-row filters gained the one exception #504 always meant them to
+ * have -- a WAITING session's own worktree row stays reachable regardless of
+ * either toggle (`WorktreesSection.tsx`'s `holdsWaitingSession`) -- eager,
+ * since `WorktreesSection` has no lazy boundary. Measured against
+ * `origin/main`'s tip (73abe90b, no waiting exception): entry 723,443 B ->
+ * 723,545 B (+102 B); gzip 216,662 B -> 216,736 B (+74 B, this machine's
+ * zlib). `ENTRY_BUDGET_BYTES` moved 723,500 -> 725,000 (723,545 B + ~0.2%
+ * slack); `ENTRY_GZIP_BUDGET_BYTES` moved 216,700 -> 217,200 (216,736 B +
+ * ~0.21% slack) on `main`.
  *
- * THE "BACK TO APP" ROW AND THE GH-MISSING GUIDE (PR 550's own follow-up)
- * DOES move it, for a reason none of the entries above are: both are new
- * CATALOGUE STRINGS (`i18n/strings.ts`), not new component code behind a
- * lazy boundary. `DetailPanel.tsx` -- eager, not lazy -- imports `t()` from
- * the same module `SettingsOverlay.tsx` and `GithubPanel.tsx` read their own
- * copy from, and a bundler cannot tree-shake individual properties out of
- * one exported object literal: the WHOLE English catalogue ships in the
- * entry, Settings-only keys included, whichever component happens to import
- * `t` first. `GithubMark`'s own SVG path and the guide's JSX markup are NOT
- * part of this bump -- confirmed by grep, `brew install gh` appears once, in
- * `SettingsOverlay-*.js`, never in the entry -- only the strings are.
+ * AN ELEVENTH, SMALL, ORDINARY GROWTH, ON ANOTHER SIBLING BRANCH: the
+ * question card's double-submit fix (`sendingRef` + `try`/`finally` around
+ * `send`) and its phone preview-collapse fix (`usePhoneViewport()`, a
+ * `previewExpanded` disclosure), together -- category-consistent small
+ * additions, no new dependency. Measured, forked from the SAME 723,500 /
+ * 216,700 ancestor the tenth paragraph above budgeted against: entry
+ * 723,917 B (+417 B); gzip 216,836 B (+136 B). This PR squash-merged to
+ * `main` first, so `ENTRY_BUDGET_BYTES` moved 723,500 -> 725,500 and
+ * `ENTRY_GZIP_BUDGET_BYTES` moved 216,700 -> 217,200 independently of the
+ * tenth paragraph's own bump above -- neither side knew about the other.
  *
- * Measured, `electron-vite build --mode production`, this branch against its
- * own base (`ea4f6613`, before this diff):
+ * THE TENTH AND ELEVENTH PARAGRAPHS' BRANCHES THEN MERGED INTO EACH OTHER,
+ * each having budgeted for its own delta alone against the SAME shared
+ * ancestor -- neither figure accounted for the other landing too. Measured
+ * on their merge commit (both fixes combined): entry 724,470 B (+970 B over
+ * the shared ancestor); gzip 216,999 B (+299 B) -- more than the simple sum
+ * of the two sides' isolated deltas, but well within either side's own
+ * headroom. `ENTRY_BUDGET_BYTES` moved 725,500 -> 725,900 (724,470 B +
+ * ~0.2% slack); `ENTRY_GZIP_BUDGET_BYTES` moved 217,200 -> 217,400
+ * (216,999 B + ~0.18% slack).
  *
- *     entry, base (no guide, no Back-to-app string)   723,449 B  (216,698 B gzip, THIS machine's zlib)
- *     entry, with this diff                           723,692 B  (216,801 B gzip)  (+243 B / +0.034%, +103 B gzip / +0.048%)
+ * THE NINTH PARAGRAPH'S BRANCH (PR 550, above) AND THE MERGED TENTH+ELEVENTH
+ * TREE ON `main` (sidebar-worktree-filters + question-card, above) THEN
+ * MERGED INTO EACH OTHER, each having budgeted for its own delta alone
+ * against the SAME shared ancestor (723,500 / 216,700) -- neither figure
+ * accounted for the other landing too, the same gap every fan-in merge in
+ * this file has found. Measured, `electron-vite build --mode production`,
+ * on this merge commit (both trees combined):
  *
- * The base figure itself already left only 51 B / 2 B of headroom under the
- * existing 723,500 / 216,700 budgets -- this diff did not create the tight
- * margin, it spent the last of it. One new nav string (`settings.nav.back`
- * replacing the deleted `settings.nav.heading`, a near wash) and three new
- * `settings.integrations.github.guide.*` keys for the gh-missing guide are
- * the whole delta; the guide's own copy button reuses the existing
- * `copyCommand`/`copied` pair rather than adding a fourth, for exactly this
- * reason.
+ *     entry   724,790 B  (217,186 B gzip)
  *
- * `ENTRY_BUDGET_BYTES` moves 723,500 -> 725,000: the real figure (723,692 B)
- * plus ~1.3 KB (~0.18%) of slack, the same small-headroom convention every
- * bump above uses. `ENTRY_GZIP_BUDGET_BYTES` moves 216,700 -> 217,100: the
- * measured gzip figure (216,801 B, this machine's zlib) plus ~300 B (~0.14%)
- * of the same slack. The next PR to land here should expect to remeasure
- * rather than assume either number still has room.
+ * `ENTRY_BUDGET_BYTES` moves 725,900 -> 726,100: the real merged figure
+ * (724,790 B) plus ~1.3 KB (~0.18%) of slack, the same small-headroom
+ * convention every bump above uses -- not either side's own margin kept
+ * as-is. `ENTRY_GZIP_BUDGET_BYTES` moves 217,400 -> 217,550: the measured
+ * gzip figure (217,186 B) plus ~364 B (~0.17%) of the same slack. The next
+ * PR to land here should still expect to remeasure rather than assume
+ * either number still has room.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -689,8 +706,8 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 // depends on is even present, decided BEFORE anything tries to build.
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
-const ENTRY_BUDGET_BYTES = 725_000;
-const ENTRY_GZIP_BUDGET_BYTES = 217_100;
+const ENTRY_BUDGET_BYTES = 726_100;
+const ENTRY_GZIP_BUDGET_BYTES = 217_550;
 
 // The one string this repo's markdown stack ships that nothing else in the
 // dependency graph or vam's own source does: `gfmTable`, the extension name

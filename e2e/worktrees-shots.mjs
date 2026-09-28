@@ -139,11 +139,22 @@ const INITIAL_WORKTREE = {
  * (`worktrees.ts`'s own `worktreesRootFor`): this is the row phase 2b's new
  * filter hides by default, and shows nested/dimmed once the operator turns
  * it on.
+ *
+ * `branch` DELIBERATELY DIFFERS FROM THE DIRECTORY NAME -- unlike
+ * `INITIAL_WORKTREE` and `LOCKED_WORKTREE` below (both vam-made: `worktrees
+ * .ts`'s own `createWorktree` always names the branch after the directory,
+ * `git worktree add --no-track -b <slug> <path>`, so the two can never
+ * differ for a row vam itself created). An ADOPTED row is exactly the case
+ * where they legitimately can: a person's own `git worktree add <path>
+ * <existing-branch>` checked out a branch whose name has nothing to do with
+ * the directory they put it in. `renderRow`'s own "same name, omit" rule
+ * (`WorktreesSection.tsx`) must still draw THIS branch -- see the dedicated
+ * check below, right after `adoptedRow` is defined.
  */
 const ADOPTED_WORKTREE = {
   worktreeId: '/Users/operator/code/scratch/manual-hotfix',
   path: '/Users/operator/code/scratch/manual-hotfix',
-  branch: 'manual-hotfix',
+  branch: 'hotfix/manual',
   projectId: 'claude-code:manual-hotfix-77776666',
   locked: false,
   lockReason: null,
@@ -303,9 +314,17 @@ check(
   `${await row.count()}`,
 );
 check(
-  'the vam-made row shows its branch',
-  (await page.locator(`[data-worktree-row="${INITIAL_WORKTREE.worktreeId}"] [data-worktree-branch]`).textContent()) ===
-    'fix-terminal-echo',
+  // S2, OPERATOR REPORT on PR 547's own screenshot: `INITIAL_WORKTREE`'s
+  // branch (`worktrees.ts`'s own `createWorktree` always names it after
+  // the directory) used to repeat its own `data-worktree-name` a line
+  // down as `data-worktree-branch` -- the SAME string twice on one row.
+  // `renderRow`'s own rule now omits the line entirely when the two
+  // agree; `ADOPTED_WORKTREE` below, whose branch genuinely differs, is
+  // what proves the line still draws when it has something new to say.
+  'the vam-made row omits its branch line -- identical to its own name',
+  (await page
+    .locator(`[data-worktree-row="${INITIAL_WORKTREE.worktreeId}"] [data-worktree-branch]`)
+    .count()) === 0,
 );
 check(
   '"Start a session here" — no live session in this worktree yet',
@@ -352,6 +371,12 @@ check(
   (await externalGroup.locator(`[data-worktree-row="${INITIAL_WORKTREE.worktreeId}"]`).count()) === 0,
 );
 const adoptedRow = page.locator(`[data-worktree-row="${ADOPTED_WORKTREE.worktreeId}"]`);
+check(
+  // The other half of the check above: a branch that genuinely differs
+  // from the directory name still draws, exactly once.
+  'the ADOPTED row shows its branch -- it genuinely differs from the directory name',
+  (await adoptedRow.locator('[data-worktree-branch]').textContent()) === 'hotfix/manual',
+);
 check(
   'the ADOPTED row still offers delete -- adoption means the same affordances',
   (await adoptedRow.locator('[data-worktree-delete]').count()) === 1,

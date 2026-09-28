@@ -8,27 +8,21 @@
  * count from then on. "That same count" has to survive a poll, a re-render,
  * AND a relaunch, or an operator who dismissed the note today would have it
  * back tomorrow for nothing new. So the one number is kept here, per viewer,
- * in `localStorage` -- the exact pattern `sources/remote-token.ts` already
- * uses for a value that must survive an absent or throwing storage without
- * taking the feature it backs down with it (Safari private mode throws from
- * `setItem`/`getItem`; a viewer there just gets asked again next launch,
- * which is worse than persisting and not broken).
+ * in `localStorage` -- through `prefs/local-storage.ts`'s shared fail-open
+ * policy, the same one `sources/remote-token.ts` leans on for a value that
+ * must survive an absent or throwing storage without taking the feature it
+ * backs down with it (Safari private mode throws from `setItem`/`getItem`;
+ * a viewer there just gets asked again next launch, which is worse than
+ * persisting and not broken).
  *
  * ONE KEY, no per-workspace or per-source qualifier: the note itself is a
  * fact about the WHOLE sidebar's count, not about any one project or source,
  * so there is nothing narrower to key it by.
  */
 
-const KEY = 'vam.foreignHiddenNote.acknowledgedCount';
+import { readItem, writeItem } from './local-storage.js';
 
-function store(): Storage | null {
-  try {
-    return globalThis.localStorage ?? null;
-  } catch {
-    // Access ITSELF throws in some privacy modes, before any method runs.
-    return null;
-  }
-}
+const KEY = 'vam.foreignHiddenNote.acknowledgedCount';
 
 /**
  * The count the note was last shown at and left (auto-hidden or dismissed),
@@ -37,14 +31,10 @@ function store(): Storage | null {
  * count the operator ever actually saw.
  */
 export function readAcknowledgedForeignHiddenCount(): number {
-  try {
-    const raw = store()?.getItem(KEY) ?? null;
-    if (raw === null) return 0;
+  return readItem(KEY, 0, (raw) => {
     const parsed = Number(raw);
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-  } catch {
-    return 0;
-  }
+  });
 }
 
 /**
@@ -55,10 +45,5 @@ export function readAcknowledgedForeignHiddenCount(): number {
  */
 export function writeAcknowledgedForeignHiddenCount(count: number): void {
   if (!Number.isFinite(count) || count < 0) return;
-  try {
-    store()?.setItem(KEY, String(count));
-  } catch {
-    // See this module's header: a viewer who cannot persist this is asked
-    // again next launch, which is not a broken sidebar.
-  }
+  writeItem(KEY, String(count));
 }
