@@ -2369,9 +2369,32 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
    * jump label when one is assigned, registers in `rowRefs` for the reveal-scroll
    * effect, and gets the same context menu and close button -- wherever it is
    * called from.
+   *
+   * `opts.suppressBranch`: THE OPERATOR'S OWN REPORT ON PR 547's own
+   * screenshot -- a session nested under a worktree row repeated that
+   * worktree's own branch a second time (the worktree row's own `data-
+   * worktree-branch` chip already says it; the nested session's `data-
+   * session-branch` chip said it again, right below). `WorktreesSection
+   * .tsx`'s `renderRow` passes its OWN worktree's branch here for every
+   * session it nests; every other caller (a top-level row, a project's own
+   * `mainSessionEntries`) passes nothing, so nothing there changes. `null`
+   * is never suppressed on purpose -- `worktree.branch: null` (a detached
+   * worktree with no branch name) must never read as "the session's own
+   * `null` branch matches", which is a fact about the SOURCE never having
+   * measured one, not about the two agreeing.
    */
-  const renderSessionRow = (entry: SessionEntry): ReactNode => {
+  const renderSessionRow = (
+    entry: SessionEntry,
+    opts?: { readonly suppressBranch?: string | null },
+  ): ReactNode => {
     const { session } = entry;
+    const suppressBranch = opts?.suppressBranch ?? null;
+    const showBranch = session.branch !== null && session.branch !== suppressBranch;
+    // A REAL branch this row's own parent worktree ALREADY said, once --
+    // `null` (a source that could not measure a branch at all) is never
+    // "suppressed": that fallback sentence is its own fact, unrelated to
+    // any worktree, and must keep drawing (below) exactly as before.
+    const branchSuppressed = session.branch !== null && session.branch === suppressBranch;
     const isFocused = session.id === focusedSessionId;
     // The one key that jumps here, or nothing when no jump
     // is armed -- and nothing, too, for a row past the end
@@ -2713,7 +2736,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                       </span>
                     )}
                   </span>
-                  {session.branch !== null && (
+                  {showBranch && (
                     <>
                       <span className="flex-none">·</span>
                       <span data-session-branch className="truncate">
@@ -2888,7 +2911,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                           that says WHOSE gap it is stays below
                                           in the row's accessible name, where
                                           it was the only copy anyway. */}
-                    {session.branch !== null && (
+                    {showBranch && (
                       /* `flex-none` IS A FIX, not tidying.
                                            An `<svg>` is a flex item with an
                                            auto basis, so this glyph shrank
@@ -2914,29 +2937,39 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                            two pixels to give. */
                       <GitBranch size={10} strokeWidth={1.6} className="flex-none" />
                     )}
-                    <span
-                      data-session-branch
-                      // `title` survives ONLY for the non-null case, where it
-                      // reveals text that is already in the DOM and merely
-                      // clipped -- the one legitimate use of the attribute.
-                      // The null case's sentence is information found nowhere
-                      // else, so it becomes `sr-only` text inside the row
-                      // button's own accessible name (see the age cell).
-                      title={session.branch ?? undefined}
-                      // `overflow-hidden` IS the guarantee (see
-                      // `BRANCH_TAIL_MAX_CHARS`'s doc comment): this box is
-                      // already sized correctly by the row's own flex layout
-                      // (`min-w-0`, shrunk to exactly the space
-                      // `data-session-age` -- `flex-none` -- does not need,
-                      // computed by the browser from its REAL rendered width).
-                      // `data-branch-tail` below is `flex-none` and will
-                      // happily paint past this box's edge; clipping here is
-                      // what refuses to let that paint land on the age, at any
-                      // width, any age string, any font.
-                      className="flex min-w-0 items-center overflow-hidden"
-                    >
-                      {session.branch === null ? (
-                        /* The em-dash is gone and the
+                    {/* SUPPRESSED (a nested worktree session whose branch
+                        equals its own worktree row's) draws NEITHER this
+                        span NOR its sr-only fallback -- the worktree row
+                        already said it once, `WorktreesSection.tsx`'s own
+                        `renderRow` is what passes `suppressBranch` down.
+                        A branch the SOURCE never measured (`null`) is a
+                        different fact and keeps drawing its fallback
+                        exactly as before -- see `branchSuppressed`'s own
+                        header above. */}
+                    {!branchSuppressed && (
+                      <span
+                        data-session-branch
+                        // `title` survives ONLY for the non-null case, where it
+                        // reveals text that is already in the DOM and merely
+                        // clipped -- the one legitimate use of the attribute.
+                        // The null case's sentence is information found nowhere
+                        // else, so it becomes `sr-only` text inside the row
+                        // button's own accessible name (see the age cell).
+                        title={session.branch ?? undefined}
+                        // `overflow-hidden` IS the guarantee (see
+                        // `BRANCH_TAIL_MAX_CHARS`'s doc comment): this box is
+                        // already sized correctly by the row's own flex layout
+                        // (`min-w-0`, shrunk to exactly the space
+                        // `data-session-age` -- `flex-none` -- does not need,
+                        // computed by the browser from its REAL rendered width).
+                        // `data-branch-tail` below is `flex-none` and will
+                        // happily paint past this box's edge; clipping here is
+                        // what refuses to let that paint land on the age, at any
+                        // width, any age string, any font.
+                        className="flex min-w-0 items-center overflow-hidden"
+                      >
+                        {session.branch === null ? (
+                          /* The em-dash is gone and the
                                              sentence is not: a screen reader
                                              still learns which fact is missing
                                              and why, from the one place that
@@ -2947,15 +2980,15 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                              edge that a number will land in,
                                              where the branch dash held nothing
                                              open at all. */
-                        <span className="sr-only">
-                          this source cannot say which branch the session is on
-                        </span>
-                      ) : (
-                        <>
-                          <span data-branch-head className="truncate">
-                            {splitBranch(session.branch).head}
+                          <span className="sr-only">
+                            this source cannot say which branch the session is on
                           </span>
-                          {/* `flex-none` always -- the tail never shares in
+                        ) : (
+                          <>
+                            <span data-branch-head className="truncate">
+                              {splitBranch(session.branch).head}
+                            </span>
+                            {/* `flex-none` always -- the tail never shares in
                                                 the head's shrink, which is the whole point: the
                                                 distinguishing final segment gives way last. Past
                                                 `BRANCH_TAIL_MAX_CHARS`, `truncate` and an inline
@@ -2970,24 +3003,25 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                                 above is a `style`, not a class. If this estimate
                                                 is ever a few pixels optimistic, the parent's clip
                                                 is the actual backstop, not this. */}
-                          <span
-                            data-branch-tail
-                            className={
-                              splitBranch(session.branch).tail.length > BRANCH_TAIL_MAX_CHARS
-                                ? 'flex-none truncate'
-                                : 'flex-none'
-                            }
-                            style={
-                              splitBranch(session.branch).tail.length > BRANCH_TAIL_MAX_CHARS
-                                ? { maxWidth: `${BRANCH_TAIL_MAX_CHARS}ch` }
-                                : undefined
-                            }
-                          >
-                            {splitBranch(session.branch).tail}
-                          </span>
-                        </>
-                      )}
-                    </span>
+                            <span
+                              data-branch-tail
+                              className={
+                                splitBranch(session.branch).tail.length > BRANCH_TAIL_MAX_CHARS
+                                  ? 'flex-none truncate'
+                                  : 'flex-none'
+                              }
+                              style={
+                                splitBranch(session.branch).tail.length > BRANCH_TAIL_MAX_CHARS
+                                  ? { maxWidth: `${BRANCH_TAIL_MAX_CHARS}ch` }
+                                  : undefined
+                              }
+                            >
+                              {splitBranch(session.branch).tail}
+                            </span>
+                          </>
+                        )}
+                      </span>
+                    )}
                   </span>
                   <span
                     data-session-age

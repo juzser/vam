@@ -175,8 +175,18 @@ export type WorktreesSectionProps = {
    * `SessionList.tsx`'s own row-rendering function, handed down whole --
    * see this file's header. Every nested session in this section draws
    * through this, not through anything defined here.
+   *
+   * THE SECOND, OPTIONAL ARGUMENT is what `renderRow` (below) uses to pass
+   * its OWN worktree's branch -- `SessionList.tsx`'s own header on `opts
+   * .suppressBranch` has the full rationale (the operator's own report: a
+   * nested session repeated its worktree row's branch a second time).
+   * `mainSessionEntries` below never passes it: those rows are a
+   * project's own top-level sessions, not nested under any worktree row.
    */
-  readonly renderSessionRow: (entry: SessionEntry) => ReactNode;
+  readonly renderSessionRow: (
+    entry: SessionEntry,
+    opts?: { readonly suppressBranch?: string | null },
+  ) => ReactNode;
   /**
    * The OPERATOR's OWN toggle, `SessionFilters.hideAgentWorktrees`
    * (`domain/session-filter.ts`), threaded down from `SessionList.tsx` --
@@ -451,6 +461,19 @@ export function WorktreesSection({
     const worktreeSessions = entries.filter((entry) => entry.project.id === worktree.projectId);
     const status: WorktreeStatus | undefined = statuses.get(worktree.worktreeId);
     const { compact } = opts;
+    const worktreeName = displayName(worktree.path);
+    /**
+     * THE OPERATOR'S OWN REPORT on PR 547's own screenshot: `feature-x`'s
+     * row showed `feature-x` twice -- the name span above, and this same
+     * text again as a "branch" one line down, because that worktree's
+     * branch and directory name happen to be identical (the common case:
+     * `git worktree add <name>` names the branch after the directory
+     * unless told otherwise). Line 2's OWN JOB is to say something the
+     * name did not; when it cannot, it draws nothing (the same `<span
+     * className="flex-1" />` placeholder a `null` branch already falls
+     * back to) rather than repeat line 1.
+     */
+    const showWorktreeBranch = worktree.branch !== null && worktree.branch !== worktreeName;
     return (
       <div
         key={worktree.worktreeId}
@@ -475,7 +498,7 @@ export function WorktreesSection({
               compact ? COMPACT_DIM_TEXT : 'text-ink-dim',
             ].join(' ')}
           >
-            {displayName(worktree.path)}
+            {worktreeName}
           </span>
           {/* NEVER OFFERED ON A LOCKED WORKTREE -- `removeWorktree`
               refuses one unconditionally, force or not
@@ -487,7 +510,7 @@ export function WorktreesSection({
             <button
               type="button"
               data-worktree-delete={worktree.worktreeId}
-              aria-label={`delete worktree ${displayName(worktree.path)}`}
+              aria-label={`delete worktree ${worktreeName}`}
               onClick={() => {
                 setDeleteError(null);
                 setDeleteDirty(false);
@@ -508,7 +531,7 @@ export function WorktreesSection({
             start-here control is now a compact icon (below) rather
             than a text label competing for the same line's width. */}
         <div className="flex items-center gap-[7px]">
-          {worktree.branch !== null ? (
+          {showWorktreeBranch ? (
             <span
               data-worktree-branch
               className={[
@@ -589,11 +612,11 @@ export function WorktreesSection({
             </span>
           )}
           {worktreeSessions.length === 0 && (
-            <ShortcutTip label={`Start a session in ${displayName(worktree.path)}`}>
+            <ShortcutTip label={`Start a session in ${worktreeName}`}>
               <button
                 type="button"
                 data-worktree-start-here={worktree.worktreeId}
-                aria-label={`start a session in ${displayName(worktree.path)}`}
+                aria-label={`start a session in ${worktreeName}`}
                 onClick={() => void startHere(worktree)}
                 className="vam-tap vam-hit-24 flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-[5px] text-ink-faint hover:text-ink"
               >
@@ -614,7 +637,9 @@ export function WorktreesSection({
             data-worktree-sessions={worktree.worktreeId}
             className="flex flex-col gap-0.5 pt-0.5"
           >
-            {worktreeSessions.map((entry) => renderSessionRow(entry))}
+            {worktreeSessions.map((entry) =>
+              renderSessionRow(entry, { suppressBranch: worktree.branch }),
+            )}
           </div>
         )}
       </div>
@@ -626,13 +651,21 @@ export function WorktreesSection({
       {showWorktreesBlock && (
         <div data-worktrees-section={project.id} style={{ paddingLeft: SIDEBAR_STEP }}>
           <div className="relative flex min-h-[21px] items-center gap-[7px] px-1 pb-0.5">
-            {/* `text-control` (12px/16px), NOT the project heading's own 13px
-            `text-body`-sized exception (`type-scale.test.ts`'s own named
-            list): this is a THIRD level, nested one step deeper than the
-            project heading it sits under, and the named scale's role for a
-            "secondary line under a title" is exactly that relationship --
-            no new exception needed. */}
-            <span className="truncate font-semibold text-control text-ink-faint">Worktrees</span>
+            {/* THE OPERATOR'S OWN REPORT on PR 547's own screenshot: bold,
+            12px, full-strength `text-ink-faint` read as a SESSION TITLE
+            wearing a strange word, not a caption over one. `text-meta`
+            (11px/16px, the scale's own subordinate-text role -- `text-
+            scale.test.ts`'s own header calls it "the eyebrow over a
+            value") plus `uppercase tracking-[0.12em]` is the SAME small-
+            caps eyebrow treatment this app already uses for a section
+            label beside a list, `settings/SettingsOverlay.tsx`'s own
+            `SectionRail` heading -- reused, not invented. No `font-
+            semibold`: the tracking and the case are what say "this is a
+            label", the same way "External worktrees" (this file's own
+            disclosure, right below) already reads as one without it. */}
+            <span className="truncate text-ink-faint text-meta uppercase tracking-[0.12em]">
+              Worktrees
+            </span>
             {/* `plainWorktrees` PLUS whatever the external group ITSELF draws
             right now -- this is "how many rows actually draw", the same
             rule the pre-existing `hideAgentWorktrees` filtering already

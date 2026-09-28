@@ -71,8 +71,8 @@ function worktree(over: Partial<WorktreeInfo> = {}): WorktreeInfo {
   };
 }
 
-function installApi() {
-  const list = vi.fn(async (projectId: string) => (projectId === 'p1' ? [worktree()] : []));
+function installApi(worktrees: readonly WorktreeInfo[] = [worktree()]) {
+  const list = vi.fn(async (projectId: string) => (projectId === 'p1' ? worktrees : []));
   (window as unknown as { api: unknown }).api = {
     worktrees: { list, create: vi.fn(), remove: vi.fn(), status: vi.fn().mockResolvedValue([]) },
     createSessionIn: vi.fn(),
@@ -181,6 +181,72 @@ describe('a nested worktree row draws from the filtered set, not the unfiltered 
       expect(
         document.querySelector('[data-worktree-start-here="/repo-worktrees/feat"]'),
       ).not.toBeNull(),
+    );
+  });
+});
+
+/**
+ * S2, OPERATOR REPORT on PR 547's own screenshot: a nested session's own
+ * `data-session-branch` chip repeated its worktree's branch a second time
+ * -- the worktree row already says it, one line up (`WorktreesSection.tsx`'s
+ * own `data-worktree-branch`). `SessionList.tsx`'s `renderSessionRow` now
+ * takes an optional `suppressBranch`, and `WorktreesSection.tsx`'s
+ * `renderRow` passes its own worktree's branch for every session it nests
+ * -- proven here through the REAL `renderSessionRow` closure (never
+ * `WorktreesSection.test.tsx`'s own `fakeRenderSessionRow` stand-in), the
+ * same "the genuine function, not a lookalike" bar
+ * `Canvas.worktree-nested-rows.test.tsx`'s own header sets for UI1.
+ */
+describe('a nested worktree session never repeats its own worktree row branch', () => {
+  it('omits the nested branch chip when it equals the worktree it is nested under', async () => {
+    // The worktree's own branch (here) and the session's branch (below)
+    // are the SAME string -- the exact shape the operator's own
+    // screenshot caught.
+    installApi([worktree({ branch: 'feature/shared' })]);
+    const model: CanvasModel = {
+      projects: [
+        { id: 'p1', name: 'alpha', source: 'claude-code', sessions: [session('a1')] },
+        {
+          id: CHILD_PROJECT_ID,
+          name: 'feat',
+          source: 'claude-code',
+          sessions: [session('c1', { branch: 'feature/shared' })],
+        },
+      ],
+    };
+    render(<Canvas model={model} />);
+
+    await waitFor(() => expect(document.querySelector('[data-session-row="c1"]')).not.toBeNull());
+    // The worktree row's own line still says it, exactly once.
+    expect(
+      document.querySelector('[data-worktree-row="/repo-worktrees/feat"] [data-worktree-branch]')
+        ?.textContent,
+    ).toBe('feature/shared');
+    // The nested session's own chip does not repeat it.
+    expect(document.querySelector('[data-session-row="c1"] [data-session-branch]')).toBeNull();
+  });
+
+  it('still shows the nested branch chip when it genuinely differs from the worktree', async () => {
+    installApi([worktree({ branch: 'feature/shared' })]);
+    const model: CanvasModel = {
+      projects: [
+        { id: 'p1', name: 'alpha', source: 'claude-code', sessions: [session('a1')] },
+        {
+          id: CHILD_PROJECT_ID,
+          name: 'feat',
+          source: 'claude-code',
+          // This session checked out a DIFFERENT branch than the worktree
+          // itself is on -- a real, useful fact, and the chip must survive.
+          sessions: [session('c1', { branch: 'feature/other' })],
+        },
+      ],
+    };
+    render(<Canvas model={model} />);
+
+    await waitFor(() =>
+      expect(
+        document.querySelector('[data-session-row="c1"] [data-session-branch]')?.textContent,
+      ).toBe('feature/other'),
     );
   });
 });
