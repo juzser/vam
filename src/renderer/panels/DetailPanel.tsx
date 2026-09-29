@@ -6974,9 +6974,11 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
     // channel than the desktop's own `terminal.send`. It only ever carries a
     // SINGLE stroke (every caller of this function passes one -- `sendKey`,
     // `cycleMode`, the composer's own Escape -- `pressPaneKey`'s own doc),
-    // and only one of the six allowlisted ids `paneKeyToRemoteKeyId` answers
-    // for (`shared/remote-key.ts`); `up`/`down` and any multi-stroke run
-    // answer `null` and fall through to the same refusal the desktop build
+    // and only one of the twenty allowlisted ids `paneKeyToRemoteKeyId` answers
+    // for (`shared/remote-key.ts`: the four arrows, delete, Ctrl c/d/l/z/r/a/e/w/u,
+    // escape, back-tab, backspace, enter, space, tab); Home/End/PageUp/PageDown,
+    // an unnamed Ctrl letter, shift-Enter, any other text and any multi-stroke
+    // run answer `null` and fall through to the same refusal the desktop build
     // without `window.api` has always shown.
     const remoteId =
       send === undefined && strokes.length === 1 && strokes[0] !== undefined
