@@ -172,23 +172,16 @@ describe('the rule under the screen', () => {
     expect(badge?.getAttribute('class')).toContain('truncate');
   });
 
-  it('draws the branch when the source knows it', async () => {
-    await open({ branch: 'smith/vam/0.2-tab-shell' });
+  it('draws no branch segment, even when a caller still hands it a branch', async () => {
+    // The branch now comes from Claude Code's own statusLine; the rule carries
+    // the session-name badge only. The cast keeps the legacy prop out of the
+    // component's type while still proving an old caller draws nothing.
+    await open({ ...({ branch: 'smith/vam/0.2-tab-shell' } as object) });
     const line = q<HTMLElement>('[data-terminal-status]');
-    expect(q<HTMLElement>('[data-terminal-branch]')?.textContent).toContain(
-      'smith/vam/0.2-tab-shell',
-    );
-    expect(line?.textContent).toContain('vam-atlas-a1b2c3');
-  });
-
-  it('says nothing at all about a branch the source cannot name', async () => {
-    // NOT a dash and NOT a zero. `model.ts` is explicit that `null` means "the
-    // source cannot say", never "not on a branch" -- and on a one-line rule an
-    // em-dash reads as a branch called `—`. The sidebar draws one because its
-    // rows are a table whose columns must line up; this is a sentence.
-    await open({ branch: null });
     expect(q('[data-terminal-branch]')).toBeNull();
-    expect(q<HTMLElement>('[data-terminal-status]')?.textContent).not.toContain('—');
+    expect(line?.querySelector('svg.lucide-git-branch')).toBeNull();
+    expect(line?.textContent).not.toContain('smith/vam/0.2-tab-shell');
+    expect(line?.textContent).toContain('vam-atlas-a1b2c3');
   });
 
   it('draws no rule at all where there is no screen', async () => {
@@ -200,16 +193,14 @@ describe('the rule under the screen', () => {
         read={vi.fn(async () => ({ kind: 'not-vam' }) as PaneView)}
         resize={undefined}
         send={undefined}
-        branch="main"
       />,
     );
     await settle();
     expect(q('[data-terminal-status]')).toBeNull();
-    expect(q('[data-terminal-branch]')).toBeNull();
   });
 
   it('paints in tokens, never in a colour of its own', async () => {
-    await open({ branch: 'main' });
+    await open();
     expect(q<HTMLElement>('[data-terminal-status]')?.outerHTML).not.toMatch(/#[0-9a-f]{3,6}\b/i);
     expect(q<HTMLElement>('[data-terminal-status]')?.getAttribute('class')).toMatch(
       /\btext-(meta|control|body|heading)\b/,

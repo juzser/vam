@@ -43,7 +43,7 @@
  *   - the RESOLVED colour of the RED/GRN/BLU markers: the sixteen-ANSI claim,
  *     falsified directly rather than trusted because both read the same
  *     scheme store.
- *   - the status rule: branch and session name, same text, same order.
+ *   - the status rule: the session name, same text.
  *   - the cursor: a steady block on both -- `TerminalTab.tsx` never blinks
  *     (its own header explains why) and `TerminalStreamTab.tsx` is
  *     configured to match it (`cursorBlink: false` at construction).
@@ -304,7 +304,6 @@ const offMetrics = () =>
       lineHeightPx: px(style.lineHeight),
       redColor: red ? getComputedStyle(red).color : null,
       statusHeight: status ? status.getBoundingClientRect().height : null,
-      branchText: document.querySelector('[data-terminal-branch]')?.textContent ?? null,
       nameText: document.querySelector('[data-terminal-badge]')?.textContent ?? null,
     };
   });
@@ -339,7 +338,6 @@ const onMetrics = () =>
       rowHeight: row ? row.getBoundingClientRect().height : null,
       redColor: red ? getComputedStyle(red).color : null,
       statusHeight: status ? status.getBoundingClientRect().height : null,
-      branchText: document.querySelector('[data-terminal-stream-branch]')?.textContent ?? null,
       nameText: document.querySelector('[data-terminal-stream-badge]')?.textContent ?? null,
       cursorBlock,
       cursorBlink,
@@ -397,7 +395,6 @@ check(
   off.redColor !== null && off.redColor === on.redColor,
   `${off.redColor} vs ${on.redColor}`,
 );
-check('the same branch text', off.branchText === BRANCH && on.branchText === BRANCH, `${off.branchText} vs ${on.branchText}`);
 check(
   'the same tmux session name',
   off.nameText === TMUX_NAME && on.nameText === TMUX_NAME,

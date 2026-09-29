@@ -94,7 +94,7 @@ afterEach(() => {
 });
 
 async function openInInsert() {
-  render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+  render(<TerminalStreamTab projectId="p1" rowId="s1" />);
   await act(async () => {
     await Promise.resolve();
     await Promise.resolve();

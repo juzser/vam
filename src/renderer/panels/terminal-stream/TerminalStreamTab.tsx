@@ -25,7 +25,6 @@ import { Unicode11Addon } from '@xterm/addon-unicode11';
 import type { ITheme } from '@xterm/xterm';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
-import { GitBranch } from 'lucide-react';
 import type { CSSProperties } from 'react';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { INSERT_STOP, insertScopeMark, releaseInsert } from '../../keyboard/focus-scope.js';
@@ -223,7 +222,6 @@ function asXtermSeed(seed: string): string {
 export function TerminalStreamTab(props: {
   readonly projectId: string | null;
   readonly rowId?: string | undefined;
-  readonly branch: string | null;
   /** Fired at most once per mount, the moment this pane learns its tmux
    *  cannot stream at all or has given up reconnecting -- see the type's own
    *  header. This pane keeps drawing its OWN refusal/down text regardless
@@ -232,7 +230,7 @@ export function TerminalStreamTab(props: {
    *  to replace it in time. */
   readonly onFallback?: (reason: StreamFallbackReason) => void;
 }) {
-  const { projectId, rowId, branch, onFallback } = props;
+  const { projectId, rowId, onFallback } = props;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -897,8 +895,7 @@ export function TerminalStreamTab(props: {
         )}
       </div>
       {/* THE STATUS RULE, the same one row `TerminalTab.tsx` draws under its
-         own screen -- branch at the left where reading starts, the tmux
-         session's name pushed to the right (`aria-hidden`: the pane's own
+         own screen -- the tmux session's name pushed to the right (`aria-hidden`: the pane's own
          accessible name already carries it, via `term.textarea`'s
          `aria-label`... which this tab does not set yet, see the design
          doc). `name` is `null` until the stream actually opens
@@ -909,14 +906,6 @@ export function TerminalStreamTab(props: {
         data-terminal-stream-status
         className="flex flex-none items-center gap-2 border-line border-t pt-1 font-mono text-meta text-ink-faint"
       >
-        {typeof branch === 'string' && branch !== '' && (
-          <span className="flex min-w-0 items-center gap-1">
-            <GitBranch size={10} strokeWidth={1.6} aria-hidden="true" />
-            <span data-terminal-stream-branch title={branch} className="truncate">
-              {branch}
-            </span>
-          </span>
-        )}
         <span className="flex-1" />
         {name !== null && (
           <span
