@@ -28,7 +28,7 @@ import '@xterm/xterm/css/xterm.css';
 import { GitBranch } from 'lucide-react';
 import type { CSSProperties } from 'react';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { INSERT_STOP, insertScopeMark } from '../../keyboard/focus-scope.js';
+import { INSERT_STOP, insertScopeMark, releaseInsert } from '../../keyboard/focus-scope.js';
 import {
   activeTerminalFontSize,
   subscribeTerminalFontSize,
@@ -523,7 +523,24 @@ export function TerminalStreamTab(props: {
         // `TerminalTab.tsx`'s own `onKeyDown` checks `SCROLL_CHORDS`. `true`
         // for everything else, including keyup, so ordinary typing is
         // unaffected.
+        //
+        // ESCAPE LEAVES THE PANE, the way `TerminalTab.tsx`'s own does: back
+        // to Select, not into the pane where it would cancel the Claude
+        // prompt. Unmodified and not composing only -- an IME uses Escape to
+        // cancel a composition -- and `Mod-.` is what sends a literal one.
         liveTerm.attachCustomKeyEventHandler((event) => {
+          if (
+            event.type === 'keydown' &&
+            event.key === 'Escape' &&
+            !event.isComposing &&
+            !event.shiftKey &&
+            !event.ctrlKey &&
+            !event.altKey &&
+            !event.metaKey
+          ) {
+            releaseInsert(document.activeElement);
+            return false;
+          }
           if (event.type !== 'keydown' || !event.shiftKey || !SCROLL_CHORD_KEYS.has(event.key)) {
             return true;
           }
