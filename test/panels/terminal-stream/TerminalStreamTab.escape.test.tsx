@@ -136,4 +136,28 @@ describe('Escape in the streaming terminal', () => {
     );
     expect(lastTerm?.scrollPages).toHaveBeenCalledWith(-1);
   });
+  it('does not intercept Escape keyup or Shift/Alt/Meta-modified Escape', async () => {
+    const { handler, textarea } = await openInInsert();
+    expect(handler({ type: 'keyup', key: 'Escape' } as KeyboardEvent)).toBe(true);
+    expect(handler({ type: 'keydown', key: 'Escape', shiftKey: true } as KeyboardEvent)).toBe(true);
+    expect(handler({ type: 'keydown', key: 'Escape', altKey: true } as KeyboardEvent)).toBe(true);
+    expect(handler({ type: 'keydown', key: 'Escape', metaKey: true } as KeyboardEvent)).toBe(true);
+    expect(document.activeElement).toBe(textarea);
+  });
+
+  it('keeps every Shift scrollback chord unchanged and unshifted ones pass through', async () => {
+    const { handler } = await openInInsert();
+    const shifted = (key: string) =>
+      handler({ type: 'keydown', key, shiftKey: true } as KeyboardEvent);
+    expect(shifted('PageUp')).toBe(false);
+    expect(shifted('PageDown')).toBe(false);
+    expect(shifted('Home')).toBe(false);
+    expect(shifted('End')).toBe(false);
+    expect(lastTerm?.scrollPages).toHaveBeenNthCalledWith(1, -1);
+    expect(lastTerm?.scrollPages).toHaveBeenNthCalledWith(2, 1);
+    expect(lastTerm?.scrollToTop).toHaveBeenCalledTimes(1);
+    expect(lastTerm?.scrollToBottom).toHaveBeenCalledTimes(1);
+    expect(handler({ type: 'keydown', key: 'PageUp' } as KeyboardEvent)).toBe(true);
+    expect(lastTerm?.scrollPages).toHaveBeenCalledTimes(2);
+  });
 });
