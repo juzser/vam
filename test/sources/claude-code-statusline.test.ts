@@ -10,7 +10,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -72,6 +72,58 @@ describe('formatStatusLine', () => {
     expect(formatStatusLine({ cwd: '/a/c', workspace: { current_dir: '/a/d' } }, null)).toMatch(
       /^d /,
     );
+  });
+});
+
+describe('formatStatusLine edge cases', () => {
+  const line = (cw: object) => formatStatusLine({ cwd: '/a/p', context_window: cw }, null);
+
+  it('compacts tokens: plain under 1k, k under 1M, M above', () => {
+    expect(line({ total_input_tokens: 999, total_output_tokens: 0 })).toContain('in:999 out:0');
+    expect(line({ total_input_tokens: 12300, total_output_tokens: 1000000 })).toContain(
+      'in:12.3k out:1.0M',
+    );
+  });
+
+  it('renders "-" for non-numeric figures and a missing model or dir', () => {
+    expect(line({ total_input_tokens: 'x', total_output_tokens: null })).toContain('in:- out:-');
+    expect(formatStatusLine({}, null)).toBe('- - ctx:- in:- out:-');
+  });
+
+  it('omits the segment for an empty branch string', () => {
+    expect(formatStatusLine({ cwd: '/a/p' }, '')).not.toContain('git:(');
+  });
+});
+
+describe('script branch resolution', () => {
+  const runScript = (payload: object): string => {
+    const settings = JSON.parse(readFileSync(installStatusLine(tmp()), 'utf8'));
+    return execFileSync('sh', ['-c', settings.statusLine.command], {
+      input: JSON.stringify(payload),
+      encoding: 'utf8',
+    }).trim();
+  };
+
+  it('prints the checked-out branch of a real git repo', () => {
+    const repo = tmp('vam-repo-');
+    execFileSync('git', ['-C', repo, 'init', '-q', '-b', 'feat-x']);
+    expect(runScript({ workspace: { current_dir: repo } })).toMatch(/ git:\(feat-x\) /);
+  });
+
+  it('never runs a shell metacharacter directory, and omits git outside a repo', () => {
+    const marker = join(tmp(), 'pwned');
+    const evil = `${tmp('vam-evil-')}/$(touch ${marker});\`touch ${marker}\``;
+    expect(runScript({ cwd: evil })).not.toContain('git:(');
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  it('survives garbage on stdin', () => {
+    const settings = JSON.parse(readFileSync(installStatusLine(tmp()), 'utf8'));
+    const out = execFileSync('sh', ['-c', settings.statusLine.command], {
+      input: 'not json',
+      encoding: 'utf8',
+    });
+    expect(out.trim()).toBe('- - ctx:- in:- out:-');
   });
 });
 
