@@ -626,6 +626,18 @@ describe('the button names the model the session is running', () => {
     expect(q('[data-model-label]')?.textContent?.trim()).toBe('Opus 4.1');
   });
 
+  it('prefers the read model over the recorded one on the disabled button', async () => {
+    const { model } = reader({ kind: 'model', name: 'Opus 4.1' });
+    draw({
+      delivers: true,
+      terminal: true,
+      model,
+      entry: { project: PROJECT, session: { ...SESSION, vamControlled: false, model: 'old-rec' } },
+    });
+    await settle();
+    expect(q('[data-model-label]')?.textContent?.trim()).toBe('Opus 4.1');
+  });
+
   it('wears the name it read, where the word "model" used to be', async () => {
     const { model } = reader({ kind: 'model', name: 'Opus 5' });
     draw({ delivers: true, terminal: true, model });
