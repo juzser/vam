@@ -15,7 +15,7 @@
  * different, unasked-for change.
  */
 
-import { cleanup, fireEvent, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Canvas, compactTokens, StatusCell } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
@@ -124,6 +124,24 @@ describe('the status bar after the trim', () => {
     render(<Canvas model={MODEL} />);
     expect(statusBar()?.querySelector('[data-mode]')?.textContent).toBe('Select');
     expect(statusBar()?.querySelector('[data-usage]')).not.toBeNull();
+  });
+});
+
+describe('the status bar usage cell opens the usage popover', () => {
+  const panel = () => document.querySelector('[data-usage-panel]');
+  const trigger = () => statusBar()?.querySelector<HTMLElement>('[data-usage-trigger]');
+
+  it('opens on click and closes on a second click', async () => {
+    render(<Canvas model={MODEL} />);
+    expect(panel()).toBeNull();
+    await act(async () => {
+      trigger()?.click();
+    });
+    expect(panel()).not.toBeNull();
+    await act(async () => {
+      trigger()?.click();
+    });
+    expect(panel()).toBeNull();
   });
 });
 

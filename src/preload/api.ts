@@ -300,14 +300,17 @@ export function createPreloadApi(ipc: InvokerLike): DesktopSourceApi {
 
 /** The bridge's usage member: two reads (Claude, Codex), no write, no argument. */
 export type UsageApi = {
-  get(): Promise<UsageSnapshot>;
+  get(opts?: UsageReadOptions): Promise<UsageSnapshot>;
   /** Codex's own reading -- `getCodex` rather than a `provider` argument on
    *  `get`, because the two snapshots are different shapes (`UsageSnapshot`
    *  vs `CodexUsageSnapshot`) read by different main-process modules, and one
    *  overloaded method would have to union them for no caller that actually
    *  wants both back in one shape. */
-  getCodex(): Promise<CodexUsageSnapshot>;
+  getCodex(opts?: UsageReadOptions): Promise<CodexUsageSnapshot>;
 };
+
+/** `force` bypasses main's 30 s read cache (still joining an in-flight read). */
+export type UsageReadOptions = { readonly force?: boolean };
 
 /**
  * `usage.get`/`usage.getCodex` forward straight to `vam:usage:get`/`vam:usage
@@ -319,8 +322,14 @@ export type UsageApi = {
  */
 export function createUsageApi(ipc: InvokerLike): UsageApi {
   return {
-    get: () => ipc.invoke(CHANNELS.usageGet) as Promise<UsageSnapshot>,
-    getCodex: () => ipc.invoke(CHANNELS.usageCodexGet) as Promise<CodexUsageSnapshot>,
+    get: (opts) =>
+      (opts?.force === true
+        ? ipc.invoke(CHANNELS.usageGet, true)
+        : ipc.invoke(CHANNELS.usageGet)) as Promise<UsageSnapshot>,
+    getCodex: (opts) =>
+      (opts?.force === true
+        ? ipc.invoke(CHANNELS.usageCodexGet, true)
+        : ipc.invoke(CHANNELS.usageCodexGet)) as Promise<CodexUsageSnapshot>,
   };
 }
 

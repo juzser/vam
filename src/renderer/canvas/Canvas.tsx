@@ -145,6 +145,7 @@ import { triggerStartSession } from '../panels/start-session-registry.js';
 import { StatusMark } from '../panels/status-mark.js';
 import { halfPageTarget } from '../panels/stick-to-bottom.js';
 import { TABS, tabForDigit, visibleTabs } from '../panels/tabs.js';
+import { toggleUsagePopover } from '../panels/UsagePopover.js';
 import { ConfirmCloseSession } from '../phone/ConfirmCloseSession.js';
 import { PhoneShell } from '../phone/PhoneShell.js';
 import { usePhoneViewport } from '../phone/viewport.js';
@@ -8659,57 +8660,71 @@ function CanvasInner({
           {prefs.statusBarShowClaudeUsage && (
             <>
               <span className="h-3 w-px bg-line" />
-              {/* The provider mark, in EVERY state -- including the bare `—`
+              <button
+                type="button"
+                data-usage-trigger
+                aria-label="Usage details"
+                onClick={toggleUsagePopover}
+                className="flex cursor-pointer items-center gap-2 bg-transparent p-0 text-inherit"
+              >
+                {/* The provider mark, in EVERY state -- including the bare `—`
                   with its tooltip. `SourceMark` is the same resolver the
                   sidebar row and the Stats screen's `ProviderCard` already
                   draw from (`sources/provider-marks.tsx`), never a copied
                   path: one glyph for `claude-code`, drawn once. */}
-              {usage.reason === null ? (
-                <span
-                  data-usage
-                  className={`flex items-center gap-1${usage.highUsage ? ' text-failed' : ''}`}
-                >
-                  <SourceMark source="claude-code" lane={12} />
-                  {usage.text}
-                </span>
-              ) : (
-                <Note text={usage.reason}>
-                  {/* A tab stop for the same reason `StatusCell` takes one. This
-                      sentence is the explanation for a MISSING NUMBER -- on the
-                      web/Tailscale build it was keyboard-unreachable, and with no
-                      hover on touch it was unreachable at all. */}
+                {usage.reason === null ? (
                   <span
                     data-usage
-                    className="flex items-center gap-1"
-                    // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see `StatusCell`.
-                    tabIndex={0}
+                    className={`flex items-center gap-1${usage.highUsage ? ' text-failed' : ''}`}
                   >
                     <SourceMark source="claude-code" lane={12} />
                     {usage.text}
                   </span>
-                </Note>
-              )}
-              {usage.windows !== null && (
-                <span className="flex items-center gap-2">
-                  {/* Five hours first: it is the window that moves minute to minute. */}
-                  <UsageBar
-                    label="5h"
-                    usageWindow={usage.windows.fiveHour}
-                    high={usage.highUsage}
-                  />
-                  <UsageBar
-                    label="7d"
-                    usageWindow={usage.windows.sevenDay}
-                    high={usage.highUsage}
-                  />
-                </span>
-              )}
+                ) : (
+                  <Note text={usage.reason}>
+                    {/* A tab stop for the same reason `StatusCell` takes one: this
+                      sentence explains a MISSING NUMBER and must stay
+                      keyboard-reachable. */}
+                    <span
+                      data-usage
+                      className="flex items-center gap-1"
+                      // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see `StatusCell`.
+                      tabIndex={0}
+                    >
+                      <SourceMark source="claude-code" lane={12} />
+                      {usage.text}
+                    </span>
+                  </Note>
+                )}
+                {usage.windows !== null && (
+                  <span className="flex items-center gap-2">
+                    {/* Five hours first: it is the window that moves minute to minute. */}
+                    <UsageBar
+                      label="5h"
+                      usageWindow={usage.windows.fiveHour}
+                      high={usage.highUsage}
+                    />
+                    <UsageBar
+                      label="7d"
+                      usageWindow={usage.windows.sevenDay}
+                      high={usage.highUsage}
+                    />
+                  </span>
+                )}
+              </button>
             </>
           )}
           {prefs.statusBarShowCodexUsage && (
             <>
               <span className="h-3 w-px bg-line" />
-              {/* Text only, no bars: Codex's own windows (`CodexWindowDisplay`)
+              <button
+                type="button"
+                data-usage-trigger
+                aria-label="Codex usage details"
+                onClick={toggleUsagePopover}
+                className="flex cursor-pointer items-center gap-2 bg-transparent p-0 text-inherit"
+              >
+                {/* Text only, no bars: Codex's own windows (`CodexWindowDisplay`)
                   are not `UsageWindow`s, and a second bar widget over a shape
                   `describeCodexStatusUsage` already collapsed to one line is
                   more than this cell earns -- the popover (`UsagePopover.tsx`)
@@ -8720,27 +8735,28 @@ function CanvasInner({
                   resolver, `source="codex"`, so this cell and Claude's read
                   as one family rather than two different widgets that
                   happen to sit beside each other. */}
-              {codexUsage.reason === null ? (
-                <span
-                  data-codex-usage
-                  className={`flex items-center gap-1${codexUsage.highUsage ? ' text-failed' : ''}`}
-                >
-                  <SourceMark source="codex" lane={12} />
-                  {codexUsage.text}
-                </span>
-              ) : (
-                <Note text={codexUsage.reason}>
+                {codexUsage.reason === null ? (
                   <span
                     data-codex-usage
-                    className="flex items-center gap-1"
-                    // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see `StatusCell`.
-                    tabIndex={0}
+                    className={`flex items-center gap-1${codexUsage.highUsage ? ' text-failed' : ''}`}
                   >
                     <SourceMark source="codex" lane={12} />
                     {codexUsage.text}
                   </span>
-                </Note>
-              )}
+                ) : (
+                  <Note text={codexUsage.reason}>
+                    <span
+                      data-codex-usage
+                      className="flex items-center gap-1"
+                      // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see `StatusCell`.
+                      tabIndex={0}
+                    >
+                      <SourceMark source="codex" lane={12} />
+                      {codexUsage.text}
+                    </span>
+                  </Note>
+                )}
+              </button>
             </>
           )}
 
