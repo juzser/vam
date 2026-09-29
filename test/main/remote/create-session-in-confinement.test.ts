@@ -617,6 +617,94 @@ describe('create-session-in: admission never widens beyond a listed project id',
 });
 
 /**
+ * `namesAListedProject`'s own doc comment (`server.ts`) claims a project id
+ * of any shape OTHER than `claude-code:<basename>-<8 hex>` "contributes no
+ * basename -- it cannot be a false admission, only a false negative that
+ * `realpath` never gets the chance to correct". Pinned directly: a listed
+ * project whose id does not match `PROJECT_ID_SHAPE` never crashes the
+ * regex exec (`?.[1]` on a `null` match), and never lets a stranger cwd
+ * whose final segment happens to equal that project's own directory name
+ * slip past the basename gate -- with zero filesystem calls either way,
+ * because `projectIdOf` (both the lexical and the canonical id this guard
+ * computes from `body.cwd`) always mints a `claude-code:`-shaped id, so an
+ * odd-shaped listed id can never be matched at any of the guard's steps,
+ * not merely the basename pre-filter -- a false negative throughout, by
+ * construction, never a crash and never a false admission.
+ */
+describe('create-session-in: a project id of a shape other than claude-code:<basename>-<hex> contributes no basename', () => {
+  beforeEach(() => {
+    realpathSpy.mockClear();
+  });
+
+  it('never crashes the basename gate and never admits by a merely-matching basename', async () => {
+    const member = await mkdtemp(join(tmpdir(), 'vam-oddshape-member-'));
+    await mkdir(join(member, '.git'), { recursive: true });
+    const canonical = await realpath(member);
+    // Deliberately NOT `claude-code:<basename>-<8 hex>` -- a plausible id
+    // from a differently-shaped source.
+    const oddProject = {
+      id: `codex:${projectIdOf(canonical)}`,
+      name: 'odd-source',
+      sessions: [],
+    } as unknown as Project;
+
+    const createSession = vi.fn(async () => null);
+    const base = await start({
+      descriptor,
+      load: vi.fn(async () => [oddProject]),
+      createSession,
+    });
+
+    // A cwd whose final segment names the member (basename gate would admit
+    // a claude-code-shaped id here) is refused: the odd-shaped id never
+    // contributed a basename, so this is a false negative, not a crash and
+    // not a false admission.
+    realpathSpy.mockClear();
+    const response = await post(base, '/api/create-session-in', {
+      cwd: member,
+      title: 'a run',
+    });
+    expect(response.status).toBe(403);
+    expect(createSession).not.toHaveBeenCalled();
+    // The pre-filter still runs synchronously and refuses before any
+    // realpath call -- the odd shape costs zero filesystem calls too.
+    expect(realpathSpy).not.toHaveBeenCalled();
+  });
+
+  it("is refused even by the project's own lexically-exact canonical spelling, because projectIdOf never mints this shape", async () => {
+    const member = await mkdtemp(join(tmpdir(), 'vam-oddshape-lexical-'));
+    await mkdir(join(member, '.git'), { recursive: true });
+    const canonical = await realpath(member);
+    const oddProject = {
+      id: `codex:${projectIdOf(canonical)}`,
+      name: 'odd-source',
+      sessions: [],
+    } as unknown as Project;
+    const createSession = vi.fn(async () => null);
+    const base = await start({
+      descriptor,
+      load: vi.fn(async () => [oddProject]),
+      createSession,
+    });
+
+    // Step 3 (lexical) computes `projectIdOf(resolve(body.cwd))`, which is
+    // ALWAYS `claude-code:`-shaped -- it can never equal `oddProject.id`,
+    // so even the caller's exact canonical spelling is refused. This is not
+    // a defect this task introduces: it holds on HEAD too, and is pinned
+    // here so a future change to the id-matching steps cannot silently
+    // widen admission to an id shape `projectIdOf` itself never produces.
+    realpathSpy.mockClear();
+    const response = await post(base, '/api/create-session-in', {
+      cwd: canonical,
+      title: 'a run',
+    });
+
+    expect(response.status).toBe(403);
+    expect(createSession).not.toHaveBeenCalled();
+  });
+});
+
+/**
  * THE ALIAS TRADE-OFF, PINNED: a symlink whose OWN name differs from its
  * target's basename is refused with zero filesystem calls. This is the
  * accepted cost of the basename gate -- `realpath(linkPath)` would resolve to
