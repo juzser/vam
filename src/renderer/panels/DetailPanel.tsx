@@ -1657,6 +1657,42 @@ const PR_STATE_INK: Record<PullRequest['state'], string> = {
 };
 
 /**
+ * The session directory's git remote as `owner/name`, through the existing
+ * `window.api.github.projectRemotes` bridge (no new channel). `undefined`
+ * while unasked, when there is no remote, and where the bridge is absent
+ * (browser, phone) -- the caller falls back to the project name.
+ */
+function useSessionRemote(projectId: string | undefined): string | undefined {
+  const [found, setFound] = useState<{ id: string; repo: string } | null>(null);
+  useEffect(() => {
+    const api = (
+      globalThis.window as
+        | {
+            api?: {
+              github?: {
+                projectRemotes?: (id: string) => Promise<readonly { name: string; repo: string }[]>;
+              };
+            };
+          }
+        | undefined
+    )?.api?.github;
+    if (projectId === undefined || api?.projectRemotes === undefined) return;
+    let live = true;
+    void api
+      .projectRemotes(projectId)
+      .then((remotes) => {
+        const pick = remotes.find((r) => r.name === 'origin') ?? remotes[0];
+        if (live) setFound(pick === undefined ? null : { id: projectId, repo: pick.repo });
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [projectId]);
+  return found !== null && found.id === projectId ? found.repo : undefined;
+}
+
+/**
  * The PRs tab's content: what GitHub said about this session's branch, or why
  * vam could not ask.
  *
@@ -1674,6 +1710,7 @@ const PR_STATE_INK: Record<PullRequest['state'], string> = {
 function PullRequestsTab({
   pullRequests,
   repo,
+  projectId,
   sessionId,
   bridge,
   reserveCornerHeight = 0,
@@ -1681,6 +1718,8 @@ function PullRequestsTab({
 }: {
   readonly pullRequests: PullRequestList | undefined;
   readonly repo?: DetailPanelProps['prRepo'];
+  /** The project whose git remote names the repository when nothing is overridden. */
+  readonly projectId?: string;
   /**
    * WHOSE pull requests these are, for the action channel. Main turns this
    * into the directory to act in -- the renderer never names one, which is
@@ -1803,9 +1842,12 @@ function PullRequestsTab({
    * a NAME: the full path is on `title`, where it settles which of two
    * checkouts this is without spending the row on it.
    */
+  const remoteName = useSessionRemote(
+    repo !== undefined && repo.directory === null ? projectId : undefined,
+  );
   const repoName =
     repo?.directory === null || repo?.directory === undefined
-      ? (repo?.projectName ?? t('prs.repo.session'))
+      ? (remoteName ?? repo?.projectName ?? t('prs.repo.session'))
       : (repo.directory.replace(/\/+$/, '').split('/').pop() ?? repo.directory);
   const heading =
     repo === undefined ? null : (
@@ -9278,6 +9320,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
         ) : current === 'PRs' ? (
           <PullRequestsTab
             pullRequests={entry?.session.pullRequests}
+            projectId={entry?.project.id}
             repo={
               prRepo === undefined
                 ? undefined

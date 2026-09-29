@@ -572,16 +572,6 @@ const EN = {
     'GitHub CLI (gh) is not installed. Install it, then sign in.',
   'settings.integrations.github.guide.noBrew': 'no Homebrew yet? see',
   'settings.integrations.github.guide.checkAgain': 'check again',
-  'settings.integrations.repo.heading': 'repository',
-  'settings.integrations.repo.current': 'reading pull requests from {name}',
-  'settings.integrations.repo.own': "this project's own repository",
-  'settings.integrations.repo.change': 'change…',
-  'settings.integrations.repo.clear': "use the project's own",
-  'settings.integrations.repo.searchLabel': 'search a GitHub owner or owner/name',
-  'settings.integrations.repo.searchPlaceholder': 'owner or owner/name',
-  'settings.integrations.repo.searchButton': 'search',
-  'settings.integrations.repo.suggested': 'suggested — this project’s own remotes',
-  'settings.integrations.repo.noProject': 'open a project first to choose its repository',
 
   // THE GITLAB CARD (operator: "GitLab now via glab, Bitbucket later"), the
   // GitHub card's own shape narrowed: status and Connect/Disconnect only --

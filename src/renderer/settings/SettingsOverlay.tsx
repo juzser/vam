@@ -1611,7 +1611,6 @@ export function SettingsOverlay({
                     onChange={onChange}
                     projects={projects}
                     copyText={window.api?.clipboard?.writeText}
-                    chooseDirectory={window.api?.dialog?.chooseDirectory}
                     openExternal={window.api?.link?.open}
                   />
                   {/* GitLab, next to GitHub -- operator: "GitLab now via glab,

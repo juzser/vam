@@ -2,7 +2,7 @@
 
 /**
  * Settings -> Integrations -> GitHub: status, Connect/Disconnect through a
- * pane, and the per-project repo picker.
+ * pane, and the absence of a repo picker.
  *
  * Operator: "add an Integrations section in Settings, to connect a GitHub
  * account and select a repo." vam stores no token of its own -- `gh` keeps it
@@ -13,7 +13,7 @@
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { GithubApi } from '../../src/preload/api.js';
-import { EMPTY_PREFS, setProjectPrRepo } from '../../src/renderer/prefs/prefs.js';
+import { EMPTY_PREFS } from '../../src/renderer/prefs/prefs.js';
 import { GithubPanel, type GithubPanelProps } from '../../src/renderer/settings/GithubPanel.js';
 import type { GithubAuthStatus } from '../../src/shared/github.js';
 
@@ -33,15 +33,6 @@ const copyCommand = () => document.querySelector<HTMLButtonElement>('[data-githu
 const paneText = () => document.querySelector('[data-github-pane]')?.textContent ?? '';
 const scopesWarning = () =>
   document.querySelector('[data-github-scopes-warning]')?.textContent ?? '';
-const repoCurrent = () => document.querySelector('[data-github-repo-current]')?.textContent ?? '';
-const repoClear = () => document.querySelector<HTMLButtonElement>('[data-github-repo-clear]');
-const repoChange = () => document.querySelector<HTMLButtonElement>('[data-github-repo-change]');
-const searchInput = () => document.querySelector<HTMLInputElement>('[data-github-repo-search]');
-const searchButton = () =>
-  document.querySelector<HTMLButtonElement>('[data-github-repo-search-button]');
-const candidateButtons = () => [
-  ...document.querySelectorAll<HTMLButtonElement>('[data-github-repo-candidate]'),
-];
 
 const LOGGED_OUT: GithubAuthStatus = { kind: 'logged-out' };
 
@@ -319,108 +310,25 @@ describe('Disconnect', () => {
   });
 });
 
-describe('the per-project repo picker', () => {
-  it('says which repo a project reads from, and offers no control with no project', async () => {
-    setup({ projects: [] });
+describe('the GitHub panel carries no repository picker', () => {
+  it('draws no picker hook, with a project or without', async () => {
+    const api = fakeApi({
+      projectRemotes: vi.fn(async () => [{ name: 'origin', repo: 'juzser/vam' }]),
+    });
+    setup({ api });
     await waitFor(() => expect(status()).not.toBe(''));
-    expect(document.querySelector('[data-github-repo-current]')).toBeNull();
-  });
-
-  it('reads "this project’s own" when nothing is overridden', async () => {
-    setup();
-    await waitFor(() => expect(repoCurrent()).toMatch(/own/i));
-    expect(repoClear()).toBeNull();
-  });
-
-  it('names the override, and offers Clear once one is set', async () => {
-    const prefs = setProjectPrRepo(EMPTY_PREFS, 'claude-code', 'p1', '/Users/x/code/other-vam');
-    setup({ prefs });
-    await waitFor(() => expect(repoCurrent()).toMatch(/other-vam/));
-    expect(repoClear()).not.toBeNull();
-  });
-
-  it('Clear writes the prefs back to unset', async () => {
-    const prefs = setProjectPrRepo(EMPTY_PREFS, 'claude-code', 'p1', '/Users/x/code/other-vam');
-    const { onChange } = setup({ prefs });
-    await waitFor(() => expect(repoClear()).not.toBeNull());
-    fireEvent.click(repoClear() as HTMLElement);
-    expect(onChange).toHaveBeenCalled();
-    const next = onChange.mock.calls[0]?.[0];
-    expect(next.prRepos['claude-code']?.p1).toBeUndefined();
-  });
-
-  it('shows the project’s own remotes as the first suggestions', async () => {
-    const api = fakeApi({
-      projectRemotes: vi.fn(async () => [{ name: 'origin', repo: 'juzser/vam' }]),
-    });
-    setup({ api });
-    fireEvent.click(repoChange() as HTMLElement);
-    await waitFor(() =>
-      expect(candidateButtons().map((b) => b.textContent)).toContain('juzser/vam'),
-    );
-  });
-
-  it('picking the project’s own remote clears the override', async () => {
-    const api = fakeApi({
-      projectRemotes: vi.fn(async () => [{ name: 'origin', repo: 'juzser/vam' }]),
-    });
-    const prefs = setProjectPrRepo(EMPTY_PREFS, 'claude-code', 'p1', '/elsewhere');
-    const { onChange } = setup({ api, prefs });
-    fireEvent.click(repoChange() as HTMLElement);
-    await waitFor(() => expect(candidateButtons().length).toBeGreaterThan(0));
-    fireEvent.click(candidateButtons()[0] as HTMLElement);
-    const next = onChange.mock.calls.at(-1)?.[0];
-    expect(next.prRepos['claude-code']?.p1).toBeUndefined();
-  });
-
-  it('picking a different repo opens the directory chooser and stores what was picked', async () => {
-    const api = fakeApi({
-      reposList: vi.fn(async () => ({ kind: 'ok', repos: ['juzser/blacksmith'] }) as const),
-    });
-    const chooseDirectory = vi.fn(async () => '/Users/x/code/blacksmith');
-    const { onChange } = setup({ api, chooseDirectory });
-    fireEvent.click(repoChange() as HTMLElement);
-    fireEvent.change(searchInput() as HTMLElement, { target: { value: 'juzser' } });
-    fireEvent.click(searchButton() as HTMLElement);
-    await waitFor(() => expect(api.reposList).toHaveBeenCalledWith('juzser'));
-    await waitFor(() =>
-      expect(candidateButtons().map((b) => b.textContent)).toContain('juzser/blacksmith'),
-    );
-    fireEvent.click(
-      candidateButtons().find((b) => b.textContent === 'juzser/blacksmith') as HTMLElement,
-    );
-    await waitFor(() => expect(chooseDirectory).toHaveBeenCalledTimes(1));
-    await waitFor(() => {
-      const next = onChange.mock.calls.at(-1)?.[0];
-      expect(next.prRepos['claude-code']?.p1).toBe('/Users/x/code/blacksmith');
-    });
-  });
-
-  it('a cancelled directory chooser writes nothing', async () => {
-    const api = fakeApi({
-      reposList: vi.fn(async () => ({ kind: 'ok', repos: ['juzser/blacksmith'] }) as const),
-    });
-    const chooseDirectory = vi.fn(async () => null);
-    const { onChange } = setup({ api, chooseDirectory });
-    fireEvent.click(repoChange() as HTMLElement);
-    fireEvent.change(searchInput() as HTMLElement, { target: { value: 'juzser' } });
-    fireEvent.click(searchButton() as HTMLElement);
-    await waitFor(() =>
-      expect(candidateButtons().map((b) => b.textContent)).toContain('juzser/blacksmith'),
-    );
-    fireEvent.click(
-      candidateButtons().find((b) => b.textContent === 'juzser/blacksmith') as HTMLElement,
-    );
-    await waitFor(() => expect(chooseDirectory).toHaveBeenCalledTimes(1));
-    expect(onChange).not.toHaveBeenCalled();
-  });
-
-  it('validates a search owner before it leaves this component: an empty search does nothing', async () => {
-    const api = fakeApi();
-    setup({ api });
-    fireEvent.click(repoChange() as HTMLElement);
-    fireEvent.click(searchButton() as HTMLElement);
-    expect(api.reposList).not.toHaveBeenCalled();
+    for (const hook of [
+      'current',
+      'clear',
+      'change',
+      'search',
+      'search-button',
+      'candidate',
+      'noproject',
+    ]) {
+      expect(document.querySelector(`[data-github-repo-${hook}]`), hook).toBeNull();
+    }
+    expect(api.projectRemotes).not.toHaveBeenCalled();
   });
 });
 
