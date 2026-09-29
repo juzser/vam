@@ -125,17 +125,24 @@ describe('the keystroke strip is drawn only where a key can actually be sent', (
   it('is drawn for a session vam started, on a source with a terminal, on phone', () => {
     draw({}, { terminal: true });
     expect(strip()).not.toBeNull();
-    // Six, not eight: no `window.api` is mocked in this test, so
-    // `hasLocalTerminalChannel` is false and the strip filters itself down to
-    // the six `paneKeyToRemoteKeyId` answers for. `sends Up/Down as real
-    // navigation keys` below mocks `window.api` and gets all eight.
-    expect(keys()).toHaveLength(6);
+    // All eight: every KEY_STRIP key has a remote id now, so the strip draws
+    // the same eight keys with no `window.api` mocked (Up and Down included).
+    expect(keys().map((el) => el.getAttribute('data-key-strip-key'))).toEqual([
+      'escape',
+      'tab',
+      'enter',
+      'back-tab',
+      'space',
+      'backspace',
+      'up',
+      'down',
+    ]);
   });
 
   it('draws a plain Tab key now, over the same literal-text path Space already proved', () => {
     // `KEY_STRIP`'s own header explains why Tab needed no new `PaneKey` kind
     // (it reuses the one-character `text` path `space` already took), and
-    // why it is one of the six the remote channel carries too -- so it shows
+    // why it is one of the eight the remote channel carries too -- so it shows
     // up here even with no `window.api` mocked (the default `draw()` below).
     draw();
     expect(document.querySelector('[data-key-strip-key="tab"]')).not.toBeNull();
@@ -143,7 +150,7 @@ describe('the keystroke strip is drawn only where a key can actually be sent', (
       keys()
         .map((k) => k.getAttribute('data-key-strip-key'))
         .sort(),
-    ).toEqual(['back-tab', 'backspace', 'enter', 'escape', 'space', 'tab'].sort());
+    ).toEqual(['back-tab', 'backspace', 'down', 'enter', 'escape', 'space', 'tab', 'up'].sort());
   });
 
   it('sends Up/Down as real navigation keys, so a phone can walk a picker too', async () => {
