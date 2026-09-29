@@ -136,10 +136,23 @@ async function openSession(page: Page): Promise<void> {
 const strip = (page: Page) => page.locator('[data-phone-shell] [data-key-strip]');
 const keyButton = (page: Page, id: string) => page.locator(`[data-phone-shell] [data-key-strip-key="${id}"]`);
 
-/** The six ids `shared/remote-key.ts`'s `REMOTE_KEY_IDS` answers for. */
-const ALLOWED = ['escape', 'tab', 'enter', 'back-tab', 'space', 'backspace'] as const;
+/** Strip id -> the id `shared/remote-key.ts`'s `REMOTE_KEY_IDS` answers for. */
+const ALLOWED = [
+  ['escape', 'escape'],
+  ['tab', 'tab'],
+  ['enter', 'enter'],
+  ['back-tab', 'back-tab'],
+  ['space', 'space'],
+  ['backspace', 'backspace'],
+  ['delete', 'delete'],
+  ['up', 'arrow-up'],
+  ['down', 'arrow-down'],
+  ['left', 'arrow-left'],
+  ['right', 'arrow-right'],
+  ...['c', 'd', 'l', 'z', 'r', 'a', 'e', 'w', 'u'].map((l) => [`ctrl-${l}`, `ctrl-${l}`] as const),
+] as const;
 
-test('the key strip draws exactly the six remote-allowlisted keys, never Up or Down', async ({ page }) => {
+test('the key strip draws every remote-allowlisted key, none filtered out', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: SHELL_H });
   await stubRemote(page);
   await openSession(page);
@@ -147,21 +160,18 @@ test('the key strip draws exactly the six remote-allowlisted keys, never Up or D
   const ids = await page
     .locator('[data-phone-shell] [data-key-strip-key]')
     .evaluateAll((els) => els.map((el) => el.getAttribute('data-key-strip-key')).sort());
-  expect(ids).toEqual([...ALLOWED].sort());
-  // FALSIFICATION TARGET, restated at the DOM level: a phone served remotely
-  // has no channel for either of vam's own two nav keys.
-  await expect(keyButton(page, 'up')).toHaveCount(0);
-  await expect(keyButton(page, 'down')).toHaveCount(0);
+  expect(ids).toEqual(ALLOWED.map(([id]) => id).sort());
 });
 
-for (const id of ALLOWED) {
-  test(`tapping "${id}" POSTs exactly {sessionId, key: "${id}"} to /api/send-key`, async ({ page }) => {
+for (const [id, remote] of ALLOWED) {
+  test(`tapping "${id}" POSTs exactly {sessionId, key: "${remote}"} to /api/send-key`, async ({ page }) => {
     await page.setViewportSize({ width: 390, height: SHELL_H });
     const calls = await stubRemote(page);
     await openSession(page);
+    await keyButton(page, id).scrollIntoViewIfNeeded();
     await keyButton(page, id).click();
     await expect.poll(() => calls.length).toBeGreaterThan(0);
-    expect(calls[0]).toEqual({ sessionId: 's2', key: id });
+    expect(calls[0]).toEqual({ sessionId: 's2', key: remote });
   });
 }
 

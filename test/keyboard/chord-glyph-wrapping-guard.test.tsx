@@ -227,6 +227,12 @@ describe('every chord-painting surface routes a Mac glyph through ChordGlyphs', 
           {...({} as Partial<DetailPanelProps>)}
         />,
       );
+      // Every pictogram chip (⌫ and the four arrows) must be painted, and each
+      // one's glyph sits in a `font-sans` wrapper.
+      for (const id of ['backspace', 'up', 'down', 'left', 'right']) {
+        const chip = document.querySelector(`[data-key-strip-key="${id}"]`);
+        expect(chip?.querySelector('span.font-sans'), id).not.toBeNull();
+      }
       expect(document.querySelectorAll('[data-key-strip-key]').length).toBeGreaterThan(0);
       // NO EXCEPTION LEFT TO NAME (composer follow-up, reversing the "→
       // agent" suffix exception this test used to carry). The strip no
