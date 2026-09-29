@@ -81,7 +81,10 @@ export function useDetailPanelModelRun(props: DetailPanelModelRunProps): DetailP
   const [running, setRunning] = useState<RunningModel | null>(null);
   /** Published only while the poll below is live; see `sendModel`. */
   const lookForModel = useRef<(() => void) | null>(null);
-  const modelReadable = modelControl === 'picker' && model !== undefined;
+  // `disabled` reads too: a session vam did not start has no pane to read, but
+  // main answers from the transcript there, and the button names what it finds.
+  const modelReadable =
+    (modelControl === 'picker' || modelControl === 'disabled') && model !== undefined;
   /** True while THIS effect's own previous run was already polling -- see
    *  its use below for why an "already polling, just a different row"
    *  transition needs its own immediate ask instead of

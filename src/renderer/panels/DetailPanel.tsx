@@ -12029,7 +12029,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                           the word it replaces. The whole name is one hover or
                           one Tab away, in the note and the accessible name. */}
                       <span data-model-label className="truncate">
-                        {recordedModel ?? 'model'}
+                        {running?.name ?? recordedModel ?? 'model'}
                       </span>
                       <ChevronDown size={11} strokeWidth={2} className="flex-none" />
                     </button>
