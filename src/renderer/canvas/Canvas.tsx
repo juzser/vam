@@ -388,7 +388,7 @@ function UsageTrigger({
   // With a `reason` the button itself is the explaining cell: it carries the
   // cell marker and an explicit tab stop, so focus opens the `Note`.
   const cell = reason === null ? {} : { [marker]: '', tabIndex: 0 };
-  const open = useUsageOpen();
+  const open = useUsageOpen(marker);
   const button = (
     <button
       type="button"
@@ -397,7 +397,7 @@ function UsageTrigger({
       // No `aria-label`: the visible figure names the button (WCAG 2.5.3).
       aria-haspopup="dialog"
       aria-expanded={open}
-      onClick={toggleUsagePopover}
+      onClick={() => toggleUsagePopover(marker)}
       className="flex cursor-pointer items-center gap-2 bg-transparent p-0 text-inherit"
     >
       {children}

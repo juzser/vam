@@ -59,6 +59,8 @@ const UsagePopoverPanel = lazy(() => import('./UsagePopoverPanel.js'));
 /** Open state shared with the status bar's usage cell (`Canvas.tsx`), which
  *  marks itself `data-usage-trigger` so the outside-press dismiss ignores it. */
 let usageOpen = false;
+/** Which status-bar trigger opened it (`null` for the popover's own toggle). */
+let usageOpener: string | null = null;
 const usageListeners = new Set<() => void>();
 function setUsageOpen(next: boolean): void {
   if (next === usageOpen) return;
@@ -69,14 +71,18 @@ function subscribeUsageOpen(listener: () => void): () => void {
   usageListeners.add(listener);
   return () => usageListeners.delete(listener);
 }
-export function toggleUsagePopover(): void {
+export function toggleUsagePopover(opener: string | null = null): void {
+  usageOpener = usageOpen ? null : opener;
   setUsageOpen(!usageOpen);
 }
 
 /** Read-only view of the shared open state, for a trigger that reflects it
  *  (`aria-expanded` on the status bar's usage cell in `Canvas.tsx`). */
-export function useUsageOpen(): boolean {
-  return useSyncExternalStore(subscribeUsageOpen, () => usageOpen);
+export function useUsageOpen(opener?: string): boolean {
+  return useSyncExternalStore(
+    subscribeUsageOpen,
+    () => usageOpen && (opener === undefined || usageOpener === opener),
+  );
 }
 
 /**
@@ -208,7 +214,7 @@ export function UsagePopover() {
           aria-expanded={open}
           aria-label="usage"
           onKeyDown={onEscape}
-          onClick={toggleUsagePopover}
+          onClick={() => toggleUsagePopover()}
           // NO FILL AT REST, on desktop too now (settings-views work, item H:
           // "remove the account icon's background, on desktop too") -- its
           // plain-icon neighbours in this same bar (Stats, Settings, Remote,
