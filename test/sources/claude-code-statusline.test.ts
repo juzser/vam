@@ -35,6 +35,7 @@ import { CLAUDE_CODE_SOURCE } from '../../src/main/sources/claude-code/source.js
 import {
   formatStatusLine,
   installStatusLine,
+  startTextWithStatusLine,
   withStatusLineSettings,
 } from '../../src/main/sources/claude-code/statusline.js';
 
@@ -181,13 +182,72 @@ describe('recordPrompt on a pane row', () => {
   it('appends --settings to a claude start command', async () => {
     const text = await run('claude --dangerously-skip-permissions');
     expect(text).toBe(
-      `claude --dangerously-skip-permissions --settings '${holder.dir}/statusline-settings.json'`,
+      `claude --settings '${holder.dir}/statusline-settings.json' --dangerously-skip-permissions`,
     );
+  });
+
+  it('types a prompt that starts with the word claude exactly as written', async () => {
+    const text = await run('claude fix the login bug');
+    expect(text).toBe('claude fix the login bug');
+    expect(text).not.toContain('--settings');
+    expect(text).not.toContain(holder.dir);
   });
 
   it('leaves codex and other text untouched', async () => {
     expect(await run('codex')).toBe('codex');
     expect(await run('claudex --x')).toBe('claudex --x');
     expect(await run('ls')).toBe('ls');
+  });
+});
+
+describe('startTextWithStatusLine', () => {
+  const SETTINGS = (d: string) => `'${d}/statusline-settings.json'`;
+  const inject = (text: string) => {
+    const dir = tmp();
+    holder.dir = dir;
+    return { out: startTextWithStatusLine(text), dir };
+  };
+
+  it('returns a prompt or compound line unchanged', () => {
+    for (const t of [
+      'claude fix the login bug',
+      'claude && echo done',
+      'claude; ls',
+      'claude | tee x',
+      'claude $(x)',
+      'claude `x`',
+      'claude > out',
+      'claude\nls',
+      'claude --x\nls',
+    ]) {
+      expect(inject(t).out).toBe(t);
+    }
+  });
+
+  it('injects directly after claude for every launch line the renderer builds', () => {
+    const bare = inject('claude');
+    expect(bare.out).toBe(`claude --settings ${SETTINGS(bare.dir)}`);
+    const yolo = inject('claude --dangerously-skip-permissions');
+    expect(yolo.out).toBe(`claude --settings ${SETTINGS(yolo.dir)} --dangerously-skip-permissions`);
+    const mode = inject('claude --permission-mode plan');
+    expect(mode.out).toBe(`claude --settings ${SETTINGS(mode.dir)} --permission-mode plan`);
+    const eq = inject('claude --model=opus');
+    expect(eq.out).toBe(`claude --settings ${SETTINGS(eq.dir)} --model=opus`);
+  });
+});
+
+describe('formatStatusLine control characters', () => {
+  it('strips C0, C1 and DEL from project, branch and model', () => {
+    const out = formatStatusLine(
+      {
+        workspace: { project_dir: '/x/pro\x1bj\x07' },
+        model: { display_name: 'Op\x1b]52;c;QUJD\x07us\u009b1m\x7f' },
+      },
+      'ma\x1bin',
+    );
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: the point of the test
+    expect(out).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
+    expect(out).toContain('proj');
+    expect(out).toContain('git:(main)');
   });
 });
