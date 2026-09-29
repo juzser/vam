@@ -71,7 +71,12 @@ function subscribeUsageOpen(listener: () => void): () => void {
   usageListeners.add(listener);
   return () => usageListeners.delete(listener);
 }
-export function toggleUsagePopover(opener: string | null = null): void {
+export function toggleUsagePopover(): void {
+  toggleUsagePopoverFrom(null);
+}
+
+/** Toggle, recording which status-bar trigger opened it (`null` for none). */
+export function toggleUsagePopoverFrom(opener: string | null): void {
   usageOpener = usageOpen ? null : opener;
   setUsageOpen(!usageOpen);
 }

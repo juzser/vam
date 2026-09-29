@@ -145,7 +145,7 @@ import { triggerStartSession } from '../panels/start-session-registry.js';
 import { StatusMark } from '../panels/status-mark.js';
 import { halfPageTarget } from '../panels/stick-to-bottom.js';
 import { TABS, tabForDigit, visibleTabs } from '../panels/tabs.js';
-import { toggleUsagePopover, useUsageOpen } from '../panels/UsagePopover.js';
+import { toggleUsagePopoverFrom, useUsageOpen } from '../panels/UsagePopover.js';
 import { ConfirmCloseSession } from '../phone/ConfirmCloseSession.js';
 import { PhoneShell } from '../phone/PhoneShell.js';
 import { usePhoneViewport } from '../phone/viewport.js';
@@ -397,7 +397,7 @@ function UsageTrigger({
       // No `aria-label`: the visible figure names the button (WCAG 2.5.3).
       aria-haspopup="dialog"
       aria-expanded={open}
-      onClick={() => toggleUsagePopover(marker)}
+      onClick={() => toggleUsagePopoverFrom(marker)}
       className="flex cursor-pointer items-center gap-2 bg-transparent p-0 text-inherit"
     >
       {children}
