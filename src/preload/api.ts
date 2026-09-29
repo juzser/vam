@@ -25,6 +25,7 @@ import type { MainFailureEvent } from '../main/errors/log.js';
 // (`tsconfig.web.json`) that carries no `node` types at all. See
 // `src/main/files/types.ts`'s own header.
 import type {
+  FileDirResult,
   FileListResult,
   FileReadResult,
   FileRefTarget,
@@ -974,6 +975,8 @@ export type FilesApi = {
    * `SourceError`, same as both. See `src/main/files/list-ipc.ts`.
    */
   list(sessionId: string): Promise<FileListResult>;
+  /** One level of `dir` (relative to the session cwd, or absolute inside it). */
+  list(sessionId: string, dir: string): Promise<FileDirResult>;
   /**
    * `src/foo/bar.ts:42` -- an AGENT's own reference -- turned into an absolute
    * path and a line. Takes the session id for `list`'s reason, and authorises
@@ -1013,7 +1016,12 @@ export type FilesApi = {
 export function createFilesApi(ipc: InvokerLike): FilesApi {
   return {
     read: (path) => unwrap<FileReadResult>(ipc.invoke(CHANNELS.filesRead, path)),
-    list: (sessionId) => unwrap<FileListResult>(ipc.invoke(CHANNELS.filesList, sessionId)),
+    list: ((sessionId: string, dir?: string) =>
+      unwrap<FileListResult | FileDirResult>(
+        dir === undefined
+          ? ipc.invoke(CHANNELS.filesList, sessionId)
+          : ipc.invoke(CHANNELS.filesList, sessionId, dir),
+      )) as FilesApi['list'],
     resolve: (sessionId, reference) =>
       unwrap<FileRefTarget>(ipc.invoke(CHANNELS.filesResolve, sessionId, reference)),
     write: (path, content, baseSignature) =>
