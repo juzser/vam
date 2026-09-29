@@ -98,6 +98,7 @@ import {
   isIdle,
   isUnprompted,
 } from '../domain/session-filter.js';
+import { isOutsideVamScope } from '../domain/session-ownership.js';
 import { ErrorLogPanel } from '../errors/ErrorLogPanel.js';
 import { loggedEvents, noteFailure, recordRefusal, subscribeEvents } from '../errors/log.js';
 import {
@@ -3653,6 +3654,16 @@ function CanvasInner({
     [allEntries],
   );
 
+  const ownershipScope = useMemo(
+    () => ({
+      prefs,
+      hiddenProjectIds: hiddenProjects,
+      vamListingGap,
+      demo: source.kind === 'demo',
+    }),
+    [prefs, hiddenProjects, vamListingGap, source.kind],
+  );
+
   const entries = useMemo(() => {
     // THE FILTERED SET, in an IIFE so both of its own early-return branches
     // (the listing-gap short-circuit below, and the ordinary tail) stay
@@ -3670,7 +3681,7 @@ function CanvasInner({
       // drawn would leave `j` stepping onto a session with no row -- the exact
       // defect the note below this memo describes, reintroduced by a different
       // route. The three views agree on the SET.
-      const visible = allEntries.filter((e) => !hiddenProjects.includes(e.project.id));
+      const visible = allEntries.filter((e) => !isOutsideVamScope(e, ownershipScope));
       const byText =
         query.trim() === '' ? visible : visible.filter((e) => matches.includes(e.session.id));
       const byStatus =
@@ -3753,7 +3764,7 @@ function CanvasInner({
     // dependency array naming a nested field the memo does not otherwise use
     // is a staleness bug waiting for the next field this filter chain grows.
     // The same argument covers `prefs.viewOptions` now too.
-  }, [allEntries, hiddenProjects, matches, query, statusFilter, prefs, vamListingGap, source.kind]);
+  }, [allEntries, ownershipScope, matches, query, statusFilter, prefs, vamListingGap, source.kind]);
 
   /**
    * EVERY SESSION OF THE ACTIVE PROJECT VAM HAS NOT POSITIVELY EXCLUDED --
@@ -4550,21 +4561,23 @@ function CanvasInner({
    * says why the crossing can only be seen where a previous model is held,
    * and `prefs/notify.ts` why there is exactly one switch.
    *
-   * `allEntries`, never the filtered `entries`: a filter hides a row from the
-   * sidebar, it does not make the session stop needing somebody. The titles
-   * carry the operator's renames because `model` has them applied. The
+   * vam's scope (`isOutsideVamScope`), never the view filters: a filter hides
+   * a row from the sidebar, it does not make the session stop needing
+   * somebody. The titles carry the operator's renames because `model` has them applied. The
    * project name rides in the body so a banner about `s1` says which `s1`.
    */
   const notifiable = useMemo(
     () =>
-      allEntries.map((e) => ({
-        sourceId: sourceKeyOf(e),
-        sessionId: e.session.id,
-        status: e.session.status,
-        title: e.session.title,
-        project: e.project.name,
-      })),
-    [allEntries],
+      allEntries
+        .filter((e) => !isOutsideVamScope(e, ownershipScope))
+        .map((e) => ({
+          sourceId: sourceKeyOf(e),
+          sessionId: e.session.id,
+          status: e.session.status,
+          title: e.session.title,
+          project: e.project.name,
+        })),
+    [allEntries, ownershipScope],
   );
   // Keyed on the two strings, not the entry: a fresh `focusedEntry` object
   // arrives with every poll, and the cursor has not moved.
