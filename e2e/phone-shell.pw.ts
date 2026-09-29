@@ -1941,7 +1941,7 @@ test.describe('the session tab strip and the keystroke strip at 390px', () => {
     await expect(waitingTab.locator('[data-phone-session-waiting-badge]')).toBeVisible();
   });
 
-  test('the keystroke strip draws six 44px controls that fit inside 390px', async ({ page }) => {
+  test('the keystroke strip draws six 30px controls that fit inside 390px', async ({ page }) => {
     // vam/terminal-arrows added Up/Down to `KEY_STRIP` (a phone has no arrow
     // keys, and Claude Code's own option pickers need them), and the phone's
     // own remote channel (`/api/send-key`, `shared/remote-key.ts`) later
@@ -1971,7 +1971,9 @@ test.describe('the session tab strip and the keystroke strip at 390px', () => {
     expect(geometry.right, 'the strip must not overflow the 390px viewport').toBeLessThanOrEqual(
       390,
     );
-    const undersized = geometry.controls.filter((c) => c.w < 44 || c.h < 44);
+    // 30px, not 44: the strip's own named exemption (`styles.css`,
+    // `[data-key-strip] .vam-tap`), so painted chips sit <= 6px apart.
+    const undersized = geometry.controls.filter((c) => c.w < 30 || c.h < 30);
     expect(undersized, JSON.stringify(geometry.controls)).toEqual([]);
   });
 

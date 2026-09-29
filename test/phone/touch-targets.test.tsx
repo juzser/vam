@@ -25,7 +25,13 @@ import { cleanup, fireEvent, render } from '@testing-library/react';
 import { act } from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
-import type { AgentQuestion, CanvasModel } from '../../src/renderer/domain/model.js';
+import type {
+  AgentQuestion,
+  CanvasModel,
+  Decision,
+  Session,
+} from '../../src/renderer/domain/model.js';
+import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/DetailPanel.js';
 import { FIVE_STEPS, installPhoneGlobals, MODEL, phoneSource, session } from './harness.js';
 
 const CSS = readFileSync(resolve(process.cwd(), 'src/renderer/styles.css'), 'utf8');
@@ -166,6 +172,68 @@ describe('the phone shell’s hit areas', () => {
       expect(btn, hook).not.toBeNull();
       expect(toolbarControls, `${hook} in the 30px sweep`).toContain(btn);
     }
+  });
+
+  it('floors the key-strip chips at 30px while an ordinary phone tap target stays 44px', () => {
+    // The strip's painted chip is 30px; the blanket 44px floor drew ~7px of
+    // invisible padding a side around it (~18px between painted chips). Same
+    // named exception as the toolbar row, enumerated by `[data-key-strip]`.
+    const decision: Decision = {
+      id: 'd1',
+      label: 'plan',
+      input: 'ask',
+      output: 'ok',
+      commands: [],
+    };
+    const sess: Session = {
+      id: 's1',
+      title: 'sess',
+      epic: null,
+      branch: null,
+      status: 'idle',
+      runningAgents: 0,
+      activity: null,
+      age: '1m',
+      decisions: [decision],
+      vamControlled: true,
+    };
+    const props = {
+      entry: { project: { id: 'p1', name: 'atlas', sessions: [sess] }, session: sess },
+      decision,
+      draft: '',
+      onDraftChange: () => {},
+      onSubmit: () => {},
+      composing: false,
+      onCompose: () => {},
+      onStopComposing: () => {},
+      active: false,
+      actionIndex: 0,
+      width: 390,
+      resizeHandle: null,
+      phone: true,
+      delivers: true,
+      terminal: true,
+      pickImageAttachment: async () => null,
+      onSetDefaultProvider: () => {},
+    } satisfies DetailPanelProps;
+    render(
+      <div data-phone-shell className="vam-phone">
+        <DetailPanel {...props} />
+      </div>,
+    );
+    const keys = [...document.querySelectorAll('[data-key-strip] button')];
+    expect(keys.length, 'key-strip buttons').toBeGreaterThan(3);
+    const wrong = keys
+      .filter((el) => {
+        const cs = getComputedStyle(el);
+        return cs.minHeight !== '30px' || cs.minWidth !== '30px';
+      })
+      .map((el) => el.getAttribute('data-key-strip-key') ?? el.tagName);
+    expect(wrong, 'strip buttons not floored at 30px').toEqual([]);
+    const composerTap = document.querySelector('[data-composer-bar] textarea');
+    expect(composerTap, 'an ordinary vam-tap outside the strip').not.toBeNull();
+    const cs = getComputedStyle(composerTap as Element);
+    expect([cs.minHeight, cs.minWidth]).toEqual(['44px', '44px']);
   });
 
   it('does not leak the 30px floor into the workspace-options popover it opens', () => {
