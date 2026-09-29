@@ -1637,6 +1637,24 @@ function TabStrip({
  * of "connected"; a mark with words after it is the shape of "something to
  * read".
  */
+/**
+ * The phone list header's row shows ONLY while the source is connecting or in
+ * error (operator decision: a lone healthy dot, or the demo note, is not worth
+ * a row). The desktop canvas bar's readout does not use this.
+ */
+function sourceNeedsReadout(source: CanvasSource): boolean {
+  switch (source.kind) {
+    case 'demo':
+      return false;
+    case 'connecting':
+      return true;
+    case 'session':
+      return source.error !== undefined && source.error !== null;
+    default:
+      return source.status !== 'live';
+  }
+}
+
 function SourceReadout({ source }: { source: CanvasSource }) {
   return (
     <span data-source className="min-w-0 truncate font-mono text-meta">
@@ -8387,7 +8405,7 @@ function CanvasInner({
           sidebar={sidebarProps}
           detail={detailProps}
           paneEligibleEntries={paneEligibleEntries}
-          sourceReadout={<SourceReadout source={source} />}
+          sourceReadout={sourceNeedsReadout(source) ? <SourceReadout source={source} /> : undefined}
           // A read-only server registers no write routes at all, so the box is
           // withdrawn rather than drawn and refused. Only a `session` source
           // can say; the demo and live sources both record.
