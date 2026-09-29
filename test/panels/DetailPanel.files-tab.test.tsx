@@ -342,6 +342,65 @@ describe('the lazy file tree', () => {
     expect(list.mock.calls.filter(([, dir]) => dir === undefined)).toHaveLength(1);
     expect(rowPaths()).toEqual(['/work/atlas/src', '/work/atlas/src/index.ts']);
   });
+
+  it('a failed directory read is said once and is not retried in a loop', async () => {
+    const list = vi.fn(async (_s: string, dir?: string) => {
+      if (dir === 'src') {
+        throw { kind: 'unreachable', code: 'boom', message: 'src is unreadable' };
+      }
+      return level('', [{ name: 'src', kind: 'dir' }]);
+    });
+    withBridge({ list });
+    await draw({ files: true });
+    await openFiles();
+    await click('/work/atlas/src');
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(list.mock.calls.filter(([, dir]) => dir === 'src')).toHaveLength(1);
+    expect(q('[data-files-note]')?.textContent).toContain('src is unreadable');
+  });
+
+  it('marks a directory busy while its level is in flight', async () => {
+    let release: (r: FileDirResult) => void = () => {};
+    const list = vi.fn(async (_s: string, dir?: string) => {
+      if (dir === 'src') {
+        return new Promise<FileDirResult>((resolve) => {
+          release = resolve;
+        });
+      }
+      return level('', [{ name: 'src', kind: 'dir' }]);
+    });
+    withBridge({ list });
+    await draw({ files: true });
+    await openFiles();
+    await click('/work/atlas/src');
+    expect(row('/work/atlas/src')?.hasAttribute('data-files-row-loading')).toBe(true);
+    await act(async () => {
+      release(level('src', [{ name: 'a.ts', kind: 'file' }]));
+      await Promise.resolve();
+    });
+    expect(row('/work/atlas/src')?.hasAttribute('data-files-row-loading')).toBe(false);
+    expect(rowPaths()).toContain('/work/atlas/src/a.ts');
+  });
+
+  it('refresh drops the cached levels, so a still-open directory is read again', async () => {
+    const list = lazyList();
+    withBridge({ list });
+    await draw({ files: true });
+    await openFiles();
+    await click('/work/atlas/src');
+    expect(list.mock.calls.filter(([, dir]) => dir === 'src')).toHaveLength(1);
+    await act(async () => {
+      q<HTMLButtonElement>('[aria-label="refresh file list"]')?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(list.mock.calls.filter(([, dir]) => dir === '')).toHaveLength(2);
+    expect(list.mock.calls.filter(([, dir]) => dir === 'src')).toHaveLength(2);
+  });
 });
 
 describe('the file tree', () => {
