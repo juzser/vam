@@ -427,16 +427,16 @@ export function isPaneSize(size: PaneSize): boolean {
  * driven from inside vam's pane at all. `ArrowLeft`/`ArrowRight` were not even
  * that lucky: `strokeFor` declined them outright (a named key is never one
  * printable character) and they reached neither the pane nor vam's own
- * grammar. `nav` is the eight keys a terminal is navigated with -- the four
- * arrows and Home/End/PageUp/PageDown -- PRESSED rather than typed, for the
+ * grammar. `nav` is the nine keys a terminal is navigated with -- the four
+ * arrows, Home/End/PageUp/PageDown and Delete -- PRESSED rather than typed, for the
  * same reason `control` is: `send-keys -l -- 'Up'` would type the two letters
  * into the operator's own prompt. `sources/tmux/argv.ts`'s `sendNavArgv`
  * carries the measurement of what a real pane receives for each.
  *
- * A KIND CARRYING A CLOSED VALUE, NOT EIGHT KINDS, matching `control`'s own
+ * A KIND CARRYING A CLOSED VALUE, NOT NINE KINDS, matching `control`'s own
  * shape rather than `enter`/`escape`/`backspace`/`back-tab`'s: `nav` is one
  * FAMILY of the pane's own keys, exactly as `control` is one family of Ctrl
- * chords, and `isNavKey` checks it against a frozen eight-member set the same
+ * chords, and `isNavKey` checks it against a frozen nine-member set the same
  * way `isControlLetter` does its twenty-six.
  */
 export type PaneKey =

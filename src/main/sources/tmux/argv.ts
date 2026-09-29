@@ -1044,7 +1044,7 @@ export function sendControlArgv(name: string, letter: ControlLetter): readonly s
 }
 
 /**
- * THE EIGHT NAVIGATION KEYS, one tmux key name each -- `CONTROL_KEY_NAMES`'s
+ * THE NINE NAVIGATION KEYS, one tmux key name each -- `CONTROL_KEY_NAMES`'s
  * own shape, keyed by `NavKey` instead of `ControlLetter`.
  *
  * MEASURED on tmux 3.7b over a private `-L` socket, against
@@ -1053,7 +1053,7 @@ export function sendControlArgv(name: string, letter: ControlLetter): readonly s
  * `42`, `44`, `43`), `Home`/`End` delivered `1b 5b 31 7e` / `1b 5b 34 7e`, and
  * `PageUp`/`PageDown` -- tmux's own aliases for `PPage`/`NPage`, confirmed to
  * deliver the identical bytes -- delivered `1b 5b 35 7e` / `1b 5b 36 7e`.
- * `PageUp`/`PageDown` are spelled that way rather than `PPage`/`NPage` for the
+ * The ninth, `Delete`, is sent as tmux's `DC` (added for vam-ux-1's remote key strip). `PageUp`/`PageDown` are spelled that way rather than `PPage`/`NPage` for the
  * same reason `sendControlArgv` writes `C-u` rather than a shorter form
  * nothing else here uses: the next reader should not have to know a second
  * name means the same key.
@@ -1091,7 +1091,7 @@ const NAV_KEY_NAMES: Readonly<Record<NavKey, string>> = {
  * WHY THIS IS A KIND AND NOT A FIELD ON `text`, restated for the eighth time
  * this file makes the argument: `send-keys -l -- 'Up'` would TYPE the two
  * letters into the operator's own prompt, which is not what an arrow key is
- * for. `Up` and its eight siblings have to go through tmux's own key
+ * for. `Up` and its eight siblings (nine navigation keys in all) have to go through tmux's own key
  * translation exactly as `Enter` and `BSpace` do.
  *
  * THE LOOKUP REFUSES RATHER THAN SPLICING, for the same reason

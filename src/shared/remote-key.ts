@@ -54,9 +54,10 @@ export function isRemoteKeyId(value: unknown): value is RemoteKeyId {
 /**
  * The allowlisted id, turned into the `PaneKey` the tmux-sending path already
  * knows how to deliver (`main/terminal/pane.ts`'s `sendToPane`). A closed
- * `switch` with no default arm: every id in `REMOTE_KEY_IDS` has exactly one
- * case, so adding a further id to the array without adding its arm here is a
- * compile error, never a silently-`undefined` key.
+ * `switch` over `REMOTE_KEY_IDS`: every id has exactly one case. The default
+ * arm assigns the id to a `never` (`const unreachable: never = id`), so adding
+ * a further id to the array without adding its arm here is a compile error,
+ * never a silently-`undefined` key.
  *
  * `tab` IS `{ kind: 'text', text: '\t' }`, NOT A NEW `PaneKey` KIND. There is
  * no dedicated kind for a plain Tab (`DetailPanel.tsx`'s `KEY_STRIP` never
