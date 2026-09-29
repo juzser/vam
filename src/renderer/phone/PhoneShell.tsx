@@ -747,9 +747,8 @@ export function PhoneShell({
              the 16px lucide icons in this same bar rather than against a text
              step. A chevron paints far smaller than its em box -- at the
              scale's 15px `heading` it would be the smallest mark in a 44px
-             target. The `×` below is 16 for the same reason in the other
-             direction: a multiplication sign fills its box where this does
-             not. Two glyphs, two optical sizes, and neither is prose. */
+             target. It is the only glyph in this bar; the rest are lucide
+             icons or prose. */
           className={`${TOUCH} ${FOCUS_RING} flex-none rounded-[7px] text-[18px] text-ink-dim`}
         >
           ‹

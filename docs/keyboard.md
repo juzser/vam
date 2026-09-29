@@ -170,23 +170,24 @@ and Apple's documentation, not a measurement.
 ## On the phone
 
 A phone has no physical keyboard for the session's own chords, so the
-keystroke strip above the composer offers six of them as taps: Escape, Tab,
-Enter, Shift-Tab, Space and Backspace — Claude Code's own option pickers
-(`AskUserQuestion`, a permission prompt, `/model`, plan approval) are walked
-with exactly this set. `Up`/`Down` (vam's own addition, vam/terminal-arrows)
-join them wherever the desktop's local channel is available, but never over
-the phone's own remote one — see below.
+keystroke strip above the composer is a horizontally scrolling row of chips:
+Keyboard, Paste, twenty keys, Terminal where the session has one, and More
+(which scrolls the row to its end). The twenty keys are Escape, Tab, Enter,
+Shift-Tab, Space, Backspace, Delete, the four arrows, and nine Ctrl chords
+(`Ctrl-C`, `Ctrl-D`, `Ctrl-L`, `Ctrl-Z`, `Ctrl-R`, `Ctrl-A`, `Ctrl-E`,
+`Ctrl-W`, `Ctrl-U`) — Claude Code's own option pickers (`AskUserQuestion`, a
+permission prompt, `/model`, plan approval) are walked with the first set.
 
 **Two channels, one strip.** In the Electron shell the strip presses
 `window.api.terminal.send`, the same bridge the Terminal tab and the mode
-switcher use, and carries all eight keys. Served remotely, over Tailscale
-Serve, there is no `window.api` at all: the strip falls back to
-`/api/send-key` (`src/main/remote/send-key.ts`), a route that accepts
-exactly the six keys above, from a fixed allowlist, into the session's own
-tmux pane — never free text, and never a client-named pane. `Up`/`Down` are
-withdrawn from the strip itself on this channel rather than drawn as two
-buttons that always fail: absent, not disabled, the same rule the mode
-switcher already applies for a session vam did not start.
+switcher use. Served remotely, over Tailscale Serve, there is no
+`window.api` at all: the strip falls back to `/api/send-key`
+(`src/main/remote/send-key.ts`), a route that accepts exactly the same twenty
+keys, each with an id in `src/shared/remote-key.ts`, from a fixed allowlist,
+into the session's own tmux pane — never free text, and never a client-named
+pane. Both channels carry all twenty, so nothing is withdrawn on the phone;
+`ctrl-b` (tmux's prefix) and every Ctrl letter not listed stay out of the
+allowlist.
 
 **Paste** reads the phone's own clipboard
 (`navigator.clipboard.readText()`) and types the result through the

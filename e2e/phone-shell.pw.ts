@@ -1955,24 +1955,28 @@ test.describe('the session tab strip and the keystroke strip at 390px', () => {
     await expect(waitingTab.locator('[data-phone-session-waiting-badge]')).toBeVisible();
   });
 
-  test('the keystroke strip draws six 30px controls that fit inside 390px', async ({ page }) => {
-    // vam/terminal-arrows added Up/Down to `KEY_STRIP` (a phone has no arrow
-    // keys, and Claude Code's own option pickers need them), and the phone's
-    // own remote channel (`/api/send-key`, `shared/remote-key.ts`) later
-    // added `tab` -- eight keys in `KEY_STRIP` now, not seven. This page has
-    // no `window.api` at all (`?demo=1` is a plain browser build, not
-    // Electron), so `hasLocalTerminalChannel` is false and the strip filters
-    // itself down to the six `paneKeyToRemoteKeyId` answers for -- Up/Down
-    // are withdrawn here for the same reason they are on a real phone served
-    // over Tailscale: absent, not disabled, because this page has no channel
-    // for them either.
+  test('the keystroke strip is one scrolling row of 30px chips inside 390px', async ({ page }) => {
+    // task-16 made the phone strip a horizontally scrolling row of chips:
+    // Keyboard, Paste, the twenty `KEY_STRIP` keys (every one has a remote id
+    // in `shared/remote-key.ts`, so the no-`window.api` filter drops none),
+    // Terminal where the session has one, and More -- 24 with a terminal, 23
+    // without (`test/panels/DetailPanel.keystroke-strip.test.tsx`'s ORDER is
+    // the oracle). The chips scroll INSIDE the strip, so the strip's own box
+    // must still end within the 390px viewport; each chip keeps 30px.
     await stubSource(page);
     await openFirstAlphaSession(page);
 
     const strip = page.locator('[data-key-strip]');
     await expect(strip).toBeVisible();
-    const keys = strip.locator('[data-key-strip-key]');
-    await expect(keys).toHaveCount(6);
+    await expect(strip.locator('[data-key-strip-keyboard]')).toHaveCount(1);
+    await expect(strip.locator('[data-key-strip-paste]')).toHaveCount(1);
+    await expect(strip.locator('[data-key-strip-more]')).toHaveCount(1);
+    await expect(strip.locator('[data-key-strip-key]')).toHaveCount(20);
+    // Measured on this page: the demo session has a terminal
+    // (`terminal !== false`) and the shell passes `onRequestTab`, so the
+    // Terminal chip draws -- 24 chips in all.
+    await expect(strip.locator('[data-key-strip-screen]')).toHaveCount(1);
+    await expect(strip.locator('button')).toHaveCount(24);
 
     const geometry = await strip.evaluate((el) => {
       const r = el.getBoundingClientRect();
