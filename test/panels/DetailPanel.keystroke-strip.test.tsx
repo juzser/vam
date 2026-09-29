@@ -594,6 +594,13 @@ describe('the quick-key strip, item 21/22: text chips in the operator’s order'
     });
     expect(document.activeElement).not.toBe(box);
   });
+
+  it('the Keyboard chip keeps focus on the composer while pressed, so click sees the true focus state', () => {
+    draw({}, { terminal: true });
+    const chip = document.querySelector('[data-key-strip-keyboard]') as HTMLElement;
+    // fireEvent returns false when the event was default-prevented.
+    expect(fireEvent.mouseDown(chip)).toBe(false);
+  });
 });
 
 describe('the quick-key strip: full key matrix, and the chips that are not keys', () => {

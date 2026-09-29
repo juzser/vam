@@ -10366,6 +10366,10 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                 data-key-strip-keyboard
                 aria-label={composerFocused ? 'hide the keyboard' : 'show the keyboard'}
                 aria-pressed={composerFocused}
+                // A press would blur the composer before the click, so the
+                // click would read `composerFocused` false and re-focus.
+                // Cancelling mousedown keeps focus put; click stays intact.
+                onMouseDown={(event) => event.preventDefault()}
                 onClick={() =>
                   composerFocused ? inputRef.current?.blur() : inputRef.current?.focus()
                 }
