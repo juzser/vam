@@ -37,6 +37,7 @@ import {
   createUsageApi,
   createWorktreesApi,
 } from './api.js';
+import { wrapTerminalStreamApiWithAck } from './terminal-stream-ack.js';
 
 contextBridge.exposeInMainWorld('api', {
   ...createPreloadApi(ipcRenderer),
@@ -75,7 +76,7 @@ contextBridge.exposeInMainWorld('api', {
   terminal: createTerminalApi(ipcRenderer),
   // The Terminal tab's streaming half, behind the `streamingTerminal` pref
   // and currently drawn by nothing -- see `src/preload/api.ts`'s own header.
-  terminalStream: createTerminalStreamApi(ipcRenderer),
+  terminalStream: wrapTerminalStreamApiWithAck(createTerminalStreamApi(ipcRenderer), ipcRenderer),
   dialog: createDialogApi(ipcRenderer),
   // The file-editor tab's read and write, authorised against every live
   // session's own working directory in main before a byte moves either way.

@@ -48,7 +48,7 @@
 
 import { realpath } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { resolve } from 'node:path';
+import { basename, resolve } from 'node:path';
 import type { SourceCapabilities } from '../../renderer/sources/port.js';
 import type { SourceDescriptor } from '../../shared/preload-api.js';
 import type { SourceError } from '../ipc/channels.js';
@@ -224,35 +224,63 @@ function isProjectMatch(
 }
 
 /**
+ * TRUE when `path`'s final segment could name one of `projectIds`.
+ *
+ * A `claude-code:<basename>-<8 hex>` id carries its project's own directory
+ * name; this reads that name back out, purely and synchronously, so the
+ * caller can refuse a path BEFORE any `realpath` call is made. An id of any
+ * other shape contributes no basename -- it cannot be a false admission,
+ * only a false negative that `realpath` never gets the chance to correct,
+ * which is why this is a cheap, coarse pre-filter and not the membership
+ * check itself: a path that passes it still has to canonicalise and match by
+ * id below.
+ */
+const PROJECT_ID_SHAPE = /^claude-code:(.+)-[0-9a-f]{8}$/;
+
+function namesAListedProject(path: string, projectIds: readonly string[]): boolean {
+  const target = basename(path);
+  return projectIds.some((id) => PROJECT_ID_SHAPE.exec(id)?.[1] === target);
+}
+
+/**
  * `/api/create-session-in`'s guard: confines the route to a `cwd` that
  * canonicalises to a project id the combined source's own `load()` already
- * lists, and
- * hands back that id rather than the caller's path -- see the `write()`
- * `guard` parameter this feeds.
+ * lists, and hands back that id rather than the caller's path -- see the
+ * `write()` `guard` parameter this feeds.
  *
- * ORDER MATTERS, AND IS PART OF THE CONTRACT. The capability check runs
- * FIRST, before `load()` or `realpath()` runs at all: a route that cannot
- * spawn must not read the operator's project list, and must not do the
- * canonicalisation work either, because capability-absent is a constant
- * property of the server -- identical for every `cwd` -- so its shorter path
- * teaches a remote caller nothing about any path.
+ * ORDER MATTERS, AND IS PART OF THE CONTRACT, IN FIVE STEPS. (1) The
+ * capability check runs FIRST, before `load()` or `realpath()` runs at all:
+ * a route that cannot spawn must not read the operator's project list, and
+ * must not do the canonicalisation work either, because capability-absent is
+ * a constant property of the server -- identical for every `cwd` -- so its
+ * shorter path teaches a remote caller nothing about any path. (2)
+ * `source.load()` is awaited next, and its rejection refuses immediately,
+ * before `body.cwd` is even resolved: an unreadable project list fails
+ * closed without touching the filesystem for a path this server could never
+ * have confirmed anyway. (3) The LEXICAL path -- `path.resolve(body.cwd)`,
+ * no filesystem call -- is checked against the listed ids directly, so a
+ * `cwd` that is already spelled exactly as a member's canonical path is
+ * admitted with zero `realpath` calls. (4) Past that, `namesAListedProject`
+ * checks the lexical path's OWN final segment against every listed
+ * project's basename; a `cwd` whose final segment names no listed project is
+ * refused HERE, with NO filesystem call ever made for it -- this is the
+ * fix for FINDING 3a9f9e70, whose duration `realpath` on an arbitrary
+ * caller-named path was a timing oracle for which directories exist outside
+ * vam's project set. (5) Only when the final segment plausibly names a
+ * member does `realpath(body.cwd)` run, once; its rejection refuses, and its
+ * resolution is matched against the listed ids exactly as before.
  *
- * PAST THE CAPABILITY CHECK, EVERY PATH-DEPENDENT CAUSE DOES THE SAME COUNT
- * OF AWAITED WORK: exactly one `realpath(body.cwd)` and exactly one
- * `source.load()`, both started together and both awaited to settlement
- * before the guard decides -- `Promise.allSettled`, not `Promise.all`, so a
- * rejection on one side never abandons the other. A `cwd` that does not
- * exist, one that is not a git repository, one the operator never added, one
- * behind a permission wall, and the member repository itself on the success
- * path all reach the verdict only after both promises have settled. This
- * equalises the COUNT and KIND of awaited operations across those causes,
- * not their DURATION: a single `realpath` can still take different wall-clock
- * time on a missing path than on an existing one, the membership scan itself
- * is a synchronous branch and not an awaited operation, and this function
- * cannot make itself immune to filesystem or `load()` implementation timing
- * -- see task-12's Result for the residuals this leaves open.
+ * THE ACCEPTED RESIDUALS (operator decision, not a gap this task closes): a
+ * probe path whose final segment merely equals a listed project's basename
+ * still gets realpath'd once, and refused -- a symlink whose OWN name
+ * differs from its target's basename is refused without ever being
+ * canonicalised, which is the deliberate cost of gating on the caller's own
+ * spelling rather than the source's canonical roots. A symlinked ANCESTOR
+ * directory (an ancestor's own alternate spelling, e.g. macOS's `/tmp` ->
+ * `/private/tmp`) still resolves and admits, because the final segment named
+ * on the wire is unaffected by an ancestor's own symlinks.
  *
- * Canonicalisation happens EXACTLY ONCE -- `fs.realpath`, matching
+ * Canonicalisation happens AT MOST ONCE -- `fs.realpath`, matching
  * `src/main/files/authorize.ts`'s own ordering -- and the id it produces is
  * the only thing this function ever returns on success; the caller's `cwd`,
  * raw or canonicalised, is not returned and must never reach a `source.*`
@@ -269,17 +297,32 @@ async function confineToProjectSet(
   if (source.createSession === undefined) {
     return UNAUTHORIZED_DIRECTORY;
   }
-  const [canonicalOutcome, projectsOutcome] = await Promise.allSettled([
-    realpath(body.cwd as string),
-    source.load(),
-  ]);
-  if (canonicalOutcome.status === 'rejected' || projectsOutcome.status === 'rejected') {
+  let projects: readonly { id: string }[];
+  try {
+    projects = await source.load();
+  } catch {
     return UNAUTHORIZED_DIRECTORY;
   }
-  const projectId = projectIdOf(canonicalOutcome.value);
-  return projectsOutcome.value.some((project) => project.id === projectId)
-    ? { projectId }
-    : UNAUTHORIZED_DIRECTORY;
+  const projectIds = projects.map((project) => project.id);
+
+  const lexical = resolve(body.cwd as string);
+  const lexicalId = projectIdOf(lexical);
+  if (projectIds.includes(lexicalId)) {
+    return { projectId: lexicalId };
+  }
+
+  if (!namesAListedProject(lexical, projectIds)) {
+    return UNAUTHORIZED_DIRECTORY;
+  }
+
+  let canonical: string;
+  try {
+    canonical = await realpath(body.cwd as string);
+  } catch {
+    return UNAUTHORIZED_DIRECTORY;
+  }
+  const canonicalId = projectIdOf(canonical);
+  return projectIds.includes(canonicalId) ? { projectId: canonicalId } : UNAUTHORIZED_DIRECTORY;
 }
 
 type Envelope = { ok: true; value: unknown } | { ok: false; error: SourceError };
