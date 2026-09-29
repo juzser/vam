@@ -119,7 +119,6 @@ describe('picking a tab from the live streamingTerminal pref', () => {
       <TerminalAutoTab
         projectId="p1"
         rowId="s1"
-        branch={null}
         read={undefined}
         resize={undefined}
         send={undefined}
@@ -145,7 +144,6 @@ describe('picking a tab from the live streamingTerminal pref', () => {
       <TerminalAutoTab
         projectId="p1"
         rowId="s1"
-        branch={null}
         read={window.api?.terminal?.read}
         resize={undefined}
         send={undefined}
@@ -168,7 +166,6 @@ describe('the runtime fallback', () => {
       <TerminalAutoTab
         projectId="p1"
         rowId="s1"
-        branch={null}
         read={window.api?.terminal?.read}
         resize={undefined}
         send={undefined}
@@ -196,7 +193,6 @@ describe('the runtime fallback', () => {
       <TerminalAutoTab
         projectId="p1"
         rowId="s1"
-        branch={null}
         read={window.api?.terminal?.read}
         resize={undefined}
         send={undefined}
@@ -226,7 +222,6 @@ describe('the runtime fallback', () => {
       <TerminalAutoTab
         projectId="p1"
         rowId="s1"
-        branch={null}
         read={window.api?.terminal?.read}
         resize={undefined}
         send={undefined}
@@ -244,7 +239,6 @@ describe('the runtime fallback', () => {
       <TerminalAutoTab
         projectId="p2"
         rowId="s2"
-        branch={null}
         read={window.api?.terminal?.read}
         resize={undefined}
         send={undefined}

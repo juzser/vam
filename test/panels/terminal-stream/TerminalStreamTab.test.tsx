@@ -225,14 +225,14 @@ afterEach(() => {
 
 describe('with no bridge and no project', () => {
   it('says the terminal is desktop-only, like TerminalTab does', () => {
-    render(<TerminalStreamTab projectId={null} branch={null} />);
+    render(<TerminalStreamTab projectId={null} />);
     expect(q('[data-terminal-stream-empty]')?.textContent).toMatch(
       /only available in the vam desktop app/,
     );
   });
 
   it('says the same thing when window.api has no terminalStream member', () => {
-    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    render(<TerminalStreamTab projectId="p1" rowId="s1" />);
     expect(q('[data-terminal-stream-empty]')).not.toBeNull();
   });
 });
@@ -245,7 +245,7 @@ describe('a refused open', () => {
     ['unsupported-tmux', /older than streaming needs/],
   ] as const)('draws distinguishable, non-blank text for %s', async (reason, expected) => {
     withBridge({ open: async () => ({ ok: false, reason }) });
-    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    render(<TerminalStreamTab projectId="p1" rowId="s1" />);
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -261,7 +261,7 @@ describe('a refused open', () => {
       const onFallback = vi.fn();
       withBridge({ open: async () => ({ ok: false, reason }) });
       const { unmount } = render(
-        <TerminalStreamTab projectId="p1" rowId="s1" branch={null} onFallback={onFallback} />,
+        <TerminalStreamTab projectId="p1" rowId="s1" onFallback={onFallback} />,
       );
       await act(async () => {
         await Promise.resolve();
@@ -275,7 +275,7 @@ describe('a refused open', () => {
   it('asks its caller to fall back on unsupported-tmux, still drawing its own refusal text too', async () => {
     const onFallback = vi.fn();
     withBridge({ open: async () => ({ ok: false, reason: 'unsupported-tmux' }) });
-    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} onFallback={onFallback} />);
+    render(<TerminalStreamTab projectId="p1" rowId="s1" onFallback={onFallback} />);
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -288,7 +288,7 @@ describe('a refused open', () => {
 
   it('never leaves a blank pane -- no container is drawn once refused', async () => {
     withBridge({ open: async () => ({ ok: false, reason: 'unavailable' }) });
-    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    render(<TerminalStreamTab projectId="p1" rowId="s1" />);
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -321,7 +321,7 @@ describe('mounted with a bridge', () => {
         };
       },
     });
-    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    render(<TerminalStreamTab projectId="p1" rowId="s1" />);
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -348,7 +348,7 @@ describe('mounted with a bridge', () => {
         name: 'vam-stub-a1b2c3',
       }),
     });
-    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    render(<TerminalStreamTab projectId="p1" rowId="s1" />);
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -358,7 +358,7 @@ describe('mounted with a bridge', () => {
 
   it('loads Unicode11Addon and switches to the "11" width table -- xterm’s default (Unicode 6) disagrees with tmux on wide emoji (measured: real tmux reports width 2 for U+1F389, xterm’s default table reports 1)', async () => {
     withBridge({});
-    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    render(<TerminalStreamTab projectId="p1" rowId="s1" />);
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -379,7 +379,7 @@ describe('mounted with a bridge', () => {
     omitUnicode = true;
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     withBridge({});
-    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    render(<TerminalStreamTab projectId="p1" rowId="s1" />);
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -393,7 +393,7 @@ describe('mounted with a bridge', () => {
   it('gives xterm a transparent ground at the composited opacity, matching the frame’s own translucent background -- xterm’s canvas used to paint an opaque one over it regardless of the pref', async () => {
     setActiveTerminalScheme(readTerminalSchemePref({ backgroundOpacity: 0.6 }), 'dark');
     withBridge({});
-    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    render(<TerminalStreamTab projectId="p1" rowId="s1" />);
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -426,7 +426,7 @@ describe('mounted with a bridge', () => {
         return () => {};
       },
     });
-    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    render(<TerminalStreamTab projectId="p1" rowId="s1" />);
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -446,7 +446,7 @@ describe('mounted with a bridge', () => {
 
   it('marks the container as an insert scope and the real textarea as its insert stop', async () => {
     withBridge({});
-    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    render(<TerminalStreamTab projectId="p1" rowId="s1" />);
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -458,7 +458,7 @@ describe('mounted with a bridge', () => {
 
   it('focusInsertStop lands DOM focus on term.textarea, not the container', async () => {
     withBridge({});
-    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    render(<TerminalStreamTab projectId="p1" rowId="s1" />);
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -472,7 +472,7 @@ describe('mounted with a bridge', () => {
   describe('scrollback chords (#459), Shift-held only', () => {
     async function openAndGetHandler() {
       withBridge({});
-      render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      render(<TerminalStreamTab projectId="p1" rowId="s1" />);
       await act(async () => {
         await Promise.resolve();
         await Promise.resolve();
@@ -533,7 +533,7 @@ describe('mounted with a bridge', () => {
 
     it('cancels the browser default and xterm’s own paste handling', async () => {
       withBridge({});
-      render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      render(<TerminalStreamTab projectId="p1" rowId="s1" />);
       await act(async () => {
         await Promise.resolve();
         await Promise.resolve();
@@ -554,7 +554,7 @@ describe('mounted with a bridge', () => {
       const paste = vi.fn();
       const write = vi.fn();
       withBridge({ paste, write });
-      render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      render(<TerminalStreamTab projectId="p1" rowId="s1" />);
       await act(async () => {
         await Promise.resolve();
         await Promise.resolve();
@@ -582,7 +582,7 @@ describe('mounted with a bridge', () => {
     it('does nothing for an empty clipboard', async () => {
       const paste = vi.fn();
       withBridge({ paste });
-      render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      render(<TerminalStreamTab projectId="p1" rowId="s1" />);
       await act(async () => {
         await Promise.resolve();
         await Promise.resolve();
@@ -597,7 +597,7 @@ describe('mounted with a bridge', () => {
 
     it('draws no refusal text -- a real paste is not a refusal', async () => {
       withBridge({});
-      render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      render(<TerminalStreamTab projectId="p1" rowId="s1" />);
       await act(async () => {
         await Promise.resolve();
         await Promise.resolve();
@@ -620,7 +620,7 @@ describe('mounted with a bridge', () => {
       // propagate to a descendant, only to ancestors.
       const paste = vi.fn();
       withBridge({ paste });
-      render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      render(<TerminalStreamTab projectId="p1" rowId="s1" />);
       await act(async () => {
         await Promise.resolve();
         await Promise.resolve();
@@ -637,7 +637,7 @@ describe('mounted with a bridge', () => {
   it('types into the stream via write()', async () => {
     const write = vi.fn();
     withBridge({ write });
-    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    render(<TerminalStreamTab projectId="p1" rowId="s1" />);
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -651,7 +651,7 @@ describe('mounted with a bridge', () => {
 
   it('closes the stream and disposes the terminal on unmount', async () => {
     const { close } = withBridge({});
-    const { unmount } = render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    const { unmount } = render(<TerminalStreamTab projectId="p1" rowId="s1" />);
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -666,7 +666,7 @@ describe('mounted with a bridge', () => {
 describe('frame parity with TerminalTab.tsx (docs/design/terminal-streaming.md)', () => {
   it('draws the same bordered, rounded, clipped pane frame TerminalTab.tsx draws -- border-line, rounded-[9px], overflow-hidden, the focus-visible ring', async () => {
     withBridge({});
-    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    render(<TerminalStreamTab projectId="p1" rowId="s1" />);
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -687,7 +687,7 @@ describe('frame parity with TerminalTab.tsx (docs/design/terminal-streaming.md)'
 
   it('configures the real Terminal with the shared font family, TerminalTab.tsx’s own line-height ratio and a steady (non-blinking) block cursor', async () => {
     withBridge({});
-    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    render(<TerminalStreamTab projectId="p1" rowId="s1" />);
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -699,20 +699,26 @@ describe('frame parity with TerminalTab.tsx (docs/design/terminal-streaming.md)'
     expect(lastTerm?.options.cursorBlink).toBe(false);
   });
 
-  it('draws a status rule under the pane with the branch and the resolved tmux session name, the same facts TerminalTab.tsx draws and in the same order', async () => {
+  it('draws a status rule under the pane with the resolved tmux session name and no branch, even when a caller still hands it one', async () => {
     withBridge({
       open: async () => ({ ok: true, streamId: 'stream-1', seed: 'hi', name: 'vam-atlas-a1b2c3' }),
     });
-    render(<TerminalStreamTab projectId="p1" rowId="s1" branch="work/atlas-fit" />);
+    // The cast keeps the removed prop out of the type while proving an old
+    // caller still draws nothing for it.
+    render(
+      <TerminalStreamTab projectId="p1" rowId="s1" {...({ branch: 'work/atlas-fit' } as object)} />,
+    );
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(q('[data-terminal-stream-branch]')?.textContent).toBe('work/atlas-fit');
+    expect(q('[data-terminal-stream-branch]')).toBeNull();
+    expect(q('[data-terminal-stream-status] svg.lucide-git-branch')).toBeNull();
+    expect(q('[data-terminal-stream-status]')?.textContent).not.toContain('work/atlas-fit');
     expect(q('[data-terminal-stream-badge]')?.textContent).toBe('vam-atlas-a1b2c3');
   });
 
-  it('draws no branch and no name until the stream has actually opened -- no invented identity', async () => {
+  it('draws no name until the stream has actually opened -- no invented identity', async () => {
     let resolveOpen:
       | ((value: { ok: true; streamId: string; seed: string; name: string }) => void)
       | undefined;
@@ -722,7 +728,7 @@ describe('frame parity with TerminalTab.tsx (docs/design/terminal-streaming.md)'
           resolveOpen = resolve;
         }),
     });
-    render(<TerminalStreamTab projectId="p1" rowId="s1" branch="work/atlas-fit" />);
+    render(<TerminalStreamTab projectId="p1" rowId="s1" />);
     await act(async () => {
       await Promise.resolve();
     });
@@ -745,7 +751,7 @@ describe('renderer-side backpressure (coordinator follow-up: bytes handed to xte
         return () => {};
       },
     });
-    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    render(<TerminalStreamTab projectId="p1" rowId="s1" />);
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -766,7 +772,7 @@ describe('renderer-side backpressure (coordinator follow-up: bytes handed to xte
         return () => {};
       },
     });
-    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    render(<TerminalStreamTab projectId="p1" rowId="s1" />);
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -807,7 +813,7 @@ describe('renderer-side backpressure (coordinator follow-up: bytes handed to xte
         return () => {};
       },
     });
-    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    render(<TerminalStreamTab projectId="p1" rowId="s1" />);
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -868,7 +874,7 @@ describe('visibility-driven connect/disconnect', () => {
     });
     try {
       visibility.mockReturnValue('visible');
-      render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      render(<TerminalStreamTab projectId="p1" rowId="s1" />);
       await act(async () => {
         await Promise.resolve();
         await Promise.resolve();
@@ -914,7 +920,7 @@ describe('visibility-driven connect/disconnect', () => {
     withBridge({ open: openSpy });
     try {
       visibility.mockReturnValue('hidden');
-      render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      render(<TerminalStreamTab projectId="p1" rowId="s1" />);
       await act(async () => {
         await Promise.resolve();
         await Promise.resolve();
@@ -937,7 +943,7 @@ describe('the onDown banner (review finding)', () => {
   it('subscribes to onDown at all -- the bridge stub used to be a no-op', async () => {
     const down = withDownCapture();
     withBridge({ onDown: down.onDown });
-    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    render(<TerminalStreamTab projectId="p1" rowId="s1" />);
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -949,7 +955,7 @@ describe('the onDown banner (review finding)', () => {
   it('shows "reconnecting…" on a reconnecting event, without tearing down the pane', async () => {
     const down = withDownCapture();
     withBridge({ onDown: down.onDown });
-    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    render(<TerminalStreamTab projectId="p1" rowId="s1" />);
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -976,7 +982,7 @@ describe('the onDown banner (review finding)', () => {
     async (reason, text) => {
       const down = withDownCapture();
       withBridge({ onDown: down.onDown });
-      render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      render(<TerminalStreamTab projectId="p1" rowId="s1" />);
       await act(async () => {
         await Promise.resolve();
         await Promise.resolve();
@@ -998,7 +1004,7 @@ describe('the onDown banner (review finding)', () => {
       const down = withDownCapture();
       const onFallback = vi.fn();
       withBridge({ onDown: down.onDown });
-      render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} onFallback={onFallback} />);
+      render(<TerminalStreamTab projectId="p1" rowId="s1" onFallback={onFallback} />);
       await act(async () => {
         await Promise.resolve();
         await Promise.resolve();
@@ -1016,7 +1022,7 @@ describe('the onDown banner (review finding)', () => {
     const down = withDownCapture();
     const onFallback = vi.fn();
     withBridge({ onDown: down.onDown });
-    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} onFallback={onFallback} />);
+    render(<TerminalStreamTab projectId="p1" rowId="s1" onFallback={onFallback} />);
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -1041,7 +1047,7 @@ describe('the onDown banner (review finding)', () => {
         };
       },
     });
-    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    render(<TerminalStreamTab projectId="p1" rowId="s1" />);
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -1068,7 +1074,7 @@ describe('the onDown banner (review finding)', () => {
         };
       },
     });
-    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    render(<TerminalStreamTab projectId="p1" rowId="s1" />);
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -1087,7 +1093,7 @@ describe('the onDown banner (review finding)', () => {
     try {
       visibility.mockReturnValue('visible');
       withBridge({ onDown: down.onDown });
-      render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      render(<TerminalStreamTab projectId="p1" rowId="s1" />);
       await act(async () => {
         await Promise.resolve();
         await Promise.resolve();
@@ -1126,7 +1132,7 @@ describe('tmux stays sized to xterm across a reconnect (task brief: cols×rows m
         };
       },
     });
-    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    render(<TerminalStreamTab projectId="p1" rowId="s1" />);
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
