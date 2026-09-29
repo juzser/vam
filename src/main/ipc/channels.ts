@@ -451,6 +451,17 @@ export const CHANNELS = {
    */
   terminalStreamClose: 'vam:terminal:stream:close',
   /**
+   * THE RENDERER'S ACK for delivered `terminalStreamData` bytes -- main
+   * counts unacknowledged forwarded bytes per stream (`stream-ipc.ts`'s own
+   * `STREAM_UNACKED_HIGH_WATER_BYTES`) and stops forwarding once that count
+   * gets too far ahead of what the renderer has actually drawn; this channel
+   * is how the renderer reports progress back so main can resume. The
+   * renderer is the least trusted side of this bridge, so the handler
+   * validates every argument and never throws -- see `stream-ipc.ts`'s own
+   * ack-path note.
+   */
+  terminalStreamAck: 'vam:terminal:stream:ack',
+  /**
    * ONE keystroke (or a paste, or an escape sequence -- whatever xterm's own
    * `onData` handed the renderer) into the pane a streaming connection is
    * attached to. Silently ignored for an unknown/closed `streamId`: a
