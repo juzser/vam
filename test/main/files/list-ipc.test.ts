@@ -174,3 +174,78 @@ describe('registerFilesListIpc containment on a real disk', () => {
     }
   });
 });
+
+describe('registerFilesListIpc dir edge cases on a real disk', () => {
+  async function withTree(
+    run: (ctx: {
+      cwd: string;
+      reads: string[];
+      invoke: (...a: unknown[]) => unknown;
+    }) => Promise<void>,
+  ) {
+    const base = await mkdtemp(join(tmpdir(), 'vam-list-edge-'));
+    try {
+      const cwd = join(base, 'cwd');
+      await mkdir(join(cwd, 'a'), { recursive: true });
+      await writeFile(join(cwd, 'a', 'f.txt'), 'x');
+      await writeFile(join(cwd, 'file.txt'), 'x');
+      const reads: string[] = [];
+      const spy: ReadDir = async (p) => {
+        reads.push(p);
+        return readdir(p, { withFileTypes: true });
+      };
+      const { invoke } = harness({
+        resolveCwd: async () => cwd,
+        realpathFn: realpath,
+        readDir: spy,
+      });
+      await run({ cwd: await realpath(cwd), reads, invoke });
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  }
+
+  it("dir '.' lists the root itself", async () => {
+    await withTree(async ({ invoke }) => {
+      const r = (await invoke('s1', '.')) as { ok: true; value: { entries: { name: string }[] } };
+      expect(r.ok).toBe(true);
+      expect(r.value.entries.map((e) => e.name)).toEqual(['a', 'file.txt']);
+    });
+  });
+
+  it('admits an absolute path inside the cwd', async () => {
+    await withTree(async ({ cwd, invoke }) => {
+      const r = (await invoke('s1', join(cwd, 'a'))) as {
+        ok: true;
+        value: { entries: unknown[]; dir: string };
+      };
+      expect(r.ok).toBe(true);
+      expect(r.value.dir).toBe(join(cwd, 'a'));
+      expect(r.value.entries).toEqual([{ name: 'f.txt', kind: 'file' }]);
+    });
+  });
+
+  it('refuses a nonexistent dir with zero reads', async () => {
+    await withTree(async ({ reads, invoke }) => {
+      const r = (await invoke('s1', 'nope')) as { ok: false; error: { kind: string } };
+      expect(r.ok).toBe(false);
+      expect(r.error.kind).toBe('refused');
+      expect(reads).toEqual([]);
+    });
+  });
+
+  it('refuses (does not throw) when dir is a file', async () => {
+    await withTree(async ({ invoke }) => {
+      const r = (await invoke('s1', 'file.txt')) as { ok: false; error: { kind: string } };
+      expect(r.ok).toBe(false);
+      expect(r.error.kind).toBe('refused');
+    });
+  });
+
+  it('refuses a sibling whose name merely prefixes the cwd', async () => {
+    await withTree(async ({ cwd, invoke }) => {
+      const r = (await invoke('s1', `${cwd}-evil`)) as { ok: false };
+      expect(r.ok).toBe(false);
+    });
+  });
+});
