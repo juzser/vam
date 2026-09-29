@@ -29,7 +29,7 @@
  */
 
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Decision, Session } from '../../src/renderer/domain/model.js';
 import type { WorktreeInfo } from '../../src/shared/worktree.js';
@@ -89,6 +89,12 @@ beforeAll(() => {
   globalThis.DOMMatrixReadOnly ??= class {
     m22 = 1;
   } as unknown as typeof DOMMatrixReadOnly;
+});
+
+// The Worktrees section ships hidden (`hideWorktrees`); these tests are about
+// the section itself, so they start with it shown.
+beforeEach(() => {
+  localStorage.setItem('vam.prefs.v1', JSON.stringify({ filters: { hideWorktrees: false } }));
 });
 
 afterEach(() => {

@@ -32,7 +32,7 @@
  */
 
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Decision, Session } from '../../src/renderer/domain/model.js';
 import type { WorktreeInfo } from '../../src/shared/worktree.js';
@@ -103,6 +103,12 @@ function installApi() {
   };
   return { list, create };
 }
+
+// The Worktrees section ships hidden (`hideWorktrees`); these tests are about
+// the section itself, so they start with it shown.
+beforeEach(() => {
+  localStorage.setItem('vam.prefs.v1', JSON.stringify({ filters: { hideWorktrees: false } }));
+});
 
 afterEach(() => {
   cleanup();
@@ -184,7 +190,7 @@ describe('a worktree session nested under "Worktrees" keeps the sidebar keyboard
     press('j');
     expect(focusedRow()).toBe('c1');
 
-    // A REAL refresh: the "+" -> type a name -> Create round trip, which
+    // A REAL refresh: the chord -> type a name -> Create round trip, which
     // is what makes `WorktreesSection`'s own `useWorktrees` call `list()`
     // again (`reload()`, its own header) -- not a synthetic re-render
     // standing in for one. The exact call COUNT is not the point (both
@@ -192,7 +198,13 @@ describe('a worktree session nested under "Worktrees" keeps the sidebar keyboard
     // `list()` independently, so the baseline is already more than one) --
     // an INCREASE after Create is what proves a real refetch happened.
     const before = list.mock.calls.length;
-    fireEvent.click(document.querySelector('[data-worktrees-add="p1"]') as HTMLButtonElement);
+    // The header `+` is gone; the project menu's "New worktree…" opens the form.
+    fireEvent.click(document.querySelector('[data-project-menu="p1"]') as HTMLElement);
+    fireEvent.click(
+      document.querySelector(
+        '[data-project-menu-panel="p1"] [data-project-menu-item="new-worktree"]',
+      ) as HTMLElement,
+    );
     const nameInput = await waitFor(() => {
       const el = document.querySelector('[data-worktrees-create-name]');
       if (el === null) throw new Error('create form not open yet');
