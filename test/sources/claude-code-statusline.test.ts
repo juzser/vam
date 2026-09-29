@@ -219,6 +219,8 @@ describe('startTextWithStatusLine', () => {
       'claude > out',
       'claude\nls',
       'claude --x\nls',
+      'claude --permission-mode plan fix it',
+      'claude \u2028ls',
     ]) {
       expect(inject(t).out).toBe(t);
     }
