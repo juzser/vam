@@ -30,6 +30,8 @@
  * hides it behind a shut parent has answered nothing.
  */
 
+import type { FileDirEntry } from '../../main/files/types.js';
+
 /** One visible row of the tree. */
 export type FileTreeRow = {
   /** Absolute, and unique: the row's identity everywhere else. */
@@ -41,6 +43,8 @@ export type FileTreeRow = {
   readonly isDirectory: boolean;
   /** The directory row that holds this one, or null at depth 0. */
   readonly parent: string | null;
+  /** True while this open directory's children are still being read. */
+  readonly loading?: boolean;
 };
 
 type Node = {
@@ -149,6 +153,48 @@ export function fileTreeRows({
     }
   };
   walk(rootNode, 0, null);
+  return rows;
+}
+
+/**
+ * The VISIBLE rows when nothing is filtered: derived from the directory levels
+ * loaded so far (`dirs`, keyed by absolute directory path), never from a walk.
+ * An open directory whose level has not arrived draws no children and is
+ * marked `loading` when it is in `loading`; a collapsed one is never read.
+ */
+export function lazyTreeRows({
+  root,
+  dirs,
+  loading,
+  expanded,
+}: {
+  readonly root: string;
+  readonly dirs: ReadonlyMap<string, readonly FileDirEntry[]>;
+  readonly loading: ReadonlySet<string>;
+  readonly expanded: ReadonlySet<string>;
+}): readonly FileTreeRow[] {
+  const rows: FileTreeRow[] = [];
+  const walk = (dir: string, depth: number, parent: string | null): void => {
+    const entries = [...(dirs.get(dir) ?? [])].sort((a, b) => {
+      if (a.kind !== b.kind) return a.kind === 'dir' ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+    for (const entry of entries) {
+      const path = `${dir}/${entry.name}`;
+      const isDirectory = entry.kind === 'dir';
+      const open = isDirectory && expanded.has(path);
+      rows.push({
+        path,
+        name: entry.name,
+        depth,
+        isDirectory,
+        parent,
+        ...(open && loading.has(path) ? { loading: true } : {}),
+      });
+      if (open) walk(path, depth + 1, path);
+    }
+  };
+  walk(baseOf(root), 0, null);
   return rows;
 }
 
