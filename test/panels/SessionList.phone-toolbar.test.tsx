@@ -48,32 +48,55 @@ describe('the phone toolbar row (Orca one-row pass)', () => {
     expect(container.querySelectorAll('button[aria-label="filter sessions"]')).toHaveLength(1);
   });
 
-  it('holds every control in one row, and none of it in the avatar bar any more', () => {
+  it('holds every control in one row, and none of it in the avatar bar', () => {
     mountPhone();
 
     const toolbar = document.querySelector('[data-phone-toolbar]');
     expect(toolbar).not.toBeNull();
     expect(toolbar).toBe(document.querySelector('[data-projects-header]'));
+    expect(document.querySelector('[data-avatar-bar]')).toBeNull();
 
-    const bar = document.querySelector('[data-avatar-bar]');
-    expect(bar).not.toBeNull();
-
-    for (const label of ['usage', 'search sessions']) {
+    for (const label of ['remote access', 'switch to light theme', 'search sessions']) {
       const control = screen.getByLabelText(label);
       expect(control.closest('[data-phone-toolbar]'), `${label} is in the toolbar`).not.toBeNull();
-      expect(control.closest('[data-avatar-bar]'), `${label} left the avatar bar`).toBeNull();
     }
+  });
 
-    // Remote and the theme toggle are one tap further in, behind "more
-    // actions" (the row's own overflow control, see its comment in
-    // `SessionList.tsx`) -- still in the toolbar, still out of the avatar
-    // bar, just not painted until that button is pressed.
-    fireEvent.click(screen.getByLabelText('more actions'));
-    for (const label of ['remote access', 'switch to light theme']) {
-      const control = screen.getByLabelText(label);
-      expect(control.closest('[data-phone-toolbar]'), `${label} is in the toolbar`).not.toBeNull();
-      expect(control.closest('[data-avatar-bar]'), `${label} left the avatar bar`).toBeNull();
-    }
+  it('has no account icon, no 3-dots toggle and no more-menu on a phone', () => {
+    mountPhone();
+    expect(document.querySelector('[data-usage-toggle]')).toBeNull();
+    expect(document.querySelector('[data-more-toggle]')).toBeNull();
+    expect(document.querySelector('[data-more-menu]')).toBeNull();
+    expect(screen.queryByLabelText('more actions')).toBeNull();
+  });
+
+  it('ends with Remote, Theme, Search, right-aligned behind a spacer', () => {
+    mountPhone();
+    const toolbar = document.querySelector('[data-phone-toolbar]') as HTMLElement;
+    const kids = [...toolbar.children];
+    const last3 = kids.slice(-3);
+    expect(
+      last3[0]?.getAttribute('aria-label') ??
+        last3[0]?.querySelector('button')?.getAttribute('aria-label'),
+    ).toBe('remote access');
+    expect(
+      last3[1]?.getAttribute('aria-label') ??
+        last3[1]?.querySelector('button')?.getAttribute('aria-label'),
+    ).toBe('switch to light theme');
+    expect(
+      last3[2]?.getAttribute('aria-label') ??
+        last3[2]?.querySelector('button')?.getAttribute('aria-label'),
+    ).toBe('search sessions');
+    const spacer = kids[kids.length - 4];
+    expect(spacer?.tagName).toBe('SPAN');
+    expect(spacer?.className).toContain('flex-1');
+    expect(spacer?.children).toHaveLength(0);
+  });
+
+  it('renders no menu inside the scrolling toolbar row for it to clip', () => {
+    mountPhone();
+    const scroller = document.querySelector('.overflow-x-auto');
+    expect(scroller?.querySelector('[role="menu"]') ?? null).toBeNull();
   });
 
   it('keeps the new-group and new-project controls reachable, unmoved', () => {
@@ -110,36 +133,18 @@ describe('the phone toolbar row (Orca one-row pass)', () => {
     expect(badge?.textContent).toBe('1');
   });
 
-  it('calls onRemote / onToggleTheme from the "more" menu, not onSettings', () => {
+  it('calls onRemote / onToggleTheme once each from the direct buttons, not onSettings', () => {
     const onRemote = vi.fn();
     const onToggleTheme = vi.fn();
     const onSettings = vi.fn();
     mountPhone({ onRemote, onToggleTheme, onSettings });
 
-    fireEvent.click(screen.getByLabelText('more actions'));
     fireEvent.click(screen.getByLabelText('remote access'));
-    // Picking one item closes the menu -- open it again for the second.
-    fireEvent.click(screen.getByLabelText('more actions'));
     fireEvent.click(screen.getByLabelText('switch to light theme'));
 
     expect(onRemote).toHaveBeenCalledTimes(1);
     expect(onToggleTheme).toHaveBeenCalledTimes(1);
     expect(onSettings).not.toHaveBeenCalled();
-  });
-
-  it('closes the "more" menu once an item is picked', () => {
-    mountPhone();
-    fireEvent.click(screen.getByLabelText('more actions'));
-    expect(document.querySelector('[data-more-menu]')).not.toBeNull();
-    fireEvent.click(screen.getByLabelText('remote access'));
-    expect(document.querySelector('[data-more-menu]')).toBeNull();
-  });
-
-  it('opens the usage popover from its relocated account icon', () => {
-    mountPhone();
-    expect(document.querySelector('[data-usage-panel]')).toBeNull();
-    fireEvent.click(screen.getByLabelText('usage'));
-    expect(document.querySelector('[data-usage-panel]')).not.toBeNull();
   });
 });
 

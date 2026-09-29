@@ -1680,54 +1680,6 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     return () => document.removeEventListener('pointerdown', dismiss);
   }, [filterMenuOpen, onFilterMenuToggle]);
 
-  /**
-   * The phone toolbar's overflow menu (Orca one-row pass): Remote and the
-   * theme toggle, tucked behind one "more" button rather than drawn bare in
-   * the row -- the operator's own suggestion for exactly this case
-   * ("possibly inside an overflow menu"), reached for once the row was
-   * measured overflowing at 390px with both drawn bare (`e2e/phone-
-   * overflow.pw.ts`'s own row-overflow tests are what this state exists to
-   * keep green). Local state, not a prop: unlike the filter popover this
-   * menu answers to nothing outside this component, and its own two items
-   * call props (`onRemote`, `onToggleTheme`) that already exist.
-   */
-  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
-  const moreButtonRef = useRef<HTMLButtonElement>(null);
-  const moreMenuRef = useRef<HTMLDivElement>(null);
-  const moreMenuWasOpen = useRef(false);
-
-  /** Same contract as the filter popover's own focus effect, above. */
-  useEffect(() => {
-    if (moreMenuOpen) {
-      moreMenuRef.current?.querySelector('button')?.focus();
-    } else if (moreMenuWasOpen.current) {
-      moreButtonRef.current?.focus();
-    }
-    moreMenuWasOpen.current = moreMenuOpen;
-  }, [moreMenuOpen]);
-
-  /** Same contract as the filter popover's own dismiss effect, above. */
-  useEffect(() => {
-    if (!moreMenuOpen) {
-      return;
-    }
-    const dismiss = (event: PointerEvent) => {
-      const target = event.target as globalThis.Node | null;
-      if (target === null) {
-        return;
-      }
-      if (moreMenuRef.current?.contains(target) === true) {
-        return;
-      }
-      if (moreButtonRef.current?.contains(target) === true) {
-        return;
-      }
-      setMoreMenuOpen(false);
-    };
-    document.addEventListener('pointerdown', dismiss);
-    return () => document.removeEventListener('pointerdown', dismiss);
-  }, [moreMenuOpen]);
-
   // Imperative focus in both cases, for the same reason: the keystroke that
   // opened the box is the request for it, so `autoFocus` would be claiming a
   // thing that was already granted, wherever the element happened to mount.
@@ -3137,7 +3089,14 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
         // set on desktop: this header is the sidebar's own everywhere else,
         // and a desktop window has no safe area to grow into.
         {...(phone ? { 'data-phone-list-top-bar': '' } : {})}
-        className="flex flex-col gap-2.5 border-line border-b p-3"
+        className={
+          // Decision #25: on a phone the row exists only while the source is
+          // connecting or in error. Without it the header keeps only the
+          // safe-area top padding the CSS rule above provides.
+          phone && sourceReadout === undefined
+            ? ''
+            : 'flex flex-col gap-2.5 border-line border-b p-3'
+        }
       >
         {/* The avatar bar, which used to be the sidebar's footer.
             It took the place of the workspace line -- avatar, name and the
@@ -3145,8 +3104,9 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
             has exactly one workspace, so a line naming it spent the widest
             row in the column restating something that never varies, and the
             avatar already carries its initial for anyone who wants it. */}
-        <div data-avatar-bar className="flex items-center gap-[7px]">
-          {/* THE ACCOUNT ICON, where the letter avatar used to sit -- the
+        {(!phone || sourceReadout !== undefined) && (
+          <div data-avatar-bar className="flex items-center gap-[7px]">
+            {/* THE ACCOUNT ICON, where the letter avatar used to sit -- the
               operator's own request: replace the initial with an icon that
               opens usage for every provider vam knows, reset times and all.
               `UsagePopover` is self-contained (its own open state, its own
@@ -3159,8 +3119,8 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
               toggle) moved down into `data-projects-header`, which became the
               phone's one TOOLBAR row below it. See that row's own comments
               for where each landed. */}
-          {!phone && <UsagePopover />}
-          {/* THE STATS & USAGE ENTRY ICON, beside the account icon at the
+            {!phone && <UsagePopover />}
+            {/* THE STATS & USAGE ENTRY ICON, beside the account icon at the
               operator's own request. NOT ON A PHONE, the same rule Settings
               takes a few lines below and for the identical reason: this
               reads `window.api.stats`, which is not a member of
@@ -3174,18 +3134,18 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
               this one did not: there is nothing to move it TO that would
               work there, since a phone build has no bridge to reach it from
               either way. */}
-          {!phone && onStats !== undefined && <StatsPopover onStats={onStats} />}
-          {/* Pushes the icons to the right edge on every surface. On a
+            {!phone && onStats !== undefined && <StatsPopover onStats={onStats} />}
+            {/* Pushes the icons to the right edge on every surface. On a
               phone, and only there, it is ALSO where the connectivity dot
               lives now: `min-w-0`/`truncate` so the rare non-healthy arms
               (real words, not a bare dot -- "connecting to the source…", an
               error) shrink rather than shove the icons off a 390px row. */}
-          {phone && sourceReadout !== undefined ? (
-            <span className="min-w-0 flex-1 truncate">{sourceReadout}</span>
-          ) : (
-            <span className="flex-1" />
-          )}
-          {/* NOT ON A PHONE, at the operator's request -- and the reason is
+            {phone && sourceReadout !== undefined ? (
+              <span className="min-w-0 flex-1 truncate">{sourceReadout}</span>
+            ) : (
+              <span className="flex-1" />
+            )}
+            {/* NOT ON A PHONE, at the operator's request -- and the reason is
               not that the screen is small. Four of the five sections behind
               this gear read and write `prefs`, which is `localStorage` on
               whichever device is looking: a theme chosen on the phone changes
@@ -3195,19 +3155,19 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
               this is the one whose subject is the DESKTOP, so it stays and
               opens the overlay on the one section a phone can act on. See
               `settings/sections.ts`, `PHONE_SECTIONS`. */}
-          {!phone && (
-            <ShortcutTip label="Settings" action={SETTINGS_ACTION}>
-              <button
-                type="button"
-                onClick={onSettings}
-                aria-label="settings"
-                className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-[7px] text-ink-faint hover:text-ink"
-              >
-                <Settings size={14} strokeWidth={1.5} />
-              </button>
-            </ShortcutTip>
-          )}
-          {/* Beside Settings, at the operator's request: pairing, approve/deny,
+            {!phone && (
+              <ShortcutTip label="Settings" action={SETTINGS_ACTION}>
+                <button
+                  type="button"
+                  onClick={onSettings}
+                  aria-label="settings"
+                  className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-[7px] text-ink-faint hover:text-ink"
+                >
+                  <Settings size={14} strokeWidth={1.5} />
+                </button>
+              </ShortcutTip>
+            )}
+            {/* Beside Settings, at the operator's request: pairing, approve/deny,
               unpair and revoke-all were all real already, buried one section
               inside Settings. This opens the same overlay, focused directly
               on Remote (`SettingsOverlay`'s `initialSection`) — one surface,
@@ -3221,36 +3181,37 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
               DESKTOP ONLY, now: on a phone this control moved to the one
               toolbar row (`data-projects-header`), where it opts into
               `vam-tap` itself instead of inheriting this bar's 44px rule. */}
-          {!phone && (
-            <ShortcutTip label="Remote access" action={REMOTE_ACTION}>
-              <button
-                type="button"
-                onClick={onRemote}
-                aria-label="remote access"
-                className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-[7px] text-ink-faint hover:text-ink"
-              >
-                <Smartphone size={14} strokeWidth={1.5} />
-              </button>
-            </ShortcutTip>
-          )}
-          {/* No chord reaches the theme toggle, so the tip is its label.
+            {!phone && (
+              <ShortcutTip label="Remote access" action={REMOTE_ACTION}>
+                <button
+                  type="button"
+                  onClick={onRemote}
+                  aria-label="remote access"
+                  className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-[7px] text-ink-faint hover:text-ink"
+                >
+                  <Smartphone size={14} strokeWidth={1.5} />
+                </button>
+              </ShortcutTip>
+            )}
+            {/* No chord reaches the theme toggle, so the tip is its label.
               DESKTOP ONLY -- see the Remote comment just above; the phone's
               own copy lives in the toolbar row now. */}
-          {!phone && (
-            <ShortcutTip
-              label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-            >
-              <button
-                type="button"
-                onClick={onToggleTheme}
-                aria-label={theme === 'dark' ? 'switch to light theme' : 'switch to dark theme'}
-                className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-[7px] text-ink-faint hover:text-ink"
+            {!phone && (
+              <ShortcutTip
+                label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
               >
-                <Sun size={14} strokeWidth={1.5} />
-              </button>
-            </ShortcutTip>
-          )}
-        </div>
+                <button
+                  type="button"
+                  onClick={onToggleTheme}
+                  aria-label={theme === 'dark' ? 'switch to light theme' : 'switch to dark theme'}
+                  className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-[7px] text-ink-faint hover:text-ink"
+                >
+                  <Sun size={14} strokeWidth={1.5} />
+                </button>
+              </ShortcutTip>
+            )}
+          </div>
+        )}
 
         {/* DESKTOP ONLY. A phone no longer carries a full-width search box of
             its own row -- it is an icon in the toolbar row that expands IN
@@ -4064,110 +4025,37 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
           </div>
         )}
 
-        {/* THE REST OF ORCA'S ROW, phone only: the icons that used to live in
-            the avatar bar above (account, Remote, the theme toggle), plus
-            search, last -- Orca's own order ("icon buttons: account,
-            list/view, and search"). None of the three is a new control; each
-            is the identical button the avatar bar drew before this pass,
-            only relocated. Remote and the theme toggle opt into `vam-tap`
-            directly (a plain glyph, no `[data-tap-skin]` needed) now that
-            they no longer sit inside `[data-avatar-bar]`, whose own CSS rule
-            gave them the same 44px floor for free.
-
-            `UsagePopover` TAKES NO `vam-tap` WRAPPER (its own header states
-            why: its 24px button used to inherit the 44px floor the same
-            free way, living inside `[data-avatar-bar]`). Wrapping it in a
-            `vam-tap` span here would size THAT span and leave the real
-            `<button data-usage-toggle>` inside it unsized -- `test/phone/
-            touch-targets.test.tsx` reads `getComputedStyle` off the actual
-            control, not a decorative ancestor, and caught exactly that.
-            `styles.css` enumerates `[data-usage-toggle]` under this row
-            instead, the same "opt in by name, not by a blanket selector"
-            rule every other enumeration in that file already follows --
-            its floor is now the row's own 30px, folded into that same
-            rule (see its comment for why).
-
-            NO `phone` PROP ANY MORE. It used to carry the toggle's OWN paint
-            (the operator's follow-up request to drop this button's filled
-            circle at rest, after looking at the shipped screenshot) until the
-            settings-views work dropped the desktop toggle's resting fill too
-            (item H: "remove the account icon's background, on desktop too") --
-            once both call sites paint identically, a prop that selects between
-            two now-identical class strings is dead weight, so `UsagePopover`
-            lost the parameter rather than keep it unread. Desktop's call site
-            three thousand lines up is the same bare `<UsagePopover />`. */}
-        {phone && <UsagePopover />}
-        {/* REMOTE AND THE THEME TOGGLE, BEHIND ONE "MORE" BUTTON. Drawn bare
-            (each its own `vam-tap` icon, same as every other control in this
-            row) this row measured 460px of content in a 389px box at 390px --
-            71px unreachable without a scroll, on the two controls the
-            operator asked for last and named as candidates for exactly this
-            move ("possibly inside an overflow menu"). Tucking both behind
-            one 44px button gives the row back 44px net (two icons for one)
-            and, more to the point, moves them out of the row a finger has to
-            scroll to reach: `e2e/phone-overflow.pw.ts` holds the row's own
-            scrollWidth/clientWidth budget at 360/390/430px. Neither control
-            is gone -- both are one more tap away, same handlers
-            (`onRemote`, `onToggleTheme`), same labels. */}
+        {/* PHONE ONLY, right-aligned behind a spacer (decision #25): Remote
+            and the theme toggle are direct icon buttons now, ahead of Search.
+            The account icon and the 3-dots menu are gone from this row; the
+            desktop keeps its own account icon in the avatar bar. Same
+            handlers (`onRemote`, `onToggleTheme`) as the desktop buttons. */}
+        {phone && <span className="flex-1" />}
         {phone && (
-          <span className="relative flex-none">
-            <ShortcutTip label="More">
-              <button
-                ref={moreButtonRef}
-                type="button"
-                data-more-toggle
-                aria-haspopup="menu"
-                aria-expanded={moreMenuOpen}
-                aria-label="more actions"
-                onClick={() => setMoreMenuOpen((open) => !open)}
-                className="vam-tap flex cursor-pointer items-center justify-center text-ink-faint"
-              >
-                <MoreHorizontal size={16} strokeWidth={1.6} />
-              </button>
-            </ShortcutTip>
-            {moreMenuOpen && (
-              <div
-                ref={moreMenuRef}
-                data-more-menu
-                role="menu"
-                aria-label="more actions"
-                onKeyDown={(event) => {
-                  if (event.key === 'Escape') {
-                    event.preventDefault();
-                    setMoreMenuOpen(false);
-                  }
-                }}
-                className="absolute top-[46px] right-0 z-20 flex w-[176px] flex-col rounded-[9px] border border-line-strong bg-card p-1 shadow-lg"
-              >
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setMoreMenuOpen(false);
-                    onRemote();
-                  }}
-                  aria-label="remote access"
-                  className="vam-tap flex cursor-pointer items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
-                >
-                  <Smartphone size={14} strokeWidth={1.5} aria-hidden="true" />
-                  Remote access
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setMoreMenuOpen(false);
-                    onToggleTheme();
-                  }}
-                  aria-label={theme === 'dark' ? 'switch to light theme' : 'switch to dark theme'}
-                  className="vam-tap flex cursor-pointer items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
-                >
-                  <Sun size={14} strokeWidth={1.5} aria-hidden="true" />
-                  {theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-                </button>
-              </div>
-            )}
-          </span>
+          <ShortcutTip label="Remote access" action={REMOTE_ACTION}>
+            <button
+              type="button"
+              data-remote-toggle
+              onClick={onRemote}
+              aria-label="remote access"
+              className="vam-tap flex flex-none cursor-pointer items-center justify-center text-ink-faint"
+            >
+              <Smartphone size={14} strokeWidth={1.5} />
+            </button>
+          </ShortcutTip>
+        )}
+        {phone && (
+          <ShortcutTip label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}>
+            <button
+              type="button"
+              data-theme-toggle
+              onClick={onToggleTheme}
+              aria-label={theme === 'dark' ? 'switch to light theme' : 'switch to dark theme'}
+              className="vam-tap flex flex-none cursor-pointer items-center justify-center text-ink-faint"
+            >
+              <Sun size={14} strokeWidth={1.5} />
+            </button>
+          </ShortcutTip>
         )}
         {/* SEARCH, LAST, phone only. Collapsed it is one icon; expanded
             (`filtering`, the same state and the same `filterRef`/handlers the

@@ -834,10 +834,7 @@ test.describe('settings at 390px', () => {
   async function openSettings(page: Page): Promise<void> {
     await openDemo(page);
     await expect(page.locator('[data-phone-shell] button[aria-label="settings"]')).toHaveCount(0);
-    // Remote is one tap further in now, behind the toolbar's "more actions"
-    // overflow button (Orca one-row pass, follow-up to pull request 527) --
-    // opening it is what reveals the Remote item this then taps.
-    await page.locator('[data-phone-shell] button[aria-label="more actions"]').first().tap();
+    // Remote is a direct button in the toolbar row.
     await page.locator('[data-phone-shell] button[aria-label="remote access"]').first().tap();
     await expect(page.locator('[data-settings-overlay]')).toBeVisible();
   }
@@ -2320,11 +2317,15 @@ test.describe('the foreign-hidden quiet line on a phone list screen', () => {
     // sits inside the avatar row now, not in a bar of its own above it.
     expect(geometry.looseHeaderAboveList).toBe(false);
     const { sourceBox, avatarBarBox } = geometry;
-    if (sourceBox === null || avatarBarBox === null) throw new Error('source or avatar bar missing');
-    expect(sourceBox.y, JSON.stringify(geometry)).toBeGreaterThanOrEqual(avatarBarBox.y);
-    expect(sourceBox.y + sourceBox.h, JSON.stringify(geometry)).toBeLessThanOrEqual(
-      avatarBarBox.y + avatarBarBox.h,
-    );
+    // A healthy or demo source draws no readout and no row at all now; when
+    // one is drawn (connecting / error) it must sit inside its bar.
+    if (sourceBox !== null) {
+      if (avatarBarBox === null) throw new Error('source without an avatar bar');
+      expect(sourceBox.y, JSON.stringify(geometry)).toBeGreaterThanOrEqual(avatarBarBox.y);
+      expect(sourceBox.y + sourceBox.h, JSON.stringify(geometry)).toBeLessThanOrEqual(
+        avatarBarBox.y + avatarBarBox.h,
+      );
+    }
 
     // (c) THE BLOCK CENTRES IN THE FREE AREA -- the header above it to the
     // bottom of the screen (the status bar, when it draws anything; the

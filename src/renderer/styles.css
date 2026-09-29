@@ -2896,8 +2896,8 @@ html {
 [data-phone-shell] [data-phone-toolbar] [data-new-project],
 [data-phone-shell] [data-phone-toolbar] [data-filter-toggle],
 [data-phone-shell] [data-phone-toolbar] [data-group-toggle],
-[data-phone-shell] [data-phone-toolbar] [data-usage-toggle],
-[data-phone-shell] [data-phone-toolbar] [data-more-toggle],
+[data-phone-shell] [data-phone-toolbar] [data-remote-toggle],
+[data-phone-shell] [data-phone-toolbar] [data-theme-toggle],
 [data-phone-shell] [data-phone-toolbar] [data-search-toggle],
 [data-phone-shell] [data-phone-toolbar] [data-search-cancel] {
   min-height: 30px;

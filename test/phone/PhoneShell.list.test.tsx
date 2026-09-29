@@ -36,16 +36,27 @@ describe('the phone list screen', () => {
     expect(document.querySelector('[data-sidebar-pane]')).not.toBeNull();
   });
 
-  it('says where the rows came from — a dropped tunnel must not look idle', () => {
+  // Decision #25: the top row shows ONLY while the source is connecting or in
+  // error. A healthy session source is a lone green dot, which is not worth a row.
+  it('draws no top row and no source readout while the source is healthy', () => {
     render(<Canvas model={MODEL} source={phoneSource()} />);
+    expect(document.querySelector('[data-avatar-bar]')).toBeNull();
+    expect(document.querySelector('[data-source]')).toBeNull();
+  });
+
+  it('says so in the header when the source carries an error', () => {
+    const healthy = phoneSource();
+    if (healthy.kind !== 'session') throw new Error('expected a session source');
+    render(<Canvas model={MODEL} source={{ ...healthy, error: 'tunnel dropped' }} />);
     const readout = document.querySelector('[data-source]');
-    // The name is `sr-only` now that the healthy arm has stopped painting the
-    // joined source labels (`Canvas.source-cell.test.tsx` holds that decision
-    // and the operator's reason for it). It is still IN the cell, which is
-    // what this test is about: the phone must not look idle when the tunnel
-    // drops, and it still names the source to anything that reads the DOM.
-    expect(readout?.textContent).toContain('Claude Code');
-    // In the app bar, not in a canvas top bar that is not drawn.
+    expect(readout?.textContent).toContain('tunnel dropped');
+    expect(readout?.closest('header')).not.toBeNull();
+  });
+
+  it('says it is connecting while there is no source yet', () => {
+    render(<Canvas model={MODEL} source={{ kind: 'connecting' }} />);
+    const readout = document.querySelector('[data-source]');
+    expect(readout?.textContent).toContain('connecting to the source…');
     expect(readout?.closest('header')).not.toBeNull();
   });
 
@@ -66,6 +77,14 @@ describe('the phone list screen', () => {
     const bar = document.querySelector('[data-phone-list-top-bar]');
     expect(bar).not.toBeNull();
     expect(bar?.tagName).toBe('HEADER');
+  });
+
+  it('keeps the safe-area hook but draws no bordered bar when the header is empty', () => {
+    render(<Canvas model={MODEL} source={phoneSource()} />);
+    const bar = document.querySelector('[data-phone-list-top-bar]');
+    expect(bar).not.toBeNull();
+    expect(bar?.className).not.toMatch(/border/);
+    expect(bar?.className).not.toMatch(/\bp-3\b/);
   });
 
   it('pushes the session screen on a tap and pops it on the chevron', () => {
