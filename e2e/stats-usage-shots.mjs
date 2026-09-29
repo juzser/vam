@@ -238,6 +238,9 @@ const browser = await chromium.launch();
   check('the entry icon is in the avatar bar', (await page.locator('[aria-label="stats"]').count()) === 1);
 
   await page.click('[aria-label="stats"]');
+  await page.waitForSelector('[data-stats-popover] [data-stats-heatmap]', { timeout: 5_000 });
+  check('the icon opens the stats popover first', (await page.locator('[data-settings-overlay]').count()) === 0);
+  await page.getByRole('button', { name: 'Details' }).click();
   const dialog = page.locator('[data-settings-overlay]');
   await dialog.waitFor({ timeout: 5_000 });
   check('the icon opens Settings', (await dialog.count()) === 1);

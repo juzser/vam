@@ -2144,4 +2144,21 @@ describe('A15.3: the restore strip shows for a while, then goes — reachably', 
     );
     expect(container.querySelector('[data-filter-hidden-projects]')).toBeNull();
   });
+
+  it('the stats button opens the stats popover and does not call onStats', async () => {
+    const onStats = vi.fn();
+    (window as unknown as { api: unknown }).api = {
+      stats: { get: vi.fn().mockResolvedValue({ kind: 'error', message: 'x' }) },
+    };
+    try {
+      const { container } = render(<SessionList {...baseProps(entries)} onStats={onStats} />);
+      await act(async () => {
+        fireEvent.click(screen.getByLabelText('stats'));
+      });
+      expect(container.querySelector('[data-stats-popover]')).not.toBeNull();
+      expect(onStats).not.toHaveBeenCalled();
+    } finally {
+      delete (window as unknown as { api?: unknown }).api;
+    }
+  });
 });
