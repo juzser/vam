@@ -233,3 +233,38 @@ test('the input pill still fills the width the buttons leave it', async ({ page 
   // The pill is the row's flexible item: most of the composer's width.
   expect((pill?.width ?? 0) > (tools?.width ?? 0)).toBe(true);
 });
+
+const SCREENSHOT_DIR =
+  '/private/tmp/claude-501/-Users-ser-scatola-jobs-projects-blacksmith/04eaaef5-ce61-45c0-a78f-28c43d92b1b2/scratchpad';
+
+/**
+ * ITEM 19, MEASURED BEFORE ANY FIX ("the input box has no padding and looks
+ * off"): a 390px screenshot of the composer plus the two candidate numbers.
+ * (a) the textarea's text inset from the pill's outer border, (b) the first
+ * strip chip's painted left edge against the pill's left edge.
+ */
+test('at 390px: the composer is screenshotted and its two edge insets measured', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: SHELL_H });
+  await stubRemote(page);
+  await openSession(page);
+  await expect(page.locator('[data-phone-shell] [data-key-strip]')).toBeVisible();
+  await page
+    .locator('[data-phone-shell] [data-composer-bar]')
+    .screenshot({ path: `${SCREENSHOT_DIR}/w11-t14-composer-390.png` });
+  const m = await page.evaluate(() => {
+    const q = (s: string) => document.querySelector(s) as HTMLElement;
+    const pill = q('[data-phone-shell] [data-prompt-input]');
+    const ta = q('[data-phone-shell] [data-composer-bar] textarea');
+    const chip = q('[data-phone-shell] [data-key-strip-key] > [data-tap-skin]');
+    const pr = pill.getBoundingClientRect();
+    const tr = ta.getBoundingClientRect();
+    const padLeft = Number.parseFloat(getComputedStyle(ta).paddingLeft);
+    return {
+      textInset: tr.left + padLeft - pr.left,
+      chipVsPill: chip.getBoundingClientRect().left - pr.left,
+    };
+  });
+  console.log(`ITEM19 measurements ${JSON.stringify(m)}`);
+  expect(m.textInset, 'text inset from the pill border (a)').toBeGreaterThanOrEqual(8);
+  expect(Math.abs(m.chipVsPill), 'first chip left edge vs pill left edge (b)').toBeLessThanOrEqual(1);
+});
