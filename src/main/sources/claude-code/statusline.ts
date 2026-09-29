@@ -44,7 +44,14 @@ export interface StatusLineInput {
 
 /** SELF-CONTAINED on purpose: its source text is embedded in the script. */
 export function formatStatusLine(input: StatusLineInput, branch: string | null): string {
-  const text = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null);
+  // C0, C1 and DEL: drops ESC and BEL, so no OSC or CSI sequence survives.
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: that is the point
+  const clean = (v: string): string => v.replace(/[\u0000-\u001f\u007f-\u009f]/g, '');
+  const text = (v: unknown): string | null => {
+    if (typeof v !== 'string') return null;
+    const c = clean(v);
+    return c === '' ? null : c;
+  };
   const num = (v: unknown): number | null =>
     typeof v === 'number' && Number.isFinite(v) ? v : null;
   const tokens = (v: unknown): string => {
@@ -65,7 +72,7 @@ export function formatStatusLine(input: StatusLineInput, branch: string | null):
   const pct = num(input.context_window?.used_percentage);
   return [
     project,
-    ...(branch === null || branch === '' ? [] : [`git:(${branch})`]),
+    ...(branch === null || clean(branch) === '' ? [] : [`git:(${clean(branch)})`]),
     text(input.model?.display_name) ?? '-',
     `ctx:${pct === null ? '-' : `${Math.round(pct)}%`}`,
     `in:${tokens(input.context_window?.total_input_tokens)}`,
@@ -162,9 +169,22 @@ export function withStatusLineSettings(
   return [...argv, '--settings', shellQuote(settings)];
 }
 
-/** Start-session text: a claude-code launch gets the settings; anything else is untouched. */
+/**
+ * Start-session text. Only a LAUNCH LINE is rewritten: one line, no shell
+ * control or substitution characters, the claude-code command first, and
+ * every later token a flag or the value of the flag right before it. A prompt
+ * ('claude fix the bug') or a compound line ('claude && x') is returned as is.
+ * The settings pair goes directly after `claude`.
+ */
 export function startTextWithStatusLine(text: string): string {
-  const first = text.trim().split(/\s+/)[0];
-  if (first !== resolveProvider('claude-code').command[0]) return text;
-  return withStatusLineSettings([text.trimEnd()]).join(' ');
+  if (/[;&|<>`\r\n\u2028\u2029]|\$\(/.test(text.trim())) return text;
+  const [first, ...rest] = text.trim().split(/\s+/);
+  if (first === undefined || first !== resolveProvider('claude-code').command[0]) return text;
+  let afterFlag = false;
+  for (const token of rest) {
+    if (token.startsWith('-')) afterFlag = !token.includes('=');
+    else if (afterFlag) afterFlag = false;
+    else return text;
+  }
+  return [...withStatusLineSettings([first]), ...rest].join(' ');
 }
