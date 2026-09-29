@@ -445,7 +445,7 @@ type DirState =
 type WalkState =
   | { readonly kind: 'loading' }
   | { readonly kind: 'ready'; readonly result: FileListResult }
-  | { readonly kind: 'error' };
+  | { readonly kind: 'error'; readonly message: string };
 
 const NO_BRIDGE: SourceError = {
   kind: 'unreachable',
@@ -472,6 +472,12 @@ export function FilesTab({
   const [listing, setListing] = useState<Record<string, ListState>>({});
   /** Loaded directory levels: session id, then absolute directory path. */
   const [dirs, setDirs] = useState<Record<string, Record<string, DirState>>>({});
+  /**
+   * Per session, bumped by every refresh. A read carries the generation it
+   * started under and is dropped if a refresh has bumped it since, so a level
+   * that lands late can never overwrite what the refresh loaded.
+   */
+  const generation = useRef<Record<string, number>>({});
   const [walks, setWalks] = useState<Record<string, WalkState>>({});
   const [newFileName, setNewFileName] = useState('');
   const [filter, setFilter] = useState('');
@@ -554,6 +560,7 @@ export function FilesTab({
   const currentWalk = sessionId === null ? undefined : walks[sessionId];
   const filtering = filter.trim() !== '';
   const walkPending = filtering && currentWalk?.kind === 'loading';
+  const walkFailed = filtering && currentWalk?.kind === 'error';
   const tree = useMemo(() => {
     if (ready === null) return null;
     const levels = new Map<string, readonly FileDirEntry[]>([[ready.root, ready.entries]]);
@@ -685,6 +692,9 @@ export function FilesTab({
   const fetchListing = useCallback(() => {
     if (sessionId === null || list === undefined) return;
     const forSession = sessionId;
+    const gen = (generation.current[forSession] ?? 0) + 1;
+    generation.current[forSession] = gen;
+    const current = () => generation.current[forSession] === gen;
     setListing((prev) => ({ ...prev, [forSession]: { kind: 'loading' } }));
     // A refresh drops every cached level and the walk; the effects below ask
     // again for whatever is still open or still filtered.
@@ -692,9 +702,11 @@ export function FilesTab({
     setWalks(({ [forSession]: _dropped, ...rest }) => rest);
     list(forSession, '')
       .then((result) => {
+        if (!current()) return;
         setListing((prev) => ({ ...prev, [forSession]: { kind: 'ready', result } }));
       })
       .catch((reason: unknown) => {
+        if (!current()) return;
         setListing((prev) => ({
           ...prev,
           [forSession]: { kind: 'error', error: reason as SourceError },
@@ -1061,6 +1073,7 @@ export function FilesTab({
     tree,
     walk: currentWalk?.kind === 'ready' ? currentWalk.result : null,
     walkPending,
+    walkFailed,
     filter,
     openFile,
     setNote,
@@ -1070,6 +1083,10 @@ export function FilesTab({
     requestEditorFocus,
     treeRef,
   });
+
+  /** The filter's own walk error stays up while the filter is typed. */
+  const shownNote =
+    note ?? (walkFailed && currentWalk?.kind === 'error' ? currentWalk.message : null);
 
   // LAZY LEVELS: an open directory whose level nobody has asked for yet is
   // read once. The cache entry (loading, ready or error) is the dedupe, so a
@@ -1081,12 +1098,16 @@ export function FilesTab({
     const prefix = `${root}/`;
     for (const path of expanded) {
       if (!path.startsWith(prefix) || sessionDirs?.[path] !== undefined) continue;
-      const put = (state: DirState) =>
+      const gen = generation.current[forSession] ?? 0;
+      const put = (state: DirState) => {
+        if ((generation.current[forSession] ?? 0) !== gen) return;
         setDirs((prev) => ({ ...prev, [forSession]: { ...prev[forSession], [path]: state } }));
+      };
       put({ kind: 'loading' });
       list(forSession, path.slice(prefix.length))
         .then((result) => put({ kind: 'ready', entries: result.entries }))
         .catch((reason: unknown) => {
+          if ((generation.current[forSession] ?? 0) !== gen) return;
           put({ kind: 'error' });
           setNote((reason as SourceError).message);
         });
@@ -1099,13 +1120,18 @@ export function FilesTab({
     if (sessionId === null || list === undefined || !filtering) return;
     if (currentWalk !== undefined) return;
     const forSession = sessionId;
-    const put = (state: WalkState) => setWalks((prev) => ({ ...prev, [forSession]: state }));
+    const gen = generation.current[forSession] ?? 0;
+    const put = (state: WalkState) => {
+      if ((generation.current[forSession] ?? 0) !== gen) return;
+      setWalks((prev) => ({ ...prev, [forSession]: state }));
+    };
     put({ kind: 'loading' });
     list(forSession)
       .then((result) => put({ kind: 'ready', result }))
       .catch((reason: unknown) => {
-        put({ kind: 'error' });
-        setNote((reason as SourceError).message);
+        const message = (reason as SourceError).message;
+        put({ kind: 'error', message });
+        setNote(message);
       });
   }, [filtering, sessionId, currentWalk, list]);
 
@@ -1814,13 +1840,13 @@ export function FilesTab({
           because they answer the same question ("what just happened, and can
           I take it back"), and because a second banner would push the editor
           down every time the operator pressed Format. */}
-      {(note !== null || formatUndoReady) && (
+      {(shownNote !== null || formatUndoReady) && (
         <p
           data-files-note
           role="status"
           className="flex flex-none items-center gap-2 text-control text-waiting"
         >
-          <span className="min-w-0 flex-1">{note}</span>
+          <span className="min-w-0 flex-1">{shownNote}</span>
           {formatUndoReady && (
             <button
               type="button"
