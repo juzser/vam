@@ -790,7 +790,15 @@ export type KeyAction =
    * (`remote`) is a different keystroke, and `normalizeKey` gives a modified
    * character its own `Mod-` spelling, so neither can answer the other's.
    */
-  | { readonly kind: 'interrupt' };
+  | { readonly kind: 'interrupt' }
+  /**
+   * `Mod-Enter` — START THE SESSION on the start screen showing for the
+   * focused session, with the provider and permission chosen there
+   * (`panels/start-session-registry.ts`). Refused when no start screen is
+   * mounted. The question card's own card-local `Mod-Enter` (`question-keys.ts`)
+   * is a different surface, live only while a question is on screen.
+   */
+  | { readonly kind: 'startSession' };
 
 type ChordStep = {
   readonly state: ChordState;
@@ -1147,6 +1155,8 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   // above, and `normalizeKey` gives a modified character its own `Mod-`
   // spelling, so the two keystrokes can never answer each other.
   'Mod-.': { kind: 'interrupt' },
+  // Start the session on the start screen — see the action's own doc comment.
+  'Mod-Enter': { kind: 'startSession' },
 };
 
 /**

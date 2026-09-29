@@ -195,6 +195,7 @@ import {
   GettingStarted,
   type GettingStartedProps,
   IconFrame,
+  START_SESSION_SHORTCUT_ROWS,
   StartShortcuts,
   TERMINAL_ONLY_SHORTCUT_ROWS,
 } from './GettingStarted.js';
@@ -210,6 +211,7 @@ import { type OutActionResult, OutActionsProvider } from './out-actions.js';
 import { OUT_MARKDOWN, OUT_URL_TRANSFORM } from './out-markdown.js';
 import { newestSet, toolUseOf } from './question-set.js';
 import { sendKeyRemote } from './send-key-remote.js';
+import { registerStartSession } from './start-session-registry.js';
 import { GLYPH_PX, MARK_LANE_PX } from './status-mark.js';
 import { hasContentAbove, hasContentBelow, isAtBottom, shouldStick } from './stick-to-bottom.js';
 import { drawsComposer, narrowsAsProse, TABS, type Tab, visibleTabs } from './tabs.js';
@@ -3405,6 +3407,13 @@ function StartSession({
     () => agentPermissions ?? 'manual',
   );
   const starting = startingPane ?? null;
+  const startBlocked = starting !== null && !starting.timedOut;
+  // The `startSession` chord starts with what is ON SCREEN; a wait already in
+  // flight blocks it the way it disables the button.
+  useEffect(() => {
+    if (onStart === undefined || startBlocked) return;
+    return registerStartSession(() => onStart(chosen, chosenPermission));
+  }, [onStart, startBlocked, chosen, chosenPermission]);
   return (
     <div
       data-start-session
@@ -3431,6 +3440,9 @@ function StartSession({
         </p>
       </div>
       {onStart !== undefined && (
+        <StartShortcuts testId="start-session-shortcuts" rows={START_SESSION_SHORTCUT_ROWS} />
+      )}
+      {onStart !== undefined && (
         <ProviderStartControls
           chosen={chosen}
           onChosenChange={setChosen}
@@ -3441,7 +3453,7 @@ function StartSession({
           // that already admits vam has nothing further to wait on
           // (`StartTimeoutHint`'s own header) must not go on disabling the
           // operator's own retry, whatever path got it there.
-          disabled={starting !== null && !starting.timedOut}
+          disabled={startBlocked}
           starting={
             starting?.kind === 'start'
               ? {

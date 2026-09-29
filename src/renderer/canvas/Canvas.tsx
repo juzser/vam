@@ -141,6 +141,7 @@ import { type ProjectChoice, ProjectPicker } from '../panels/ProjectPicker.js';
 import type { RemovalPlan } from '../panels/remove-project.js';
 import { NEW_PROJECT_PENDING, rowMenuItems, SessionList } from '../panels/SessionList.js';
 import { SplitResizer } from '../panels/SplitResizer.js';
+import { triggerStartSession } from '../panels/start-session-registry.js';
 import { StatusMark } from '../panels/status-mark.js';
 import { halfPageTarget } from '../panels/stick-to-bottom.js';
 import { TABS, tabForDigit, visibleTabs } from '../panels/tabs.js';
@@ -6744,6 +6745,13 @@ function CanvasInner({
           );
           return;
         }
+        case 'startSession':
+          // The mounted start screen registers its own callback, so the
+          // provider and permission started with are the ones on screen.
+          if (!triggerStartSession()) {
+            setStatus('no start screen here — this session is already started');
+          }
+          return;
         case 'newSession':
           // Real now: main starts a detached tmux session running `claude` in
           // the project's own directory. Which project is the focused
