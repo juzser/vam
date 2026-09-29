@@ -105,6 +105,7 @@ export function baseProps(entries: readonly SessionEntry[]): SessionListProps {
       hideIdle: false,
       hideAgentWorktrees: false,
       hideExternalWorktrees: false,
+      hideWorktrees: false,
     },
     onOriginFilters: noop,
     viewOptions: DEFAULT_VIEW_OPTIONS,

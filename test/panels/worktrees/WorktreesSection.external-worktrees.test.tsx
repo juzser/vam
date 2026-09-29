@@ -158,6 +158,56 @@ describe('WorktreesSection — the external/locked filter defaults to hidden', (
   });
 });
 
+describe('WorktreesSection — the hidden-count note needs a visible row to sit beside', () => {
+  it('names no hidden count when every worktree is external and none is visible', async () => {
+    const nine = Array.from({ length: 9 }, (_, i) =>
+      worktree({
+        worktreeId: `/elsewhere/w${i}`,
+        path: `/elsewhere/w${i}`,
+        branch: `w${i}`,
+        external: true,
+      }),
+    );
+    const list = vi.fn().mockResolvedValue(nine);
+    installApi({ worktrees: { list } });
+    const { container } = render(
+      <WorktreesSection
+        project={project}
+        entries={[]}
+        forceOpenCreate={false}
+        onCloseCreate={vi.fn()}
+        renderSessionRow={fakeRenderSessionRow}
+        hideExternalWorktrees={true}
+      />,
+    );
+    await waitFor(() => expect(list).toHaveBeenCalled());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(container.textContent).not.toContain('9 hidden');
+    expect(container.querySelector('[data-worktrees-external-hidden-count]')).toBeNull();
+  });
+
+  it('still names "2 hidden" beside one visible worktree', async () => {
+    installApi({
+      worktrees: {
+        list: vi.fn().mockResolvedValue([normalWorktree, externalWorktree, lockedVamWorktree]),
+      },
+    });
+    const { container } = render(
+      <WorktreesSection
+        project={project}
+        entries={[]}
+        forceOpenCreate={false}
+        onCloseCreate={vi.fn()}
+        renderSessionRow={fakeRenderSessionRow}
+        hideExternalWorktrees={true}
+      />,
+    );
+    await waitFor(() => expect(container.textContent).toContain('2 hidden'));
+  });
+});
+
 describe('WorktreesSection — shown, as a compact nested tree', () => {
   it('draws external/locked rows nested, under their own group, once the toggle is off', async () => {
     installApi({

@@ -229,6 +229,24 @@ describe('WorktreesSection — a worktree row never repeats its own name as its 
   });
 });
 
+describe('WorktreesSection — no header + button', () => {
+  it('draws no "new worktree of" button in the section header', async () => {
+    installApi({ worktrees: { list: vi.fn().mockResolvedValue([worktree()]) } });
+    const { container } = render(
+      <WorktreesSection
+        project={project}
+        entries={[]}
+        forceOpenCreate={false}
+        onCloseCreate={vi.fn()}
+        renderSessionRow={fakeRenderSessionRow}
+      />,
+    );
+    await waitFor(() => expect(container.querySelector('[data-worktrees-section]')).not.toBeNull());
+    expect(container.querySelector('[aria-label^="new worktree of "]')).toBeNull();
+    expect(container.querySelector('[data-worktrees-add]')).toBeNull();
+  });
+});
+
 describe('WorktreesSection — create', () => {
   it('the "+" opens the form, and Create calls api.create then reloads', async () => {
     const { list, create } = installApi();

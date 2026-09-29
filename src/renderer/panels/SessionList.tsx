@@ -119,6 +119,7 @@ const SETTINGS_ACTION: KeyAction = { kind: 'settings' };
 const REMOTE_ACTION: KeyAction = { kind: 'remote' };
 const SEARCH_ACTION: KeyAction = { kind: 'search' };
 const FILTER_MENU_ACTION: KeyAction = { kind: 'filterMenu' };
+const NEW_PROJECT_ACTION: KeyAction = { kind: 'newProject' };
 const CLOSE_ACTION: KeyAction = { kind: 'close' };
 const NEW_SESSION_ACTION: KeyAction = { kind: 'newSession' };
 /** The project menu's own "New worktree…" item -- its one bound chord,
@@ -3451,7 +3452,10 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
             project" (see the button above), but the words a person reads on
             focus never repeat the word the group button just used for
             something else. */}
-        <ShortcutTip label={newSessionDecline ?? 'Choose a directory and start a session in it'}>
+        <ShortcutTip
+          label={newSessionDecline ?? 'Choose a directory and start a session in it'}
+          action={NEW_PROJECT_ACTION}
+        >
           <button
             type="button"
             data-new-project
@@ -3912,6 +3916,17 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                       !originFilters.hideExternalWorktrees,
                       0,
                     ],
+                    // THE EIGHTH ROW -- the whole Worktrees section. Stored
+                    // `hide`-shaped, labelled "Show worktrees" like the row
+                    // above, so `on` is `!hideWorktrees` here too.
+                    [
+                      'worktrees',
+                      GitBranch,
+                      'Show worktrees',
+                      'Draw each project’s Worktrees section under it.',
+                      !originFilters.hideWorktrees,
+                      0,
+                    ],
                   ] as const
                 ).map(([key, Icon, label, note, on, hides]) => (
                   <Note key={key} text={note}>
@@ -3939,7 +3954,9 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                         // (on=false) -> new hidden=false=on; old
                                         // hidden=false (on=true) -> new hidden=true=on.
                                         { ...originFilters, hideExternalWorktrees: on }
-                                      : { ...originFilters, onlyPrompted: !on },
+                                      : key === 'worktrees'
+                                        ? { ...originFilters, hideWorktrees: on }
+                                        : { ...originFilters, onlyPrompted: !on },
                         )
                       }
                       className={[
@@ -5193,7 +5210,14 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                             </span>
                           </div>
                         )}
-                      {viewOptions.groupBy === 'project' ? (
+                      {/* `hideWorktrees` drops the section, never the project's own
+                          sessions (it draws those too, via `mainSessionEntries`),
+                          so a hidden section falls through to the plain rows.
+                          An open create request (`Mod-Shift-w`, the project menu)
+                          still needs the form, so it wins over the hide. */}
+                      {viewOptions.groupBy === 'project' &&
+                      (!originFilters.hideWorktrees ||
+                        creatingWorktreeFor === section.project.id) ? (
                         <WorktreesSection
                           project={section.project}
                           // THE FILTERED SET, never `allEntries` (an S2: a

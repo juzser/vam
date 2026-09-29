@@ -60,6 +60,12 @@ function sessions(actors: readonly (string | null)[]): readonly Session[] {
   return toCanvasModel(overview, timelines, 'factory').projects.flatMap((p) => p.sessions);
 }
 
+describe('the hide-worktrees default', () => {
+  it('hides the Worktrees section by default', () => {
+    expect(DEFAULT_SESSION_FILTERS.hideWorktrees).toBe(true);
+  });
+});
+
 describe('the hide-agent default, over real sessions', () => {
   it('hides an agent-opened and a test session, and nothing else', () => {
     // `coder` and `tester` are factory roles; `operator`, `operator-skill` and

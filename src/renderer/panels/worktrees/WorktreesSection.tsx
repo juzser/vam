@@ -683,7 +683,7 @@ export function WorktreesSection({
             `WorktreesSection.test.tsx`'s own count assertion reads it by
             that selector). Absent, not a "0 hidden": present only while
             the filter is actually holding something back. */}
-            {hideExternalWorktrees && externalWorktrees.length > 0 && (
+            {hideExternalWorktrees && externalWorktrees.length > 0 && plainWorktrees.length > 0 && (
               <span
                 data-worktrees-external-hidden-count
                 className="whitespace-nowrap text-ink-faint text-meta"
@@ -692,17 +692,6 @@ export function WorktreesSection({
               </span>
             )}
             <span className="flex-1" />
-            {!creating && (
-              <button
-                type="button"
-                data-worktrees-add={project.id}
-                aria-label={`new worktree of ${project.name}`}
-                onClick={() => setCreating(true)}
-                className="vam-tap vam-hit-24 flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-[5px] text-ink-faint hover:text-ink"
-              >
-                +
-              </button>
-            )}
           </div>
 
           {creating && (

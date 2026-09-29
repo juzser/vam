@@ -9,17 +9,21 @@
  * order` are not offered; see `docs/design/workspace-options.md`.
  */
 
-import { cleanup, fireEvent, render } from '@testing-library/react';
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   applyViewOrder,
   DEFAULT_VIEW_OPTIONS,
   type SessionEntry,
 } from '../../src/renderer/domain/selectors.js';
+import { DEFAULT_SESSION_FILTERS } from '../../src/renderer/domain/session-filter.js';
 import { SessionList, type SessionListProps } from '../../src/renderer/panels/SessionList.js';
 import { baseProps, makeProject, makeSession } from './session-list-props.js';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  (window as unknown as { api: unknown }).api = undefined;
+});
 
 const alpha = makeProject({ id: 'p1', name: 'alpha' }, []);
 const beta = makeProject({ id: 'p2', name: 'beta' }, []);
@@ -252,5 +256,91 @@ describe('the Sort by drill-in', () => {
     expect(document.activeElement).toBe(name);
     fireEvent.keyDown(name, { key: 'ArrowUp' });
     expect(document.activeElement).toBe(needsYou);
+  });
+});
+
+describe('Show worktrees (SessionFilters.hideWorktrees)', () => {
+  function installWorktreesApi() {
+    const list = vi.fn().mockResolvedValue([
+      {
+        worktreeId: '/alpha-worktrees/feat',
+        path: '/alpha-worktrees/feat',
+        branch: 'feat',
+        projectId: 'claude-code:feat-00000000',
+        locked: false,
+        lockReason: null,
+        prunable: false,
+        prunableReason: null,
+        detached: false,
+        external: false,
+      },
+    ]);
+    (window as unknown as { api: unknown }).api = {
+      worktrees: { list, create: vi.fn(), remove: vi.fn(), status: vi.fn().mockResolvedValue([]) },
+    };
+    return list;
+  }
+
+  it('offers a "Show worktrees" toggle that writes hideWorktrees back', () => {
+    const onOriginFilters = vi.fn();
+    const { container } = mount({
+      originFilters: { ...DEFAULT_SESSION_FILTERS },
+      onOriginFilters,
+    });
+    const row = container.querySelector('[data-origin-toggle="worktrees"]') as HTMLElement;
+    expect(row.textContent).toContain('Show worktrees');
+    expect(row.getAttribute('aria-checked')).toBe('false');
+    fireEvent.click(row);
+    expect(onOriginFilters).toHaveBeenCalledWith({
+      ...DEFAULT_SESSION_FILTERS,
+      hideWorktrees: false,
+    });
+  });
+
+  it('draws no Worktrees section while hidden, and draws it once shown', async () => {
+    const list = installWorktreesApi();
+    const { container, rerender } = mount({
+      filterMenuOpen: false,
+      originFilters: { ...DEFAULT_SESSION_FILTERS },
+    });
+    await waitFor(() => expect(list).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 0));
+    expect(container.querySelector('[data-worktrees-section]')).toBeNull();
+
+    rerender(
+      <SessionList
+        {...baseProps(applyViewOrder(entries(), DEFAULT_VIEW_OPTIONS))}
+        originFilters={{ ...DEFAULT_SESSION_FILTERS, hideWorktrees: false }}
+      />,
+    );
+    await waitFor(() => expect(container.querySelector('[data-worktrees-section]')).not.toBeNull());
+  });
+
+  it('an open create request draws the create form even while hideWorktrees is ON', async () => {
+    const list = installWorktreesApi();
+    const { container } = mount({
+      filterMenuOpen: false,
+      originFilters: { ...DEFAULT_SESSION_FILTERS, hideWorktrees: true },
+      createWorktreeRequest: { projectId: 'p1' },
+    });
+    await waitFor(() =>
+      expect(container.querySelector('[data-worktrees-create-form]')).not.toBeNull(),
+    );
+    expect(list).toHaveBeenCalled();
+    // Only the requested project's section is drawn; beta stays hidden.
+    expect(container.querySelectorAll('[data-worktrees-section]')).toHaveLength(1);
+  });
+
+  it('draws no create form while hideWorktrees is ON and no request is open', async () => {
+    const list = installWorktreesApi();
+    const { container } = mount({
+      filterMenuOpen: false,
+      originFilters: { ...DEFAULT_SESSION_FILTERS, hideWorktrees: true },
+      createWorktreeRequest: null,
+    });
+    await waitFor(() => expect(list).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 0));
+    expect(container.querySelector('[data-worktrees-create-form]')).toBeNull();
+    expect(container.querySelector('[data-worktrees-section]')).toBeNull();
   });
 });
