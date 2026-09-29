@@ -142,11 +142,13 @@ requests for the project's linked repo.
 **Select** mode moves with `hjkl` and vim-style prefix chords (`gg`, `yy`, `zs`/`zv`…); `i`
 drops you into **Insert**, where the same keys type into the prompt or answer a question
 instead, and `Escape` leaves Insert and hands the keyboard straight back rather than
-reaching the session's own pane. `Mod-.` is the dedicated way to interrupt the focused
-session instead — it sends Escape to its pane. `?` opens a searchable sheet generated from
-the same key tables that back every binding, and in **Settings → Keyboard**, a chord two
-actions claim is flagged with a red dot and a tooltip naming the other action — on both the
-row that kept the chord and the row that lost it.
+reaching the session's own pane. `Mod-.` is the dedicated way to send Escape into the
+focused session's pane instead — interrupt it, drive Claude Code's own Esc-Esc rewind,
+dismiss its menus, or leave vim — and it works whether that session is running, waiting, or
+idle. `?` opens a searchable sheet generated from the same key tables that back every
+binding, and in **Settings → Keyboard**, a chord two actions claim is flagged with a red
+dot and a tooltip naming the other action — on both the row that kept the chord and the row
+that lost it.
 
 </td>
 <td>
@@ -195,7 +197,7 @@ from what's actually bound:
 | `h` `l` | Cycle the focused project's open tabs |
 | `i` | Enter Insert — type into the prompt, or answer a question |
 | `Escape` | Leave Insert, back to Select — never into the session's pane |
-| `Mod-.` | Interrupt the focused session — sends Escape to its pane |
+| `Mod-.` | Send Escape to the focused session's pane — interrupt, running or not |
 | `o` / `Mod-n` | Start a session in the focused project |
 | `x` / `Mod-w` | Close the focused session |
 | `Mod-Shift-p` | New project |
