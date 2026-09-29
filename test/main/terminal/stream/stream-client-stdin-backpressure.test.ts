@@ -11,13 +11,13 @@ import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RECONNECT_BACKOFF_MS } from '../../../../src/main/sources/tmux/control.js';
 import { hexBytes } from '../../../../src/main/sources/tmux/control-protocol.js';
-import { MAX_STREAM_WRITE_BYTES } from '../../../../src/main/terminal/stream-ipc.js';
 import {
   type ControlChildProcess,
   MAX_PENDING_STDIN_BYTES,
   StreamClient,
   type StreamDownEvent,
 } from '../../../../src/main/terminal/stream/client.js';
+import { MAX_STREAM_WRITE_BYTES } from '../../../../src/main/terminal/stream-ipc.js';
 
 /** Fake stdin -- an `EventEmitter` (so `once('drain', ...)` behaves exactly
  * like Node's real `Writable`) plus a controllable `write()` return value.
@@ -211,6 +211,50 @@ describe('StreamClient stdin backpressure', () => {
     child.stdin.drain();
     await tick();
     expect(child.stdin.written.length).toBe(bigBaseline);
+  });
+
+  it('AC3b/AC5-4: pending command placeholders are flushed by the trip, so a reconnect reseeds clean with no stale reply pairing', async () => {
+    // Three `write()` calls queue THREE no-op placeholders onto
+    // `#blockQueue` (#540's own order: the placeholder is pushed before
+    // `#write` ever runs) before the trip discards their lines. The spec
+    // requires every one of them to settle through `#handleDown`'s splice
+    // -- "nothing rejects" -- rather than sit in the FIFO forever. If any
+    // one of them were left behind, the reconnect's OWN `#requestPauseAfter`
+    // and `#reseed` replies below would shift into the wrong slot (FIFO
+    // order), and either the pause-after ack or the reseed chain's own two
+    // replies would be misread -- exactly the "swallow the first reply and
+    // hang or misroute that reseed" failure the spec names for a stale
+    // placeholder. A clean, single, correctly-bodied seed reaching `onSeed`
+    // is therefore a real, discriminating proof that the trip's queue
+    // flush left nothing behind.
+    vi.useFakeTimers();
+    const { client, children } = harness();
+    const connecting = client.connect();
+    const child = at(children, 0);
+    await connectWith(child, '%3');
+    await connecting;
+
+    child.stdin.nextResults.push(false); // block
+    client.write('warm'); // placeholder 1, line written
+    const big = 'a'.repeat(3_500_000);
+    client.write(big); // placeholder 2, held
+    client.write(big); // placeholder 3, trips the bound
+
+    expect(child.killed).toBe(1);
+
+    const seeds: string[] = [];
+    client.onSeed((seed) => seeds.push(seed));
+
+    await vi.advanceTimersByTimeAsync(RECONNECT_BACKOFF_MS);
+    const second = at(children, 1);
+    // A reconnect never re-runs `list-panes` (`#reconnect` only awaits
+    // `#requestPauseAfter()` then `#reseed()`), so it is answered the same
+    // way `tmux-stream-client.test.ts`'s own reconnect test does.
+    await answerPauseAfter(second);
+    await answerCapturePane(second, 'clean-reseed', 1);
+    await tick();
+
+    expect(seeds).toEqual(['clean-reseed']);
   });
 
   it('AC4: one legal write of MAX_STREAM_WRITE_BYTES never trips the bound', async () => {
