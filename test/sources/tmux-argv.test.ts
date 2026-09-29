@@ -28,6 +28,7 @@ import {
   promptKeystrokes,
   sendBackspaceArgv,
   sendBackTabArgv,
+  sendControlArgv,
   sendEnterArgv,
   sendEscapeArgv,
   sendNavArgv,
@@ -768,5 +769,37 @@ describe('deleteBufferArgv', () => {
       '-b',
       'vam-paste-a1b2c3',
     ]);
+  });
+});
+
+describe("the remote route's nine Ctrl chords and five nav keys, spelled for tmux", () => {
+  it('builds C-<letter> for each of the nine allowlisted chords, interpreted (no -l)', () => {
+    const letters = ['c', 'd', 'l', 'z', 'r', 'a', 'e', 'w', 'u'] as const;
+    expect(letters).toHaveLength(9);
+    for (const letter of letters) {
+      expect(sendControlArgv('vam-a1b2c3', letter), letter).toEqual([
+        'send-keys',
+        '-t',
+        '=vam-a1b2c3:',
+        '--',
+        `C-${letter}`,
+      ]);
+    }
+  });
+
+  it('builds Up/Down/Left/Right/DC for the four arrows and delete, interpreted (no -l)', () => {
+    const expected = [
+      ['up', 'Up'],
+      ['down', 'Down'],
+      ['left', 'Left'],
+      ['right', 'Right'],
+      ['delete', 'DC'],
+    ] as const;
+    expect(expected).toHaveLength(5);
+    for (const [nav, name] of expected) {
+      const argv = sendNavArgv('vam-a1b2c3', nav);
+      expect(argv, nav).toEqual(['send-keys', '-t', '=vam-a1b2c3:', '--', name]);
+      expect(argv).not.toContain('-l');
+    }
   });
 });

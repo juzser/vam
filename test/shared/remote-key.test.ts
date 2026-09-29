@@ -166,3 +166,66 @@ describe('paneKeyToRemoteKeyId: the strip button, asked whether this route can c
     }
   });
 });
+
+describe('the fourteen new ids, one by one', () => {
+  it('maps each new id to its own PaneKey, and back, with none shared', () => {
+    const table: readonly [string, PaneKey][] = [
+      ['delete', { kind: 'nav', nav: 'delete' }],
+      ['arrow-up', { kind: 'nav', nav: 'up' }],
+      ['arrow-down', { kind: 'nav', nav: 'down' }],
+      ['arrow-left', { kind: 'nav', nav: 'left' }],
+      ['arrow-right', { kind: 'nav', nav: 'right' }],
+      ['ctrl-c', { kind: 'control', letter: 'c' }],
+      ['ctrl-d', { kind: 'control', letter: 'd' }],
+      ['ctrl-l', { kind: 'control', letter: 'l' }],
+      ['ctrl-z', { kind: 'control', letter: 'z' }],
+      ['ctrl-r', { kind: 'control', letter: 'r' }],
+      ['ctrl-a', { kind: 'control', letter: 'a' }],
+      ['ctrl-e', { kind: 'control', letter: 'e' }],
+      ['ctrl-w', { kind: 'control', letter: 'w' }],
+      ['ctrl-u', { kind: 'control', letter: 'u' }],
+    ];
+    expect(table).toHaveLength(14);
+    expect(table.map(([id]) => id)).toEqual([...REMOTE_KEY_IDS.slice(6)]);
+    for (const [id, key] of table) {
+      expect(isRemoteKeyId(id), id).toBe(true);
+      expect(remoteKeyToPaneKey(id as never), id).toEqual(key);
+      expect(paneKeyToRemoteKeyId(key), id).toBe(id);
+    }
+    expect(new Set(table.map(([, key]) => JSON.stringify(key))).size).toBe(14);
+  });
+
+  it('isRemoteKeyId is false for every non-string, including ones that stringify to an id', () => {
+    const boxed = { toString: () => 'delete' };
+    for (const value of [
+      0,
+      1,
+      Number.NaN,
+      true,
+      false,
+      null,
+      undefined,
+      {},
+      [],
+      ['delete'],
+      boxed,
+      Symbol('delete'),
+      () => 'delete',
+      10n,
+    ]) {
+      expect(isRemoteKeyId(value), String(typeof value)).toBe(false);
+    }
+  });
+
+  it('answers null for Ctrl letters and nav keys outside the allowlist, and nothing is accepted by prefix', () => {
+    for (const letter of ['b', 'f', 'k', 'x', 'y', 'q', 'A', 'C'] as const) {
+      expect(paneKeyToRemoteKeyId({ kind: 'control', letter } as PaneKey), letter).toBeNull();
+    }
+    for (const nav of ['home', 'end', 'page-up', 'page-down'] as const) {
+      expect(paneKeyToRemoteKeyId({ kind: 'nav', nav }), nav).toBeNull();
+    }
+    for (const id of ['ctrl-b', 'ctrl-f', 'arrow-x', 'ctrl-cc', 'delete-', 'ctrl_c']) {
+      expect(isRemoteKeyId(id), id).toBe(false);
+    }
+  });
+});
