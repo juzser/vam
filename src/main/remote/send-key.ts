@@ -59,9 +59,11 @@
  *
  * SHARED WITH THE PROMPT ROUTE, NOT EQUAL TO IT. `/api/record-prompt`
  * (`recordPrompt` -> `replyToSession` -> `typeIntoPane`) already types
- * arbitrary text followed by Enter into this same pane, but it cannot send a
- * control chord: Ctrl-C, Ctrl-D and Ctrl-Z here can interrupt, end or suspend
- * the pane's process. Neither route reads the pane first, and neither gates
+ * arbitrary text followed by Enter into this same pane, and that text goes
+ * out with `send-keys -l` with no control-byte filtering, so raw 0x03/0x04/0x1a
+ * bytes in a prompt already reach the pane as Ctrl-C/D/Z. The ctrl-c, ctrl-d
+ * and ctrl-z ids here add convenience, not a new privilege class; they can
+ * still interrupt, end or suspend the pane's process. Neither route reads the pane first, and neither gates
  * on a pending permission or plan-approval prompt: a key sent while one is
  * showing lands on whatever option the CLI's cursor sits on.
  */
