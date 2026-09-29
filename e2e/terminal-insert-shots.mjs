@@ -296,8 +296,16 @@ check('and the mode cell follows it to Insert', entered.mode === 'Insert', say(e
 await page.screenshot({ path: `${outDir}/terminal-insert-entered.png` });
 console.log(`${outDir}/terminal-insert-entered.png`);
 
-/* ── 3: WHAT IS TYPED THERE GOES TO TMUX, ESCAPE INCLUDED ────────────────── */
+/* ── 3: A PRINTABLE KEY GOES TO TMUX; ESCAPE LEAVES INSTEAD ──────────────── */
 
+// THE OPERATOR'S SECOND REVERSAL, measured on a REAL keypress -- exactly what
+// this file's own header says a unit test cannot deliver. Escape was SENT
+// into the session for one stretch of this pane's history ("inside tmux,
+// Escape should do what Escape does"); asked whether Escape should go back
+// to leaving Insert, with the interrupt moved to a chord of its own, the
+// operator chose exactly that. `j` still reaches tmux as text -- that half
+// is unchanged -- but Escape now releases the keyboard, the SAME door
+// `Mod-0` opens below, and nothing is sent to tmux for it at all.
 await page.keyboard.press('j');
 await page.keyboard.press('Escape');
 await page.waitForTimeout(400);
@@ -308,26 +316,17 @@ check(
   JSON.stringify(typed.sent),
 );
 check(
-  'Escape is SENT into the session — it is the pane’s key, not an exit',
-  typed.sent.includes('escape'),
+  'Escape is NOT sent into the session — the interrupt moved to Mod-.',
+  !typed.sent.includes('escape'),
   JSON.stringify(typed.sent),
 );
 check(
-  'and Escape did not let go: the next key is still the session’s',
-  typed.onInput && typed.mode === 'Insert',
+  'and Escape DID let go: the next key is vam’s own, mode Select, focus outside the pane',
+  !typed.inPane && typed.mode === 'Select',
   say(typed),
 );
 
-/* ── 4: THE WAY OUT, AND BACK IN AGAIN ───────────────────────────────────── */
-
-// `Meta`, not `Control`: `Mod-<digit>` is Cmd on macOS and Ctrl elsewhere
-// since the fold was removed, and Meta is the command modifier on both — the
-// reasoning `key-truth-shots.mjs` carries in full.
-await page.keyboard.press('Meta+Digit0');
-await page.waitForTimeout(150);
-const left = await state();
-check('Mod-0 hands the keyboard back to the shell', !left.inPane, say(left));
-check('and the mode cell says so', left.mode === 'Select', say(left));
+/* ── 4: BACK IN AGAIN, THEN THE OTHER WAY OUT ────────────────────────────── */
 
 // `Shift+I` AND NOT `I` — see this file's header. Unshifted, `normalizeKey`
 // resolves the character as `i`, which is the OTHER key.
@@ -339,6 +338,17 @@ check(
   again.onInput && again.mode === 'Insert',
   say(again),
 );
+
+// `Meta`, not `Control`: `Mod-<digit>` is Cmd on macOS and Ctrl elsewhere
+// since the fold was removed, and Meta is the command modifier on both — the
+// reasoning `key-truth-shots.mjs` carries in full. Pressed from Insert
+// (re-entered just above) so the check is still "does this door open",
+// rather than "is a door that Escape already opened still open".
+await page.keyboard.press('Meta+Digit0');
+await page.waitForTimeout(150);
+const left = await state();
+check('Mod-0 hands the keyboard back to the shell', !left.inPane, say(left));
+check('and the mode cell says so', left.mode === 'Select', say(left));
 
 /* ── 5: A SESSION SWITCH DOES NOT TAKE THE KEYBOARD BACK ─────────────────── */
 

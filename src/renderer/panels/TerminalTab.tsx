@@ -73,7 +73,7 @@ import type {
   PaneView,
 } from '../../shared/terminal.js';
 import { isControlLetter, MAX_COLUMNS, MAX_ROWS, MAX_WHEEL_TICKS } from '../../shared/terminal.js';
-import { insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
+import { insertScopeMark, insertStopMark, releaseInsert } from '../keyboard/focus-scope.js';
 import {
   activeTerminalFontSize,
   subscribeTerminalFontSize,
@@ -303,19 +303,24 @@ function measurePane(pane: HTMLElement, ruler: HTMLElement): PaneSize | null {
 /**
  * The keystroke a key name becomes, or `null` when the pane does not want it.
  *
- * FOUR ANSWERS AND A REFUSAL, and the interesting one is Escape. It used to
- * be vam's way out of this surface; the operator asked for it back in the
- * words that settle it -- inside tmux, Escape should do what Escape does. It
- * cancels Claude Code's picker, leaves vim's insert mode and dismisses most
- * of what anyone runs in a terminal, so a surface that swallows it is not one
- * you can work in.
+ * THREE ANSWERS AND A REFUSAL. Escape used to be a fourth — it was vam's own
+ * way out of this surface, then became the pane's own ("inside tmux, Escape
+ * should do what Escape does"), sent straight in as `{kind:'escape'}`. THE
+ * OPERATOR REVERSED IT AGAIN: asked whether Escape should go back to leaving
+ * Insert, with the interrupt moved to a chord of its own, they chose exactly
+ * that. So Escape is not a stroke this function answers at all any more —
+ * `onKeyDown` claims it earlier, before this is ever called, and releases the
+ * keyboard instead of building one (see that handler's own comment). Sending
+ * a LITERAL Escape into the pane — cancelling Claude Code's own picker,
+ * leaving vim's insert mode, whatever the program does with it — is `Mod-.`
+ * now (`chords.ts`'s `interrupt` action), which presses the identical
+ * `{kind:'escape'}` this function used to build, and reaches the pane whether
+ * or not it holds the keyboard.
  *
- * WHAT LEAVES INSTEAD IS TAB, which is the browser's own meaning for a focus
- * stop and is `null` here on purpose. That is the trade, stated plainly: Tab
- * no longer reaches the shell for completion, because a surface that consumes
- * keys has to keep one key that lets go, and of the two only Escape is
- * load-bearing INSIDE the pane. The corner hint says so while the pane has
- * focus, so it is discoverable without reading this.
+ * WHAT LEAVES IS BOTH ESCAPE AND TAB NOW, Tab unchanged from before and `null`
+ * here on purpose, the browser's own meaning for a focus stop. The corner
+ * hint says so while the pane has focus, so it is discoverable without
+ * reading this.
  *
  * `null` for every other named key -- the arrows, the Page keys, Home/End --
  * which is what leaves the browser scrolling a region whose scrollbar is
@@ -332,7 +337,6 @@ function measurePane(pane: HTMLElement, ruler: HTMLElement): PaneSize | null {
  */
 function strokeFor(key: string, shiftKey: boolean): PaneKey | null {
   if (key === 'Enter') return { kind: 'enter', shift: shiftKey };
-  if (key === 'Escape') return { kind: 'escape' };
   // Correcting a typo is part of typing: a pane that takes characters and
   // cannot take them back strands the operator on a wrong line. It is a KEY,
   // not the word -- see `sendBackspaceArgv`.
@@ -439,8 +443,12 @@ function composedKeydownStrokes(key: string): readonly PaneKey[] | null {
  *   than by this one. THE COST IS REAL AND IS THE
  *   TRADE: Meta chords do not reach the pane, so readline's `Alt+B`/`Alt+F`
  *   word motion is unavailable here. The portable spelling of Meta is the Esc
- *   PREFIX -- press Escape, then the letter -- and Escape is already the
- *   pane's, so nothing readline can do is actually out of reach. macOS
+ *   PREFIX -- press Escape, then the letter -- and a bare Escape leaves the
+ *   pane now rather than reaching it (the operator's own reversal; see
+ *   `strokeFor`'s doc comment), so the prefix has to be pressed a different
+ *   way: `Mod-.` first, which presses Escape into the pane WITHOUT taking the
+ *   keyboard off it, then the letter, typed normally a moment later. Nothing
+ *   readline can do is actually out of reach, only slower to reach. macOS
  *   terminals themselves default Option to compose and make Meta opt-in, so
  *   this is the platform's own answer rather than vam's idiosyncrasy.
  *
@@ -1290,9 +1298,9 @@ export function TerminalTab({
   /**
    * Whether the pane has the keyboard -- ANYWHERE INSIDE IT, which since the
    * hidden box below is no longer the same question as whether this element is
-   * `document.activeElement`. It draws exactly one thing -- the hint naming the
-   * way out -- and it draws it only then, because Escape is the pane's now and
-   * Tab is all that is left to leave with.
+   * `document.activeElement`. It draws exactly one thing -- the hint naming
+   * the way out -- and it draws it only then, because Escape and Tab are both
+   * ways to leave and neither means anything to draw a hint about otherwise.
    */
   const [hasFocus, setHasFocus] = useState(false);
 
@@ -1688,6 +1696,40 @@ export function TerminalTab({
       // Whatever is left holding Ctrl or Alt is vam's, unsent and unstopped,
       // so it reaches the window listener and does its one thing.
       if (event.ctrlKey || event.altKey) return;
+      /**
+       * ESCAPE LEAVES THE PANE — the operator's second reversal on this key,
+       * and it has to be answered HERE, ahead of `takeKeyboard`'s own
+       * microtask a few lines down, or the very thing this branch releases
+       * would be re-focused a beat later and Insert would never actually let
+       * go.
+       *
+       * `releaseInsert(document.activeElement)`, NOT a ref to this pane —
+       * the same call `Canvas.tsx`'s `cancel` case and `focusList` already
+       * make, and for the identical reason: the keyboard can be on the pane
+       * itself (`tabIndex={-1}`, focused on arrival) or on its hidden text
+       * box (`inputRef`, focused the moment typing starts), and
+       * `releaseInsert` blurs whichever one is actually holding it rather
+       * than one this closure would otherwise have to guess between.
+       *
+       * NOTHING IS SENT TO TMUX. That is the whole point of the reversal —
+       * this used to be `strokeFor`'s `{kind:'escape'}`, pressed into the
+       * agent; `Mod-.` is that now (`chords.ts`'s `interrupt` action,
+       * `Canvas.tsx`'s `case 'interrupt'`), reachable whether or not this
+       * pane holds the keyboard at all, which a key answered only from here
+       * could never be.
+       *
+       * `preventDefault` WITHOUT `stopPropagation`. Nothing above this
+       * listener needs the event — `cursorModeAt` reads the blur through
+       * `document.activeElement`, not through a bubbled keydown — and a
+       * `stopPropagation` here would only be theatre, unlike the chord
+       * branch above it, which has a real second listener to guard against
+       * (React re-dispatching the same native event at this element twice).
+       */
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        releaseInsert(document.activeElement);
+        return;
+      }
       // TYPING ENDS A COPY GESTURE. `onPointerUp` leaves the keyboard on the
       // pane rather than the box when a drag selected something, so that
       // Cmd-C still has a selection to copy; the moment an unmodified key is
@@ -2097,9 +2139,12 @@ export function TerminalTab({
           are typed into a running agent. So this is no longer "a focus stop
           that activates nothing": it activates something on someone else's
           machine. It is therefore focused deliberately on arrival, and left by
-          TAB -- Escape is not an exit here, it is one of the keys sent into
-          the agent, which is the point of the pane. Tab is the way out, and it
-          is said on the surface while the pane holds focus, by the corner
+          ESCAPE OR TAB -- Escape went to the agent for one stretch of this
+          pane's history ("inside tmux, Escape should do what Escape does")
+          and is vam's own exit again now, the operator's second reversal on
+          this key; `Mod-.` is the way to press a LITERAL Escape into the
+          agent without leaving (`chords.ts`'s `interrupt` action). Both exits
+          are said on the surface while the pane holds focus, by the corner
           badge below rather than by a row of chrome above: a surface that eats
           every key with no way out is the trap the sentence that stood here
           promised this was not. */}
@@ -2107,10 +2152,11 @@ export function TerminalTab({
           While this pane holds the keyboard, printable keys are typed into
           somebody's running agent — which is as literally Insert as this
           application gets, and the status bar used to read Select through the
-          whole of it. Marking it makes the bar honest here, and gives the pane
-          a keyboard exit it did not have: `Mod-0` releases whatever is in an
-          insert scope, and the comment above could previously only offer Tab
-          because Escape is one of the keys this pane SENDS. */}
+          whole of it. Marking it makes the bar honest here. `Mod-0` releases
+          whatever is in an insert scope, same as everywhere else it is marked,
+          and Escape now does the identical release from right here rather
+          than reaching the agent — see `onKeyDown`'s own comment on that
+          branch for why it has to run ahead of `takeKeyboard`'s microtask. */}
       {/* THE PANE IS NO LONGER THE TAB STOP; THE BOX INSIDE IT IS, and the
           reason is a focus trap rather than a preference. A container with
           `tabIndex={0}` sits BEFORE its own children in the focus order, so
@@ -2227,7 +2273,7 @@ export function TerminalTab({
             if (paneRef.current?.contains(event.relatedTarget) === true) return;
             setHasFocus(false);
           },
-          'aria-label': `terminal of ${view.name}: typing goes to this session, press Tab to leave`,
+          'aria-label': `terminal of ${view.name}: typing goes to this session, press Esc or Tab to leave`,
           /* A REGION, SPELLED AS A ROLE. This was a `<section>` with an
              `aria-label`, which IS `role="region"` with a name -- the element
              changed because `OverlayScroll` owns the box now, and the role is
@@ -2569,7 +2615,7 @@ export function TerminalTab({
           {view.name}
           {hasFocus && (
             <span data-terminal-exit-hint className="text-ink-quiet">
-              {' · Tab leaves'}
+              {' · Esc or Tab leaves'}
             </span>
           )}
         </span>

@@ -598,28 +598,63 @@ describe("the pane draws the agent's own colours", () => {
   });
 });
 
-describe('Escape belongs to the pane, and the way out is Tab', () => {
-  it('sends Escape to tmux instead of using it to leave', async () => {
-    // REVERSED ON THE OPERATOR'S WORDS. Escape was vam's exit; inside a
-    // terminal it has to be the key that cancels the picker, leaves insert
-    // mode, dismisses the prompt. Keeping it as an exit made the pane the one
-    // place in their tools where Escape did not mean escape.
+describe('Escape leaves the pane again, and Tab still does too', () => {
+  /**
+   * THE OPERATOR'S SECOND REVERSAL. Escape was vam's own exit, then became
+   * the pane's — "inside tmux, Escape should do what Escape does" — sent
+   * straight into the agent as `{kind:'escape'}`. Asked whether Escape should
+   * go back to leaving Insert, with the interrupt on a chord of its own, the
+   * operator chose exactly that. So Escape releases the keyboard again, the
+   * SAME way `Mod-0`/`Mod-Shift-h` already do for every other insert scope
+   * (`focus-scope.ts`'s `releaseInsert`), and NOTHING is sent to tmux for it
+   * any more.
+   *
+   * THE ESCAPE HATCH FOR A LITERAL ESCAPE — vim's own insert mode inside
+   * tmux, Claude Code's Esc-Esc rewind, cancelling one of its pickers — is
+   * `Mod-.`, the new interrupt chord (`chords.ts`, `Canvas.tsx`'s
+   * `case 'interrupt'`). It presses the identical `{kind:'escape'}` this
+   * block used to send on a bare Escape, and it works whether or not the
+   * pane holds the keyboard — which a key that only fires while focused here
+   * could never do from outside it. No second, pane-local mechanism (a
+   * double-press, a modifier held with Escape) was built for exactly that
+   * reason: one already exists and reaches further.
+   */
+  it('leaves the pane on a bare Escape, and sends nothing to tmux', async () => {
     const send = await open();
     await enter();
     expect(holdsKeyboard()).toBe(true);
-    expect(fireEvent.keyDown(pane() as HTMLElement, { key: 'Escape' })).toBe(false);
+    // Not claimed: `cursorModeAt` reads the blur through `document
+    // .activeElement`, not through a return value this event has no say in —
+    // matching every other release in this grammar (`Canvas.tsx`'s `cancel`,
+    // `DetailPanel`'s `Mod-[`), all of which leave `preventDefault` off the
+    // browser's own default and only stop what they actually acted on.
+    fireEvent.keyDown(pane() as HTMLElement, { key: 'Escape' });
     await settle();
-    expect(keys(send)).toEqual([{ kind: 'escape' }]);
-    // And it did NOT let go: the pane still has focus, so the next key is
-    // still the pane's.
-    expect(holdsKeyboard()).toBe(true);
+    expect(send).not.toHaveBeenCalled();
+    expect(holdsKeyboard()).toBe(false);
   });
 
-  it('still lets go on Tab, which is now the only key that does', async () => {
+  it('releases from the hidden input box too, wherever the keyboard actually is', async () => {
+    // The box (`data-terminal-input`), not the pane's own `tabIndex={-1}`
+    // wrapper, is what holds `document.activeElement` once typing has begun
+    // (`onFocus`'s microtask forward) — so this is the element Escape has to
+    // release for the common case, not only the one `enter()` leaves focus on
+    // before the first keystroke.
     const send = await open();
-    // Not prevented: the default IS the focus move, and it is the whole exit
-    // now that Escape is the pane's. The trade is that Tab no longer reaches
-    // the shell for completion.
+    await enter();
+    const box = document.querySelector('[data-terminal-input]') as HTMLElement;
+    box.focus();
+    await settle();
+    expect(document.activeElement).toBe(box);
+    fireEvent.keyDown(box, { key: 'Escape' });
+    await settle();
+    expect(send).not.toHaveBeenCalled();
+    expect(holdsKeyboard()).toBe(false);
+  });
+
+  it('still lets go on Tab, unchanged — now one of two ways out instead of the only one', async () => {
+    const send = await open();
+    // Not prevented: the default IS the focus move, exactly as it was.
     expect(fireEvent.keyDown(pane() as HTMLElement, { key: 'Tab' })).toBe(true);
     await settle();
     expect(send).not.toHaveBeenCalled();
@@ -631,6 +666,7 @@ describe('Escape belongs to the pane, and the way out is Tab', () => {
     // which is the only moment the question is asked.
     await open();
     await enter();
+    expect(q('[data-terminal-exit-hint]')?.textContent).toContain('Esc');
     expect(q('[data-terminal-exit-hint]')?.textContent).toContain('Tab');
     expect(q('[data-terminal-exit-hint]')?.closest('[data-terminal-status]')).not.toBeNull();
 
@@ -643,6 +679,7 @@ describe('Escape belongs to the pane, and the way out is Tab', () => {
 
   it('names the exit in the accessible name too, for a reader that cannot see a corner', async () => {
     await open();
+    expect(pane()?.getAttribute('aria-label')).toContain('Esc');
     expect(pane()?.getAttribute('aria-label')).toContain('Tab');
   });
 });

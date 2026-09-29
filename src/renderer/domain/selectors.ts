@@ -173,6 +173,50 @@ export type SessionEntry = {
 };
 
 /**
+ * WHY AN INTERRUPT INTO THIS ENTRY'S PANE WOULD BE REFUSED, or `null` when it
+ * would not.
+ *
+ * TWO CALLERS, ONE ANSWER. `DetailPanel.tsx`'s own `interruptRun` (the bubble
+ * menu's "Cancel prompt", and — until the operator's reversal moved the
+ * keystroke to `Mod-.` — the composer's own Escape) computed this inline
+ * until `Canvas.tsx` needed the identical three-way check for `case
+ * 'interrupt'`, a GLOBAL chord reachable whether or not a composer is even
+ * mounted for the focused session. Two copies of "can vam press a key into
+ * this pane" is this pane's oldest defect (`main/sources/pull-requests.ts`:
+ * "'No PRs' and 'vam could not ask' must never look the same"), so this is
+ * the one place either caller reads it from.
+ *
+ * THE THREE OUTCOMES ARE THREE SENTENCES, and stay that way here: a source
+ * with no terminal, a session vam did not start, and a session that simply
+ * is not working right now are different facts about different things, and
+ * the operator who presses a key expecting an agent to stop is owed which
+ * one is true rather than one silence standing in for all three.
+ *
+ * `hasTerminal` IS `boolean | undefined`, MATCHING `DetailPanelProps.terminal`
+ * EXACTLY, because `undefined` means "nobody said" there and reads as
+ * available — the same rule `canCycleMode` already applies to that prop —
+ * never as "no", which only an explicit `false` means.
+ */
+export function interruptRefusal(
+  entry: SessionEntry | null,
+  hasTerminal: boolean | undefined,
+): string | null {
+  if (hasTerminal === false) {
+    return 'not sent — this source has no session terminal to interrupt';
+  }
+  if (entry === null) {
+    return 'pick a session first';
+  }
+  if (entry.session.vamControlled !== true) {
+    return 'not sent — vam did not start this session, so it has no keyboard into it';
+  }
+  if (entry.session.status !== 'running') {
+    return 'nothing running to interrupt — this session is not working';
+  }
+  return null;
+}
+
+/**
  * Two `Project` objects are the SAME CHECKOUT when this returns the same
  * string, whatever source reported either of them.
  *

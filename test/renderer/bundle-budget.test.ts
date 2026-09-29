@@ -716,6 +716,53 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * measured gzip figure (217,412 B) still clears the existing 217,550
  * budget, if only by 138 B, so this PR bumps only the number its own build
  * actually tripped rather than one that still holds.
+ *
+ * A THIRTEENTH, SMALL, ORDINARY GROWTH, ON A SIBLING BRANCH FORKED FROM THE
+ * SAME `99b989ae` ANCESTOR: the operator's Esc/Cmd+. reversal (`chords.ts`'s
+ * new `interrupt` action and its `Mod-.` table entry, `rowConflicts()`, and
+ * `keysheet.ts`'s one new `ACTION_LABELS` row) is all eager -- `chords.ts`
+ * and `keysheet.ts` are both shared modules the entry already statically
+ * imports (`TerminalTab.tsx`, `DetailPanel.tsx`, `Canvas.tsx` all read
+ * `chords.ts` directly), so this did not go through `SettingsOverlay`'s own
+ * lazy boundary even though the new conflict-dot UI itself lives entirely
+ * inside that lazy chunk. CI's own `electron-vite build --mode production`
+ * run (`ubuntu-latest`, this PR's actual gate, forked before the twelfth
+ * paragraph's GitLab card existed) measured entry gzip at 217,677 B against
+ * the 217,550 B budget the eleventh paragraph left it at -- over by 127 B,
+ * and over on the FIRST push despite this branch's own local (`darwin`)
+ * build passing under budget beforehand, the same cross-machine zlib-output
+ * variance the eleventh and twelfth paragraphs' own "this machine's zlib"
+ * notes already flagged, now large enough on its own to flip a result. This
+ * branch alone moved `ENTRY_GZIP_BUDGET_BYTES` 217,550 -> 217,900 (CI's own
+ * 217,677 B plus ~223 B/~0.1% slack) and left `ENTRY_BUDGET_BYTES` at
+ * 726,100, the raw-byte test having passed in the same CI run.
+ *
+ * THE TWELFTH AND THIRTEENTH PARAGRAPHS' BRANCHES THEN MERGED INTO EACH
+ * OTHER, each having budgeted for its own delta alone against the SAME
+ * shared ancestor (726,100 / 217,550) -- neither figure accounted for the
+ * other landing too, the same gap every fan-in merge in this file has
+ * found. Measured, `electron-vite build --mode production` (this machine's
+ * `darwin` zlib), on this merge (both trees combined):
+ *
+ *     entry   727,239 B  (217,677 B gzip)
+ *
+ * `ENTRY_BUDGET_BYTES` moves 727,700 -> 728,700: the real merged figure
+ * (727,239 B) plus ~1,461 B (~0.2%) of the same small-headroom convention
+ * every bump above uses -- not either side's own margin kept as-is (the
+ * twelfth paragraph's own 727,700 already cleared the merged figure, but
+ * only by 461 B, tighter than this file's own convention asks for once the
+ * two deltas are combined). `ENTRY_GZIP_BUDGET_BYTES` moves 217,900 ->
+ * 218,150: the merged gzip figure (217,677 B) sits under the thirteenth
+ * paragraph's own 217,900, but only by 223 B -- the same size of margin
+ * that paragraph's own bump already proved is not always enough to survive
+ * a DIFFERENT machine's zlib (`ubuntu-latest`'s CI build measured this same
+ * source at that exact 217,677 B figure before this merge, on a build that
+ * did not yet include the GitLab card, which strongly suggests this
+ * merge's 217,677 B local figure understates what CI will measure once
+ * BOTH trees are combined there too) -- so the merge takes the fuller ~0.2%
+ * slack the coordinator asked for rather than the ~0.1% the prior paragraph
+ * used. The next PR to land here should still expect to remeasure rather
+ * than assume either number still has room.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -726,8 +773,8 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 // depends on is even present, decided BEFORE anything tries to build.
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
-const ENTRY_BUDGET_BYTES = 727_700;
-const ENTRY_GZIP_BUDGET_BYTES = 217_550;
+const ENTRY_BUDGET_BYTES = 728_700;
+const ENTRY_GZIP_BUDGET_BYTES = 218_150;
 
 // The one string this repo's markdown stack ships that nothing else in the
 // dependency graph or vam's own source does: `gfmTable`, the extension name
