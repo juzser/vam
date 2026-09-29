@@ -822,6 +822,13 @@ const TERMINAL_STREAM_MARKER = 'data-terminal-stream-mount';
 // data-stats-popover-panel node_modules` finds nothing.
 const STATS_POPOVER_PANEL_MARKER = 'data-stats-popover-panel';
 
+// The usage popover panel's header row. Exact, not a prefix of another
+// attribute: `grep -rn data-usage-header src` finds only
+// `UsagePopoverPanel.tsx` (the eager shell's own markers are
+// `data-usage-toggle` and `data-usage-panel`, neither of which starts with
+// this string).
+const USAGE_PANEL_MARKER = 'data-usage-header';
+
 describe.skipIf(!buildAvailable)('electron renderer entry chunk budget', () => {
   let outDir: string;
   let entryBytes: number;
@@ -986,6 +993,13 @@ describe.skipIf(!buildAvailable)('electron renderer entry chunk budget', () => {
     expect(
       otherAssetTexts.filter((text) => text.includes(STATS_POPOVER_PANEL_MARKER)),
     ).toHaveLength(1);
+  });
+
+  it('the usage popover panel is not in the eager entry chunk, and ships in exactly one lazy chunk', () => {
+    // Falsify by importing `UsagePopoverPanel` statically in
+    // `UsagePopover.tsx` instead of through its `lazy(() => import(...))`.
+    expect(entryText.includes(USAGE_PANEL_MARKER)).toBe(false);
+    expect(otherAssetTexts.filter((text) => text.includes(USAGE_PANEL_MARKER))).toHaveLength(1);
   });
 });
 
