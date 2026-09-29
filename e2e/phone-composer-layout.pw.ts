@@ -233,3 +233,64 @@ test('the input pill still fills the width the buttons leave it', async ({ page 
   // The pill is the row's flexible item: most of the composer's width.
   expect((pill?.width ?? 0) > (tools?.width ?? 0)).toBe(true);
 });
+
+const SCREENSHOT_DIR =
+  '/private/tmp/claude-501/-Users-ser-scatola-jobs-projects-blacksmith/04eaaef5-ce61-45c0-a78f-28c43d92b1b2/scratchpad';
+
+/**
+ * ITEM 19, MEASURED BEFORE ANY FIX ("the input box has no padding and looks
+ * off"): a 390px screenshot of the composer plus the two candidate numbers.
+ * (a) the textarea's text inset from the pill's outer border, (b) the first
+ * strip chip's painted left edge against the pill's left edge.
+ */
+test('at 390px: the composer is screenshotted and its two edge insets measured', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: SHELL_H });
+  await stubRemote(page);
+  await openSession(page);
+  await expect(page.locator('[data-phone-shell] [data-key-strip]')).toBeVisible();
+  await page
+    .locator('[data-phone-shell] [data-composer-bar]')
+    .screenshot({ path: `${SCREENSHOT_DIR}/w11-t14-composer-390.png` });
+  const m = await page.evaluate(() => {
+    const q = (s: string) => document.querySelector(s) as HTMLElement;
+    const pill = q('[data-phone-shell] [data-prompt-input]');
+    const ta = q('[data-phone-shell] [data-composer-bar] textarea');
+    const chip = q('[data-phone-shell] [data-key-strip-key] > [data-tap-skin]');
+    const pr = pill.getBoundingClientRect();
+    const tr = ta.getBoundingClientRect();
+    const cs = getComputedStyle(ta);
+    const padLeft = Number.parseFloat(cs.paddingLeft);
+    const lh = Number.parseFloat(cs.lineHeight) || Number.parseFloat(cs.fontSize) * 1.2;
+    const above = Number.parseFloat(cs.paddingTop);
+    const below = tr.height - above - lh;
+    return {
+      textInset: tr.left + padLeft - pr.left,
+      lineAboveBelowGap: Math.abs(above - below),
+      chipVsPill: chip.getBoundingClientRect().left - pr.left,
+    };
+  });
+  console.log(`ITEM19 measurements ${JSON.stringify(m)}`);
+  expect(m.textInset, 'text inset from the pill border (a)').toBeGreaterThanOrEqual(8);
+  expect(m.lineAboveBelowGap, 'text line centred in the pill: space above vs below (a, vertical)').toBeLessThanOrEqual(2);
+  expect(Math.abs(m.chipVsPill), 'first chip left edge vs pill left edge (b)').toBeLessThanOrEqual(1);
+});
+
+/**
+ * ITEM 20: the key strip's chips are painted 30px, but every strip button
+ * wears `vam-tap`, whose 44px floor drew ~7px of invisible padding a side --
+ * about 18px between painted chips. Measured on the painted boxes.
+ */
+test('at 390px: adjacent key-strip chips sit at most 6px apart', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: SHELL_H });
+  await stubRemote(page);
+  await openSession(page);
+  await expect(page.locator('[data-phone-shell] [data-key-strip]')).toBeVisible();
+  const gaps = await page.evaluate(() => {
+    const skins = [
+      ...document.querySelectorAll('[data-phone-shell] [data-key-strip-key] > [data-tap-skin]'),
+    ].map((el) => el.getBoundingClientRect());
+    return skins.slice(1).map((r, i) => r.left - (skins[i] as DOMRect).right);
+  });
+  expect(gaps.length, 'adjacent chip pairs').toBeGreaterThanOrEqual(3);
+  for (const gap of gaps) expect(gap, `painted gap ${JSON.stringify(gaps)}`).toBeLessThanOrEqual(6);
+});

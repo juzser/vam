@@ -2904,6 +2904,19 @@ html {
   min-width: 30px;
 }
 
+/* THE SECOND NAMED EXCEPTION: the keystroke strip's chips. Each button is a
+ * 30px painted chip inside a `vam-tap` hit box, and the 44px floor drew ~7px
+ * of invisible padding a side on top of the nav's own `gap-1` (about 18px
+ * between painted chips, and the first chip inset 7px from the pill's left
+ * edge below it). Flooring the strip at 30 makes hit and paint one box. Same
+ * enumerated form as the toolbar exemption above, scoped by `[data-key-strip]`
+ * (an attribute plus two classes' worth of specificity beats the floor).
+ * Still clear of WCAG 2.2 SC 2.5.8's 24px minimum. */
+[data-phone-shell] [data-key-strip] .vam-tap {
+  min-height: 30px;
+  min-width: 30px;
+}
+
 /* The other half of the sizing: the hit stays 44, the PAINT comes inward.
  *
  * The operator's complaint ("on mobile the buttons are too big") and the

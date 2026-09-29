@@ -330,6 +330,16 @@ describe("AC-7's height half: the phone row is merged, not stacked (docs/design/
     expect(textarea?.style.height).toBe('');
   });
 
+  it('centres the single line with vertical padding (py-3) on phone only', () => {
+    draw();
+    const phoneArea = q<HTMLTextAreaElement>('textarea[aria-label="prompt to session"]');
+    expect(phoneArea?.className).toContain('py-3');
+    cleanup();
+    draw({ phone: false });
+    const deskArea = q<HTMLTextAreaElement>('textarea[aria-label="prompt to session"]');
+    expect(deskArea?.className).not.toContain('py-3');
+  });
+
   it('desktop never carried field-sizing either -- its own rows stay 2, untouched', () => {
     draw({ phone: false });
     const textarea = q<HTMLTextAreaElement>('textarea[aria-label="prompt to session"]');

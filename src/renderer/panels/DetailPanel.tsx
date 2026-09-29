@@ -10963,8 +10963,11 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                    Desktop is unaffected: both classes are phone-only. */
                   className={[
                     'vam-no-scrollbar vam-tap min-w-0 flex-1 resize-none bg-transparent text-body text-ink outline-none placeholder:text-ink-faint',
+                    // `py-3` (12px a side) centres the one line in the 44px
+                    // box: with no vertical padding the text sat flush
+                    // against the pill's top border (item 19, measured).
                     phone
-                      ? 'overflow-x-auto overflow-y-hidden whitespace-nowrap'
+                      ? 'overflow-x-auto overflow-y-hidden whitespace-nowrap py-3'
                       : 'overflow-y-auto max-h-[120px]',
                   ].join(' ')}
                   aria-label="prompt to session"
