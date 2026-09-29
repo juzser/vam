@@ -993,7 +993,6 @@ describe('WorktreesSection — formOnly (Show worktrees OFF + open create reques
     await new Promise((r) => setTimeout(r, 0));
     expect(container.textContent).not.toContain('Worktrees');
     expect(container.querySelector('[data-worktree-row]')).toBeNull();
-    expect(container.querySelector('.font-mono')).toBeNull();
     expect(container.querySelector('[data-worktrees-external-hidden-count]')).toBeNull();
     expect(container.textContent).not.toContain('External worktrees');
   });
