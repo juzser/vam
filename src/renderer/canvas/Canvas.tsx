@@ -78,10 +78,10 @@ import { cycleMatch, searchMatches } from '../domain/search.js';
 import type { SessionEntry, ViewOptions } from '../domain/selectors.js';
 import {
   applyViewOrder,
-  interruptRefusal,
   orderedPaneTabs,
   orderedSessions,
   runningAgentTotal,
+  sendEscapeRefusal,
 } from '../domain/selectors.js';
 import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
 import {
@@ -6685,22 +6685,32 @@ function CanvasInner({
           void closeSession(focusedEntry.session.id, focusedEntry.session.title);
           return;
         /**
-         * `Mod-.` — THE INTERRUPT, moved off Escape at the operator's own
-         * request (`chords.ts`'s `interrupt` action carries the whole
-         * history). GLOBAL rather than composer-local on purpose: "whenever
-         * a session is focused", not "while its composer happens to be
-         * open" — the same reach every other per-session chord in this
-         * switch already has (`close`, `rename`, `copy`).
+         * `Mod-.` — SEND ESCAPE INTO THE FOCUSED SESSION'S PANE, moved off
+         * bare Escape at the operator's own request (`chords.ts`'s
+         * `interrupt` action carries the whole history). GLOBAL rather than
+         * composer-local on purpose: "whenever a session is focused", not
+         * "while its composer happens to be open" — the same reach every
+         * other per-session chord in this switch already has (`close`,
+         * `rename`, `copy`).
          *
-         * THE THREE REFUSALS ARE `domain/selectors.ts`'s `interruptRefusal`,
-         * the SAME function `DetailPanel.tsx`'s own `interruptRun` reads —
-         * two callers, one answer, rather than two copies of "can vam stop
-         * it" (that pane's own comment on the same defect). What differs
-         * here is only the surface a refusal is drawn on: `DetailPanel`
-         * has its own inline banner (`cycleNote`) tied to a mounted
-         * composer that may not even exist for the focused pane right now;
-         * this one is a global chord, so it speaks through the status bar
-         * every other window-level refusal in this switch already uses.
+         * NOT STATUS-GATED, AND THAT IS THE FIX (not the original design).
+         * This case first read `domain/selectors.ts`'s `interruptRefusal`,
+         * which refused "nothing running to interrupt" for any session that
+         * was not `running` — right for `DetailPanel.tsx`'s own
+         * `interruptRun` ("Cancel this turn", where cancelling something not
+         * running is a contradiction), wrong here: since Escape no longer
+         * reaches a pane on its own, `Mod-.` is the ONLY way left to send a
+         * literal Escape, and an idle or waiting session still has a pane
+         * that needs one — Claude Code's own Esc-Esc rewind at an idle
+         * prompt, dismissing its `/model`/`/resume` menus or autocomplete,
+         * clearing the input, vim's own insert mode. None of those need an
+         * agent mid-turn, and the status gate made all of them unreachable
+         * the moment a session stopped running. This case now reads
+         * `sendEscapeRefusal`, the same three reachability facts
+         * (`cancelPromptRefusal` is `interruptRun`'s half, covered in
+         * `test/domain/interrupt-refusal.test.ts`) with no status check at
+         * all — pressing `Mod-.` twice sends two Escs, which is what makes
+         * Esc-Esc rewind reachable from here too.
          *
          * SENT DIRECTLY, NOT THROUGH `DetailPanel`'s `pressPaneKey` — that
          * function's in-flight guard and remote-pairing fallback exist for
@@ -6715,7 +6725,7 @@ function CanvasInner({
             setStatus('pick a session first');
             return;
           }
-          const refusal = interruptRefusal(focusedEntry, terminalTab);
+          const refusal = sendEscapeRefusal(focusedEntry, terminalTab);
           if (refusal !== null) {
             setStatus(refusal);
             return;

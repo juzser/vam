@@ -758,17 +758,27 @@ export type KeyAction =
   | { readonly kind: 'zoom'; readonly delta: 1 | -1 }
   | { readonly kind: 'cancel' }
   /**
-   * `Mod-.` — INTERRUPT THE FOCUSED SESSION'S AGENT: press Escape into its
-   * pane, over the same channel the phone keystroke strip and the bubble
-   * menu's "Cancel prompt" already use (`Canvas.tsx`'s `case 'interrupt'`).
+   * `Mod-.` — INTERRUPT / SEND ESC TO THE FOCUSED SESSION'S PANE: press one
+   * literal Escape into it, over the same channel the phone keystroke strip
+   * and the bubble menu's "Cancel prompt" already use (`Canvas.tsx`'s `case
+   * 'interrupt'`).
    *
    * THE OPERATOR'S REVERSAL, DATED. Escape used to BE this — both in the
    * terminal pane (`TerminalTab`: "inside tmux, Escape should do what Escape
    * does") and in the composer (`DetailPanel`'s old Escape branch). Asked
    * "should Esc leave Insert, with cancel-previous-prompt on a different
    * key?", the operator chose exactly that: Escape leaves Insert everywhere,
-   * and the interrupt gets its own chord so it still reaches the agent from
-   * anywhere a session is focused, in or out of Insert.
+   * and this chord is what still reaches the pane from anywhere a session is
+   * focused, in or out of Insert.
+   *
+   * NOT GATED ON THE AGENT ACTUALLY RUNNING — a regression the first landing
+   * of this reversal introduced and `sendEscapeRefusal`
+   * (`domain/selectors.ts`) fixed. Since Escape no longer reaches a pane on
+   * its own, this chord is the ONLY way left to send one, and an idle or
+   * waiting session still has a pane that needs it: Claude Code's own
+   * Esc-Esc rewind at an idle prompt, dismissing its `/model`/`/resume`
+   * menus, clearing the input, vim's own insert mode. "Interrupt" is half
+   * this chord's name, not the whole of what it does.
    *
    * `Mod-` NEEDS NO SECOND ENTRY FOR THE OTHER PLATFORMS, the same free ride
    * every other `Mod-<character>` binding in this table gets: Cmd on macOS,

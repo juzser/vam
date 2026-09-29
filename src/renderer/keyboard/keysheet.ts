@@ -450,14 +450,18 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
   // no binding behind it is the defect this module exists to make impossible.
   cancel: { group: 'view', label: () => 'close / cancel' },
   // `Mod-.` — the operator's reversal: Escape now leaves Insert everywhere
-  // (it is `cancel`, above, for exactly that reason) and the interrupt gets
-  // its own chord so it still reaches the focused session's agent from
-  // anywhere, in or out of Insert. `session`, beside `rename`/`close`: it
-  // acts on the focused session's pane, not on a surface that opens over
-  // everything.
+  // (it is `cancel`, above, for exactly that reason) and this chord is what
+  // still reaches the focused session's pane, in or out of Insert. NOT
+  // status-gated (`sendEscapeRefusal`, `domain/selectors.ts`): it presses
+  // Escape whether the agent is running, idle, or waiting, which is why the
+  // caption says "send Esc" rather than only "interrupt" — an idle session
+  // still needs it for Claude Code's own Esc-Esc rewind, closing its menus,
+  // or vim. `session`, beside `rename`/`close`: it acts on the focused
+  // session's pane, not on a surface that opens over everything.
   interrupt: {
     group: 'session',
-    label: () => 'interrupt the focused session’s agent — presses Escape into its pane',
+    label: () =>
+      'interrupt / send Esc to the focused session’s pane — sends whether or not the agent is running',
   },
 };
 

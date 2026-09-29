@@ -1,25 +1,37 @@
 // @vitest-environment happy-dom
 
 /**
- * `Mod-.` INTERRUPTS THE FOCUSED SESSION'S AGENT — the operator's reversal.
+ * `Mod-.` SENDS ESCAPE INTO THE FOCUSED SESSION'S PANE — the operator's
+ * reversal, and then a regression the reversal introduced.
  *
  * Escape used to do this, first inside the terminal pane and then, briefly,
  * from the composer too. Asked "should Esc leave Insert, with
  * cancel-previous-prompt on a different key?", the operator chose exactly
- * that, so the interrupt moved to a chord of its own: `Cmd+.` on macOS,
- * `Ctrl+.` elsewhere over the SAME `Mod-` fold every other command-modifier
- * chord in this grammar already gets.
+ * that, so this moved to a chord of its own: `Cmd+.` on macOS, `Ctrl+.`
+ * elsewhere over the SAME `Mod-` fold every other command-modifier chord in
+ * this grammar already gets.
  *
  * BOUND HERE, AT THE WINDOW LEVEL, rather than inside `DetailPanel`'s own
  * composer — the operator's own words were "whenever a session is focused",
  * not "while its composer is open", and `Canvas.tsx` is where every other
  * per-session global chord already lives (`x`/`Mod-w` close, `r` rename,
  * `yy` copy). `DetailPanel`'s existing `interruptRun` stays exactly as it
- * was (the bubble menu's "Cancel prompt", the phone strip's `Escape` tap);
- * what changed is the SHARED refusal derivation both now read
- * (`domain/selectors.ts`'s `interruptRefusal`, covered on its own in
- * `test/domain/interrupt-refusal.test.ts`) and that a third route — this
- * one — reaches it with no composer in the picture at all.
+ * was (the bubble menu's "Cancel prompt", the phone strip's `Escape` tap).
+ *
+ * WHAT CHANGED FROM THE FIRST LANDING: this case used to reuse
+ * `interruptRefusal`, the SAME status-gated ternary "Cancel this turn" reads
+ * — refusing "nothing running to interrupt" the instant a session left
+ * `running`. That made this the interrupt's twin bug: an idle or waiting
+ * session still has a pane, and a literal Escape is what dismisses Claude
+ * Code's own menus, drives its Esc-Esc rewind, and reaches vim — none of
+ * which needs the agent mid-turn. This case now reads
+ * `domain/selectors.ts`'s `sendEscapeRefusal`, which drops the status check
+ * entirely and keeps only the three refusals that are actually about
+ * WHETHER THE PANE IS REACHABLE (no terminal, no session focused, a session
+ * vam did not start) — covered on its own in
+ * `test/domain/interrupt-refusal.test.ts`. `cancelPromptRefusal` is the
+ * other half of that split, still status-gated, still what "Cancel this
+ * turn" reads.
  */
 
 import { act, cleanup, render } from '@testing-library/react';
@@ -117,7 +129,7 @@ async function pressInterrupt() {
   });
 }
 
-describe('Cmd+. interrupts the focused session', () => {
+describe('Cmd+. sends Escape into the focused session', () => {
   it('presses Escape into the focused session’s pane, over the desktop bridge', async () => {
     const send = withBridge('sent');
     render(<Canvas model={modelWith()} source={sourceWith(true)} />);
@@ -143,6 +155,34 @@ describe('Cmd+. interrupts the focused session', () => {
     expect(send).toHaveBeenCalledTimes(1);
     expect(statusBar().toLowerCase()).toContain('not sent');
   });
+
+  /**
+   * THE REGRESSION THIS FILE EXISTS TO CATCH. `sendEscapeRefusal` drops the
+   * status check `interruptRefusal` used to make here, so an idle or a
+   * waiting session sends Escape exactly as a running one does — the only
+   * way left to reach Claude Code's own Esc-Esc rewind, dismiss its `/model`
+   * or `/resume` menus, clear its input, or leave vim's insert mode once a
+   * turn has actually finished.
+   */
+  it.each(['idle', 'waiting', 'done', 'failed'] as const)(
+    'sends Escape to a %s session too — its pane still exists',
+    async (status) => {
+      const send = withBridge('sent');
+      render(<Canvas model={modelWith({ status })} source={sourceWith(true)} />);
+      await pressInterrupt();
+      expect(send).toHaveBeenCalledWith('p1', { kind: 'escape' }, 'a1');
+    },
+  );
+
+  it('sends two Escs for two presses, so Esc-Esc rewind still works on an idle session', async () => {
+    const send = withBridge('sent');
+    render(<Canvas model={modelWith({ status: 'idle' })} source={sourceWith(true)} />);
+    await pressInterrupt();
+    await pressInterrupt();
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send).toHaveBeenNthCalledWith(1, 'p1', { kind: 'escape' }, 'a1');
+    expect(send).toHaveBeenNthCalledWith(2, 'p1', { kind: 'escape' }, 'a1');
+  });
 });
 
 describe('an interrupt with nothing to reach says so, and sends nothing', () => {
@@ -152,14 +192,6 @@ describe('an interrupt with nothing to reach says so, and sends nothing', () => 
     await pressInterrupt();
     expect(send).not.toHaveBeenCalled();
     expect(statusBar()).not.toBe('');
-  });
-
-  it('refuses on a session that is not currently running', async () => {
-    const send = withBridge();
-    render(<Canvas model={modelWith({ status: 'idle' })} source={sourceWith(true)} />);
-    await pressInterrupt();
-    expect(send).not.toHaveBeenCalled();
-    expect(statusBar().toLowerCase()).toContain('nothing running');
   });
 
   it('refuses on a session vam did not start, distinctly from "nothing running"', async () => {
