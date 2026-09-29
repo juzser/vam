@@ -105,6 +105,14 @@ export function registerFilesListIpc(
       if (!authorization.existed) {
         return { ok: false, error: refused('not-found', `${dir} is not a directory here`) };
       }
+      // EC-13: a real path equals its lexical form exactly when no segment
+      // below the (already real) cwd is a symlink; refuse any that is followed.
+      if (authorization.realPath !== candidate.replace(/[\\/]+$/, '')) {
+        return {
+          ok: false,
+          error: refused('symlink', `${dir} is or passes through a symlink, which is not listed`),
+        };
+      }
       let entries: Awaited<ReturnType<typeof listDirectory>>;
       try {
         entries = await listDirectory(authorization.realPath, '', readDir);

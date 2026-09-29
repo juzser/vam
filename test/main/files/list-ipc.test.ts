@@ -163,9 +163,20 @@ describe('registerFilesListIpc containment on a real disk', () => {
         expect(result.error?.kind).toBe('refused');
       }
       expect(reads).toEqual([]);
-      // A symlink to a directory inside the cwd is listed through its realpath.
-      const ok = (await invoke('s1', 'inlink')) as { ok: true; value: { entries: unknown[] } };
-      expect(ok.value.entries).toEqual([{ name: 'f.txt', kind: 'file' }]);
+      // A symlink to a directory inside the cwd is refused, not followed (EC-13).
+      await mkdir(join(cwd, 'inner', 'sub'));
+      const realCwd = await realpath(cwd);
+      for (const dir of [
+        'inlink',
+        'inlink/sub',
+        join(realCwd, 'inlink'),
+        join(realCwd, 'inlink', 'sub'),
+      ]) {
+        const r = (await invoke('s1', dir)) as { ok: boolean; error?: { kind: string } };
+        expect(r.ok).toBe(false);
+        expect(r.error?.kind).toBe('refused');
+      }
+      expect(reads).toEqual([]);
       // A symlink child drops out of a listing.
       const top = (await invoke('s1', '')) as { ok: true; value: { entries: { name: string }[] } };
       expect(top.value.entries.map((e) => e.name)).toEqual(['a', 'inner']);

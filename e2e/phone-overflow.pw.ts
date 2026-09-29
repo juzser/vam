@@ -10,7 +10,7 @@
  *      because a flex child is sized by its context regardless of what
  *      overflows inside it. What that test never asked is whether the row's
  *      CONTENT fits the row -- `scrollWidth` against `clientWidth` -- and it
- *      did not: two of the seven chips are `data-tap-pill`s holding text
+ *      did not: two of the 24 chips (23 without a terminal) are `data-tap-pill`s holding text
  *      ("Esc → agent", "⏎ → agent"), and the row carried `overflow-x:
  *      visible`, no wrap and no scroll. The excess simply painted past the
  *      row's own right edge with no way to reach it.
@@ -603,7 +603,7 @@ test.describe('the keystroke strip scrolls horizontally', () => {
     expect(
       info.scrollWidth,
       `scrollWidth (${info.scrollWidth}) must exceed clientWidth (${info.clientWidth}) -- ` +
-        'seven chips, two of them text pills, do not fit 361px of clear width',
+        '24 chips (23 without a terminal), two of them text pills, do not fit 361px of clear width',
     ).toBeGreaterThan(info.clientWidth);
   });
 
