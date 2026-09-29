@@ -402,6 +402,33 @@ describe('the lazy file tree', () => {
     expect(list.mock.calls.filter(([, dir]) => dir === 'src')).toHaveLength(2);
   });
 
+  it('a failed filter walk keeps its error up and draws no rows, then the tree returns when cleared', async () => {
+    const list = vi.fn(async (_s: string, dir?: string) => {
+      if (dir === undefined) {
+        throw { kind: 'unreachable', code: 'boom', message: 'walk failed' };
+      }
+      return level('', [{ name: 'src', kind: 'dir' }]);
+    });
+    withBridge({ list });
+    await draw({ files: true });
+    await openFiles();
+    const type = async (value: string) =>
+      act(async () => {
+        fireEvent.change(q<HTMLInputElement>('[data-files-filter]') as HTMLInputElement, {
+          target: { value },
+        });
+        await Promise.resolve();
+      });
+    await type('index');
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(rowPaths()).toEqual([]);
+    expect(q('[data-files-note]')?.textContent).toContain('walk failed');
+    await type('');
+    expect(rowPaths()).toEqual(['/work/atlas/src']);
+  });
+
   it('a directory read that started before a refresh never overwrites the refreshed level', async () => {
     let releaseOld: (result: FileDirResult) => void = () => {};
     let srcCalls = 0;
