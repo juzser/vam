@@ -41,7 +41,7 @@
  *
  * NO `aria-label` STARTING WITH `close ` ON EITHER BUTTON, which is not a style
  * note: `styles.css` carries `[data-phone-shell] button[aria-label^='close ']
- * :not([data-phone-close]) { display: none }` to remove the row's hover-only
+ * :not([data-swipe-trash]) { display: none }` to remove the row's hover-only
  * `x` from a phone, and this dialog renders INSIDE `[data-phone-shell]` when a
  * phone shows it. A confirming button named that way would be invisible and
  * the operator would be stuck in a dialog they could only cancel. The buttons
@@ -59,12 +59,23 @@ import { useEffect, useRef } from 'react';
 export type ConfirmCloseSessionProps = {
   /** The session, named the way the operator would name it. */
   readonly title: string;
+  /**
+   * The session's live background-agent count. Above zero the dialog says so
+   * (closing ends them); zero keeps the plain "mid-turn" copy.
+   */
+  readonly runningAgents: number;
   readonly onConfirm: () => void;
   readonly onCancel: () => void;
 };
 
-export function ConfirmCloseSession({ title, onConfirm, onCancel }: ConfirmCloseSessionProps) {
+export function ConfirmCloseSession({
+  title,
+  runningAgents,
+  onConfirm,
+  onCancel,
+}: ConfirmCloseSessionProps) {
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const agents = runningAgents > 0;
 
   useEffect(() => {
     cancelRef.current?.focus();
@@ -107,15 +118,16 @@ export function ConfirmCloseSession({ title, onConfirm, onCancel }: ConfirmClose
         <div className="flex items-center gap-2">
           <TriangleAlert size={13} strokeWidth={1.8} className="flex-none text-danger" />
           <span className="min-w-0 font-mono font-semibold text-body text-ink">
-            Close “{title}”?
+            {agents ? 'Close session with background agents running?' : <>Close “{title}”?</>}
           </span>
         </div>
         {/* WHAT IT WILL DO, not "are you sure". The agent is what is ended;
             the transcript is not deleted and saying so is what keeps the
             question answerable without a trip to the docs. */}
         <p className="mt-2.5 text-control text-ink-dim">
-          This ends the agent running in it. Nothing in vam undoes that; the session’s transcript
-          stays where it is.
+          {agents
+            ? `${runningAgents} background ${runningAgents === 1 ? 'agent' : 'agents'} still running. Closing the session ends them.`
+            : 'This ends the agent running in it. Nothing in vam undoes that; the session’s transcript stays where it is.'}
         </p>
         <div className="mt-3 flex justify-end gap-2">
           <button

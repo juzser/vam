@@ -3086,9 +3086,10 @@ html {
  * the top-right of the row it sat INVISIBLE over the row's own tap area and a
  * tap meant to open a session could close it instead. `display: none` is what
  * makes it absent rather than merely unseen: gone from hit testing and gone
- * from the accessibility tree. Closing a session has a deliberate, visible
- * route on the session screen's app bar instead -- `data-phone-close`, which
- * is why this rule has to exempt it: it carries a `close ...` label too.
+ * from the accessibility tree. Closing a session has a deliberate route
+ * instead -- the trash a right-to-left swipe reveals on the row,
+ * `data-swipe-trash`, which is why this rule has to exempt it: it carries a
+ * `close session` label too.
  *
  * MATCHED AGAINST THE REAL TREE, not written from memory of it. The first
  * version of this rule read `[data-phone-shell] [data-session-row] button[...]`
@@ -3097,7 +3098,7 @@ html {
  * rule's TEXT stayed green over that for a whole release; only a computed
  * style on the rendered node, or a hit test at 390px, can tell a rule that
  * applies from a rule that was merely typed. Both now exist. */
-[data-phone-shell] button[aria-label^='close ']:not([data-phone-close]) {
+[data-phone-shell] button[aria-label^='close ']:not([data-swipe-trash]) {
   display: none;
 }
 

@@ -27,8 +27,8 @@
  * the desktop's row is unchanged beside them.
  */
 
-import { cleanup, render } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import { SessionList } from '../../src/renderer/panels/SessionList.js';
 import { baseProps, decision, makeProject, makeSession } from '../panels/session-list-props.js';
@@ -323,5 +323,96 @@ describe('the desktop row, which shares this component', () => {
     expect(document.body.textContent).toContain('cannot say which branch');
     expect(row('a1').className).toContain('border-line-loud');
     expect(row('a1').querySelector('[data-row-cursor]')).not.toBeNull();
+  });
+});
+
+/**
+ * SWIPE TO CLOSE. jsdom has no layout, so the gesture is driven with pointer
+ * events carrying `clientX`/`clientY` and nothing else: a right-to-left drag
+ * past the 36px threshold opens the row onto a trash button; a tap and a
+ * vertical scroll never do. Desktop rows carry no gesture at all.
+ */
+describe('swipe to close on a phone row', () => {
+  const drag = (el: Element, dx: number, dy = 0) => {
+    fireEvent.pointerDown(el, { clientX: 300, clientY: 100, pointerId: 1 });
+    fireEvent.pointerMove(el, { clientX: 300 + dx, clientY: 100 + dy, pointerId: 1 });
+    fireEvent.pointerUp(el, { clientX: 300 + dx, clientY: 100 + dy, pointerId: 1 });
+  };
+  const trash = () => screen.queryByRole('button', { name: 'close session' });
+  const drawPhone = (onClose = vi.fn(), onPick = vi.fn()) => {
+    render(
+      <SessionList
+        {...baseProps(entries())}
+        onClose={onClose}
+        onPick={onPick}
+        phone
+        width={undefined}
+      />,
+    );
+    return { onClose, onPick };
+  };
+
+  it('reveals a trash button on a leftward drag, and tapping it closes once', () => {
+    const { onClose, onPick } = drawPhone();
+    expect(trash(), 'nothing revealed at rest').toBeNull();
+    act(() => drag(row('a2'), -100));
+    const button = trash();
+    expect(button, 'revealed by the swipe').not.toBeNull();
+    expect(onPick).not.toHaveBeenCalled();
+    fireEvent.click(button as Element);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledWith('a2');
+  });
+
+  it('opens the row on a plain tap and calls no onClose', () => {
+    const { onClose, onPick } = drawPhone();
+    act(() => drag(row('a2'), 2));
+    fireEvent.click(row('a2'));
+    expect(onPick).toHaveBeenCalledWith('a2');
+    expect(onClose).not.toHaveBeenCalled();
+    expect(trash()).toBeNull();
+  });
+
+  it('reveals nothing on a mostly-vertical drag', () => {
+    drawPhone();
+    act(() => drag(row('a2'), -30, 80));
+    expect(trash()).toBeNull();
+  });
+
+  it('reveals nothing on a drag shorter than the threshold', () => {
+    drawPhone();
+    act(() => drag(row('a2'), -20));
+    expect(trash()).toBeNull();
+  });
+
+  it('does not open the session when the swipe ends in a click', () => {
+    const { onPick } = drawPhone();
+    act(() => drag(row('a2'), -100));
+    fireEvent.click(row('a2'));
+    expect(onPick).not.toHaveBeenCalled();
+  });
+
+  it('closes an open row when another row opens', () => {
+    drawPhone();
+    act(() => drag(row('a1'), -100));
+    act(() => drag(row('a2'), -100));
+    expect(screen.getAllByRole('button', { name: 'close session' }).length).toBe(1);
+  });
+
+  it('closes an open row on an outside tap', () => {
+    drawPhone();
+    act(() => drag(row('a2'), -100));
+    expect(trash()).not.toBeNull();
+    act(() => {
+      fireEvent.pointerDown(document.body, { clientX: 5, clientY: 5, pointerId: 2 });
+    });
+    expect(trash()).toBeNull();
+  });
+
+  it('does nothing on a desktop row', () => {
+    render(<SessionList {...baseProps(entries())} onClose={vi.fn()} />);
+    act(() => drag(row('a2'), -100));
+    expect(trash()).toBeNull();
+    expect(document.querySelector('[data-swipe-trash]')).toBeNull();
   });
 });

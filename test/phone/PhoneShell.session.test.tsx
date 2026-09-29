@@ -196,125 +196,20 @@ describe('the phone session screen', () => {
   });
 
   /**
-   * CLOSING A SESSION, AND THE QUESTION IN FRONT OF IT -- WHILE IT IS RUNNING.
-   *
-   * The control's own comment used to claim it "goes through the same confirm
-   * the `x` chord does". There was no confirm on either path -- `Canvas`'s
-   * `onSidebarClose` calls `closeSession` straight, and `ConfirmForceClose` is
-   * only offered AFTER a close has been refused -- so one tap, eight pixels
-   * from the Agents icon, ended a running agent with no undo and no question.
-   * The claim is true now, and it is true because of this test rather than
-   * because of the comment.
-   *
-   * `RUNNING_MODEL`, not `MODEL` -- DECISION 1 gates the question on the
-   * session's own status (`running` asks, everything else does not), so this
-   * needs a session actually `running` rather than `MODEL`'s `waiting` one.
-   * See the case right after this one for the status that does NOT ask.
+   * THE SESSION SCREEN HAS NO CLOSE CONTROL. The top-right `x` sat eight
+   * pixels from the Agents icon and was easy to hit by accident; closing now
+   * lives on the list, behind a swipe (`session-row.test.tsx`), and the
+   * question in front of it is pinned in `Canvas.close-confirm.test.tsx`.
    */
-  it('carries closing a session where it can be seen, and only there', async () => {
-    const closed: string[] = [];
-    render(
-      <Canvas
-        model={RUNNING_MODEL}
-        source={phoneSource({
-          closeSession: async (id) => {
-            closed.push(id);
-          },
-        })}
-      />,
-    );
-    act(() => {
-      fireEvent.click(rows()[0] as Element);
-    });
-    const control = document.querySelector('[data-phone-close]');
-    expect(control?.getAttribute('aria-label')).toBe('close session');
-    // At the trailing edge of the app bar -- a whole screen away from the row
-    // whose top-right corner the hover-revealed `x` sat invisibly over.
-    expect(control?.closest('header')).not.toBeNull();
-    expect(control?.closest('[data-session-row]')).toBeNull();
-    await act(async () => {
-      fireEvent.click(control as Element);
-    });
-    // THE TAP OPENS THE QUESTION AND SENDS NOTHING. Both halves, because a
-    // dialog that appears AND writes is the defect wearing a confirm.
-    expect(document.querySelector('[data-confirm-close-session]')).not.toBeNull();
-    expect(closed, 'nothing may be sent before the question is answered').toEqual([]);
-
-    // Cancel leaves it running, and leaves the screen where it was.
-    await act(async () => {
-      fireEvent.click(document.querySelector('[data-confirm-close-session-cancel]') as Element);
-    });
-    expect(document.querySelector('[data-confirm-close-session]')).toBeNull();
-    expect(closed).toEqual([]);
-    expect(document.querySelector('[data-phone-shell="session"]')).not.toBeNull();
-
-    // And the route still works: the confirm is a step, not a wall.
-    await act(async () => {
-      fireEvent.click(control as Element);
-    });
-    await act(async () => {
-      fireEvent.click(document.querySelector('[data-confirm-close-session-go]') as Element);
-    });
-    // The same seam the `x` chord goes through, so this is one route with two
-    // entrances rather than a phone-only way to end a session.
-    expect(closed).toEqual(['a1']);
-  });
-
-  /**
-   * THE OTHER HALF OF DECISION 1: `waiting` has already finished its turn --
-   * the ball is with the operator, per `domain/model.ts`'s own definition --
-   * so closing it loses nothing in flight and the phone must not ask, exactly
-   * like idle/done/terminal. `MODEL`'s own `a1` is `waiting`, which is why
-   * every OTHER case in this file (all opened through `openSession`, all
-   * against `MODEL`) never had to think about this dialog at all.
-   */
-  it('closes a waiting session at once: the ball is already with the operator', async () => {
-    const closed: string[] = [];
-    render(
-      <Canvas
-        model={MODEL}
-        source={phoneSource({
-          closeSession: async (id) => {
-            closed.push(id);
-          },
-        })}
-      />,
-    );
-    act(() => {
-      fireEvent.click(rows()[0] as Element);
-    });
-    await act(async () => {
-      fireEvent.click(document.querySelector('[data-phone-close]') as Element);
-    });
-    expect(document.querySelector('[data-confirm-close-session]')).toBeNull();
-    expect(closed).toEqual(['a1']);
-  });
-
-  it('names the session in the question, and keeps the confirm out of the close-rule’s reach', () => {
+  it('draws no close control in the session header', () => {
     render(<Canvas model={RUNNING_MODEL} source={phoneSource({ closeSession: async () => {} })} />);
     act(() => {
       fireEvent.click(rows()[0] as Element);
     });
-    act(() => {
-      fireEvent.click(document.querySelector('[data-phone-close]') as Element);
-    });
-    const dialog = document.querySelector('[data-confirm-close-session]');
-    // A generic "are you sure" is not adequate for something irreversible:
-    // the session is named, the way the operator names it.
-    expect(dialog?.textContent).toContain('nightly sweep');
-    expect(dialog?.getAttribute('role')).toBe('dialog');
-    expect(dialog?.getAttribute('aria-modal')).toBe('true');
-    // AND NEITHER BUTTON IS NAMED `close ...`. `styles.css` hides
-    // `[data-phone-shell] button[aria-label^='close ']:not([data-phone-close])`
-    // to remove the row's hover-only `x` from a phone -- and this dialog
-    // renders INSIDE `[data-phone-shell]`, so a confirming button labelled
-    // that way would be invisible and the operator would be stuck in a dialog
-    // they could only cancel.
-    for (const hook of ['-cancel', '-go']) {
-      const button = document.querySelector(`[data-confirm-close-session${hook}]`);
-      expect(button?.getAttribute('aria-label'), hook).toBeNull();
-      expect(button?.textContent?.length ?? 0, hook).toBeGreaterThan(0);
-    }
+    const header = document.querySelector('[data-phone-shell="session"] header');
+    expect(header).not.toBeNull();
+    expect(document.querySelector('[data-phone-close]')).toBeNull();
+    expect(header?.querySelector('button[aria-label="close session"]')).toBeNull();
   });
 
   it('renders no Submit: a pick cannot travel from a browser', () => {

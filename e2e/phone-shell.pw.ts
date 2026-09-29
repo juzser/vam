@@ -51,6 +51,23 @@ const IOS_KEYBOARD_CSS_PX = 336;
 /** WCAG 2.2 SC 2.5.5 (AAA) and Apple's HIG figure -- the shell's own comment. */
 const TOUCH_MIN = 44;
 
+/** Swipe a phone row open (touchscreen can only tap) and return the revealed trash. */
+async function swipeTrash(page: Page, row: Locator): Promise<Locator> {
+  await row.evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    const [x, y] = [box.right - 24, box.top + box.height / 2];
+    const fire = (type: string, dx: number) =>
+      el.dispatchEvent(
+        new PointerEvent(type, { bubbles: true, pointerId: 1, clientX: x + dx, clientY: y }),
+      );
+    for (const [type, dx] of [['pointerdown', 0], ['pointermove', -30], ['pointermove', -100], ['pointerup', -100]] as const)
+      fire(type, dx);
+  });
+  const trash = page.locator('[data-phone-shell] [data-swipe-trash]:visible');
+  await expect(trash).toHaveCount(1);
+  return trash;
+}
+
 /**
  * The painted ceiling, from the UI spec's table (`vam-phone-controls`, 3.2):
  * the widest skin it authorises is the 36px record disc, and the widest square
@@ -287,24 +304,22 @@ test.describe('the phone shell at 390px', () => {
     await expect(page.locator('[data-phone-shell] [data-session-row]').first()).toBeVisible();
   });
 
-  test('the close control is on the session bar, clear of the back chevron', async ({ page }) => {
+  test('the session bar has no close control; a swipe on the list reveals a 44px trash', async ({
+    page,
+  }) => {
     await openDemo(page);
     await openFirstSession(page);
+    await expect(page.locator('[data-phone-shell] header [aria-label="close session"]')).toHaveCount(
+      0,
+    );
+    await page.locator('[data-phone-back]').tap();
 
-    const back = page.locator('[data-phone-back]');
-    const close = page.locator('[data-phone-close]');
-    const backBox = await back.boundingBox();
-    const closeBox = await close.boundingBox();
-    if (backBox === null || closeBox === null) throw new Error('app bar controls missing');
-
-    // Visible, not hover-revealed: this is the deliberate route #191 added
-    // BECAUSE a finger has no hover.
-    await expect(close).toBeVisible();
-    await expect(close).toHaveCSS('opacity', '1');
-    // At the other end of the bar from `back`, with real space between them.
-    expect(closeBox.x).toBeGreaterThan(backBox.x + backBox.width + 8);
-    expect(closeBox.width).toBeGreaterThanOrEqual(TOUCH_MIN);
-    expect(closeBox.height).toBeGreaterThanOrEqual(TOUCH_MIN);
+    const trash = await swipeTrash(page, page.locator('[data-phone-shell] [data-session-row]').first());
+    await expect(trash).toBeVisible();
+    const box = await trash.boundingBox();
+    if (box === null) throw new Error('trash missing');
+    expect(box.width).toBeGreaterThanOrEqual(TOUCH_MIN);
+    expect(box.height).toBeGreaterThanOrEqual(TOUCH_MIN);
   });
 
   /**
@@ -1630,13 +1645,12 @@ test.describe('the sheets behind a source', () => {
    * fewer than it used to take.
    */
   const recordAFailure = async (page: Page): Promise<void> => {
-    const box = await page.locator('[data-phone-shell] [data-session-row]').first().boundingBox();
-    if (box === null) throw new Error('no session row');
-    await page.touchscreen.tap(box.x + 60, box.y + box.height / 2);
-    await expect(page.locator('[data-phone-shell]')).toHaveAttribute('data-phone-shell', 'session');
-    await page.locator('[data-phone-close]').tap();
+    const trash = await swipeTrash(
+      page,
+      page.locator('[data-phone-shell] [data-session-row]').first(),
+    );
+    await trash.tap();
     await expect(page.locator('[data-phone-status]').first()).toContainText('stub');
-    await page.locator('[data-phone-back]').tap();
   };
 
   test('the error log opens as a bottom sheet from the failures button', async ({ page }) => {
