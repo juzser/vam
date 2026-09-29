@@ -409,6 +409,69 @@ describe('swipe to close on a phone row', () => {
     expect(trash()).toBeNull();
   });
 
+  const at = (el: Element, moves: [number, number][]) => {
+    fireEvent.pointerDown(el, { clientX: 300, clientY: 100, pointerId: 1 });
+    for (const [dx, dy] of moves)
+      fireEvent.pointerMove(el, { clientX: 300 + dx, clientY: 100 + dy, pointerId: 1 });
+    const [dx, dy] = moves[moves.length - 1] ?? [0, 0];
+    fireEvent.pointerUp(el, { clientX: 300 + dx, clientY: 100 + dy, pointerId: 1 });
+  };
+
+  it('commits at exactly 36px and not at 35px', () => {
+    drawPhone();
+    act(() => drag(row('a2'), -35));
+    expect(trash(), '35px').toBeNull();
+    act(() => drag(row('a2'), -36));
+    expect(trash(), '36px').not.toBeNull();
+  });
+
+  it('locks the axis at 8px: a vertical start is never a swipe, a sub-8px wobble still is', () => {
+    drawPhone();
+    act(() =>
+      at(row('a2'), [
+        [0, 10],
+        [-100, 10],
+      ]),
+    );
+    expect(trash(), 'vertical first, then sideways').toBeNull();
+    act(() =>
+      at(row('a2'), [
+        [-7, 0],
+        [-100, 0],
+      ]),
+    );
+    expect(trash(), 'under the lock, then sideways').not.toBeNull();
+  });
+
+  it('closes an open row on a rightward swipe, and ignores a rightward one on a closed row', () => {
+    drawPhone();
+    act(() => drag(row('a2'), 100));
+    expect(trash(), 'rightward on a closed row').toBeNull();
+    act(() => drag(row('a2'), -100));
+    expect(trash()).not.toBeNull();
+    act(() => drag(row('a2'), 100));
+    expect(trash(), 'rightward on an open row').toBeNull();
+  });
+
+  it('abandons a swipe on pointer cancel', () => {
+    drawPhone();
+    fireEvent.pointerDown(row('a2'), { clientX: 300, clientY: 100, pointerId: 1 });
+    fireEvent.pointerMove(row('a2'), { clientX: 200, clientY: 100, pointerId: 1 });
+    fireEvent.pointerCancel(row('a2'), { pointerId: 1 });
+    expect(trash()).toBeNull();
+  });
+
+  it('keeps the trash out of the tab order and the a11y tree until the row is open', () => {
+    drawPhone();
+    const hidden = document.querySelector('[data-swipe-row="a2"] [data-swipe-trash]');
+    expect(hidden?.getAttribute('tabindex')).toBe('-1');
+    expect(hidden?.getAttribute('aria-hidden')).toBe('true');
+    act(() => drag(row('a2'), -100));
+    const open = trash();
+    expect(open?.hasAttribute('tabindex')).toBe(false);
+    expect(open?.tagName).toBe('BUTTON');
+  });
+
   it('does nothing on a desktop row', () => {
     render(<SessionList {...baseProps(entries())} onClose={vi.fn()} />);
     act(() => drag(row('a2'), -100));
