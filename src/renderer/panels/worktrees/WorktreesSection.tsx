@@ -239,6 +239,13 @@ export type WorktreesSectionProps = {
    * `groupBy === 'project'` mode (see its own call site).
    */
   readonly mainSessionEntries?: readonly SessionEntry[];
+  /**
+   * "Show worktrees" is OFF but a create request is open: draw ONLY the
+   * create form (no heading, no worktree rows, no hidden note, no external
+   * group) so the request stays reachable without leaking the section the
+   * filter hides. `mainSessionEntries` still draw. Defaults to `false`.
+   */
+  readonly formOnly?: boolean;
 };
 
 export function WorktreesSection({
@@ -250,6 +257,7 @@ export function WorktreesSection({
   hideAgentWorktrees = true,
   hideExternalWorktrees = true,
   mainSessionEntries = [],
+  formOnly = false,
 }: WorktreesSectionProps) {
   const api = window.api?.worktrees;
   const { state, reload } = useWorktrees({ projectId: project.id, api });
@@ -327,7 +335,7 @@ export function WorktreesSection({
   const externalWorktrees = worktrees.filter(
     (worktree) => isExternalOrLockedWorktree(worktree) && !holdsWaitingSession(worktree),
   );
-  const showExternalGroup = !hideExternalWorktrees && externalWorktrees.length > 0;
+  const showExternalGroup = !formOnly && !hideExternalWorktrees && externalWorktrees.length > 0;
 
   const [externalCollapsed, setExternalCollapsed] = useState(() =>
     isWorktreeTreeCollapsed(project.id),
@@ -650,8 +658,9 @@ export function WorktreesSection({
     <>
       {showWorktreesBlock && (
         <div data-worktrees-section={project.id} style={{ paddingLeft: SIDEBAR_STEP }}>
-          <div className="relative flex min-h-[21px] items-center gap-[7px] px-1 pb-0.5">
-            {/* THE OPERATOR'S OWN REPORT on PR 547's own screenshot: bold,
+          {!formOnly && (
+            <div className="relative flex min-h-[21px] items-center gap-[7px] px-1 pb-0.5">
+              {/* THE OPERATOR'S OWN REPORT on PR 547's own screenshot: bold,
             12px, full-strength `text-ink-faint` read as a SESSION TITLE
             wearing a strange word, not a caption over one. `text-meta`
             (11px/16px, the scale's own subordinate-text role -- `text-
@@ -663,10 +672,10 @@ export function WorktreesSection({
             semibold`: the tracking and the case are what say "this is a
             label", the same way "External worktrees" (this file's own
             disclosure, right below) already reads as one without it. */}
-            <span className="truncate text-ink-faint text-meta uppercase tracking-[0.12em]">
-              Worktrees
-            </span>
-            {/* `plainWorktrees` PLUS whatever the external group ITSELF draws
+              <span className="truncate text-ink-faint text-meta uppercase tracking-[0.12em]">
+                Worktrees
+              </span>
+              {/* `plainWorktrees` PLUS whatever the external group ITSELF draws
             right now -- this is "how many rows actually draw", the same
             rule the pre-existing `hideAgentWorktrees` filtering already
             established for this span, extended rather than replaced: a
@@ -674,25 +683,28 @@ export function WorktreesSection({
             quiet note beside it says so instead); one shown but folded
             shut still is, the same way a collapsed project still counts
             its own sessions elsewhere in this app. */}
-            <span className="font-mono text-meta text-ink-faint">
-              {plainWorktrees.length + (showExternalGroup ? externalWorktrees.length : 0)}
-            </span>
-            {/* THE QUIET NOTE -- `SessionList.tsx`'s own "· N hidden" style,
+              <span className="font-mono text-meta text-ink-faint">
+                {plainWorktrees.length + (showExternalGroup ? externalWorktrees.length : 0)}
+              </span>
+              {/* THE QUIET NOTE -- `SessionList.tsx`'s own "· N hidden" style,
             never `font-mono` (this file's own count span above is the
             FIRST `.font-mono` under `data-worktrees-section` on purpose;
             `WorktreesSection.test.tsx`'s own count assertion reads it by
             that selector). Absent, not a "0 hidden": present only while
             the filter is actually holding something back. */}
-            {hideExternalWorktrees && externalWorktrees.length > 0 && plainWorktrees.length > 0 && (
-              <span
-                data-worktrees-external-hidden-count
-                className="whitespace-nowrap text-ink-faint text-meta"
-              >
-                {externalWorktrees.length} hidden
-              </span>
-            )}
-            <span className="flex-1" />
-          </div>
+              {hideExternalWorktrees &&
+                externalWorktrees.length > 0 &&
+                plainWorktrees.length > 0 && (
+                  <span
+                    data-worktrees-external-hidden-count
+                    className="whitespace-nowrap text-ink-faint text-meta"
+                  >
+                    {externalWorktrees.length} hidden
+                  </span>
+                )}
+              <span className="flex-1" />
+            </div>
+          )}
 
           {creating && (
             <div
@@ -766,9 +778,11 @@ export function WorktreesSection({
             </p>
           )}
 
-          <div className="flex flex-col gap-1">
-            {plainWorktrees.map((worktree) => renderRow(worktree))}
-          </div>
+          {!formOnly && (
+            <div className="flex flex-col gap-1">
+              {plainWorktrees.map((worktree) => renderRow(worktree))}
+            </div>
+          )}
         </div>
       )}
 
