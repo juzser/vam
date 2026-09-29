@@ -192,4 +192,10 @@ describe('the builder refuses a nav key it has no constant for', () => {
     const notANavKey: string = 'Up';
     expect(() => sendNavArgv('vam-atlas-a1b2c3', notANavKey as NavKey)).toThrow(/navigation/i);
   });
+
+  it('names the count as nine in the refusal, and echoes the offending key', () => {
+    expect(() => sendNavArgv('vam-atlas-a1b2c3', 'Up' as NavKey)).toThrow(
+      /`Up` is not one of the nine navigation keys/,
+    );
+  });
 });
