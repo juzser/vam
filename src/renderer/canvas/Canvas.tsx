@@ -6799,7 +6799,7 @@ function CanvasInner({
         case 'startSession':
           // The mounted start screen registers its own callback, so the
           // provider and permission started with are the ones on screen.
-          if (!triggerStartSession()) {
+          if (focusedSessionId === null || !triggerStartSession(focusedSessionId)) {
             setStatus('no start screen here — this session is already started');
           }
           return;
