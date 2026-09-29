@@ -28,7 +28,10 @@ export default function StatsPopoverPanel() {
 
   useEffect(() => {
     const bridge = window.api?.stats;
-    if (bridge === undefined) return;
+    if (bridge === undefined) {
+      setLoad({ state: 'failed' });
+      return;
+    }
     let cancelled = false;
     bridge
       .get()

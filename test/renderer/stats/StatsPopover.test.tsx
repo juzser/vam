@@ -126,13 +126,16 @@ describe('StatsPopover', () => {
     expect(get).toHaveBeenCalledTimes(2);
   });
 
-  it('opens without a stats bridge and does not throw', async () => {
+  it('opens without a stats bridge, does not throw and shows the failure line', async () => {
     (window as unknown as { api: unknown }).api = undefined;
     render(<StatsPopover onStats={vi.fn()} />);
     await act(async () => {
       fireEvent.click(screen.getByLabelText('stats'));
     });
-    expect(screen.getByRole('dialog').textContent).toContain('loading');
+    await waitFor(() =>
+      expect(screen.getByRole('dialog').textContent).toContain('Stats unavailable'),
+    );
+    expect(screen.getByRole('dialog').textContent).not.toContain('loading');
   });
 
   it('re-clicking the toggle button closes the popover and reflects aria-expanded', async () => {
