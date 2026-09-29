@@ -15,11 +15,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CHANNELS } from '../../src/main/ipc/channels.js';
 import type { TmuxRun, TmuxRunResult } from '../../src/main/sources/tmux/spawn.js';
+import type { StreamClient } from '../../src/main/terminal/stream/client.js';
 import {
   registerTerminalStreamIpc,
   STREAM_UNACKED_LOW_WATER_BYTES,
 } from '../../src/main/terminal/stream-ipc.js';
-import type { StreamClient } from '../../src/main/terminal/stream/client.js';
 import type { TerminalStreamApi } from '../../src/preload/api.js';
 import {
   TERMINAL_STREAM_ACK_STEP_BYTES,
@@ -207,7 +207,7 @@ describe('wrapTerminalStreamApiWithAck', () => {
     errorSpy.mockRestore();
   });
 
-  it('pass-through: every other member is the fake API\'s own function, called with the same arguments', () => {
+  it("pass-through: every other member is the fake API's own function, called with the same arguments", () => {
     const fake = fakeApi();
     const { invoke } = fakeInvoke();
     const wrapped = wrapTerminalStreamApiWithAck(fake.api, invoke);
@@ -317,7 +317,8 @@ describe('terminal stream ack -- byte counting agreement (AC2)', () => {
     // before `record.unacked` finished accounting for the chunk being sent --
     // a reentrancy the real bridge cannot produce.
     const wrapperInvoke = {
-      invoke: (channel: string, ...args: unknown[]) => Promise.resolve().then(() => call(channel, ...args)),
+      invoke: (channel: string, ...args: unknown[]) =>
+        Promise.resolve().then(() => call(channel, ...args)),
     };
     const fakeApiForWrap: TerminalStreamApi = {
       open: (() => Promise.resolve()) as unknown as TerminalStreamApi['open'],
