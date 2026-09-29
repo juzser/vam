@@ -35,7 +35,7 @@ export interface UseFilesTreeStateParams {
   /** True while a filter is typed and its walk has not answered yet. */
   readonly walkPending: boolean;
   /** True when a filter is typed and its walk failed: no rows, never the unfiltered tree. */
-  readonly walkFailed?: boolean;
+  readonly walkFailed: boolean;
   readonly filter: string;
   readonly openFile: (path: string) => void;
   readonly setNote: (note: string | null) => void;
@@ -55,8 +55,6 @@ export interface UseFilesTreeStateParams {
 
 export interface UseFilesTreeStateResult {
   readonly rows: readonly FileTreeRow[];
-  /** A typed filter whose walk failed; the caller shows the error for it. */
-  readonly filterError: boolean;
   readonly cursorIndex: number;
   readonly cursorRow: FileTreeRow | null;
   readonly expanded: ReadonlySet<string>;
@@ -73,7 +71,7 @@ export function useFilesTreeState({
   tree,
   walk,
   walkPending,
-  walkFailed = false,
+  walkFailed,
   filter,
   openFile,
   setNote,
@@ -211,11 +209,8 @@ export function useFilesTreeState({
     ],
   );
 
-  const filterError = walkFailed && filter.trim() !== '' && walk === null;
-
   return {
     rows,
-    filterError,
     cursorIndex,
     cursorRow,
     expanded,

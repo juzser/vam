@@ -40,6 +40,7 @@ function setup(files: readonly string[]) {
       tree: rootLevel(files),
       walk: null,
       walkPending: false,
+      walkFailed: false,
       filter: '',
       openFile,
       setNote,
@@ -121,6 +122,7 @@ describe('useFilesTreeState', () => {
       tree: base,
       walk,
       walkPending,
+      walkFailed: false,
       filter: 'index',
       openFile: vi.fn(),
       setNote: vi.fn(),
@@ -160,12 +162,10 @@ describe('useFilesTreeState', () => {
     });
     const typed = renderHook(() => useFilesTreeState(params('index')));
     expect(typed.result.current.rows).toEqual([]);
-    expect(typed.result.current.filterError).toBe(true);
     const cleared = renderHook(() => useFilesTreeState(params('')));
     expect(cleared.result.current.rows.map((row) => row.path)).toEqual([
       '/w/atlas/src',
       '/w/atlas/README.md',
     ]);
-    expect(cleared.result.current.filterError).toBe(false);
   });
 });

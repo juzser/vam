@@ -1062,7 +1062,6 @@ export function FilesTab({
 
   const {
     rows,
-    filterError,
     cursorRow,
     expanded,
     setCursorPath,
@@ -1087,7 +1086,7 @@ export function FilesTab({
 
   /** The filter's own walk error stays up while the filter is typed. */
   const shownNote =
-    note ?? (filterError && currentWalk?.kind === 'error' ? currentWalk.message : null);
+    note ?? (walkFailed && currentWalk?.kind === 'error' ? currentWalk.message : null);
 
   // LAZY LEVELS: an open directory whose level nobody has asked for yet is
   // read once. The cache entry (loading, ready or error) is the dedupe, so a

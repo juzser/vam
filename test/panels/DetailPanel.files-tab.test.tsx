@@ -469,6 +469,49 @@ describe('the lazy file tree', () => {
     expect(rowPaths()).toContain('/work/atlas/src/fresh.ts');
     expect(rowPaths()).not.toContain('/work/atlas/src/stale.ts');
   });
+
+  it('a filter walk that started before a refresh never fills in the refreshed walk', async () => {
+    let releaseOld: (result: FileListResult) => void = () => {};
+    let walkCalls = 0;
+    const list = vi.fn(async (_sessionId: string, dir?: string) => {
+      if (dir === undefined) {
+        walkCalls += 1;
+        if (walkCalls === 1) {
+          return new Promise<FileListResult>((resolve) => {
+            releaseOld = resolve;
+          });
+        }
+        return { root: '/work/atlas', files: ['fresh.ts'], truncated: false } as FileListResult;
+      }
+      return level('', [{ name: 'fresh.ts', kind: 'file' }]);
+    });
+    withBridge({ list });
+    await draw({ files: true });
+    await openFiles();
+    await act(async () => {
+      fireEvent.change(q<HTMLInputElement>('[data-files-filter]') as HTMLInputElement, {
+        target: { value: 'ts' },
+      });
+      await Promise.resolve();
+    });
+    await act(async () => {
+      q<HTMLButtonElement>('[aria-label="refresh file list"]')?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      releaseOld({ root: '/work/atlas', files: ['stale.ts'], truncated: false });
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(list.mock.calls.filter(([, dir]) => dir === undefined)).toHaveLength(2);
+    expect(rowPaths()).toContain('fresh.ts');
+    expect(rowPaths()).not.toContain('stale.ts');
+  });
 });
 
 describe('the file tree', () => {
