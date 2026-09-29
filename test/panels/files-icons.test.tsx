@@ -302,4 +302,34 @@ describe('the directory row’s right-edge chevron', () => {
     const file = screen.getByRole('treeitem', { name: /a\.txt/ });
     expect(file.querySelector('.lucide-chevron-right, .lucide-chevron-down')).toBeNull();
   });
+
+  it('collapses back to the right chevron, and gives way in the NAME, never the chevron', async () => {
+    render(
+      <FilesTab
+        hidden={false}
+        sessionId="s1"
+        list={list}
+        read={(async () => ({})) as never}
+        write={(async () => ({})) as never}
+        reportUnsaved={undefined}
+        reserveCorner={0}
+        reserveCornerHeight={0}
+        filesTreeWidth={null}
+        onFilesTreeWidth={undefined}
+        onFilesMarkdownView={() => {}}
+      />,
+    );
+    const dir = await screen.findByRole('treeitem', { name: /src/ });
+    await userEvent.click(dir);
+    expect(lastSvgClass(dir)).toContain('lucide-chevron-down');
+    await userEvent.click(dir);
+    expect(lastSvgClass(dir)).toContain('lucide-chevron-right');
+    expect(dir.getAttribute('aria-expanded')).toBe('false');
+    // Narrow-width contract: the chevron is flex-none, the name is the truncating item.
+    expect(dir.lastElementChild?.getAttribute('class')).toContain('flex-none');
+    const name = dir.querySelector('[data-files-row-name]');
+    expect(name?.getAttribute('class')).toMatch(/\btruncate\b/);
+    expect(name?.getAttribute('class')).toContain('min-w-0');
+    expect(name?.getAttribute('class')).not.toContain('flex-none');
+  });
 });
