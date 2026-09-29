@@ -15,8 +15,8 @@
  * different, unasked-for change.
  */
 
-import { act, cleanup, fireEvent, render } from '@testing-library/react';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Canvas, compactTokens, StatusCell } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
 import { clearEvents, recordFailure, recordRefusal } from '../../src/renderer/errors/log.js';
@@ -135,12 +135,53 @@ describe('the status bar usage cell opens the usage popover', () => {
     render(<Canvas model={MODEL} />);
     await act(async () => {
       trigger()?.click();
+      await vi.dynamicImportSettled();
     });
     expect(panel()).not.toBeNull();
     await act(async () => {
       trigger()?.click();
+      await vi.dynamicImportSettled();
     });
     expect(panel()).toBeNull();
+  });
+
+  // WCAG 2.5.3 (Label in Name) and 4.1.2: the accessible name must contain the
+  // visible figure, and the cell must expose the popover's open state.
+  it('is named by its visible figure and exposes aria-haspopup and aria-expanded', async () => {
+    const fiveHour = {
+      kind: 'known',
+      percent: 42,
+      resetsAt: new Date(Date.now() + 3_600_000).toISOString(),
+    };
+    (window as unknown as { api: unknown }).api = {
+      usage: {
+        get: async () => ({
+          kind: 'ok',
+          windows: { fiveHour, sevenDay: fiveHour },
+          observedAt: new Date().toISOString(),
+        }),
+        getCodex: async () => ({ kind: 'unknown', reason: 'unavailable' }),
+      },
+    };
+    try {
+      render(<Canvas model={MODEL} />);
+      const cell = await screen.findByRole('button', { name: /42%/ });
+      expect(cell.hasAttribute('data-usage-trigger')).toBe(true);
+      expect(cell.getAttribute('aria-haspopup')).toBe('dialog');
+      expect(cell.getAttribute('aria-expanded')).toBe('false');
+      await act(async () => {
+        cell.click();
+        await vi.dynamicImportSettled();
+      });
+      expect(cell.getAttribute('aria-expanded')).toBe('true');
+      await act(async () => {
+        cell.click();
+        await vi.dynamicImportSettled();
+      });
+      expect(cell.getAttribute('aria-expanded')).toBe('false');
+    } finally {
+      Reflect.deleteProperty(window, 'api');
+    }
   });
 });
 

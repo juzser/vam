@@ -145,7 +145,7 @@ import { triggerStartSession } from '../panels/start-session-registry.js';
 import { StatusMark } from '../panels/status-mark.js';
 import { halfPageTarget } from '../panels/stick-to-bottom.js';
 import { TABS, tabForDigit, visibleTabs } from '../panels/tabs.js';
-import { toggleUsagePopover } from '../panels/UsagePopover.js';
+import { toggleUsagePopoverFrom, useUsageOpen } from '../panels/UsagePopover.js';
 import { ConfirmCloseSession } from '../phone/ConfirmCloseSession.js';
 import { PhoneShell } from '../phone/PhoneShell.js';
 import { usePhoneViewport } from '../phone/viewport.js';
@@ -377,12 +377,10 @@ export function truncateStatus(text: string): string {
 /** A usage cell that toggles the popover: the button is the one tab stop, and
  *  a missing-number `reason` rides on a `Note` around it (opens on focus). */
 function UsageTrigger({
-  label,
   marker,
   reason,
   children,
 }: {
-  readonly label: string;
   readonly marker: 'data-usage' | 'data-codex-usage';
   readonly reason: string | null;
   readonly children: ReactNode;
@@ -390,13 +388,16 @@ function UsageTrigger({
   // With a `reason` the button itself is the explaining cell: it carries the
   // cell marker and an explicit tab stop, so focus opens the `Note`.
   const cell = reason === null ? {} : { [marker]: '', tabIndex: 0 };
+  const open = useUsageOpen(marker);
   const button = (
     <button
       type="button"
       data-usage-trigger
       {...cell}
-      aria-label={label}
-      onClick={toggleUsagePopover}
+      // No `aria-label`: the visible figure names the button (WCAG 2.5.3).
+      aria-haspopup="dialog"
+      aria-expanded={open}
+      onClick={() => toggleUsagePopoverFrom(marker)}
       className="flex cursor-pointer items-center gap-2 bg-transparent p-0 text-inherit"
     >
       {children}
@@ -8714,7 +8715,7 @@ function CanvasInner({
                   sidebar row and the Stats screen's `ProviderCard` already
                   draw from (`sources/provider-marks.tsx`), never a copied
                   path: one glyph for `claude-code`, drawn once. */}
-              <UsageTrigger label="Usage details" marker="data-usage" reason={usage.reason}>
+              <UsageTrigger marker="data-usage" reason={usage.reason}>
                 <span
                   data-usage={usage.reason === null ? '' : undefined}
                   className={`flex items-center gap-1${usage.highUsage ? ' text-failed' : ''}`}
@@ -8754,11 +8755,7 @@ function CanvasInner({
                   resolver, `source="codex"`, so this cell and Claude's read
                   as one family rather than two different widgets that
                   happen to sit beside each other. */}
-              <UsageTrigger
-                label="Codex usage details"
-                marker="data-codex-usage"
-                reason={codexUsage.reason}
-              >
+              <UsageTrigger marker="data-codex-usage" reason={codexUsage.reason}>
                 <span
                   data-codex-usage={codexUsage.reason === null ? '' : undefined}
                   className={`flex items-center gap-1${codexUsage.highUsage ? ' text-failed' : ''}`}
