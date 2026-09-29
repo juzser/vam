@@ -612,6 +612,32 @@ describe('the button names the model the session is running', () => {
     expect(asked).toEqual([['p1', 's1']]);
   });
 
+  it('names the model on the disabled button when vam did not start the session', async () => {
+    const { asked, model } = reader({ kind: 'model', name: 'Opus 4.1' });
+    draw({
+      delivers: true,
+      terminal: true,
+      model,
+      entry: { project: PROJECT, session: { ...SESSION, vamControlled: false } },
+    });
+    await settle();
+    expect(asked).toEqual([['p1', 's1']]);
+    expect(picker()?.disabled).toBe(true);
+    expect(q('[data-model-label]')?.textContent?.trim()).toBe('Opus 4.1');
+  });
+
+  it('prefers the read model over the recorded one on the disabled button', async () => {
+    const { model } = reader({ kind: 'model', name: 'Opus 4.1' });
+    draw({
+      delivers: true,
+      terminal: true,
+      model,
+      entry: { project: PROJECT, session: { ...SESSION, vamControlled: false, model: 'old-rec' } },
+    });
+    await settle();
+    expect(q('[data-model-label]')?.textContent?.trim()).toBe('Opus 4.1');
+  });
+
   it('wears the name it read, where the word "model" used to be', async () => {
     const { model } = reader({ kind: 'model', name: 'Opus 5' });
     draw({ delivers: true, terminal: true, model });
@@ -768,22 +794,6 @@ describe('the button names the model the session is running', () => {
     draw({ model });
     await settle();
     expect(request()).not.toBeNull();
-    expect(asked).toEqual([]);
-  });
-
-  it('asks nothing for a session vam did not start', async () => {
-    // vam does not look into a pane it may not act in -- the same rule the
-    // pane-prompt read keeps.
-    const { asked, model } = reader({ kind: 'model', name: 'Opus 5' });
-    draw({
-      delivers: true,
-      terminal: true,
-      model,
-      entry: { project: PROJECT, session: { ...SESSION, vamControlled: false } },
-    });
-    await settle();
-    expect(picker()?.disabled).toBe(true);
-    expect(label()).toBe('model');
     expect(asked).toEqual([]);
   });
 });

@@ -49,26 +49,39 @@ describe('useDetailPanelModelRun', () => {
     expect(result.current.running).toBeNull();
   });
 
-  it('reads nothing and publishes no on-demand reader when the control is not a readable picker', async () => {
-    const model = vi.fn().mockResolvedValue({ kind: 'model', name: 'Opus 5' });
-    type Props = { readonly modelControl: 'request' | 'disabled' | 'picker' };
-    const { result, rerender } = renderHook<ReturnType<typeof useDetailPanelModelRun>, Props>(
-      (props) => useDetailPanelModelRun({ ...props, model, projectId: 'p1', rowId: 'r1' }),
-      { initialProps: { modelControl: 'request' } },
+  it('reads the running model when the control is disabled and a reader exists', async () => {
+    const model = vi.fn().mockResolvedValue({ kind: 'model', name: 'Opus 4.1' });
+    const { result } = renderHook(() =>
+      useDetailPanelModelRun({ modelControl: 'disabled', model, projectId: 'p1', rowId: 'r1' }),
     );
+    await waitFor(() =>
+      expect(result.current.running).toEqual({ kind: 'model', name: 'Opus 4.1' }),
+    );
+    expect(model).toHaveBeenCalledTimes(1);
+    expect(model).toHaveBeenCalledWith('p1', 'r1');
+  });
 
+  it('reads nothing and publishes no on-demand reader when the control is neither picker nor disabled', async () => {
+    const model = vi.fn().mockResolvedValue({ kind: 'model', name: 'Opus 5' });
+    const { result } = renderHook(() =>
+      useDetailPanelModelRun({ modelControl: 'request', model, projectId: 'p1', rowId: 'r1' }),
+    );
     await act(async () => {
       await Promise.resolve();
     });
     expect(model).not.toHaveBeenCalled();
     expect(result.current.running).toBeNull();
     expect(result.current.lookForModel.current).toBeNull();
+  });
 
-    rerender({ modelControl: 'disabled' });
+  it('reads nothing when the control is disabled but no reader is given', async () => {
+    const { result } = renderHook(() =>
+      useDetailPanelModelRun({ modelControl: 'disabled', projectId: 'p1', rowId: 'r1' }),
+    );
     await act(async () => {
       await Promise.resolve();
     });
-    expect(model).not.toHaveBeenCalled();
+    expect(result.current.running).toBeNull();
     expect(result.current.lookForModel.current).toBeNull();
   });
 
