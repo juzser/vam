@@ -378,17 +378,23 @@ export function truncateStatus(text: string): string {
  *  a missing-number `reason` rides on a `Note` around it (opens on focus). */
 function UsageTrigger({
   label,
+  marker,
   reason,
   children,
 }: {
   readonly label: string;
+  readonly marker: 'data-usage' | 'data-codex-usage';
   readonly reason: string | null;
   readonly children: ReactNode;
 }) {
+  // With a `reason` the button itself is the explaining cell: it carries the
+  // cell marker and an explicit tab stop, so focus opens the `Note`.
+  const cell = reason === null ? {} : { [marker]: '', tabIndex: 0 };
   const button = (
     <button
       type="button"
       data-usage-trigger
+      {...cell}
       aria-label={label}
       onClick={toggleUsagePopover}
       className="flex cursor-pointer items-center gap-2 bg-transparent p-0 text-inherit"
@@ -8690,9 +8696,9 @@ function CanvasInner({
                   sidebar row and the Stats screen's `ProviderCard` already
                   draw from (`sources/provider-marks.tsx`), never a copied
                   path: one glyph for `claude-code`, drawn once. */}
-              <UsageTrigger label="Usage details" reason={usage.reason}>
+              <UsageTrigger label="Usage details" marker="data-usage" reason={usage.reason}>
                 <span
-                  data-usage
+                  data-usage={usage.reason === null ? '' : undefined}
                   className={`flex items-center gap-1${usage.highUsage ? ' text-failed' : ''}`}
                 >
                   <SourceMark source="claude-code" lane={12} />
@@ -8730,9 +8736,13 @@ function CanvasInner({
                   resolver, `source="codex"`, so this cell and Claude's read
                   as one family rather than two different widgets that
                   happen to sit beside each other. */}
-              <UsageTrigger label="Codex usage details" reason={codexUsage.reason}>
+              <UsageTrigger
+                label="Codex usage details"
+                marker="data-codex-usage"
+                reason={codexUsage.reason}
+              >
                 <span
-                  data-codex-usage
+                  data-codex-usage={codexUsage.reason === null ? '' : undefined}
                   className={`flex items-center gap-1${codexUsage.highUsage ? ' text-failed' : ''}`}
                 >
                   <SourceMark source="codex" lane={12} />
