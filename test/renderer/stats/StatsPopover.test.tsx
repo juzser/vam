@@ -176,6 +176,24 @@ describe('StatsPopover', () => {
     expect(panel.textContent).not.toContain('loading');
   });
 
+  it('shows loading while the read is pending, then swaps to the panel', async () => {
+    let resolve: (v: unknown) => void = () => {};
+    const get = vi.fn().mockReturnValue(new Promise((r) => (resolve = r)));
+    (window as unknown as { api: unknown }).api = { stats: { get } };
+    render(<StatsPopover onStats={vi.fn()} />);
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText('stats'));
+    });
+    const panel = screen.getByRole('dialog');
+    expect(panel.textContent).toContain('loading');
+    expect(panel.querySelector('[data-stats-popover-error]')).toBeNull();
+    await act(async () => {
+      resolve({ kind: 'ok', snapshot: SNAPSHOT });
+    });
+    await waitFor(() => expect(panel.textContent).toContain('18.2B'));
+    expect(panel.textContent).not.toContain('loading');
+  });
+
   it('does not fetch while closed and fetches once per open', async () => {
     const { get } = await open();
     expect(get).toHaveBeenCalledTimes(1);
