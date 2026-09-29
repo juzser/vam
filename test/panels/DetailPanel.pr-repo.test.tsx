@@ -119,6 +119,47 @@ describe('with no override the heading names the session directory’s git remot
     expect(name()?.textContent).toBe('blacksmith');
   });
 
+  it('prefers origin over an earlier-listed remote', async () => {
+    const projectRemotes = vi.fn(async () => [
+      { name: 'upstream', repo: 'up/blacksmith' },
+      { name: 'origin', repo: 'me/blacksmith' },
+    ]);
+    stubRemotes(projectRemotes);
+    draw({ prRepo: noOverride });
+    await waitFor(() => expect(name()?.textContent).toBe('me/blacksmith'));
+  });
+
+  it('takes the first remote when none is called origin', async () => {
+    const projectRemotes = vi.fn(async () => [
+      { name: 'fork', repo: 'f/blacksmith' },
+      { name: 'upstream', repo: 'up/blacksmith' },
+    ]);
+    stubRemotes(projectRemotes);
+    draw({ prRepo: noOverride });
+    await waitFor(() => expect(name()?.textContent).toBe('f/blacksmith'));
+  });
+
+  it('falls back to the project name when the bridge rejects', async () => {
+    const projectRemotes = vi.fn(async () => {
+      throw new Error('boom');
+    });
+    stubRemotes(projectRemotes);
+    draw({ prRepo: noOverride });
+    await waitFor(() => expect(projectRemotes).toHaveBeenCalled());
+    await Promise.resolve();
+    expect(name()?.textContent).toBe('blacksmith');
+  });
+
+  it('keeps the clear control and the override name when overridden, remote ignored', async () => {
+    const projectRemotes = vi.fn(async () => [{ name: 'origin', repo: 'owner/blacksmith' }]);
+    stubRemotes(projectRemotes);
+    draw({ prRepo: { ...noOverride, directory: DIR } });
+    await Promise.resolve();
+    expect(name()?.textContent).toBe('other-repo');
+    expect(clear()).not.toBeNull();
+    expect(projectRemotes).not.toHaveBeenCalled();
+  });
+
   it('does not ask, and keeps the chosen directory, when one is overridden', () => {
     const projectRemotes = vi.fn(async () => [{ name: 'origin', repo: 'owner/blacksmith' }]);
     stubRemotes(projectRemotes);
