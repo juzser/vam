@@ -275,6 +275,18 @@ describe('the overlay draws a focus indicator', () => {
  * left-arrow row reading "Back to app" at the top of the desktop rail, in
  * place of the plain label, closing Settings the same way Esc/`×` already do.
  */
+describe('the wide rail reads one type-scale step above control', () => {
+  it('sets every section item in text-body, none in text-control', () => {
+    open();
+    const items = [...document.querySelectorAll('[data-settings-nav-item]')];
+    expect(items.length).toBe(VISIBLE_SECTIONS.length);
+    for (const el of items) {
+      expect(el.classList.contains('text-body')).toBe(true);
+      expect(el.classList.contains('text-control')).toBe(false);
+    }
+  });
+});
+
 describe('the rail\'s own "Back to app" row', () => {
   const back = () => document.querySelector<HTMLElement>('[data-settings-back]');
 
