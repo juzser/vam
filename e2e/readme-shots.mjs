@@ -1,7 +1,7 @@
 /**
  * THE README'S OWN SCREENSHOTS, RETAKEN AGAINST THE CURRENT BUILD.
  *
- * Ten pictures, all `docs/assets/readme/`, all `?demo=1` fixture data or an
+ * Eleven pictures, all `docs/assets/readme/`, all `?demo=1` fixture data or an
  * in-page `window.api` stub whose every value is invented (the same
  * technique `start-screen-shots.mjs`, `usage-popover-shots.mjs`,
  * `settings-chrome-shots.mjs`, `integrations-github-shots.mjs` and
@@ -21,7 +21,10 @@
  *                        list.
  *   integrations.png     the GitHub (`gh`) and GitLab (`glab`) cards.
  *   keyboard-today.png   the `?` shortcuts sheet, generated from the key
- *                        tables, true today — no unmerged #553 content.
+ *                        tables (post-#553: Escape leaves Insert, Mod-.
+ *                        interrupts).
+ *   keyboard-settings.png Settings → Keyboard, a contested chord's red
+ *                        conflict dot with its tooltip open (PR #553).
  *   hero.png             the tab shell itself — sidebar, sessions as tabs,
  *                        one session's Response view with its IN/OUT.
  *
@@ -795,12 +798,10 @@ function baseApiStub() {
 
 // ── 9. KEYBOARD, TRUE TODAY — the generated shortcuts sheet ─────────────────
 // Pure `?demo=1`: `?` opens the sheet the same way `key-sheet-shots.mjs`
-// does. No keyboard-remapping code is touched here -- the sheet as it exists
-// on this branch today. Binding-conflict detection (`bindingClashes()`,
-// `chords.ts`) already ships (PR #297, long before this pass); this fixture
-// just has no clashing bindings to show one. Unmerged PR #553 adds two
-// specific gestures on top of today's Insert mode (Esc leaves Insert, Cmd+.
-// interrupts) -- neither depicted here, both still open.
+// does. PR #553 (merged): `Escape` now leaves Insert instead of reaching the
+// pane, and `Mod-.` is the new way to send Escape INTO a running session —
+// this sheet is generated straight from the same key tables, so it already
+// reads the post-#553 bindings with no changes needed here.
 {
   const page = await browser.newPage({ viewport: DESKTOP, deviceScaleFactor: RETINA });
   page.on('pageerror', (err) => console.error('KEYBOARD-TODAY PAGE ERROR:', err));
@@ -820,7 +821,65 @@ function baseApiStub() {
   await page.close();
 }
 
-// ── 10. THE HERO — the tab shell itself, sidebar, sessions as tabs ─────────
+// ── 10. KEYBOARD SETTINGS — the conflict dot, tooltip open ─────────────────
+// PR #553 (merged) also shipped a conflict dot (`data-binding-conflict`,
+// `SettingsOverlay.tsx`) on EVERY row a chord is contested on, winner
+// included -- `binding-conflict-dot.test.tsx`'s own fixture, replayed here:
+// binding `close` to bare `r` leaves the shipped `rename` (`r`) dead behind
+// it. Planted through the same `localStorage` key a real override lives in
+// (`settings-chrome-shots.mjs`'s own pattern, `vam.prefs.v1`), never a real
+// preference. The tooltip opens the way a keyboard does -- focus, no
+// pointer -- the same shape `tooltip-shots.mjs` uses on `Note`, with one
+// wrinkle THIS row needed that a lone `.focus()` does not: Radix's `Note`
+// gates the portal on `:focus-visible`, which a bare programmatic
+// `element.focus()` right after two prior pointer clicks (open Settings,
+// pick Keyboard) does NOT set in Chromium -- measured here, `:focus-visible`
+// read `false` and no tooltip opened. A `Shift+Tab` then `Tab` -- real
+// keyboard traversal -- flips it to `true` and the portal opens, same
+// element, same click history otherwise.
+{
+  const page = await browser.newPage({ viewport: DESKTOP, deviceScaleFactor: RETINA });
+  page.on('pageerror', (err) => console.error('KEYBOARD-SETTINGS PAGE ERROR:', err));
+  await page.addInitScript(() => {
+    localStorage.setItem('vam.prefs.v1', JSON.stringify({ keyBindings: { close: ['r'] } }));
+  });
+  await page.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('button[aria-label="settings"]', { timeout: 15_000 });
+  await page.locator('button[aria-label="settings"]').first().click();
+  await page.waitForSelector('[data-settings-nav]', { timeout: 5_000 });
+  await page.locator('[data-settings-nav-item="keyboard"]').click();
+  await page.waitForSelector('[data-binding-slot]', { timeout: 5_000 });
+
+  const dots = await page
+    .locator('[data-binding-conflict]')
+    .evaluateAll((els) => els.map((el) => el.getAttribute('data-binding-conflict')));
+  console.log('conflict dots:', JSON.stringify(dots));
+  assert(
+    'both the winning and losing row carry a dot',
+    dots.includes('close') && dots.includes('rename'),
+    JSON.stringify(dots),
+  );
+
+  // Open the tooltip on the LOSING row, so the frame shows what it names.
+  // `.focus()` first (scrolls the row into view and lands focus on it), then
+  // a real Shift+Tab/Tab dance so Chromium marks it `:focus-visible` -- see
+  // this block's own header for why the bare `.focus()` alone does not.
+  await page.locator('[data-binding-conflict="rename"]').focus();
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Tab');
+  await page.waitForSelector('[role="tooltip"]', { timeout: 3_000 });
+  const tipText = await page.locator('[role="tooltip"]').first().innerText();
+  console.log('conflict tooltip:', JSON.stringify(tipText));
+  assert('the tooltip names the other action', tipText.toLowerCase().includes('close'), tipText);
+
+  await page.waitForTimeout(150);
+  await freeze(page);
+  await page.screenshot({ path: `${outDir}/keyboard-settings.png` });
+  console.log(`${outDir}/keyboard-settings.png`);
+  await page.close();
+}
+
+// ── 11. THE HERO — the tab shell itself, sidebar, sessions as tabs ────────
 // `factory-sse-1` is 'waiting': the README's own pitch (it colours a session
 // by whether it needs you, so the waiting state should be what a reader
 // actually sees) is what the hero should show, not an idle screen.

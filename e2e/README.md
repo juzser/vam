@@ -595,36 +595,33 @@ Falsified 2026-09-08: making `zv` a no-op in the served bundle (with
 `split-panes-shots.mjs` — *"zv (split vertical) left 1 pane(s), expected 2"* —
 and `prompt-suggest-shots.mjs`, and exits 1.
 
-## `e2e/readme-shots.mjs` — the four screenshots `README.md` embeds
+## `e2e/readme-shots.mjs` — the eleven screenshots `README.md` embeds
 
 Another shot-taker, not a guard (same reason as the four above; not in
-`run-web-guards.mjs`'s list). It retakes the images `README.md`'s own
-"Screenshots" section links to — `hero-dark.png`, `palette.png`,
-`agents-tab.png`, `composer-attach.png` — against the CURRENT build, `?demo=1`
-only, same rule `phone-list-shots.mjs` states ("live mode would put a real
-workspace, with real paths and real session ids, into a public repo").
+`run-web-guards.mjs`'s list). It retakes every image the nodeterm-style
+`README.md` embeds under `docs/assets/readme/` — the hero, the start flow and
+its Manual/Yolo picker, status & usage, the question card, workspace filters,
+phone pairing plus a live phone session, the Settings overlay, Integrations,
+the keyboard sheet, and Settings → Keyboard's conflict dot — against the
+CURRENT build, `?demo=1` (or an in-page `window.api`/`localStorage` stub, for
+the handful of views `?demo=1` alone cannot reach) only, same rule
+`phone-list-shots.mjs` states ("live mode would put a real workspace, with
+real paths and real session ids, into a public repo").
 
-The previous four (`canvas-dark.png`, `palette.png`, `terminal.png`,
-`image-attach.png`) all predated PR #260 (the 0.2 tab-shell migration,
-"collapse vam to two panes and drop the canvas layout presets") and showed a
-node-graph canvas that no longer exists, rendered against the pre-lift dark
-palette besides. Two of the four could not be retaken like-for-like: the
-Terminal tab is withdrawn from the bar entirely in demo mode
-(`visibleTabs()` in `panels/tabs.ts`, since `terminalTab` is
-`source.kind === 'session' && …` and `?demo=1` is never `'session'`), and the
-image-attach button is drawn only when `pickImageAttachment !== undefined`,
-which `Canvas.tsx` likewise sets `undefined` for demo — both gate on a real
-Electron dialog / a real tmux pane, neither of which a fictional fixture has
-to show. `readme-shots.mjs`'s own header comment has the full reasoning.
-`agents-tab.png` and `composer-attach.png` take their two slots instead, with
-two real, current, demo-safe capabilities.
+This replaced an earlier four-image set (`hero-dark.png`, `palette.png`,
+`agents-tab.png`, `composer-attach.png`, in `docs/images/`) written for a
+much shorter README; those four are gone from both the script and the repo
+now that the images they were retaking are gone too. `readme-shots.mjs`'s own
+header comment has the full reasoning for what still can't be shown honestly
+(the Terminal tab and the native image-attach dialog, both gated on
+capabilities `?demo=1` does not have).
 
 Run against a running preview server, same pattern as the scripts above:
 
 ```bash
 node_modules/.bin/vite build --config vite.web.config.ts
 node_modules/.bin/vite preview --config vite.web.config.ts --port 5529
-node e2e/readme-shots.mjs http://localhost:5529 docs/images
+node e2e/readme-shots.mjs http://localhost:5529 docs/assets/readme
 ```
 
 ## `e2e/dark-ladder-shots.mjs` — the palette change, judged by eye as well as by number
