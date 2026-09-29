@@ -52,6 +52,7 @@ describe('the session-origin filters, persisted', () => {
       // visibility.ts`'s own header. `hide`-shaped like every field here;
       // only the popover's own label reads "Show external worktrees".
       hideExternalWorktrees: true,
+      hideWorktrees: true,
     });
     expect(EMPTY_PREFS.filters).toEqual(DEFAULT_SESSION_FILTERS);
   });
@@ -68,6 +69,7 @@ describe('the session-origin filters, persisted', () => {
         hideIdle: true,
         hideAgentWorktrees: false,
         hideExternalWorktrees: false,
+        hideWorktrees: false,
       }),
     );
     expect(readPrefs(s).filters).toEqual({
@@ -78,6 +80,7 @@ describe('the session-origin filters, persisted', () => {
       hideIdle: true,
       hideAgentWorktrees: false,
       hideExternalWorktrees: false,
+      hideWorktrees: false,
     });
   });
 
@@ -116,6 +119,7 @@ describe('the session-origin filters, persisted', () => {
       hideIdle: false,
       hideAgentWorktrees: true,
       hideExternalWorktrees: true,
+      hideWorktrees: true,
     });
   });
 
@@ -131,6 +135,7 @@ describe('the session-origin filters, persisted', () => {
       hideIdle: false,
       hideAgentWorktrees: true,
       hideExternalWorktrees: true,
+      hideWorktrees: true,
     });
   });
 
@@ -144,6 +149,7 @@ describe('the session-origin filters, persisted', () => {
       hideIdle: false,
       hideAgentWorktrees: true,
       hideExternalWorktrees: true,
+      hideWorktrees: true,
     });
   });
 
@@ -157,6 +163,7 @@ describe('the session-origin filters, persisted', () => {
       hideIdle: true,
       hideAgentWorktrees: true,
       hideExternalWorktrees: true,
+      hideWorktrees: true,
     });
   });
 
@@ -175,6 +182,7 @@ describe('the session-origin filters, persisted', () => {
       hideIdle: false,
       hideAgentWorktrees: false,
       hideExternalWorktrees: true,
+      hideWorktrees: true,
     });
   });
 
@@ -193,11 +201,31 @@ describe('the session-origin filters, persisted', () => {
       hideIdle: false,
       hideAgentWorktrees: true,
       hideExternalWorktrees: false,
+      hideWorktrees: true,
     });
   });
 
   it('takes only a real boolean for hideExternalWorktrees -- garbage falls back to the shipped default (on)', () => {
     const raw = '{"filters":{"hideExternalWorktrees":"yes"}}';
     expect(readPrefs(store(raw)).filters.hideExternalWorktrees).toBe(true);
+  });
+
+  it('reads a missing hideWorktrees key as the shipped default (on)', () => {
+    const raw = '{"filters":{"hideIdle":true}}';
+    expect(readPrefs(store(raw)).filters.hideWorktrees).toBe(true);
+  });
+
+  it('round-trips hideWorktrees: false as false', () => {
+    const s = store();
+    writePrefs(
+      s,
+      setSessionFilters(EMPTY_PREFS, { ...DEFAULT_SESSION_FILTERS, hideWorktrees: false }),
+    );
+    expect(readPrefs(s).filters.hideWorktrees).toBe(false);
+  });
+
+  it('takes only a real boolean for hideWorktrees -- garbage falls back to the shipped default (on)', () => {
+    const raw = '{"filters":{"hideWorktrees":"no"}}';
+    expect(readPrefs(store(raw)).filters.hideWorktrees).toBe(true);
   });
 });

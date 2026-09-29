@@ -1649,6 +1649,7 @@ function readFilters(raw: unknown): SessionFilters {
     hideIdle,
     hideAgentWorktrees,
     hideExternalWorktrees,
+    hideWorktrees,
   } = (typeof raw === 'object' && raw !== null ? raw : {}) as {
     hideAgentStarted?: unknown;
     onlyPrompted?: unknown;
@@ -1657,6 +1658,7 @@ function readFilters(raw: unknown): SessionFilters {
     hideIdle?: unknown;
     hideAgentWorktrees?: unknown;
     hideExternalWorktrees?: unknown;
+    hideWorktrees?: unknown;
   };
   return {
     hideAgentStarted:
@@ -1696,6 +1698,10 @@ function readFilters(raw: unknown): SessionFilters {
       typeof hideExternalWorktrees === 'boolean'
         ? hideExternalWorktrees
         : DEFAULT_SESSION_FILTERS.hideExternalWorktrees,
+    // Same per-field fallback, ON by default: a store predating this key
+    // reads back as the shipped default.
+    hideWorktrees:
+      typeof hideWorktrees === 'boolean' ? hideWorktrees : DEFAULT_SESSION_FILTERS.hideWorktrees,
   };
 }
 

@@ -106,6 +106,12 @@ export type SessionFilters = {
    * one convention rather than two.
    */
   readonly hideExternalWorktrees: boolean;
+  /**
+   * The whole per-project Worktrees section, not drawn at all. ON by default.
+   * `hide`-shaped like every field here, though the filter menu's own label
+   * reads "Show worktrees" -- the operator's own words, the other way round.
+   */
+  readonly hideWorktrees: boolean;
 };
 
 /**
@@ -125,6 +131,7 @@ export const DEFAULT_SESSION_FILTERS: SessionFilters = {
   hideIdle: false,
   hideAgentWorktrees: true,
   hideExternalWorktrees: true,
+  hideWorktrees: true,
 };
 
 /**
