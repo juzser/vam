@@ -1091,7 +1091,7 @@ const NAV_KEY_NAMES: Readonly<Record<NavKey, string>> = {
  * WHY THIS IS A KIND AND NOT A FIELD ON `text`, restated for the eighth time
  * this file makes the argument: `send-keys -l -- 'Up'` would TYPE the two
  * letters into the operator's own prompt, which is not what an arrow key is
- * for. `Up` and its seven siblings have to go through tmux's own key
+ * for. `Up` and its eight siblings have to go through tmux's own key
  * translation exactly as `Enter` and `BSpace` do.
  *
  * THE LOOKUP REFUSES RATHER THAN SPLICING, for the same reason
@@ -1104,7 +1104,7 @@ export function sendNavArgv(name: string, nav: NavKey): readonly string[] {
   const keyName = NAV_KEY_NAMES[nav];
   if (keyName === undefined) {
     throw new Error(
-      `vam will not build a tmux send-keys argv: \`${String(nav)}\` is not one of the eight navigation keys`,
+      `vam will not build a tmux send-keys argv: \`${String(nav)}\` is not one of the nine navigation keys`,
     );
   }
   return ['send-keys', '-t', paneTarget(name), '--', keyName];

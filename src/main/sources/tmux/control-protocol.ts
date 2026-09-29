@@ -128,6 +128,7 @@ const SAFE_LITERALS: ReadonlySet<string> = new Set([
   'End',
   'PageUp',
   'PageDown',
+  'DC',
   ...'abcdefghijklmnopqrstuvwxyz'.split('').map((letter) => `C-${letter}`),
 ]);
 
