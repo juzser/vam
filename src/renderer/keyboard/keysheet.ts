@@ -449,6 +449,16 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
   // table and gets no row: the sheet lists what the tables hold, and a row with
   // no binding behind it is the defect this module exists to make impossible.
   cancel: { group: 'view', label: () => 'close / cancel' },
+  // `Mod-.` — the operator's reversal: Escape now leaves Insert everywhere
+  // (it is `cancel`, above, for exactly that reason) and the interrupt gets
+  // its own chord so it still reaches the focused session's agent from
+  // anywhere, in or out of Insert. `session`, beside `rename`/`close`: it
+  // acts on the focused session's pane, not on a surface that opens over
+  // everything.
+  interrupt: {
+    group: 'session',
+    label: () => 'interrupt the focused session’s agent — presses Escape into its pane',
+  },
 };
 
 type SheetRow = {

@@ -756,7 +756,31 @@ export type KeyAction =
    * `?`/`Shift+/` shape the same rule already covers.
    */
   | { readonly kind: 'zoom'; readonly delta: 1 | -1 }
-  | { readonly kind: 'cancel' };
+  | { readonly kind: 'cancel' }
+  /**
+   * `Mod-.` — INTERRUPT THE FOCUSED SESSION'S AGENT: press Escape into its
+   * pane, over the same channel the phone keystroke strip and the bubble
+   * menu's "Cancel prompt" already use (`Canvas.tsx`'s `case 'interrupt'`).
+   *
+   * THE OPERATOR'S REVERSAL, DATED. Escape used to BE this — both in the
+   * terminal pane (`TerminalTab`: "inside tmux, Escape should do what Escape
+   * does") and in the composer (`DetailPanel`'s old Escape branch). Asked
+   * "should Esc leave Insert, with cancel-previous-prompt on a different
+   * key?", the operator chose exactly that: Escape leaves Insert everywhere,
+   * and the interrupt gets its own chord so it still reaches the agent from
+   * anywhere a session is focused, in or out of Insert.
+   *
+   * `Mod-` NEEDS NO SECOND ENTRY FOR THE OTHER PLATFORMS, the same free ride
+   * every other `Mod-<character>` binding in this table gets: Cmd on macOS,
+   * Ctrl on Linux and Windows (`normalizeKey`'s own header). `.` is not in
+   * `CTRL_GESTURES`, so on macOS a bare Ctrl+. is NOT this — it stays the
+   * terminal's own, exactly like Ctrl+K or Ctrl+W (PR 361's rule).
+   *
+   * FREE WHEN IT WAS TAKEN. Nothing in any table held `Mod-.`; the bare `.`
+   * (`remote`) is a different keystroke, and `normalizeKey` gives a modified
+   * character its own `Mod-` spelling, so neither can answer the other's.
+   */
+  | { readonly kind: 'interrupt' };
 
 type ChordStep = {
   readonly state: ChordState;
@@ -1107,6 +1131,12 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   // "nothing to zoom" ever since, under key-sheet rows that still promised
   // all three. Absent, not dimmed: the bindings are gone and the keys are
   // free for a real meaning rather than kept as captions that lie.
+  //
+  // THE INTERRUPT — see the action's own doc comment above (`KeyAction`) for
+  // the whole of why it moved here from Escape. Free: bare `.` is `remote`
+  // above, and `normalizeKey` gives a modified character its own `Mod-`
+  // spelling, so the two keystrokes can never answer each other.
+  'Mod-.': { kind: 'interrupt' },
 };
 
 /**
@@ -1817,6 +1847,45 @@ type BindingClash = {
  * An action that holds one chord in both its slots is not a clash: it wastes a
  * slot and steals nothing, and refusing it would strand the map.
  */
+/** One other action `id`'s row shares a chord with, and which chord it is. */
+export type RowConflict = {
+  readonly chord: string;
+  /** The OTHER side of the clash — never `id` itself. */
+  readonly with: string;
+};
+
+/**
+ * ONE ROW'S OWN SLICE of `bindingClashes`, and SYMMETRIC where `row.dead`
+ * is not.
+ *
+ * `row.dead` (`keysheet.ts`'s `buildBindingSheet`) already marks a SHADOWED
+ * key struck through with the winner's name — but only the losing row ever
+ * carries it; a winning row's own slot looks exactly like an uncontested one,
+ * so an operator editing `close` (say) has no way to learn that `x` is also
+ * `rename`'s advertised key until they rebind `rename` and watch it go dead.
+ * This is the settings conflict dot's own source, and it answers for BOTH
+ * sides of a clash from either one's own row — the whole reason it is a
+ * second function rather than a second reading of `row.dead`.
+ *
+ * TAKES `clashes` RATHER THAN RE-DERIVING THEM, so a caller computing them
+ * once for a whole editor (`SettingsOverlay.tsx` already does, for the
+ * standing notice above the list) does not pay `bindingClashes`' own O(n)
+ * walk again per row.
+ */
+export function rowConflicts(clashes: readonly BindingClash[], id: string): readonly RowConflict[] {
+  const out: RowConflict[] = [];
+  for (const clash of clashes) {
+    if (clash.winner === id) {
+      for (const shadowed of clash.shadowed) {
+        out.push({ chord: clash.chord, with: shadowed });
+      }
+    } else if (clash.shadowed.includes(id)) {
+      out.push({ chord: clash.chord, with: clash.winner });
+    }
+  }
+  return out;
+}
+
 export function bindingClashes(overrides: KeyBindings): readonly BindingClash[] {
   const claims = new Map<string, string[]>();
   for (const binding of inPrecedenceOrder(overrides)) {

@@ -1484,11 +1484,16 @@ describe('the mode control is drawn only where a mode can actually be chosen', (
     // one of the six `paneKeyToRemoteKeyId` answers for
     // (`shared/remote-key.ts`), so this no longer refuses instantly the way
     // it used to for every key without a bridge: it takes `/api/send-key`
-    // instead, the SAME fallback the composer's own Escape and the phone
-    // keystroke strip take (`typePaneStrokes`, `DetailPanel.tsx`) -- this row
-    // is drawn from the session's own facts, with no window.api check of its
-    // own, so it can be on screen with only the remote channel behind it,
-    // and it still says so rather than doing nothing.
+    // instead, the SAME fallback the phone keystroke strip's own `Escape` tap
+    // takes (`typePaneStrokes`, `DetailPanel.tsx`) -- this row is drawn from
+    // the session's own facts, with no window.api check of its own, so it can
+    // be on screen with only the remote channel behind it, and it still says
+    // so rather than doing nothing. THE COMPOSER'S OWN ESCAPE IS NOT THIS
+    // CHANNEL ANY MORE: it leaves the box now (`DetailPanel.composer-escape.
+    // test.tsx`), and the interrupt it used to reach is `Mod-.`, a global
+    // chord `Canvas.tsx` presses over `window.api.terminal.send` directly,
+    // with no remote fallback of its own (`Canvas.interrupt.test.tsx`'s own
+    // header records that as a deliberate scope line, not an oversight).
     const originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(async () => ({
       json: async () => ({
@@ -1522,10 +1527,13 @@ describe('there is a way out of the prompt box without a mouse', () => {
     // key, so no navigation key reaches the sidebar at all.
     expect(document.activeElement).toBe(box);
 
-    // `Mod-[` since Escape in this box became the agent's interrupt. `Mod`
-    // folds Ctrl and Cmd, and `cancelable` is what makes the handler's
-    // `preventDefault()` mean anything at all -- without it a hand-built event
-    // reports `defaultPrevented: false` whatever the handler does.
+    // `Mod-[`, which answers the identical branch Escape does now
+    // (`onKeyDown`'s own comment on that branch carries the two reversals:
+    // Escape became the interrupt, then rejoined `Mod-[` as the way out when
+    // the interrupt moved to `Mod-.`). `Mod` folds Ctrl and Cmd, and
+    // `cancelable` is what makes the handler's `preventDefault()` mean
+    // anything at all -- without it a hand-built event reports
+    // `defaultPrevented: false` whatever the handler does.
     act(() => {
       box.dispatchEvent(
         new KeyboardEvent('keydown', {
@@ -1555,8 +1563,11 @@ describe('there is a way out of the prompt box without a mouse', () => {
    * over every case those four covered between them. The keys they were about
    * are asserted as BEHAVIOUR, which is where they always belonged:
    * `'Mod-[ gives the keyboard back'` above, `DetailPanel.composer-escape.
-   * test.tsx` for the interrupt, and `DetailPanel.submit-key.test.tsx` for
-   * which keystroke really sends in each mode.
+   * test.tsx` for the identical release Escape answers now, and
+   * `DetailPanel.submit-key.test.tsx` for which keystroke really sends in
+   * each mode. The interrupt this row's caption used to name is `Mod-.` now,
+   * a global chord with no composer-local caption to retire in the first
+   * place (`Canvas.interrupt.test.tsx`).
    */
 });
 

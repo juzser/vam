@@ -101,6 +101,10 @@ const FORBIDDEN_ACCELERATORS = [
   'CommandOrControl+-',
   'CommandOrControl+Shift+Plus',
   'CommandOrControl+W',
+  // `Mod-.` — the interrupt (`chords.ts`'s `interrupt` action). No Electron
+  // default role carries a Period accelerator; this is what proves it stays
+  // that way rather than trusting the absence.
+  'CommandOrControl+.',
 ];
 
 /**
