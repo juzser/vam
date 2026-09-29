@@ -143,7 +143,7 @@ import type {
   TurnStep,
 } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
-import { interruptRefusal as computeInterruptRefusal } from '../domain/selectors.js';
+import { cancelPromptRefusal as computeCancelRefusal } from '../domain/selectors.js';
 import { t } from '../i18n/strings.js';
 import { chordSymbols, normalizeKey } from '../keyboard/chords.js';
 import { insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
@@ -7852,24 +7852,27 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
     event.stopPropagation();
   };
   /**
-   * WHY AN INTERRUPT WOULD BE REFUSED, or `null` when it would not.
+   * WHY CANCELLING THIS SESSION'S RUNNING TURN WOULD BE REFUSED, or `null`
+   * when it would not.
    *
-   * The three refusals were inline in `interruptRun` until the right-click
-   * menu needed them BEFORE the click: a menu item can say "vam did not start
+   * These refusals were inline in `interruptRun` until the right-click menu
+   * needed them BEFORE the click: a menu item can say "vam did not start
    * this session" while it is still disabled, which is the one thing a
-   * keystroke cannot do. `Canvas.tsx`'s `case 'interrupt'` (`Mod-.`) needed
-   * the identical check a second time — a GLOBAL chord, reachable whether or
-   * not this pane is even mounted for the focused session — so the three
-   * conditions moved to `domain/selectors.ts`'s `interruptRefusal`, the one
-   * place both routes read them from now. Two copies of this would be two
-   * answers to "can vam stop it", and the pane's oldest defect is two
-   * different facts that look the same.
+   * keystroke cannot do. They moved to `domain/selectors.ts`'s
+   * `cancelPromptRefusal` — the one place this pane's own "Cancel this turn"
+   * reads them from, and the reachability three-quarters of it shared with
+   * `Canvas.tsx`'s `case 'interrupt'` (`Mod-.`) until that GLOBAL chord's own
+   * job — sending a literal Escape whether or not a turn is running — split
+   * off into `sendEscapeRefusal` instead. Two copies of "can vam reach this
+   * pane" would be two answers to the same question, and the pane's oldest
+   * defect is two different facts that look the same; "Cancel this turn"
+   * keeps the one refusal (nothing running) that `Mod-.` correctly does not.
    */
-  const interruptRefusal: string | null = computeInterruptRefusal(entry, terminal);
+  const cancelRefusal: string | null = computeCancelRefusal(entry, terminal);
 
   const interruptRun = () => {
-    if (interruptRefusal !== null) {
-      setCycleNote({ kind: 'refused', text: interruptRefusal });
+    if (cancelRefusal !== null) {
+      setCycleNote({ kind: 'refused', text: cancelRefusal });
       return;
     }
     // SENT, NOT CANCELLED. vam presses the key and never reads back what the
@@ -12438,7 +12441,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                 promptMenu.kind === 'prompt'
                   ? promptMenuItems(turn, {
                       live: turn.id === newestId,
-                      interruptRefusal,
+                      cancelRefusal,
                       onCopy: copy(turn.input, 'prompt'),
                       onCancel: interruptRun,
                     })
@@ -12465,10 +12468,11 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
  * one it is still working on.
  *
  * THE REFUSALS ARE SHOWN BEFORE THE CLICK, which is the only thing this menu
- * adds that Escape-in-the-composer does not. `interruptRefusal` carries the
- * three the pane already knows -- no terminal, not vam's session, nothing
- * running -- and the fourth is about the TURN rather than the session: an
- * older turn has already finished, whatever the session is doing now.
+ * adds that Escape-in-the-composer does not. `cancelPromptRefusal` carries
+ * the three the pane already knows -- no terminal, not vam's session,
+ * nothing running -- and the fourth is about the TURN rather than the
+ * session: an older turn has already finished, whatever the session is
+ * doing now.
  *
  * Module scope, so the whole item set can be asserted without a pane.
  */
@@ -12566,7 +12570,7 @@ export function promptMenuItems(
   _turn: Decision,
   how: {
     readonly live: boolean;
-    readonly interruptRefusal: string | null;
+    readonly cancelRefusal: string | null;
     readonly onCopy: () => void;
     readonly onCancel: () => void;
   },
@@ -12581,7 +12585,7 @@ export function promptMenuItems(
       // in a session that is busy on a later one, and reporting the session's
       // reason there would answer a question nobody asked.
       unavailable: how.live
-        ? how.interruptRefusal
+        ? how.cancelRefusal
         : 'this turn has already finished — only the newest can be interrupted',
       onPick: how.onCancel,
     },

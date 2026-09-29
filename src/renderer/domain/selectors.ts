@@ -173,31 +173,42 @@ export type SessionEntry = {
 };
 
 /**
- * WHY AN INTERRUPT INTO THIS ENTRY'S PANE WOULD BE REFUSED, or `null` when it
- * would not.
+ * WHY PRESSING ESCAPE INTO THIS ENTRY'S PANE WOULD BE REFUSED, or `null` when
+ * it would not.
  *
- * TWO CALLERS, ONE ANSWER. `DetailPanel.tsx`'s own `interruptRun` (the bubble
- * menu's "Cancel prompt", and — until the operator's reversal moved the
- * keystroke to `Mod-.` — the composer's own Escape) computed this inline
- * until `Canvas.tsx` needed the identical three-way check for `case
- * 'interrupt'`, a GLOBAL chord reachable whether or not a composer is even
- * mounted for the focused session. Two copies of "can vam press a key into
- * this pane" is this pane's oldest defect (`main/sources/pull-requests.ts`:
- * "'No PRs' and 'vam could not ask' must never look the same"), so this is
- * the one place either caller reads it from.
+ * TWO CALLERS, ONE ANSWER — for the three facts both share. `DetailPanel.tsx`'s
+ * own `interruptRun` (the bubble menu's "Cancel prompt") and `Canvas.tsx`'s
+ * `case 'interrupt'` (`Mod-.`, a GLOBAL chord reachable whether or not a
+ * composer is even mounted for the focused session) both need to know
+ * whether vam can press a key into this pane AT ALL: a source with no
+ * terminal, no session picked, or a session vam did not start are the same
+ * fact wherever they are asked. Two copies of that check is this pane's
+ * oldest defect (`main/sources/pull-requests.ts`: "'No PRs' and 'vam could
+ * not ask' must never look the same"), so this is the one place either
+ * caller reads those three from.
  *
- * THE THREE OUTCOMES ARE THREE SENTENCES, and stay that way here: a source
- * with no terminal, a session vam did not start, and a session that simply
- * is not working right now are different facts about different things, and
- * the operator who presses a key expecting an agent to stop is owed which
- * one is true rather than one silence standing in for all three.
+ * WHERE THE TWO CALLERS DIVERGE is the fourth fact, and this is why there
+ * are two functions below rather than one. "Cancel this turn" is an act on a
+ * RUNNING turn — cancelling one that has not started is a contradiction, so
+ * `cancelPromptRefusal` keeps a fourth refusal for a session that is not
+ * currently working. `Mod-.` HAS NO SUCH TURN TO CANCEL: since the
+ * operator's reversal moved Escape off this chord and onto leaving Insert,
+ * `Mod-.` is the ONLY way left to press a literal Escape into a session's
+ * pane — and an idle or waiting session still has a pane. Claude Code's own
+ * Esc-Esc rewind at an idle prompt, dismissing its `/model`/`/resume` menus
+ * or autocomplete, clearing the input, and vim's own insert mode all need
+ * that literal keystroke with no agent mid-turn at all. Gating it on
+ * `status === 'running'` (as one shared function briefly did) made every one
+ * of those unreachable the instant a session stopped running — a regression,
+ * not a refusal. `sendEscapeRefusal` is the three shared facts ALONE, with no
+ * fourth check.
  *
  * `hasTerminal` IS `boolean | undefined`, MATCHING `DetailPanelProps.terminal`
  * EXACTLY, because `undefined` means "nobody said" there and reads as
  * available — the same rule `canCycleMode` already applies to that prop —
  * never as "no", which only an explicit `false` means.
  */
-export function interruptRefusal(
+export function sendEscapeRefusal(
   entry: SessionEntry | null,
   hasTerminal: boolean | undefined,
 ): string | null {
@@ -210,7 +221,31 @@ export function interruptRefusal(
   if (entry.session.vamControlled !== true) {
     return 'not sent — vam did not start this session, so it has no keyboard into it';
   }
-  if (entry.session.status !== 'running') {
+  return null;
+}
+
+/**
+ * WHY CANCELLING THIS ENTRY'S RUNNING TURN WOULD BE REFUSED, or `null` when
+ * it would not.
+ *
+ * `sendEscapeRefusal`'s three facts, PLUS the one that is only ever about
+ * cancelling: a turn cannot be stopped in a session that is not currently
+ * working. Read by `DetailPanel.tsx`'s own `interruptRun` — the bubble
+ * menu's "Cancel this turn" — never by `Canvas.tsx`'s `Mod-.`, which sends a
+ * literal Escape rather than cancelling anything and reads
+ * `sendEscapeRefusal` instead. See that function's own header for the full
+ * argument for why the two diverge.
+ */
+export function cancelPromptRefusal(
+  entry: SessionEntry | null,
+  hasTerminal: boolean | undefined,
+): string | null {
+  const refusal = sendEscapeRefusal(entry, hasTerminal);
+  if (refusal !== null) {
+    return refusal;
+  }
+  // `sendEscapeRefusal` only returns `null` once `entry` is known non-null.
+  if (entry !== null && entry.session.status !== 'running') {
     return 'nothing running to interrupt — this session is not working';
   }
   return null;
