@@ -8463,6 +8463,7 @@ function CanvasInner({
         <Suspense fallback={null}>
           <SettingsOverlay
             prefs={prefs}
+            sidebarWidth={sidebarWidth}
             theme={effective}
             onChange={savePrefs}
             onClose={() => setSettingsOpen(false)}
