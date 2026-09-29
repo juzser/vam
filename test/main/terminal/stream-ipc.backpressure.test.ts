@@ -310,7 +310,11 @@ describe('registerTerminalStreamIpc -- backpressure (finding 546486bb)', () => {
     expect(r % CHUNK).not.toBe(0);
 
     // Ack down to the residue r, which queues the resync.
-    const ackPromise = call(CHANNELS.terminalStreamAck, streamId, STREAM_UNACKED_HIGH_WATER_BYTES - r);
+    const ackPromise = call(
+      CHANNELS.terminalStreamAck,
+      streamId,
+      STREAM_UNACKED_HIGH_WATER_BYTES - r,
+    );
 
     await fake2.connectCalled;
     fake2.resolveConnect('resync-seed');
