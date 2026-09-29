@@ -106,7 +106,7 @@ function keyLine(text: string): string {
   return `send-keys -t ${paneTarget} -H ${hexBytes(text).join(' ')}`;
 }
 
-describe('StreamClient stdin backpressure', () => {
+describe('StreamClient stdin backpressure', { timeout: 30_000 }, () => {
   afterEach(() => {
     vi.useRealTimers();
   });
@@ -182,16 +182,30 @@ describe('StreamClient stdin backpressure', () => {
 
   it('AC3: at the bound, held+tripping lines are discarded and the connection is closed', async () => {
     const { client, children } = harness();
-    const connecting = client.connect();
-    const child = at(children, 0);
-    await connectWith(child);
-    await connecting;
-
     const downEvents: StreamDownEvent[] = [];
     client.onDown((event) => downEvents.push(event));
 
-    child.stdin.nextResults.push(false); // block
+    // connect() is left mid-flight, still awaiting its own `list-panes` --
+    // both handlers are attached before anything can settle, so a
+    // rejection is never unhandled.
+    const connecting = client.connect();
+    let outcome: unknown = 'pending';
+    connecting.then(
+      (value) => {
+        outcome = { fulfilled: value };
+      },
+      (error: unknown) => {
+        outcome = error;
+      },
+    );
+
+    const child = at(children, 0);
+    child.stdin.nextResults.push(false); // 'warm' trips the block
     client.write('warm');
+
+    // connect() proceeds to its own list-panes, HELD behind the block: the
+    // fake stdin holds only the pause-after line and 'warm''s line.
+    await answerPauseAfter(child);
 
     // Each line alone (~10.5MB after hex expansion) sits comfortably under
     // the 16MiB bound; held TOGETHER they exceed it, which is the case this
@@ -206,6 +220,15 @@ describe('StreamClient stdin backpressure', () => {
     expect(downEvents.filter((e) => e.kind === 'reconnecting').length).toBe(1);
     // nothing new reached the OLD child's stdin from the trip itself
     expect(child.stdin.written.length).toBe(bigBaseline);
+
+    await tick();
+    // connect()'s own list-panes command was pending at the trip:
+    // `#handleDown`'s splice settles every `#blockQueue` entry
+    // `{ ok: false, body: '' }`, which connect() renders into this
+    // rejection -- the ': ' with nothing after it is the empty trimmed
+    // body. A command left pending would leave `outcome` at 'pending'; a
+    // rejection would print its own reason instead of this one.
+    expect(String(outcome)).toBe(`Error: could not list panes for ${TARGET}: `);
 
     // a later drain from the now-dead old child writes nothing further
     child.stdin.drain();
@@ -369,45 +392,85 @@ describe('StreamClient stdin backpressure', () => {
     await connectWith(child);
     await connecting;
 
-    // First episode: hold a line near, but under, the bound, then drain clean.
-    child.stdin.nextResults.push(false);
-    client.write('warm');
-    const nearBound = 'a'.repeat(4_000_000); // well under MAX_PENDING_STDIN_BYTES
-    client.write(nearBound);
-    child.stdin.drain();
-    await tick();
-
     const downEvents: StreamDownEvent[] = [];
     client.onDown((event) => downEvents.push(event));
 
-    // Second episode: an equally large hold must NOT be judged against the
-    // first episode's already-flushed bytes.
+    // T's own line size s, measured from an UNBLOCKED write -- the same
+    // hex-expanded, '\n'-terminated encoding the held FIFO's own byte
+    // total accounts in.
+    const T = 'a'.repeat(1_900_000);
+    const measureBaseline = child.stdin.written.length;
+    client.write(T);
+    const measuredLine = child.stdin.written[measureBaseline];
+    if (measuredLine === undefined) throw new Error('T was not written');
+    const s = Buffer.byteLength(measuredLine);
+    const k = Math.floor(MAX_PENDING_STDIN_BYTES / s);
+    expect(k).toBeGreaterThanOrEqual(2);
+
+    // EPISODE 1: one blocking write, k held, then a clean drain.
     child.stdin.nextResults.push(false);
-    client.write('warm2');
-    client.write(nearBound);
-    expect(child.killed).toBe(0);
-    expect(downEvents.length).toBe(0);
+    const episode1Baseline = child.stdin.written.length;
+    client.write(T); // written, blocks the connection
+    expect(child.stdin.written.length - episode1Baseline).toBe(1);
+    for (let i = 0; i < k; i += 1) client.write(T); // held, k * s <= the bound
+    expect(child.stdin.written.length - episode1Baseline).toBe(1);
 
     child.stdin.drain();
     await tick();
-    expect(child.stdin.written.at(-1)).toBe(`${keyLine(nearBound)}\n`);
+    expect(child.stdin.written.length - episode1Baseline).toBe(k + 1);
+    expect(child.killed).toBe(0);
+    expect(downEvents.length).toBe(0);
+
+    // EPISODE 2: the SAME k + 1 writes -- must be judged only on what THIS
+    // episode holds, not episode 1's already-flushed bytes.
+    child.stdin.nextResults.push(false);
+    const episode2Baseline = child.stdin.written.length;
+    client.write(T); // written, blocks the connection
+    for (let i = 0; i < k; i += 1) client.write(T); // held, under the bound
+    expect(child.stdin.written.length - episode2Baseline).toBe(1);
+    expect(child.killed).toBe(0);
+    expect(downEvents.length).toBe(0);
+
+    // One more line -- episode 2's (k + 1)th HELD line -- tips this
+    // episode's own held bytes past MAX_PENDING_STDIN_BYTES: the same
+    // write index episode 1 would have tripped at, had it kept going
+    // instead of draining.
+    client.write(T);
+    expect(child.killed).toBe(1);
+    expect(downEvents.filter((e) => e.kind === 'reconnecting').length).toBe(1);
   });
 
   it('AC8: a write after a completed flush is written directly, no further drain needed', async () => {
     const { client, children } = harness();
     const connecting = client.connect();
     const child = at(children, 0);
-    await connectWith(child);
+    await connectWith(child, '%3');
     await connecting;
 
-    child.stdin.nextResults.push(false);
+    child.stdin.nextResults.push(false); // 'a' trips the block
     client.write('a');
+    const baseline = child.stdin.written.length;
+
+    client.write('b'); // held
+    client.write('c'); // held
+    expect(child.stdin.written.length).toBe(baseline); // neither reached stdin
+
+    // 'drain' with write() now returning true (nextResults is empty):
+    // 'b' then 'c' flush, one call each, in order, and the FIFO empties.
     child.stdin.drain();
     await tick();
+    expect(child.stdin.written.slice(baseline)).toEqual([`${keyLine('b')}\n`, `${keyLine('c')}\n`]);
 
-    const baseline = child.stdin.written.length;
-    client.write('c'); // no forced false queued -- must write immediately
-    expect(child.stdin.written.length - baseline).toBe(1);
-    expect(child.stdin.written.at(-1)).toBe(`${keyLine('c')}\n`);
+    const beforeD = child.stdin.written.length;
+    client.write('d'); // the FIFO is empty and not blocked -- written directly
+    expect(child.stdin.written.length - beforeD).toBe(1);
+    expect(child.stdin.written.at(-1)).toBe(`${keyLine('d')}\n`);
+
+    // ORDER ACROSS KINDS: the pause trigger's own command, with no further
+    // 'drain', is recorded as the next write call after 'd'.
+    child.data('%pause %3\n');
+    await tick();
+    const refreshLine = `refresh-client -A "%3:continue"`;
+    expect(child.stdin.written.at(-1)).toBe(`${refreshLine}\n`);
   });
 });
