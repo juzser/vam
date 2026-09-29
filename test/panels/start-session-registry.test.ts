@@ -29,8 +29,10 @@ describe('start-session registry', () => {
   it('a stale unregister does not remove a newer callback of the same id', () => {
     const ran: string[] = [];
     const off1 = registerStartSession('A', () => ran.push('old'));
-    registerStartSession('A', () => ran.push('new'))();
+    const off2 = registerStartSession('A', () => ran.push('new'));
     off1();
-    expect(triggerStartSession('A')).toBe(false);
+    expect(triggerStartSession('A')).toBe(true);
+    expect(ran).toEqual(['new']);
+    off2();
   });
 });
