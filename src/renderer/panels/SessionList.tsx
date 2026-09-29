@@ -51,7 +51,9 @@ import {
 } from 'lucide-react';
 import {
   memo,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
+  type PointerEvent as ReactPointerEvent,
   type RefObject,
   useCallback,
   useEffect,
@@ -1346,6 +1348,120 @@ function SortByMenu({
   );
 }
 
+/** Width of the trash a swipe reveals; also where an open row rests. */
+const SWIPE_REVEAL_PX = 72;
+/** A release past this much travel opens the row; short of it, the row snaps shut. */
+const SWIPE_COMMIT_PX = 36;
+/** Travel before the gesture picks an axis; a vertical pick is final (a scroll). */
+const SWIPE_LOCK_PX = 8;
+
+/**
+ * SWIPE TO CLOSE, PHONE ROWS ONLY. A right-to-left drag slides the row left
+ * 72px onto a trash button that calls the same `onClose` the desktop `×` does,
+ * so `Canvas`'s `closeSession` still decides whether to ask first.
+ *
+ * Pointer events with `touch-action: pan-y`, no gesture library. The pointer is
+ * not captured until the drag has locked to the horizontal axis, so a tap
+ * reaches the row's own `onClick` and a vertical scroll is never taken from the
+ * browser. The click that trails a swipe, or lands on an open row, is swallowed
+ * so neither opens the session. One controller per list holds the single open
+ * row, so opening another closes the first.
+ */
+function useSwipeRows() {
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [drag, setDrag] = useState<{ id: string; offset: number } | null>(null);
+  const gesture = useRef<{
+    id: string;
+    x: number;
+    y: number;
+    base: number;
+    axis: 'x' | 'y' | null;
+    /** Latest offset, kept here so a release never reads a stale render. */
+    last: number;
+  } | null>(null);
+  const swallowClick = useRef(false);
+
+  // An open row closes on an outside tap or on any scroll.
+  useEffect(() => {
+    if (openId === null) return;
+    const outside = (event: Event) => {
+      const host = (event.target as Element | null)?.closest?.('[data-swipe-row]');
+      if (host?.getAttribute('data-swipe-row') !== openId) setOpenId(null);
+    };
+    const scrolled = () => setOpenId(null);
+    document.addEventListener('pointerdown', outside);
+    document.addEventListener('scroll', scrolled, true);
+    return () => {
+      document.removeEventListener('pointerdown', outside);
+      document.removeEventListener('scroll', scrolled, true);
+    };
+  }, [openId]);
+
+  return {
+    setOpenId,
+    /** Where the row's layer sits, in px (0 at rest, -72 fully open). */
+    offsetOf: (id: string) =>
+      drag?.id === id ? drag.offset : openId === id ? -SWIPE_REVEAL_PX : 0,
+    /** Being dragged right now, so the layer must follow the finger untransitioned. */
+    draggingId: drag?.id ?? null,
+    isOpen: (id: string) => openId === id,
+    /** Handlers for the row's sliding layer (the `[data-session-row]` button). */
+    layerProps: (id: string, disabled: boolean) => ({
+      onPointerDown: (event: ReactPointerEvent<HTMLElement>) => {
+        swallowClick.current = false;
+        gesture.current = disabled
+          ? null
+          : {
+              id,
+              x: event.clientX,
+              y: event.clientY,
+              base: openId === id ? -SWIPE_REVEAL_PX : 0,
+              axis: null,
+              last: openId === id ? -SWIPE_REVEAL_PX : 0,
+            };
+      },
+      onPointerMove: (event: ReactPointerEvent<HTMLElement>) => {
+        const g = gesture.current;
+        if (g === null || g.id !== id || g.axis === 'y') return;
+        const dx = event.clientX - g.x;
+        const dy = event.clientY - g.y;
+        if (g.axis === null) {
+          if (Math.abs(dx) < SWIPE_LOCK_PX && Math.abs(dy) < SWIPE_LOCK_PX) return;
+          // Vertical, or rightward on a closed row: not ours, ever.
+          if (Math.abs(dy) >= Math.abs(dx) || (dx > 0 && openId !== id)) {
+            g.axis = 'y';
+            return;
+          }
+          g.axis = 'x';
+          swallowClick.current = true;
+          event.currentTarget.setPointerCapture?.(event.pointerId);
+        }
+        g.last = Math.min(0, Math.max(-SWIPE_REVEAL_PX, g.base + dx));
+        setDrag({ id, offset: g.last });
+      },
+      onPointerUp: () => {
+        const g = gesture.current;
+        gesture.current = null;
+        if (g?.axis !== 'x') return;
+        setOpenId(g.last <= -SWIPE_COMMIT_PX ? id : null);
+        setDrag(null);
+      },
+      onPointerCancel: () => {
+        gesture.current = null;
+        setDrag(null);
+      },
+      onClickCapture: (event: ReactMouseEvent<HTMLElement>) => {
+        if (swallowClick.current || openId === id) {
+          event.stopPropagation();
+          event.preventDefault();
+          swallowClick.current = false;
+          if (openId === id) setOpenId(null);
+        }
+      },
+    }),
+  };
+}
+
 /**
  * `React.memo`: `draft` (the composer's text) lives one level up in
  * `Canvas`, so a keystroke re-renders `Canvas` and would otherwise
@@ -1702,6 +1818,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
    * the pointer left a heading the keyboard had just revealed.
    */
   const [revealed, setRevealed] = useState<string | null>(null);
+  const swipe = useSwipeRows();
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   /**
    * The fold, when no caller owns it. See `collapsedProjects` above: the
@@ -2437,8 +2554,28 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
             // rather than an inline colour, so the row keeps
             // its own tokens and the treatment is one rule.
             {...(closing ? { 'data-row-pending': session.id, 'aria-busy': true } : {})}
-            className="group/row relative"
+            {...(phone ? { 'data-swipe-row': session.id, style: { touchAction: 'pan-y' } } : {})}
+            className={`group/row relative ${phone ? 'overflow-hidden rounded-[9px]' : ''}`}
           >
+            {phone && (
+              <button
+                type="button"
+                data-swipe-trash
+                aria-label="close session"
+                aria-hidden={
+                  swipe.isOpen(session.id) || swipe.draggingId === session.id ? undefined : true
+                }
+                tabIndex={swipe.isOpen(session.id) ? undefined : -1}
+                onClick={() => {
+                  swipe.setOpenId(null);
+                  onClose(session.id);
+                }}
+                style={{ width: SWIPE_REVEAL_PX }}
+                className={`vam-tap absolute top-0 right-0 bottom-0 flex cursor-pointer items-center justify-center bg-danger text-ground ${swipe.offsetOf(session.id) === 0 ? 'invisible' : ''}`}
+              >
+                <Trash2 size={16} strokeWidth={1.8} aria-hidden="true" />
+              </button>
+            )}
             <button
               type="button"
               // Held by id, like `foldRefs` above: the reveal
@@ -2474,6 +2611,12 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
               disabled={closing}
               tabIndex={closing ? -1 : undefined}
               {...(closing ? { title: closingLabel } : {})}
+              {...(phone ? swipe.layerProps(session.id, closing) : {})}
+              {...(phone
+                ? {
+                    style: { transform: `translateX(${swipe.offsetOf(session.id)}px)` },
+                  }
+                : {})}
               className={[
                 // `vam-tap`: the row is the screen's primary
                 // tap target, and it says so itself rather
@@ -2483,7 +2626,10 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                 // Over the 44 floor `vam-tap` sets, and the
                 // extra is what makes a scrolling list
                 // forgiving of a moving thumb.
-                phone ? 'min-h-[56px]' : '',
+                phone ? 'min-h-[56px] bg-ground motion-reduce:transition-none' : '',
+                phone && swipe.draggingId !== session.id
+                  ? 'transition-transform duration-150 ease-out'
+                  : '',
                 isFocused && !phone
                   ? 'border border-line-loud bg-raised'
                   : 'border border-transparent',

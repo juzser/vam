@@ -27,8 +27,8 @@
  * the desktop's row is unchanged beside them.
  */
 
-import { cleanup, render } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import { SessionList } from '../../src/renderer/panels/SessionList.js';
 import { baseProps, decision, makeProject, makeSession } from '../panels/session-list-props.js';
@@ -323,5 +323,159 @@ describe('the desktop row, which shares this component', () => {
     expect(document.body.textContent).toContain('cannot say which branch');
     expect(row('a1').className).toContain('border-line-loud');
     expect(row('a1').querySelector('[data-row-cursor]')).not.toBeNull();
+  });
+});
+
+/**
+ * SWIPE TO CLOSE. jsdom has no layout, so the gesture is driven with pointer
+ * events carrying `clientX`/`clientY` and nothing else: a right-to-left drag
+ * past the 36px threshold opens the row onto a trash button; a tap and a
+ * vertical scroll never do. Desktop rows carry no gesture at all.
+ */
+describe('swipe to close on a phone row', () => {
+  const drag = (el: Element, dx: number, dy = 0) => {
+    fireEvent.pointerDown(el, { clientX: 300, clientY: 100, pointerId: 1 });
+    fireEvent.pointerMove(el, { clientX: 300 + dx, clientY: 100 + dy, pointerId: 1 });
+    fireEvent.pointerUp(el, { clientX: 300 + dx, clientY: 100 + dy, pointerId: 1 });
+  };
+  const trash = () => screen.queryByRole('button', { name: 'close session' });
+  const drawPhone = (onClose = vi.fn(), onPick = vi.fn()) => {
+    render(
+      <SessionList
+        {...baseProps(entries())}
+        onClose={onClose}
+        onPick={onPick}
+        phone
+        width={undefined}
+      />,
+    );
+    return { onClose, onPick };
+  };
+
+  it('reveals a trash button on a leftward drag, and tapping it closes once', () => {
+    const { onClose, onPick } = drawPhone();
+    expect(trash(), 'nothing revealed at rest').toBeNull();
+    act(() => drag(row('a2'), -100));
+    const button = trash();
+    expect(button, 'revealed by the swipe').not.toBeNull();
+    expect(onPick).not.toHaveBeenCalled();
+    fireEvent.click(button as Element);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledWith('a2');
+  });
+
+  it('opens the row on a plain tap and calls no onClose', () => {
+    const { onClose, onPick } = drawPhone();
+    act(() => drag(row('a2'), 2));
+    fireEvent.click(row('a2'));
+    expect(onPick).toHaveBeenCalledWith('a2');
+    expect(onClose).not.toHaveBeenCalled();
+    expect(trash()).toBeNull();
+  });
+
+  it('reveals nothing on a mostly-vertical drag', () => {
+    drawPhone();
+    act(() => drag(row('a2'), -30, 80));
+    expect(trash()).toBeNull();
+  });
+
+  it('reveals nothing on a drag shorter than the threshold', () => {
+    drawPhone();
+    act(() => drag(row('a2'), -20));
+    expect(trash()).toBeNull();
+  });
+
+  it('does not open the session when the swipe ends in a click', () => {
+    const { onPick } = drawPhone();
+    act(() => drag(row('a2'), -100));
+    fireEvent.click(row('a2'));
+    expect(onPick).not.toHaveBeenCalled();
+  });
+
+  it('closes an open row when another row opens', () => {
+    drawPhone();
+    act(() => drag(row('a1'), -100));
+    act(() => drag(row('a2'), -100));
+    expect(screen.getAllByRole('button', { name: 'close session' }).length).toBe(1);
+  });
+
+  it('closes an open row on an outside tap', () => {
+    drawPhone();
+    act(() => drag(row('a2'), -100));
+    expect(trash()).not.toBeNull();
+    act(() => {
+      fireEvent.pointerDown(document.body, { clientX: 5, clientY: 5, pointerId: 2 });
+    });
+    expect(trash()).toBeNull();
+  });
+
+  const at = (el: Element, moves: [number, number][]) => {
+    fireEvent.pointerDown(el, { clientX: 300, clientY: 100, pointerId: 1 });
+    for (const [dx, dy] of moves)
+      fireEvent.pointerMove(el, { clientX: 300 + dx, clientY: 100 + dy, pointerId: 1 });
+    const [dx, dy] = moves[moves.length - 1] ?? [0, 0];
+    fireEvent.pointerUp(el, { clientX: 300 + dx, clientY: 100 + dy, pointerId: 1 });
+  };
+
+  it('commits at exactly 36px and not at 35px', () => {
+    drawPhone();
+    act(() => drag(row('a2'), -35));
+    expect(trash(), '35px').toBeNull();
+    act(() => drag(row('a2'), -36));
+    expect(trash(), '36px').not.toBeNull();
+  });
+
+  it('locks the axis at 8px: a vertical start is never a swipe, a sub-8px wobble still is', () => {
+    drawPhone();
+    act(() =>
+      at(row('a2'), [
+        [0, 10],
+        [-100, 10],
+      ]),
+    );
+    expect(trash(), 'vertical first, then sideways').toBeNull();
+    act(() =>
+      at(row('a2'), [
+        [-7, 0],
+        [-100, 0],
+      ]),
+    );
+    expect(trash(), 'under the lock, then sideways').not.toBeNull();
+  });
+
+  it('closes an open row on a rightward swipe, and ignores a rightward one on a closed row', () => {
+    drawPhone();
+    act(() => drag(row('a2'), 100));
+    expect(trash(), 'rightward on a closed row').toBeNull();
+    act(() => drag(row('a2'), -100));
+    expect(trash()).not.toBeNull();
+    act(() => drag(row('a2'), 100));
+    expect(trash(), 'rightward on an open row').toBeNull();
+  });
+
+  it('abandons a swipe on pointer cancel', () => {
+    drawPhone();
+    fireEvent.pointerDown(row('a2'), { clientX: 300, clientY: 100, pointerId: 1 });
+    fireEvent.pointerMove(row('a2'), { clientX: 200, clientY: 100, pointerId: 1 });
+    fireEvent.pointerCancel(row('a2'), { pointerId: 1 });
+    expect(trash()).toBeNull();
+  });
+
+  it('keeps the trash out of the tab order and the a11y tree until the row is open', () => {
+    drawPhone();
+    const hidden = document.querySelector('[data-swipe-row="a2"] [data-swipe-trash]');
+    expect(hidden?.getAttribute('tabindex')).toBe('-1');
+    expect(hidden?.getAttribute('aria-hidden')).toBe('true');
+    act(() => drag(row('a2'), -100));
+    const open = trash();
+    expect(open?.hasAttribute('tabindex')).toBe(false);
+    expect(open?.tagName).toBe('BUTTON');
+  });
+
+  it('does nothing on a desktop row', () => {
+    render(<SessionList {...baseProps(entries())} onClose={vi.fn()} />);
+    act(() => drag(row('a2'), -100));
+    expect(trash()).toBeNull();
+    expect(document.querySelector('[data-swipe-trash]')).toBeNull();
   });
 });

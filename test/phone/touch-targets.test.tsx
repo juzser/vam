@@ -271,22 +271,27 @@ describe('the phone shell’s hit areas', () => {
     // sat invisible over the row's own tap area.
     const rowCloses = [
       ...document.querySelectorAll("[data-phone-shell] button[aria-label^='close ']"),
-    ].filter((el) => !el.hasAttribute('data-phone-close'));
+    ].filter((el) => !el.hasAttribute('data-swipe-trash'));
     expect(rowCloses.length).toBeGreaterThan(0);
     for (const el of rowCloses) expect(getComputedStyle(el).display).toBe('none');
   });
 
-  it('leaves the session bar’s own close control alone, label and all', () => {
+  it('keeps the revealed swipe trash visible and above the 44px floor', () => {
     phone();
+    const row = document.querySelector('[data-session-row]') as Element;
     act(() => {
-      fireEvent.click(document.querySelector('[data-session-row]') as Element);
+      fireEvent.pointerDown(row, { clientX: 300, clientY: 100, pointerId: 1 });
+      fireEvent.pointerMove(row, { clientX: 200, clientY: 100, pointerId: 1 });
+      fireEvent.pointerUp(row, { clientX: 200, clientY: 100, pointerId: 1 });
     });
-    const close = document.querySelector('[data-phone-close]');
-    expect(close).not.toBeNull();
-    // It reads `close session`, so the rule above would take it too without
-    // its exemption -- and then a phone would have no way to close one.
-    expect(close?.getAttribute('aria-label')).toMatch(/^close /);
-    expect(getComputedStyle(close as Element).display).not.toBe('none');
+    const trash = document.querySelector('[data-swipe-trash]');
+    expect(trash).not.toBeNull();
+    // It reads `close session`, so the hide rule above would take it without
+    // its exemption -- and then the swipe would reveal nothing.
+    expect(trash?.getAttribute('aria-label')).toBe('close session');
+    const cs = getComputedStyle(trash as Element);
+    expect(cs.display).not.toBe('none');
+    expect([cs.minHeight, cs.minWidth]).toEqual(['44px', '44px']);
   });
 
   it('sets 16px on every box you type in, which is the iOS zoom threshold', () => {

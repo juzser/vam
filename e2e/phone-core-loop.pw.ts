@@ -52,6 +52,23 @@ const SHELL_H = 844;
 /** WCAG 2.2 SC 2.5.5 (AAA) and Apple's HIG figure -- the shell's own comment. */
 const TOUCH_MIN = 44;
 
+/** Swipe a phone row open (touchscreen can only tap) and return the revealed trash. */
+async function swipeTrash(page: Page, row: Locator): Promise<Locator> {
+  await row.evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    const [x, y] = [box.right - 24, box.top + box.height / 2];
+    const fire = (type: string, dx: number) =>
+      el.dispatchEvent(
+        new PointerEvent(type, { bubbles: true, pointerId: 1, clientX: x + dx, clientY: y }),
+      );
+    for (const [type, dx] of [['pointerdown', 0], ['pointermove', -30], ['pointermove', -100], ['pointerup', -100]] as const)
+      fire(type, dx);
+  });
+  const trash = page.locator('[data-phone-shell] [data-swipe-trash]:visible');
+  await expect(trash).toHaveCount(1);
+  return trash;
+}
+
 /**
  * HOW MUCH OF THE AGENT'S ANSWER HAS TO SURVIVE THE KEYBOARD, and it is six
  * lines rather than a round number: `--text-body--line-height` is 20px
@@ -785,31 +802,18 @@ test.describe('the card names controls that exist', () => {
  * `openWaiting`) finished its turn already, so it is the OTHER half's
  * fixture, in the case right after these two.
  */
-async function openRunningSession(page: Page): Promise<void> {
-  await page
-    .locator('[data-phone-shell] [data-session-row]', { hasText: 'alpha-running' })
-    .first()
-    .click();
-  await expect(page.locator('[data-phone-shell]')).toHaveAttribute('data-phone-shell', 'session');
+async function swipeRunning(page: Page): Promise<Locator> {
+  return swipeTrash(
+    page,
+    page.locator('[data-phone-shell] [data-session-row]', { hasText: 'alpha-running' }).first(),
+  );
 }
 
 test.describe('stopping a session is a decision, not a tap', () => {
-  test('the × asks first, and sends nothing until it is answered', async ({ page }) => {
+  test('the swipe trash asks first, and sends nothing until it is answered', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: SHELL_H });
     const writes = await stubRemote(page);
-    await openRunningSession(page);
-
-    // THE GEOMETRY THAT MAKES THIS AN S2: the Agents icon and the × are
-    // neighbours on one 390px bar, so the tap that switches a view and the
-    // tap that stops a session are a few pixels apart.
-    const views = await page.locator('[data-phone-shell] [data-phone-views]').boundingBox();
-    const close = await page.locator('[data-phone-close]').boundingBox();
-    expect(views, 'the view icon row').not.toBeNull();
-    expect(close, 'the close control').not.toBeNull();
-    const gap = (close?.x ?? 0) - ((views?.x ?? 0) + (views?.width ?? 0));
-    expect(gap, 'pixels between a view switch and the stop control').toBeLessThan(44);
-
-    await page.locator('[data-phone-close]').tap();
+    await (await swipeRunning(page)).tap();
     const confirm = page.locator('[data-confirm-close-session]');
     await expect(confirm, 'a stop with no undo asks before it acts').toBeVisible();
     expect(
@@ -821,10 +825,9 @@ test.describe('stopping a session is a decision, not a tap', () => {
     await page.locator('[data-confirm-close-session-cancel]').tap();
     await expect(confirm).toHaveCount(0);
     expect(writes.urls.filter((u) => u.includes('close-session'))).toEqual([]);
-    await expect(page.locator('[data-phone-shell]')).toHaveAttribute('data-phone-shell', 'session');
 
     // AND THE OTHER HALF STILL WORKS: the route is behind a question, not gone.
-    await page.locator('[data-phone-close]').tap();
+    await (await swipeRunning(page)).tap();
     await page.locator('[data-confirm-close-session-go]').tap();
     await expect
       .poll(() => writes.urls.filter((u) => u.includes('close-session')).length, {
@@ -836,8 +839,7 @@ test.describe('stopping a session is a decision, not a tap', () => {
   test('both of the confirm’s own controls are touch targets', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: SHELL_H });
     await stubRemote(page);
-    await openRunningSession(page);
-    await page.locator('[data-phone-close]').tap();
+    await (await swipeRunning(page)).tap();
     await expect(page.locator('[data-confirm-close-session]')).toBeVisible();
 
     const boxes = await page.$$eval('[data-confirm-close-session] button', (els) =>
@@ -862,25 +864,25 @@ test.describe('stopping a session is a decision, not a tap', () => {
   });
 
   /**
-   * THE OTHER HALF OF DECISION 1. `s1` ("alpha-waiting") already finished its
-   * turn -- `domain/model.ts`'s own definition of `waiting`: the ball is with
-   * the operator, not the agent -- so closing it loses nothing in flight and
-   * the phone must not ask, on the operator's own rule ("ONLY while the
-   * agent is running, on every device"). `openWaiting` is the harness this
-   * whole file already uses to reach `s1`.
+   * DECISION #32: background agents count as running. `s1` ("alpha-waiting")
+   * finished its own turn, but two of its agents are still alive and closing
+   * the session ends them, so the swipe asks -- in the agents' own words.
    */
-  test('a waiting session closes at once: nothing in flight to lose', async ({ page }) => {
+  test('a waiting session with background agents asks, and says so', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: SHELL_H });
     const writes = await stubRemote(page);
-    await openWaiting(page);
-
-    await page.locator('[data-phone-close]').tap();
-    await expect(page.locator('[data-confirm-close-session]')).toHaveCount(0);
-    await expect
-      .poll(() => writes.urls.filter((u) => u.includes('close-session')).length, {
-        message: 'a waiting session sends its close at once, with no question in front of it',
-      })
-      .toBeGreaterThan(0);
+    await (
+      await swipeTrash(
+        page,
+        page.locator('[data-phone-shell] [data-session-row]', { hasText: 'alpha-waiting' }).first(),
+      )
+    ).tap();
+    const confirm = page.locator('[data-confirm-close-session]');
+    await expect(confirm).toContainText('Close session with background agents running?');
+    await expect(confirm).toContainText(
+      '2 background agents still running. Closing the session ends them.',
+    );
+    expect(writes.urls.filter((u) => u.includes('close-session'))).toEqual([]);
   });
 });
 

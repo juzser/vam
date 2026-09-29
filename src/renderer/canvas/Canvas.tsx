@@ -5462,7 +5462,12 @@ function CanvasInner({
     async (sessionId: string, title: string, force = false): Promise<boolean> => {
       if (!force) {
         const entry = allEntries.find((e) => e.session.id === sessionId);
-        if (entry !== undefined && entry.session.status === 'running') {
+        // Background agents count as running too: closing the session ends
+        // them, and `runningAgents` is the live count of them.
+        if (
+          entry !== undefined &&
+          (entry.session.status === 'running' || entry.session.runningAgents > 0)
+        ) {
           setConfirmCloseSession({ sessionId, title });
           return false;
         }
@@ -8502,6 +8507,10 @@ function CanvasInner({
       {confirmCloseSession !== null && (
         <ConfirmCloseSession
           title={confirmCloseSession.title}
+          runningAgents={
+            allEntries.find((e) => e.session.id === confirmCloseSession.sessionId)?.session
+              .runningAgents ?? 0
+          }
           onCancel={() => setConfirmCloseSession(null)}
           onConfirm={() => {
             const target = confirmCloseSession;
