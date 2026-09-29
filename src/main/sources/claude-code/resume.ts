@@ -85,6 +85,7 @@ import { createVamSession, type TmuxRun } from '../tmux/spawn.js';
 import type { AgentsResult, LiveAgent } from './agents.js';
 import { projectIdOf } from './project-id.js';
 import { typeThenEnter } from './start-in-pane.js';
+import { withStatusLineSettings } from './statusline.js';
 
 /**
  * THE SESSION ID IS ABOUT TO BECOME AN ARGUMENT, so it is checked first.
@@ -102,7 +103,7 @@ export function claudeResumeCommand(sessionId: string): readonly string[] | null
   if (!UUID.test(sessionId)) return null;
   // The provider's own command, so a `claude` that is invoked differently on
   // this machine stays invoked that way -- `providers.ts` is the one table.
-  return [...resolveProvider('claude-code').command, '--resume', sessionId];
+  return withStatusLineSettings([...resolveProvider('claude-code').command, '--resume', sessionId]);
 }
 
 const refused = (code: string, message: string): SourceError => ({
