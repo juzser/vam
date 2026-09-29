@@ -315,4 +315,32 @@ describe('Show worktrees (SessionFilters.hideWorktrees)', () => {
     );
     await waitFor(() => expect(container.querySelector('[data-worktrees-section]')).not.toBeNull());
   });
+
+  it('an open create request draws the create form even while hideWorktrees is ON', async () => {
+    const list = installWorktreesApi();
+    const { container } = mount({
+      filterMenuOpen: false,
+      originFilters: { ...DEFAULT_SESSION_FILTERS, hideWorktrees: true },
+      createWorktreeRequest: { projectId: 'p1' },
+    });
+    await waitFor(() =>
+      expect(container.querySelector('[data-worktrees-create-form]')).not.toBeNull(),
+    );
+    expect(list).toHaveBeenCalled();
+    // Only the requested project's section is drawn; beta stays hidden.
+    expect(container.querySelectorAll('[data-worktrees-section]')).toHaveLength(1);
+  });
+
+  it('draws no create form while hideWorktrees is ON and no request is open', async () => {
+    const list = installWorktreesApi();
+    const { container } = mount({
+      filterMenuOpen: false,
+      originFilters: { ...DEFAULT_SESSION_FILTERS, hideWorktrees: true },
+      createWorktreeRequest: null,
+    });
+    await waitFor(() => expect(list).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 0));
+    expect(container.querySelector('[data-worktrees-create-form]')).toBeNull();
+    expect(container.querySelector('[data-worktrees-section]')).toBeNull();
+  });
 });
