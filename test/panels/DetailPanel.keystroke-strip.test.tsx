@@ -595,3 +595,94 @@ describe('the quick-key strip, item 21/22: text chips in the operator’s order'
     expect(document.activeElement).not.toBe(box);
   });
 });
+
+describe('the quick-key strip: full key matrix, and the chips that are not keys', () => {
+  const MATRIX: readonly (readonly [string, string, object])[] = [
+    ['escape', 'escape', { kind: 'escape' }],
+    ['tab', 'tab', { kind: 'text', text: '\t' }],
+    ['enter', 'enter', { kind: 'enter', shift: false }],
+    ['back-tab', 'back-tab', { kind: 'back-tab' }],
+    ['space', 'space', { kind: 'text', text: ' ' }],
+    ['backspace', 'backspace', { kind: 'backspace' }],
+    ['delete', 'delete', { kind: 'nav', nav: 'delete' }],
+    ['up', 'arrow-up', { kind: 'nav', nav: 'up' }],
+    ['down', 'arrow-down', { kind: 'nav', nav: 'down' }],
+    ['left', 'arrow-left', { kind: 'nav', nav: 'left' }],
+    ['right', 'arrow-right', { kind: 'nav', nav: 'right' }],
+    ...(['c', 'd', 'l', 'z', 'r', 'a', 'e', 'w', 'u'] as const).map(
+      (l) => [`ctrl-${l}`, `ctrl-${l}`, { kind: 'control', letter: l }] as const,
+    ),
+  ];
+
+  it('every key sends its own PaneKey over the local channel', async () => {
+    const send = vi.fn(async (): Promise<PaneSendResult> => 'sent');
+    Object.defineProperty(window, 'api', { configurable: true, value: { terminal: { send } } });
+    draw({}, { terminal: true });
+    for (const [id, , pane] of MATRIX) {
+      await act(async () => {
+        fireEvent.click(document.querySelector(`[data-key-strip-key="${id}"]`) as HTMLElement);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(send, id).toHaveBeenLastCalledWith('p1', pane, 's1');
+    }
+    expect(send).toHaveBeenCalledTimes(MATRIX.length);
+    Reflect.deleteProperty(window, 'api');
+  });
+
+  it('every key POSTs its own remote id where there is no window.api', async () => {
+    const originalFetch = globalThis.fetch;
+    const bodies: unknown[] = [];
+    globalThis.fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return { json: async () => ({ ok: true, value: null }) };
+    }) as unknown as typeof fetch;
+    draw({}, { terminal: false });
+    for (const [id, remote] of MATRIX) {
+      await act(async () => {
+        fireEvent.click(document.querySelector(`[data-key-strip-key="${id}"]`) as HTMLElement);
+      });
+      await waitFor(() => expect(bodies.at(-1), id).toEqual({ sessionId: 's1', key: remote }));
+    }
+    expect(bodies).toHaveLength(MATRIX.length);
+    globalThis.fetch = originalFetch;
+  });
+
+  it('the More chip scrolls the strip to its own end', async () => {
+    draw({}, { terminal: true });
+    const nav = document.querySelector('[data-key-strip]') as HTMLElement;
+    const scrollTo = vi.fn();
+    Object.defineProperty(nav, 'scrollTo', { configurable: true, value: scrollTo });
+    Object.defineProperty(nav, 'scrollWidth', { configurable: true, value: 1234 });
+    await act(async () => {
+      fireEvent.click(document.querySelector('[data-key-strip-more]') as HTMLElement);
+    });
+    expect(scrollTo).toHaveBeenCalledWith({ left: 1234, behavior: 'smooth' });
+  });
+
+  it('the Terminal chip asks for the Terminal tab', async () => {
+    const onRequestTab = vi.fn();
+    draw({}, { terminal: true, onRequestTab });
+    await act(async () => {
+      fireEvent.click(document.querySelector('[data-key-strip-screen]') as HTMLElement);
+    });
+    expect(onRequestTab).toHaveBeenCalledWith('Terminal');
+  });
+
+  it('Paste reads the clipboard into the draft, never through the send-key route', async () => {
+    const readText = vi.fn(async () => 'pasted!');
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { readText } });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn() as unknown as typeof fetch;
+    const onDraftChange = vi.fn();
+    draw({}, { terminal: true, onDraftChange });
+    await act(async () => {
+      fireEvent.click(document.querySelector('[data-key-strip-paste]') as HTMLElement);
+    });
+    await waitFor(() => expect(onDraftChange).toHaveBeenCalledWith('pasted!'));
+    expect(readText).toHaveBeenCalledTimes(1);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    globalThis.fetch = originalFetch;
+    Reflect.deleteProperty(navigator, 'clipboard');
+  });
+});
