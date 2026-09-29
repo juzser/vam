@@ -4515,10 +4515,10 @@ function modelSwitchNote(result: ModelSwitchResult, title: string, choice: strin
  * exactly them, the same report the Terminal tab's own keyboard fix answers.
  * Left/Right are not here: nothing on this strip is a line of text to move a
  * caret through, and every picker this strip exists for walks its rows with
- * Up/Down alone. THEY ARE NOT SERVED REMOTELY -- `paneKeyToRemoteKeyId`
- * (`shared/remote-key.ts`) answers `null` for both, Orca's own phone layout
- * carries neither, and the strip filters them out of its own render wherever
- * `hasLocalTerminalChannel` is false (see the render site).
+ * Up/Down alone. THEY ARE SERVED REMOTELY -- `paneKeyToRemoteKeyId`
+ * (`shared/remote-key.ts`) answers `arrow-up`/`arrow-down` for them, so the
+ * render site's `hasLocalTerminalChannel` filter (which drops only keys with
+ * no remote id) keeps both on a phone.
  *
  * Escape and Enter carry a visible caption naming a different destination
  * than their textarea siblings already claim (`Esc → sidebar`, the send
