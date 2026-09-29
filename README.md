@@ -133,7 +133,7 @@ against the key tables.
 | `zs` `zv` | Split the focused tab, stacked or side by side |
 | `?` | The in-app shortcut sheet |
 
-On a phone there is no physical keyboard, so a 22-chip strip above the composer taps the
+On a phone there is no physical keyboard, so a 24-chip strip (23 where the session has no terminal) above the composer taps the
 keys for you: Keyboard, Paste, twenty keys, Terminal where the session has one, and More.
 
 ## 🤝 Contributing
