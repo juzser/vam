@@ -28,7 +28,8 @@ import { authorize, type RealpathFn } from './authorize.js';
 import { listDirectory, listFiles, type ReadDir } from './list.js';
 import type { FileDirResult, FileListResult } from './types.js';
 
-export type { FileDirResult, FileListResult };
+export type { FileListResult };
+export type { FileDirResult };
 
 /** The session's own working directory, or `null` if nothing live answers to this id. */
 export type ResolveSessionCwd = (sessionId: string) => Promise<string | null>;
