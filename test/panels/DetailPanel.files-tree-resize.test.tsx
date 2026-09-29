@@ -27,6 +27,7 @@
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
+  FileDirResult,
   FileListResult,
   FileReadResult,
   FileSignature,
@@ -68,7 +69,7 @@ const qa = <T extends Element>(selector: string) => [...document.querySelectorAl
 const SIGNATURE: FileSignature = { size: 12, mtimeMs: 1, sha256: 'abc' };
 
 type Bridge = {
-  list: (sessionId: string) => Promise<FileListResult>;
+  list: (sessionId: string, dir?: string) => Promise<FileListResult | FileDirResult>;
   read: (path: string) => Promise<FileReadResult>;
   write: (
     path: string,
@@ -77,18 +78,39 @@ type Bridge = {
   ) => Promise<FileWriteResult>;
 };
 
+/** The real bridge answers `list(sid, dir)` one level deep; derive that from a flat walk. */
+function levelOf(inner: Bridge['list']): Bridge['list'] {
+  return async (sessionId, dir) => {
+    const answer = await (dir === undefined ? inner(sessionId) : inner(sessionId, dir));
+    if (dir === undefined || !('files' in answer)) return answer;
+    const base = dir === '' ? answer.root : `${answer.root}/${dir}`;
+    const entries = new Map<string, 'file' | 'dir'>();
+    for (const file of answer.files) {
+      if (!file.startsWith(`${base}/`)) continue;
+      const [first, ...rest] = file.slice(base.length + 1).split('/');
+      entries.set(first as string, rest.length > 0 ? 'dir' : 'file');
+    }
+    return {
+      root: answer.root,
+      dir: base,
+      entries: [...entries].map(([name, kind]) => ({ name, kind })),
+    };
+  };
+}
+
 function withBridge(bridge: Partial<Bridge> = {}) {
   Object.defineProperty(window, 'api', {
     configurable: true,
     value: {
       files: {
-        list:
+        list: levelOf(
           bridge.list ??
-          (async () => ({
-            root: '/work/atlas',
-            files: ['/work/atlas/.env', '/work/atlas/src/index.ts'],
-            truncated: false,
-          })),
+            (async () => ({
+              root: '/work/atlas',
+              files: ['/work/atlas/.env', '/work/atlas/src/index.ts'],
+              truncated: false,
+            })),
+        ),
         read:
           bridge.read ?? (async () => ({ content: 'A=1', isBinary: false, signature: SIGNATURE })),
         write: bridge.write ?? (async () => ({ signature: SIGNATURE })),

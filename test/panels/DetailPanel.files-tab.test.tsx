@@ -14,6 +14,7 @@
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
+  FileDirResult,
   FileListResult,
   FileReadResult,
   FileSignature,
@@ -105,7 +106,8 @@ function refusal(code: string, message: string) {
 }
 
 type Bridge = {
-  list: (sessionId: string) => Promise<FileListResult>;
+  /** A flat mock is answered one level at a time by `withBridge`; a dir-aware one is passed through. */
+  list: (sessionId: string, dir?: string) => Promise<FileListResult | FileDirResult>;
   read: (path: string) => Promise<FileReadResult>;
   write: (
     path: string,
@@ -116,12 +118,39 @@ type Bridge = {
   reportUnsaved: (report: { count: number; names: readonly string[] }) => void;
 };
 
+/**
+ * The real bridge answers `list(sid, dir)` one level deep. Most tests only care
+ * about WHICH files exist, so they hand over a flat `{root, files}` answer and
+ * this derives the one level asked for; a mock that already answers with
+ * `entries` is passed through untouched.
+ */
+function levelOf(inner: NonNullable<Bridge['list']>): NonNullable<Bridge['list']> {
+  return async (sessionId, dir) => {
+    const answer = await (dir === undefined ? inner(sessionId) : inner(sessionId, dir));
+    if (dir === undefined || !('files' in answer)) return answer;
+    const base = dir === '' ? answer.root : `${answer.root}/${dir}`;
+    const entries = new Map<string, 'file' | 'dir'>();
+    for (const file of answer.files) {
+      if (!file.startsWith(`${base}/`)) continue;
+      const [first, ...rest] = file.slice(base.length + 1).split('/');
+      entries.set(first as string, rest.length > 0 ? 'dir' : 'file');
+    }
+    return {
+      root: answer.root,
+      dir: base,
+      entries: [...entries].map(([name, kind]) => ({ name, kind })),
+    };
+  };
+}
+
 function withBridge(bridge: Partial<Bridge>) {
   Object.defineProperty(window, 'api', {
     configurable: true,
     value: {
       files: {
-        list: bridge.list ?? (async () => ({ root: '/work/atlas', files: [], truncated: false })),
+        list: levelOf(
+          bridge.list ?? (async () => ({ root: '/work/atlas', files: [], truncated: false })),
+        ),
         read: bridge.read ?? (async () => Promise.reject(refusal('not-found', 'missing'))),
         write:
           bridge.write ?? (async () => Promise.reject(refusal('unreadable', 'no write wired'))),
@@ -220,6 +249,157 @@ describe('no session focused', () => {
     await draw({ entry: null, files: true });
     await openFiles();
     expect(q('[data-files-empty]')?.textContent).toContain('No session selected');
+  });
+});
+
+describe('the lazy file tree', () => {
+  const level = (dir: string, entries: FileDirResult['entries']): FileDirResult => ({
+    root: '/work/atlas',
+    dir: dir === '' ? '/work/atlas' : `/work/atlas/${dir}`,
+    entries,
+  });
+  const lazyList = () =>
+    vi.fn(async (_sessionId: string, dir?: string): Promise<FileListResult | FileDirResult> => {
+      if (dir === undefined) {
+        return { root: '/work/atlas', files: ['/work/atlas/src/index.ts'], truncated: true };
+      }
+      return dir === ''
+        ? level('', [
+            { name: 'src', kind: 'dir' },
+            { name: 'node_modules', kind: 'dir' },
+          ])
+        : level(dir, [{ name: 'index.ts', kind: 'file' }]);
+    });
+  const click = async (path: string) =>
+    act(async () => {
+      row(path)?.click();
+      await Promise.resolve();
+    });
+
+  it('opens with the root level only, then reads a directory once when it is expanded', async () => {
+    const list = lazyList();
+    withBridge({ list });
+    await draw({ files: true });
+    await openFiles();
+
+    expect(list.mock.calls).toEqual([['s1', '']]);
+    expect(rowPaths()).toEqual(['/work/atlas/node_modules', '/work/atlas/src']);
+
+    await click('/work/atlas/src');
+    expect(list.mock.calls).toEqual([
+      ['s1', ''],
+      ['s1', 'src'],
+    ]);
+    expect(rowPaths()).toContain('/work/atlas/src/index.ts');
+
+    await click('/work/atlas/src');
+    await click('/work/atlas/src');
+    expect(list.mock.calls).toHaveLength(2);
+    expect(rowPaths()).toContain('/work/atlas/src/index.ts');
+  });
+
+  it('never reads a collapsed directory', async () => {
+    const list = lazyList();
+    withBridge({ list });
+    await draw({ files: true });
+    await openFiles();
+    await click('/work/atlas/src');
+    expect(list.mock.calls.some(([, dir]) => dir === 'node_modules')).toBe(false);
+  });
+
+  it('draws no "Showing the first" notice, even for a truncated walk', async () => {
+    withBridge({ list: lazyList() });
+    await draw({ files: true });
+    await openFiles();
+    await act(async () => {
+      fireEvent.change(q<HTMLInputElement>('[data-files-filter]') as HTMLInputElement, {
+        target: { value: 'index' },
+      });
+      await Promise.resolve();
+    });
+    expect(document.body.textContent).not.toContain('Showing the first');
+  });
+
+  it('runs the full walk only once a filter is typed, and filters over it', async () => {
+    const list = lazyList();
+    withBridge({ list });
+    await draw({ files: true });
+    await openFiles();
+    expect(list.mock.calls.some(([, dir]) => dir === undefined)).toBe(false);
+
+    await act(async () => {
+      fireEvent.change(q<HTMLInputElement>('[data-files-filter]') as HTMLInputElement, {
+        target: { value: 'i' },
+      });
+      await Promise.resolve();
+    });
+    await act(async () => {
+      fireEvent.change(q<HTMLInputElement>('[data-files-filter]') as HTMLInputElement, {
+        target: { value: 'index' },
+      });
+      await Promise.resolve();
+    });
+    expect(list.mock.calls.filter(([, dir]) => dir === undefined)).toHaveLength(1);
+    expect(rowPaths()).toEqual(['/work/atlas/src', '/work/atlas/src/index.ts']);
+  });
+
+  it('a failed directory read is said once and is not retried in a loop', async () => {
+    const list = vi.fn(async (_s: string, dir?: string) => {
+      if (dir === 'src') {
+        throw { kind: 'unreachable', code: 'boom', message: 'src is unreadable' };
+      }
+      return level('', [{ name: 'src', kind: 'dir' }]);
+    });
+    withBridge({ list });
+    await draw({ files: true });
+    await openFiles();
+    await click('/work/atlas/src');
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(list.mock.calls.filter(([, dir]) => dir === 'src')).toHaveLength(1);
+    expect(q('[data-files-note]')?.textContent).toContain('src is unreadable');
+  });
+
+  it('marks a directory busy while its level is in flight', async () => {
+    let release: (r: FileDirResult) => void = () => {};
+    const list = vi.fn(async (_s: string, dir?: string) => {
+      if (dir === 'src') {
+        return new Promise<FileDirResult>((resolve) => {
+          release = resolve;
+        });
+      }
+      return level('', [{ name: 'src', kind: 'dir' }]);
+    });
+    withBridge({ list });
+    await draw({ files: true });
+    await openFiles();
+    await click('/work/atlas/src');
+    expect(row('/work/atlas/src')?.hasAttribute('data-files-row-loading')).toBe(true);
+    await act(async () => {
+      release(level('src', [{ name: 'a.ts', kind: 'file' }]));
+      await Promise.resolve();
+    });
+    expect(row('/work/atlas/src')?.hasAttribute('data-files-row-loading')).toBe(false);
+    expect(rowPaths()).toContain('/work/atlas/src/a.ts');
+  });
+
+  it('refresh drops the cached levels, so a still-open directory is read again', async () => {
+    const list = lazyList();
+    withBridge({ list });
+    await draw({ files: true });
+    await openFiles();
+    await click('/work/atlas/src');
+    expect(list.mock.calls.filter(([, dir]) => dir === 'src')).toHaveLength(1);
+    await act(async () => {
+      q<HTMLButtonElement>('[aria-label="refresh file list"]')?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(list.mock.calls.filter(([, dir]) => dir === '')).toHaveLength(2);
+    expect(list.mock.calls.filter(([, dir]) => dir === 'src')).toHaveLength(2);
   });
 });
 
@@ -457,7 +637,7 @@ describe('opening a file — the read side of all seven refusals', () => {
 
   it('not-authorized reads exactly main’s own uniform refusal, never a hint about existence', async () => {
     withBridge({
-      list: async () => ({ root: '/work/atlas', files: ['/etc/passwd'], truncated: false }),
+      list: async () => ({ root: '/work/atlas', files: ['/work/atlas/passwd'], truncated: false }),
       read: async () =>
         Promise.reject(
           refusal(

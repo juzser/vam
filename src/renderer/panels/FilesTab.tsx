@@ -158,6 +158,8 @@ import {
   useSyncExternalStore,
 } from 'react';
 import type {
+  FileDirEntry,
+  FileDirResult,
   FileListResult,
   FileReadResult,
   FileSignature,
@@ -201,7 +203,12 @@ export type WriteFile = (
   content: string,
   baseSignature: FileSignature | null,
 ) => Promise<FileWriteResult>;
-export type ListFiles = (sessionId: string) => Promise<FileListResult>;
+export type ListFiles = {
+  /** The full walk -- only ever asked for when a filter is typed. */
+  (sessionId: string): Promise<FileListResult>;
+  /** ONE level of `dir` (relative to the session root; `''` is the root). */
+  (sessionId: string, dir: string): Promise<FileDirResult>;
+};
 
 /**
  * HOW WIDE THE TREE IS WHEN NOBODY HAS SAID, and why that is still a clamp
@@ -416,8 +423,20 @@ export type FilesTabProps = {
 
 type ListState =
   | { readonly kind: 'loading' }
-  | { readonly kind: 'ready'; readonly result: FileListResult }
+  | { readonly kind: 'ready'; readonly result: FileDirResult }
   | { readonly kind: 'error'; readonly error: SourceError };
+
+/** One expanded directory's own level, cached per session and directory. */
+type DirState =
+  | { readonly kind: 'loading' }
+  | { readonly kind: 'ready'; readonly entries: readonly FileDirEntry[] }
+  | { readonly kind: 'error' };
+
+/** The filter's full walk, per session. */
+type WalkState =
+  | { readonly kind: 'loading' }
+  | { readonly kind: 'ready'; readonly result: FileListResult }
+  | { readonly kind: 'error' };
 
 const NO_BRIDGE: SourceError = {
   kind: 'unreachable',
@@ -440,7 +459,11 @@ export function FilesTab({
   onFilesMarkdownView,
   openRequest = null,
 }: FilesTabProps) {
+  /** The ROOT level, per session; deeper levels live in `dirs`. */
   const [listing, setListing] = useState<Record<string, ListState>>({});
+  /** Loaded directory levels: session id, then absolute directory path. */
+  const [dirs, setDirs] = useState<Record<string, Record<string, DirState>>>({});
+  const [walks, setWalks] = useState<Record<string, WalkState>>({});
   const [newFileName, setNewFileName] = useState('');
   const [filter, setFilter] = useState('');
   /**
@@ -518,6 +541,20 @@ export function FilesTab({
   const currentListing = sessionId === null ? undefined : listing[sessionId];
   const ready = currentListing?.kind === 'ready' ? currentListing.result : null;
   const root = ready?.root ?? null;
+  const sessionDirs = sessionId === null ? undefined : dirs[sessionId];
+  const currentWalk = sessionId === null ? undefined : walks[sessionId];
+  const filtering = filter.trim() !== '';
+  const walkPending = filtering && currentWalk?.kind === 'loading';
+  const tree = useMemo(() => {
+    if (ready === null) return null;
+    const levels = new Map<string, readonly FileDirEntry[]>([[ready.root, ready.entries]]);
+    const loading = new Set<string>();
+    for (const [path, state] of Object.entries(sessionDirs ?? {})) {
+      if (state.kind === 'ready') levels.set(path, state.entries);
+      else if (state.kind === 'loading') loading.add(path);
+    }
+    return { root: ready.root, dirs: levels, loading };
+  }, [ready, sessionDirs]);
 
   // Declared before `useFileBuffers` below, which reads both through
   // `onNormalizedBeforeSave`: the caret it restores after a save trims the
@@ -640,7 +677,11 @@ export function FilesTab({
     if (sessionId === null || list === undefined) return;
     const forSession = sessionId;
     setListing((prev) => ({ ...prev, [forSession]: { kind: 'loading' } }));
-    list(forSession)
+    // A refresh drops every cached level and the walk; the effects below ask
+    // again for whatever is still open or still filtered.
+    setDirs(({ [forSession]: _dropped, ...rest }) => rest);
+    setWalks(({ [forSession]: _dropped, ...rest }) => rest);
+    list(forSession, '')
       .then((result) => {
         setListing((prev) => ({ ...prev, [forSession]: { kind: 'ready', result } }));
       })
@@ -1008,7 +1049,9 @@ export function FilesTab({
     focusCursorRow,
     onTreeKeyDown,
   } = useFilesTreeState({
-    ready,
+    tree,
+    walk: currentWalk?.kind === 'ready' ? currentWalk.result : null,
+    walkPending,
     filter,
     openFile,
     setNote,
@@ -1018,6 +1061,44 @@ export function FilesTab({
     requestEditorFocus,
     treeRef,
   });
+
+  // LAZY LEVELS: an open directory whose level nobody has asked for yet is
+  // read once. The cache entry (loading, ready or error) is the dedupe, so a
+  // collapse and re-expand never calls again; a collapsed directory is never
+  // read at all, however heavy (`node_modules`, build output).
+  useEffect(() => {
+    if (sessionId === null || list === undefined || root === null) return;
+    const forSession = sessionId;
+    const prefix = `${root}/`;
+    for (const path of expanded) {
+      if (!path.startsWith(prefix) || sessionDirs?.[path] !== undefined) continue;
+      const put = (state: DirState) =>
+        setDirs((prev) => ({ ...prev, [forSession]: { ...prev[forSession], [path]: state } }));
+      put({ kind: 'loading' });
+      list(forSession, path.slice(prefix.length))
+        .then((result) => put({ kind: 'ready', entries: result.entries }))
+        .catch((reason: unknown) => {
+          put({ kind: 'error' });
+          setNote((reason as SourceError).message);
+        });
+    }
+  }, [expanded, root, sessionId, sessionDirs, list]);
+
+  // THE FILTER'S FULL WALK, on demand: the first keystroke asks, opening the
+  // tab never does. Cached per session until the refresh button drops it.
+  useEffect(() => {
+    if (sessionId === null || list === undefined || !filtering) return;
+    if (currentWalk !== undefined) return;
+    const forSession = sessionId;
+    const put = (state: WalkState) => setWalks((prev) => ({ ...prev, [forSession]: state }));
+    put({ kind: 'loading' });
+    list(forSession)
+      .then((result) => put({ kind: 'ready', result }))
+      .catch((reason: unknown) => {
+        put({ kind: 'error' });
+        setNote((reason as SourceError).message);
+      });
+  }, [filtering, sessionId, currentWalk, list]);
 
   /**
    * THE LINE A REQUEST ASKED FOR, held until the file is actually there to
@@ -1891,7 +1972,7 @@ export function FilesTab({
           buffers={buffers}
           filter={filter}
           onFilterChange={setFilter}
-          listing={currentListing}
+          listing={walkPending ? { kind: 'loading' } : currentListing}
           onRefresh={fetchListing}
           onKeyDown={onTreeKeyDown}
           onBoxKeyDown={onBoxKeyDown}
@@ -2440,6 +2521,7 @@ function Tree({
                 data-files-row-path={row.path}
                 data-files-row-kind={row.isDirectory ? 'directory' : 'file'}
                 {...(row.isDirectory ? { 'data-files-row-open': String(open) } : {})}
+                {...(row.loading ? { 'data-files-row-loading': '', 'aria-busy': true } : {})}
                 {...(isCursor ? { 'data-files-cursor': '' } : {})}
                 {...(row.path === activePath ? { 'data-files-row-active': '' } : {})}
                 aria-expanded={row.isDirectory ? open : undefined}
@@ -2508,12 +2590,6 @@ function Tree({
             );
           })}
         </div>
-        {listing?.kind === 'ready' && listing.result.truncated && (
-          <p className="px-2 py-1 text-meta text-ink-faint">
-            Showing the first {listing.result.files.length.toLocaleString()} files — this directory
-            has more.
-          </p>
-        )}
       </OverlayScroll>
     </div>
   );
