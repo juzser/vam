@@ -143,7 +143,16 @@
  * without either side enumerating the other's keys.
  */
 
-import { AlignLeft, Code, Eye, FilePlus, RefreshCw, Search } from 'lucide-react';
+import {
+  AlignLeft,
+  ChevronDown,
+  ChevronRight,
+  Code,
+  Eye,
+  FilePlus,
+  RefreshCw,
+  Search,
+} from 'lucide-react';
 import {
   type KeyboardEvent,
   lazy,
@@ -2543,24 +2552,24 @@ function Tree({
                   isCursor ? 'bg-line-strong text-ink' : 'hover:bg-raised hover:text-ink',
                 ].join(' ')}
               >
-                {/* ONE SLOT, ONE GLYPH — and it replaces the `▸`/`▾` twisty
-                    this row used to draw rather than sitting beside it.
+                {/* ONE GLYPH BEFORE THE NAME, AND A CHEVRON AT THE RIGHT EDGE.
 
-                    The operator asked for "an icon before the folder name",
-                    singular, and a chevron NEXT TO a folder is two icons
-                    before it. One that changes shape when the row opens
-                    (`Folder`/`FolderOpen`) carries the same open/shut fact in
-                    12px instead of 24, which is width this column genuinely
-                    does not have: at vam's narrowest legal pane the tree is
-                    `TREE_WIDTH`'s 7.5rem floor and every pixel of chrome comes
-                    off the NAME. The state a screen reader hears is unchanged
-                    — `aria-expanded` above was always what carried it, and the
-                    twisty was `aria-hidden` exactly as this is.
+                    The leading slot is one glyph — `Folder`/`FolderOpen` for a
+                    directory, a file-family glyph otherwise — which replaced
+                    the `▸`/`▾` twisty that used to sit beside it. That
+                    one-icon rule is REVERSED for directories (operator item
+                    12): a folder that only changes shape is easy to miss as
+                    expandable, so a directory row also draws a trailing
+                    `ChevronRight` (collapsed) / `ChevronDown` (open) below.
+                    It lives at the RIGHT edge, so the name keeps its place
+                    beside the icon; it is `flex-none` and the name is the
+                    `truncate`d item, so at `TREE_WIDTH`'s 7.5rem floor the
+                    name gives way and the chevron never does. It is
+                    `aria-hidden` exactly as the icon is: `aria-expanded`
+                    above is what a screen reader hears.
 
-                    `e2e/files-tab-keyboard-shots.mjs` measures what is left
-                    for the name at that floor, as a rectangle: a glyph that
-                    fits the column while squeezing the names down to an
-                    ellipsis would pass every check in this file. */}
+                    `e2e/files-tab-shots.mjs` measures the chevron's rectangle
+                    against the row's at that floor. */}
                 <FileRowIcon path={row.path} isDirectory={row.isDirectory} open={open} />
                 <span data-files-row-name className="min-w-0 flex-1 truncate">
                   {row.name}
@@ -2586,6 +2595,22 @@ function Tree({
                     style={{ width: 5, height: 5 }}
                   />
                 )}
+                {row.isDirectory &&
+                  (open ? (
+                    <ChevronDown
+                      size={12}
+                      strokeWidth={1.6}
+                      className="flex-none text-ink-faint"
+                      aria-hidden="true"
+                    />
+                  ) : (
+                    <ChevronRight
+                      size={12}
+                      strokeWidth={1.6}
+                      className="flex-none text-ink-faint"
+                      aria-hidden="true"
+                    />
+                  ))}
               </button>
             );
           })}
