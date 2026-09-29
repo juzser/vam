@@ -184,12 +184,10 @@ describe('registerUsageIpc rate limiting', () => {
 });
 
 describe('a forced read', () => {
+  const known = { kind: 'known' as const, percent: 1, resetsAt: 't' };
   const ok = (observedAt: string) => ({
     kind: 'ok' as const,
-    windows: {
-      fiveHour: { kind: 'known' as const, percent: 1, resetsAt: 't' },
-      sevenDay: { kind: 'known' as const, percent: 1, resetsAt: 't' },
-    },
+    windows: { fiveHour: known, sevenDay: known },
     observedAt,
   });
 

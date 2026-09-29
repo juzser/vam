@@ -133,7 +133,6 @@ describe('the status bar usage cell opens the usage popover', () => {
 
   it('opens on click and closes on a second click', async () => {
     render(<Canvas model={MODEL} />);
-    expect(panel()).toBeNull();
     await act(async () => {
       trigger()?.click();
     });

@@ -374,6 +374,31 @@ export function truncateStatus(text: string): string {
   return `${text.slice(0, STATUS_MAX_CHARS - 1).trimEnd()}\u2026`;
 }
 
+/** A usage cell that toggles the popover: the button is the one tab stop, and
+ *  a missing-number `reason` rides on a `Note` around it (opens on focus). */
+function UsageTrigger({
+  label,
+  reason,
+  children,
+}: {
+  readonly label: string;
+  readonly reason: string | null;
+  readonly children: ReactNode;
+}) {
+  const button = (
+    <button
+      type="button"
+      data-usage-trigger
+      aria-label={label}
+      onClick={toggleUsagePopover}
+      className="flex cursor-pointer items-center gap-2 bg-transparent p-0 text-inherit"
+    >
+      {children}
+    </button>
+  );
+  return reason === null ? button : <Note text={reason}>{button}</Note>;
+}
+
 /**
  * The status bar's message cell.
  *
@@ -8660,42 +8685,19 @@ function CanvasInner({
           {prefs.statusBarShowClaudeUsage && (
             <>
               <span className="h-3 w-px bg-line" />
-              <button
-                type="button"
-                data-usage-trigger
-                aria-label="Usage details"
-                onClick={toggleUsagePopover}
-                className="flex cursor-pointer items-center gap-2 bg-transparent p-0 text-inherit"
-              >
-                {/* The provider mark, in EVERY state -- including the bare `—`
+              {/* The provider mark, in EVERY state -- including the bare `—`
                   with its tooltip. `SourceMark` is the same resolver the
                   sidebar row and the Stats screen's `ProviderCard` already
                   draw from (`sources/provider-marks.tsx`), never a copied
                   path: one glyph for `claude-code`, drawn once. */}
-                {usage.reason === null ? (
-                  <span
-                    data-usage
-                    className={`flex items-center gap-1${usage.highUsage ? ' text-failed' : ''}`}
-                  >
-                    <SourceMark source="claude-code" lane={12} />
-                    {usage.text}
-                  </span>
-                ) : (
-                  <Note text={usage.reason}>
-                    {/* A tab stop for the same reason `StatusCell` takes one: this
-                      sentence explains a MISSING NUMBER and must stay
-                      keyboard-reachable. */}
-                    <span
-                      data-usage
-                      className="flex items-center gap-1"
-                      // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see `StatusCell`.
-                      tabIndex={0}
-                    >
-                      <SourceMark source="claude-code" lane={12} />
-                      {usage.text}
-                    </span>
-                  </Note>
-                )}
+              <UsageTrigger label="Usage details" reason={usage.reason}>
+                <span
+                  data-usage
+                  className={`flex items-center gap-1${usage.highUsage ? ' text-failed' : ''}`}
+                >
+                  <SourceMark source="claude-code" lane={12} />
+                  {usage.text}
+                </span>
                 {usage.windows !== null && (
                   <span className="flex items-center gap-2">
                     {/* Five hours first: it is the window that moves minute to minute. */}
@@ -8711,20 +8713,13 @@ function CanvasInner({
                     />
                   </span>
                 )}
-              </button>
+              </UsageTrigger>
             </>
           )}
           {prefs.statusBarShowCodexUsage && (
             <>
               <span className="h-3 w-px bg-line" />
-              <button
-                type="button"
-                data-usage-trigger
-                aria-label="Codex usage details"
-                onClick={toggleUsagePopover}
-                className="flex cursor-pointer items-center gap-2 bg-transparent p-0 text-inherit"
-              >
-                {/* Text only, no bars: Codex's own windows (`CodexWindowDisplay`)
+              {/* Text only, no bars: Codex's own windows (`CodexWindowDisplay`)
                   are not `UsageWindow`s, and a second bar widget over a shape
                   `describeCodexStatusUsage` already collapsed to one line is
                   more than this cell earns -- the popover (`UsagePopover.tsx`)
@@ -8735,28 +8730,15 @@ function CanvasInner({
                   resolver, `source="codex"`, so this cell and Claude's read
                   as one family rather than two different widgets that
                   happen to sit beside each other. */}
-                {codexUsage.reason === null ? (
-                  <span
-                    data-codex-usage
-                    className={`flex items-center gap-1${codexUsage.highUsage ? ' text-failed' : ''}`}
-                  >
-                    <SourceMark source="codex" lane={12} />
-                    {codexUsage.text}
-                  </span>
-                ) : (
-                  <Note text={codexUsage.reason}>
-                    <span
-                      data-codex-usage
-                      className="flex items-center gap-1"
-                      // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see `StatusCell`.
-                      tabIndex={0}
-                    >
-                      <SourceMark source="codex" lane={12} />
-                      {codexUsage.text}
-                    </span>
-                  </Note>
-                )}
-              </button>
+              <UsageTrigger label="Codex usage details" reason={codexUsage.reason}>
+                <span
+                  data-codex-usage
+                  className={`flex items-center gap-1${codexUsage.highUsage ? ' text-failed' : ''}`}
+                >
+                  <SourceMark source="codex" lane={12} />
+                  {codexUsage.text}
+                </span>
+              </UsageTrigger>
             </>
           )}
 

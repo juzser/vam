@@ -63,13 +63,8 @@ import { PROVIDER_MARKS } from '../sources/provider-marks.js';
 const UNKNOWN_CLAUDE: UsageSnapshot = { kind: 'unknown', reason: 'unavailable' };
 const UNKNOWN_CODEX: CodexUsageSnapshot = { kind: 'unknown', reason: 'unavailable' };
 
-/**
- * The popover's open state, lifted out of the component so a second trigger
- * (the status bar's usage cell, `Canvas.tsx`) can toggle the same panel. A
- * trigger outside the popover marks itself `data-usage-trigger` so the
- * outside-press dismiss below ignores it and a click toggles rather than
- * close-then-reopen.
- */
+/** Open state shared with the status bar's usage cell (`Canvas.tsx`), which
+ *  marks itself `data-usage-trigger` so the outside-press dismiss ignores it. */
 let usageOpen = false;
 const usageListeners = new Set<() => void>();
 function setUsageOpen(next: boolean): void {
@@ -124,7 +119,6 @@ function useLiveSnapshot<T>(
           if (force) settled.current?.();
         });
     };
-    // A tick above zero is the Refresh button: read past main's cache.
     poll(refreshTick > 0);
     const id = window.setInterval(() => poll(), POLL_INTERVAL_MS);
     return () => {
@@ -374,8 +368,6 @@ export function usagePanelLeftOffset(
  */
 export function UsagePopover() {
   const open = useSyncExternalStore(subscribeUsageOpen, () => usageOpen);
-  const setOpen = (next: boolean | ((o: boolean) => boolean)) =>
-    setUsageOpen(typeof next === 'function' ? next(usageOpen) : next);
   const [refreshTick, setRefreshTick] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const pendingRefreshes = useRef(0);
@@ -383,9 +375,15 @@ export function UsagePopover() {
     pendingRefreshes.current -= 1;
     if (pendingRefreshes.current <= 0) setRefreshing(false);
   };
-  // Unmounting the popover (the sidebar going away) must not leave the shared
-  // state open for the next mount.
+  // Unmounting must not leave the shared state open for the next mount.
   useEffect(() => () => setUsageOpen(false), []);
+  // A close ends the refresh: the next open polls normally, not with force.
+  useEffect(() => {
+    if (open) return;
+    setRefreshTick(0);
+    setRefreshing(false);
+    pendingRefreshes.current = 0;
+  }, [open]);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const wasOpen = useRef(false);
@@ -455,7 +453,7 @@ export function UsagePopover() {
 
   const onEscape = (event: ReactKeyboardEvent<HTMLElement>) => {
     if (event.key !== 'Escape') return;
-    setOpen(false);
+    setUsageOpen(false);
   };
 
   const hasBridge = window.api !== undefined;
@@ -471,7 +469,7 @@ export function UsagePopover() {
           aria-expanded={open}
           aria-label="usage"
           onKeyDown={onEscape}
-          onClick={() => setOpen((o) => !o)}
+          onClick={toggleUsagePopover}
           // NO FILL AT REST, on desktop too now (settings-views work, item H:
           // "remove the account icon's background, on desktop too") -- its
           // plain-icon neighbours in this same bar (Stats, Settings, Remote,

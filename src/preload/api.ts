@@ -309,7 +309,6 @@ export type UsageApi = {
   getCodex(opts?: UsageReadOptions): Promise<CodexUsageSnapshot>;
 };
 
-/** `force` bypasses main's 30 s read cache (still joining an in-flight read). */
 export type UsageReadOptions = { readonly force?: boolean };
 
 /**
@@ -323,13 +322,15 @@ export type UsageReadOptions = { readonly force?: boolean };
 export function createUsageApi(ipc: InvokerLike): UsageApi {
   return {
     get: (opts) =>
-      (opts?.force === true
-        ? ipc.invoke(CHANNELS.usageGet, true)
-        : ipc.invoke(CHANNELS.usageGet)) as Promise<UsageSnapshot>,
+      ipc.invoke(
+        CHANNELS.usageGet,
+        ...(opts?.force === true ? [true] : []),
+      ) as Promise<UsageSnapshot>,
     getCodex: (opts) =>
-      (opts?.force === true
-        ? ipc.invoke(CHANNELS.usageCodexGet, true)
-        : ipc.invoke(CHANNELS.usageCodexGet)) as Promise<CodexUsageSnapshot>,
+      ipc.invoke(
+        CHANNELS.usageCodexGet,
+        ...(opts?.force === true ? [true] : []),
+      ) as Promise<CodexUsageSnapshot>,
   };
 }
 

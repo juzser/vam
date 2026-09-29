@@ -365,6 +365,25 @@ describe('the refresh button', () => {
     expect(panel()?.textContent).toContain('77%');
   });
 
+  it('a close and reopen after a refresh polls normally, without force', async () => {
+    serve(claudeSnapshot(), codexSnapshot());
+    render(<UsagePopover />);
+    await act(async () => {
+      toggle().click();
+    });
+    await act(async () => {
+      screen.getByRole('button', { name: 'Refresh' }).click();
+    });
+    const api = (window as unknown as { api: { usage: { get: Mock; getCodex: Mock } } }).api;
+    for (const step of ['close', 'reopen']) {
+      if (step === 'reopen') api.usage.get.mockClear();
+      await act(async () => {
+        toggle().click();
+      });
+    }
+    expect(api.usage.get.mock.calls).toEqual([[]]);
+  });
+
   it('a press on it does not dismiss the popover, and the footer trigger is not "outside"', async () => {
     serve(claudeSnapshot(), codexSnapshot());
     const outside = document.createElement('button');
