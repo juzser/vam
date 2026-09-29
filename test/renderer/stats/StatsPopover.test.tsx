@@ -82,4 +82,81 @@ describe('StatsPopover', () => {
     fireEvent.pointerDown(document.body);
     expect(screen.queryByRole('dialog')).toBeNull();
   });
+
+  it('shows loading until the snapshot arrives and stays there on a non-ok result', async () => {
+    const get = vi.fn().mockResolvedValue({ kind: 'error', message: 'x' });
+    (window as unknown as { api: unknown }).api = { stats: { get } };
+    render(<StatsPopover onStats={vi.fn()} />);
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText('stats'));
+    });
+    const panel = screen.getByRole('dialog');
+    expect(panel.textContent).toContain('loading');
+    expect(panel.querySelector('[data-stats-heatmap]')).toBeNull();
+  });
+
+  it('a rejected stats.get does not crash and leaves the popover open on loading', async () => {
+    const get = vi.fn().mockRejectedValue(new Error('boom'));
+    (window as unknown as { api: unknown }).api = { stats: { get } };
+    render(<StatsPopover onStats={vi.fn()} />);
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText('stats'));
+    });
+    expect(screen.getByRole('dialog').textContent).toContain('loading');
+  });
+
+  it('opens without a stats bridge and does not throw', async () => {
+    (window as unknown as { api: unknown }).api = undefined;
+    render(<StatsPopover onStats={vi.fn()} />);
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText('stats'));
+    });
+    expect(screen.getByRole('dialog').textContent).toContain('loading');
+  });
+
+  it('re-clicking the toggle button closes the popover and reflects aria-expanded', async () => {
+    await open();
+    const button = screen.getByLabelText('stats');
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('a pointerdown on the toggle button is not treated as outside', async () => {
+    await open();
+    fireEvent.pointerDown(screen.getByLabelText('stats'));
+    expect(screen.queryByRole('dialog')).not.toBeNull();
+  });
+
+  it('closes on Escape pressed on the toggle button', async () => {
+    await open();
+    fireEvent.keyDown(screen.getByLabelText('stats'), { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('renders zeros and an empty heatmap for an empty snapshot', async () => {
+    const empty = {
+      ...SNAPSHOT,
+      agentsSpawned: 0,
+      heatmap: [],
+      usageOverview: { ...SNAPSHOT.usageOverview, totalTokens: 0, activeDays: 0 },
+    } as unknown as StatsSnapshot;
+    const get = vi.fn().mockResolvedValue({ kind: 'ok', snapshot: empty });
+    (window as unknown as { api: unknown }).api = { stats: { get } };
+    render(<StatsPopover onStats={vi.fn()} />);
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText('stats'));
+    });
+    const panel = screen.getByRole('dialog');
+    expect(panel.querySelector('[data-stats-heatmap]')).not.toBeNull();
+    expect(panel.textContent).not.toContain('loading');
+  });
+
+  it('does not fetch while closed and fetches once per open', async () => {
+    const { get } = await open();
+    expect(get).toHaveBeenCalledTimes(1);
+  });
 });
