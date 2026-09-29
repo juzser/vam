@@ -181,7 +181,7 @@ describe('tmux argv', () => {
     expect(sendBackTabArgv('vam-a1b2c3')).not.toContain('Tab');
   });
 
-  it('presses each of the eight navigation keys, interpreted, never typed', () => {
+  it('presses each of the nine navigation keys, interpreted, never typed', () => {
     // vam/terminal-arrows. MEASURED on tmux 3.7b over a private `-L` socket,
     // against `e2e/fixtures/key-echo.cjs` in a real pane, plain cursor-key
     // mode: `send-keys Up/Down/Left/Right` delivered `1b 5b 41/42/44/43`,
@@ -246,6 +246,13 @@ describe('tmux argv', () => {
       '--',
       'PageDown',
     ]);
+    expect(sendNavArgv('vam-a1b2c3', 'delete')).toEqual([
+      'send-keys',
+      '-t',
+      '=vam-a1b2c3:',
+      '--',
+      'DC',
+    ]);
     for (const nav of [
       'up',
       'down',
@@ -255,6 +262,7 @@ describe('tmux argv', () => {
       'end',
       'page-up',
       'page-down',
+      'delete',
     ] as const) {
       expect(sendNavArgv('vam-a1b2c3', nav)).not.toContain('-l');
     }

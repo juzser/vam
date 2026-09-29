@@ -573,14 +573,13 @@ export function isControlLetter(value: unknown): value is ControlLetter {
  * THE WHOLE ALLOWLIST OF NAVIGATION KEYS -- the four arrows and Home, End,
  * PageUp, PageDown, written out exactly as `CONTROL_LETTERS` is.
  *
- * EIGHT, AND CLOSED FOR THE SAME REASON THAT LIST IS: these are the keys a
+ * NINE, AND CLOSED FOR THE SAME REASON THAT LIST IS: these are the keys a
  * terminal is navigated with (`PaneKey`'s own `nav` doc has the report), and
  * anything else a keyboard sends is either a character `strokeFor` already
  * carries or a browser/vam chord this file has no business claiming.
- * `Insert` and `Delete` are deliberately NOT here -- the operator's report was
- * about the arrows and the pickers they walk, `Delete` already means
- * something to a browser (and nothing measured yet to a pane), and a list
- * grown on a guess is a list this file would have to defend twice.
+ * `Delete` joined the eight for the phone's key strip (vam-ux-1, the remote
+ * route's `delete` id) and is sent to tmux as `DC`; `Insert` is still NOT
+ * here.
  *
  * SPELLED AS LITERALS, so a `string` narrowed by a regular expression can
  * never stand in for it -- the same defence `CONTROL_LETTERS` makes.
@@ -594,15 +593,16 @@ export const NAV_KEYS = [
   'end',
   'page-up',
   'page-down',
+  'delete',
 ] as const;
 
-/** One of the eight above, and nothing else is assignable to it. */
+/** One of the nine above, and nothing else is assignable to it. */
 export type NavKey = (typeof NAV_KEYS)[number];
 
 const NAV_KEY_SET: ReadonlySet<string> = new Set<string>(NAV_KEYS);
 
 /**
- * Whether a value off the bridge names one of the eight navigation keys --
+ * Whether a value off the bridge names one of the nine navigation keys --
  * `isControlLetter`'s own reasoning, unchanged: a `Set` built FROM the list
  * so membership of the array IS the definition, and exported because the
  * renderer decides with it too (`TerminalTab.tsx`).

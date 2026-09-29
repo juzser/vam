@@ -33,7 +33,7 @@ import { sendNavArgv } from '../../../src/main/sources/tmux/argv.js';
 import type { TmuxRun, TmuxRunResult } from '../../../src/main/sources/tmux/spawn.js';
 import { registerTerminalIpc } from '../../../src/main/terminal/ipc.js';
 import { sendSessionKey } from '../../../src/main/terminal/pane.js';
-import { NAV_KEYS, type NavKey } from '../../../src/shared/terminal.js';
+import { isNavKey, NAV_KEYS, type NavKey } from '../../../src/shared/terminal.js';
 
 const ok = (stdout: string): TmuxRunResult => ({ failure: null, stdout, stderr: '' });
 const failed = (stderr: string): TmuxRunResult => ({
@@ -88,7 +88,7 @@ describe('a navigation key reaches the pane as a real key, never as its letters'
    * EVERY ONE OF THE EIGHT, AND THE COUNT IS ASSERTED INSIDE THE LOOP'S OWN
    * EXPRESSION -- a sweep that finds nothing passes silently otherwise.
    */
-  it('spells all eight the one way tmux spells them, and no other way', async () => {
+  it('spells all nine the one way tmux spells them, and no other way', async () => {
     const names: string[] = [];
     for (const nav of NAV_KEYS) {
       const { run, argvs } = runner(atlasIsListed);
@@ -98,8 +98,18 @@ describe('a navigation key reaches the pane as a real key, never as its letters'
       expect(argv.slice(0, 4)).toEqual(['send-keys', '-t', PANE, '--']);
       names.push(argv[4] ?? '');
     }
-    expect(names).toHaveLength(8);
-    expect(names).toEqual(['Up', 'Down', 'Left', 'Right', 'Home', 'End', 'PageUp', 'PageDown']);
+    expect(names).toHaveLength(9);
+    expect(names).toEqual([
+      'Up',
+      'Down',
+      'Left',
+      'Right',
+      'Home',
+      'End',
+      'PageUp',
+      'PageDown',
+      'DC',
+    ]);
     expect(names.some((name) => name.startsWith('-'))).toBe(false);
   });
 
@@ -119,7 +129,15 @@ describe('a navigation key reaches the pane as a real key, never as its letters'
   });
 });
 
-describe('the bridge cannot name a tmux key, only index a table of eight', () => {
+describe('delete is a navigation key', () => {
+  it('isNavKey accepts delete and the set has nine members', () => {
+    expect(isNavKey('delete')).toBe(true);
+    expect(NAV_KEYS).toHaveLength(9);
+    expect(NAV_KEYS.filter((key) => isNavKey(key))).toHaveLength(9);
+  });
+});
+
+describe('the bridge cannot name a tmux key, only index a table of nine', () => {
   function handler() {
     const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
     const { run, argvs } = runner(atlasIsListed);

@@ -1077,6 +1077,7 @@ const NAV_KEY_NAMES: Readonly<Record<NavKey, string>> = {
   end: 'End',
   'page-up': 'PageUp',
   'page-down': 'PageDown',
+  delete: 'DC',
 };
 
 /**

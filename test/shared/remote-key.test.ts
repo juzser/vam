@@ -12,9 +12,67 @@ import {
 } from '../../src/shared/remote-key.js';
 import type { PaneKey } from '../../src/shared/terminal.js';
 
-describe('the six ids, closed', () => {
+describe('the twenty ids, closed', () => {
   it('is exactly this list, in this order', () => {
-    expect(REMOTE_KEY_IDS).toEqual(['escape', 'tab', 'enter', 'back-tab', 'space', 'backspace']);
+    expect(REMOTE_KEY_IDS).toEqual([
+      'escape',
+      'tab',
+      'enter',
+      'back-tab',
+      'space',
+      'backspace',
+      'delete',
+      'arrow-up',
+      'arrow-down',
+      'arrow-left',
+      'arrow-right',
+      'ctrl-c',
+      'ctrl-d',
+      'ctrl-l',
+      'ctrl-z',
+      'ctrl-r',
+      'ctrl-a',
+      'ctrl-e',
+      'ctrl-w',
+      'ctrl-u',
+    ]);
+    expect(REMOTE_KEY_IDS).toHaveLength(20);
+  });
+
+  it('isRemoteKeyId rejects every near miss: no prefix, no pattern, no chord', () => {
+    for (const value of [
+      'ctrl-b',
+      'ctrl-x',
+      'ctrl-',
+      'C-c',
+      'up',
+      'Delete',
+      'ctrl-c ',
+      'ctrl-C',
+      'arrow-',
+      42,
+      null,
+      undefined,
+      {},
+    ]) {
+      expect(isRemoteKeyId(value), `isRemoteKeyId(${JSON.stringify(value)})`).toBe(false);
+    }
+  });
+
+  it('maps the new ids to the PaneKeys the local path already delivers', () => {
+    expect(remoteKeyToPaneKey('ctrl-c')).toEqual({ kind: 'control', letter: 'c' });
+    expect(remoteKeyToPaneKey('arrow-left')).toEqual({ kind: 'nav', nav: 'left' });
+    expect(remoteKeyToPaneKey('delete')).toEqual({ kind: 'nav', nav: 'delete' });
+    expect(remoteKeyToPaneKey('arrow-up')).toEqual({ kind: 'nav', nav: 'up' });
+    expect(remoteKeyToPaneKey('ctrl-u')).toEqual({ kind: 'control', letter: 'u' });
+  });
+
+  it('round-trips each of the fourteen new ids', () => {
+    const added = REMOTE_KEY_IDS.slice(6);
+    expect(added).toHaveLength(14);
+    for (const id of added) {
+      expect(paneKeyToRemoteKeyId(remoteKeyToPaneKey(id)), id).toBe(id);
+    }
   });
 
   it('isRemoteKeyId accepts every one of them and nothing else', () => {
@@ -53,6 +111,20 @@ describe('remoteKeyToPaneKey: the id, as the tmux-sending path already understan
       backspace: { kind: 'backspace' },
       space: { kind: 'text', text: ' ' },
       tab: { kind: 'text', text: '\t' },
+      delete: { kind: 'nav', nav: 'delete' },
+      'arrow-up': { kind: 'nav', nav: 'up' },
+      'arrow-down': { kind: 'nav', nav: 'down' },
+      'arrow-left': { kind: 'nav', nav: 'left' },
+      'arrow-right': { kind: 'nav', nav: 'right' },
+      'ctrl-c': { kind: 'control', letter: 'c' },
+      'ctrl-d': { kind: 'control', letter: 'd' },
+      'ctrl-l': { kind: 'control', letter: 'l' },
+      'ctrl-z': { kind: 'control', letter: 'z' },
+      'ctrl-r': { kind: 'control', letter: 'r' },
+      'ctrl-a': { kind: 'control', letter: 'a' },
+      'ctrl-e': { kind: 'control', letter: 'e' },
+      'ctrl-w': { kind: 'control', letter: 'w' },
+      'ctrl-u': { kind: 'control', letter: 'u' },
     };
     for (const id of REMOTE_KEY_IDS) {
       expect(remoteKeyToPaneKey(id)).toEqual(expected[id]);
@@ -72,7 +144,7 @@ describe('remoteKeyToPaneKey: the id, as the tmux-sending path already understan
 });
 
 describe('paneKeyToRemoteKeyId: the strip button, asked whether this route can carry it', () => {
-  it('round-trips every one of the six', () => {
+  it('round-trips every one of the twenty', () => {
     for (const id of REMOTE_KEY_IDS) {
       expect(paneKeyToRemoteKeyId(remoteKeyToPaneKey(id))).toBe(id);
     }
@@ -80,10 +152,10 @@ describe('paneKeyToRemoteKeyId: the strip button, asked whether this route can c
 
   it('answers null for every key this route refuses', () => {
     const outside: readonly PaneKey[] = [
-      { kind: 'nav', nav: 'up' },
-      { kind: 'nav', nav: 'down' },
-      { kind: 'nav', nav: 'left' },
-      { kind: 'control', letter: 'c' },
+      { kind: 'nav', nav: 'home' },
+      { kind: 'nav', nav: 'page-down' },
+      { kind: 'control', letter: 'b' },
+      { kind: 'control', letter: 'x' },
       { kind: 'wheel', ticks: 1, direction: 'up', column: 1, row: 1 },
       { kind: 'paste', text: 'anything' },
       { kind: 'enter', shift: true }, // Shift+Return is a literal newline, not this route's Enter

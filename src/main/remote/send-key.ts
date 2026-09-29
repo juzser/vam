@@ -8,11 +8,22 @@
  * no `window.api`, and `remote/server.ts`'s own `UNSERVED.terminal` says why
  * the REST of the terminal surface stays that way: read, resize and answer
  * all need their own decision, and full read/write into a pane is the
- * heaviest thing this server can be asked to do. A SINGLE KEY, from a FIXED
- * ALLOWLIST, is a much smaller promise -- Escape, Tab, Enter, Shift-Tab,
- * Space and Backspace are exactly the keys Claude Code's own option pickers
- * (`AskUserQuestion`, a permission prompt, `/model`, plan approval) are
- * walked with, never a channel for arbitrary text.
+ * heaviest thing this server can be asked to do. So this is a closed
+ * ALLOWLIST of twenty keys, never a channel for arbitrary text: the
+ * original six (Escape, Tab, Enter, Shift-Tab, Space, Backspace -- the keys
+ * Claude Code's own option pickers are walked with), plus Delete, the four
+ * arrows and nine named Ctrl chords.
+ *
+ * WHAT THE PAIRED PHONE CAN NOW DO (vam-ux-1, a deliberate widening of the
+ * threat model): interrupt the running program with Ctrl-C, send EOF with
+ * Ctrl-D (which can end a shell), suspend it with Ctrl-Z, and edit the
+ * shell line (Ctrl-A/E/W/U, Ctrl-R history search, Ctrl-L redraw, arrows,
+ * Delete). That is acceptable for an already-paired device: it has passed
+ * the same authentication as `/api/record-prompt`, which already types
+ * whole prompts, plus Enter, into this same pane -- a strictly larger
+ * power than any key here. Excluded on purpose: tmux's prefix chord
+ * (Ctrl-B) and every Ctrl letter not named, so the phone can never open a
+ * tmux command prompt or reach a chord nobody reviewed.
  *
  * THE RESOLUTION IS RECORDPROMPT'S OWN, reused rather than re-derived
  * (`claude-code/source.ts`'s `recordPrompt`, this module's whole model):
@@ -38,7 +49,7 @@
  * itself takes none, deriving everything from `sessionId` alone through the
  * proofs above, and a caller-supplied project id would be one more value to
  * validate for no safety it does not already have. It never accepts a tmux
- * key NAME from the caller: `remoteKeyToPaneKey` (`shared/remote-key.ts`) is a closed `switch` over six
+ * key NAME from the caller: `remoteKeyToPaneKey` (`shared/remote-key.ts`) is a closed `switch` over twenty
  * literal ids, so nothing this route reads off the wire ever becomes an
  * argv token by itself (see `sendToPane`'s own header on why every one of
  * the five key-press builders is a fixed argv rather than a name-driven
@@ -124,10 +135,7 @@ export async function sendRemoteKey(
   // trust that caller either. `keyId as RemoteKeyId` above is a compile-time
   // promise only; nothing stops a caller from handing this a plain `string`.
   if (!isRemoteKeyId(keyId)) {
-    return refused(
-      'invalid-key',
-      `"${String(keyId)}" is not one of the six keys this route allows`,
-    );
+    return refused('invalid-key', `"${String(keyId)}" is not one of the keys this route allows`);
   }
   const run = deps.run ?? createTmuxRunner();
   const listAgents = deps.listAgents ?? listLiveAgents;
