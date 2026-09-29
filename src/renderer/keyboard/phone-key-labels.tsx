@@ -11,7 +11,8 @@
  * `Esc → agent` on the Android phone this same bundle is served to, which
  * read as two different apps depending on which pocket the phone came out
  * of. The operator asked for one short, plain caption regardless: `Esc`,
- * `Tab`, `⇧Tab`, `↵`, `Space`, `⌫`, `↑`, `↓` -- none of it varies by
+ * `Tab`, `Shift+Tab`, `Enter`, `Space`, `⌫`, `Del`, the four arrows and the
+ * Ctrl chords -- none of it varies by
  * platform, so none of it belongs behind `chordSymbols` any more.
  *
  * THIS IS A SECOND TABLE, ON PURPOSE, and `test/keyboard/no-stray-glyphs
@@ -25,12 +26,24 @@ import type { ReactElement } from 'react';
 export const PHONE_KEY_LABELS = {
   escape: 'Esc',
   tab: 'Tab',
-  enter: '↵',
-  'back-tab': '⇧Tab',
+  enter: 'Enter',
+  'back-tab': 'Shift+Tab',
   space: 'Space',
   backspace: '⌫',
+  delete: 'Del',
   up: '↑',
   down: '↓',
+  left: '←',
+  right: '→',
+  'ctrl-c': 'Ctrl+C',
+  'ctrl-d': 'Ctrl+D',
+  'ctrl-l': 'Ctrl+L',
+  'ctrl-z': 'Ctrl+Z',
+  'ctrl-r': 'Ctrl+R',
+  'ctrl-a': 'Ctrl+A',
+  'ctrl-e': 'Ctrl+E',
+  'ctrl-w': 'Ctrl+W',
+  'ctrl-u': 'Ctrl+U',
 } as const;
 
 /**
@@ -44,7 +57,7 @@ export const PHONE_KEY_LABELS = {
  * ⇧ reads the same either way. `Esc`/`Tab`/`Space` are plain words and never
  * enter this set at all.
  */
-const LABEL_GLYPHS = new Set(['⇧', '⌫', '↑', '↓', '↵']);
+const LABEL_GLYPHS = new Set(['⌫', '↑', '↓', '←', '→']);
 
 /**
  * `label`, split into plain runs and glyph runs, each glyph run wrapped for

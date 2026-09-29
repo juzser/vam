@@ -125,8 +125,8 @@ describe('the keystroke strip is drawn only where a key can actually be sent', (
   it('is drawn for a session vam started, on a source with a terminal, on phone', () => {
     draw({}, { terminal: true });
     expect(strip()).not.toBeNull();
-    // All eight: every KEY_STRIP key has a remote id now, so the strip draws
-    // the same eight keys with no `window.api` mocked (Up and Down included).
+    // All twenty: every KEY_STRIP key has a remote id now, so the strip draws
+    // the same keys with no `window.api` mocked (Up and Down included).
     expect(keys().map((el) => el.getAttribute('data-key-strip-key'))).toEqual([
       'escape',
       'tab',
@@ -134,8 +134,20 @@ describe('the keystroke strip is drawn only where a key can actually be sent', (
       'back-tab',
       'space',
       'backspace',
+      'delete',
       'up',
       'down',
+      'left',
+      'right',
+      'ctrl-c',
+      'ctrl-d',
+      'ctrl-l',
+      'ctrl-z',
+      'ctrl-r',
+      'ctrl-a',
+      'ctrl-e',
+      'ctrl-w',
+      'ctrl-u',
     ]);
   });
 
@@ -150,7 +162,22 @@ describe('the keystroke strip is drawn only where a key can actually be sent', (
       keys()
         .map((k) => k.getAttribute('data-key-strip-key'))
         .sort(),
-    ).toEqual(['back-tab', 'backspace', 'down', 'enter', 'escape', 'space', 'tab', 'up'].sort());
+    ).toEqual(
+      [
+        'back-tab',
+        'backspace',
+        'down',
+        'enter',
+        'escape',
+        'space',
+        'tab',
+        'up',
+        'delete',
+        'left',
+        'right',
+        ...['c', 'd', 'l', 'z', 'r', 'a', 'e', 'w', 'u'].map((l) => `ctrl-${l}`),
+      ].sort(),
+    );
   });
 
   it('sends Up/Down as real navigation keys, so a phone can walk a picker too', async () => {
@@ -186,7 +213,7 @@ describe('the keystroke strip is drawn only where a key can actually be sent', (
     // print. That row is long gone (the paragraph below), and the operator
     // asked for the reverse of the added wording too: "short plain
     // labels... instead of '⟲→ agent' / '↩→ agent' style captions" -- so
-    // the strip's own caption is now exactly `Esc` and exactly `↵`, nothing
+    // the strip's own caption is now exactly `Esc` and exactly `Enter`, nothing
     // appended, on every platform (`chordSymbols` used to vary this by
     // `navigator.platform`; see the platform test below for why that had to
     // go too).
@@ -194,7 +221,7 @@ describe('the keystroke strip is drawn only where a key can actually be sent', (
     const escapeKey = document.querySelector('[data-key-strip-key="escape"]');
     const enterKey = document.querySelector('[data-key-strip-key="enter"]');
     expect(escapeKey?.textContent).toBe('Esc');
-    expect(enterKey?.textContent).toBe('↵');
+    expect(enterKey?.textContent).toBe('Enter');
     // AND THE TEXTAREA NAMES NO KEY AT ALL TO BE CONFUSED WITH. The strip's
     // button is now the only thing under the composer that says "Esc" on any
     // route: the key row beneath the input is gone entirely, at the operator's
@@ -223,9 +250,9 @@ describe('the keystroke strip is drawn only where a key can actually be sent', (
     const EXPECT: Readonly<Record<string, string>> = {
       escape: 'Esc',
       tab: 'Tab',
-      enter: '↵',
+      enter: 'Enter',
       backspace: '⌫',
-      'back-tab': '⇧Tab',
+      'back-tab': 'Shift+Tab',
       space: 'Space',
       up: '↑',
       down: '↓',
@@ -462,5 +489,109 @@ describe('the keystroke strip is drawn only where a key can actually be sent', (
       await Promise.resolve();
     });
     Reflect.deleteProperty(window, 'api');
+  });
+});
+
+describe('the quick-key strip, item 21/22: text chips in the operator’s order', () => {
+  const ORDER = [
+    'Keyboard',
+    'Paste',
+    'Esc',
+    'Tab',
+    'Enter',
+    'Shift+Tab',
+    'Space',
+    '⌫',
+    'Del',
+    '↑',
+    '↓',
+    '←',
+    '→',
+    'Ctrl+C',
+    'Ctrl+D',
+    'Ctrl+L',
+    'Ctrl+Z',
+    'Ctrl+R',
+    'Ctrl+A',
+    'Ctrl+E',
+    'Ctrl+W',
+    'Ctrl+U',
+    'Terminal',
+    'More',
+  ];
+  const chips = () => [...document.querySelectorAll('[data-key-strip] button')];
+
+  it('lists every chip in order, all text with no svg but Backspace’s glyph', () => {
+    draw({}, { terminal: true, onRequestTab: () => {} });
+    expect(chips().map((c) => c.textContent)).toEqual(ORDER);
+    for (const chip of chips()) expect(chip.querySelector('svg')).toBeNull();
+    expect(chips().every((c) => (c.getAttribute('aria-label') ?? '') !== '')).toBe(true);
+  });
+
+  it('omits the Terminal chip where the source has no terminal', () => {
+    draw({}, { terminal: false, onRequestTab: () => {} });
+    expect(chips().map((c) => c.textContent)).toEqual(ORDER.filter((l) => l !== 'Terminal'));
+  });
+
+  it('sends each new chip’s PaneKey over the local channel', async () => {
+    const send = vi.fn(async (): Promise<PaneSendResult> => 'sent');
+    Object.defineProperty(window, 'api', { configurable: true, value: { terminal: { send } } });
+    draw({}, { terminal: true });
+    const press = async (id: string) => {
+      await act(async () => {
+        fireEvent.click(document.querySelector(`[data-key-strip-key="${id}"]`) as HTMLElement);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+    };
+    await press('delete');
+    expect(send).toHaveBeenLastCalledWith('p1', { kind: 'nav', nav: 'delete' }, 's1');
+    await press('left');
+    expect(send).toHaveBeenLastCalledWith('p1', { kind: 'nav', nav: 'left' }, 's1');
+    await press('ctrl-c');
+    expect(send).toHaveBeenLastCalledWith('p1', { kind: 'control', letter: 'c' }, 's1');
+    await press('ctrl-u');
+    expect(send).toHaveBeenLastCalledWith('p1', { kind: 'control', letter: 'u' }, 's1');
+    Reflect.deleteProperty(window, 'api');
+  });
+
+  it('POSTs each new chip with its remote id on a phone with no window.api', async () => {
+    const originalFetch = globalThis.fetch;
+    const bodies: unknown[] = [];
+    globalThis.fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return { json: async () => ({ ok: true, value: null }) };
+    }) as unknown as typeof fetch;
+    draw({}, { terminal: false });
+    for (const [id, remote] of [
+      ['delete', 'delete'],
+      ['left', 'arrow-left'],
+      ['ctrl-c', 'ctrl-c'],
+    ] as const) {
+      const chip = document.querySelector(`[data-key-strip-key="${id}"]`);
+      expect(chip, id).not.toBeNull();
+      await act(async () => {
+        fireEvent.click(chip as HTMLElement);
+      });
+      await waitFor(() => expect(bodies.at(-1)).toEqual({ sessionId: 's1', key: remote }));
+    }
+    globalThis.fetch = originalFetch;
+  });
+
+  it('the Keyboard chip is always drawn: focuses the composer when blurred, blurs it when focused', async () => {
+    draw({}, { terminal: true });
+    const chip = () => document.querySelector('[data-key-strip-keyboard]') as HTMLElement;
+    const box = document.querySelector('[data-composer-bar] textarea') as HTMLTextAreaElement;
+    expect(chip()).not.toBeNull();
+    expect(document.activeElement).not.toBe(box);
+    await act(async () => {
+      fireEvent.click(chip());
+    });
+    expect(document.activeElement).toBe(box);
+    expect(chip()).not.toBeNull();
+    await act(async () => {
+      fireEvent.click(chip());
+    });
+    expect(document.activeElement).not.toBe(box);
   });
 });

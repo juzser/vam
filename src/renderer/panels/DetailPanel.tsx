@@ -76,12 +76,10 @@ import {
   ChevronsUp,
   Circle,
   CircleSlash,
-  ClipboardPaste,
   FileText,
   GitPullRequest,
   Hand,
   Image as ImageIcon,
-  KeyboardOff,
   ListChecks,
   LoaderCircle,
   MessageSquare,
@@ -4609,6 +4607,14 @@ const KEY_STRIP: readonly {
     ariaLabel: 'press Backspace in the session',
   },
   {
+    id: 'delete',
+    key: { kind: 'nav', nav: 'delete' },
+    chord: 'Delete',
+    suffix: '',
+    label: PHONE_KEY_LABELS.delete,
+    ariaLabel: 'press Delete in the session',
+  },
+  {
     id: 'up',
     key: { kind: 'nav', nav: 'up' },
     chord: 'ArrowUp',
@@ -4624,7 +4630,99 @@ const KEY_STRIP: readonly {
     label: PHONE_KEY_LABELS.down,
     ariaLabel: 'press the down arrow in the session',
   },
+  {
+    id: 'left',
+    key: { kind: 'nav', nav: 'left' },
+    chord: 'ArrowLeft',
+    suffix: '',
+    label: PHONE_KEY_LABELS.left,
+    ariaLabel: 'press the left arrow in the session',
+  },
+  {
+    id: 'right',
+    key: { kind: 'nav', nav: 'right' },
+    chord: 'ArrowRight',
+    suffix: '',
+    label: PHONE_KEY_LABELS.right,
+    ariaLabel: 'press the right arrow in the session',
+  },
+  {
+    id: 'ctrl-c',
+    key: { kind: 'control', letter: 'c' },
+    chord: 'Ctrl-C',
+    suffix: '',
+    label: PHONE_KEY_LABELS['ctrl-c'],
+    ariaLabel: 'press Control-C in the session',
+  },
+  {
+    id: 'ctrl-d',
+    key: { kind: 'control', letter: 'd' },
+    chord: 'Ctrl-D',
+    suffix: '',
+    label: PHONE_KEY_LABELS['ctrl-d'],
+    ariaLabel: 'press Control-D in the session',
+  },
+  {
+    id: 'ctrl-l',
+    key: { kind: 'control', letter: 'l' },
+    chord: 'Ctrl-L',
+    suffix: '',
+    label: PHONE_KEY_LABELS['ctrl-l'],
+    ariaLabel: 'press Control-L in the session',
+  },
+  {
+    id: 'ctrl-z',
+    key: { kind: 'control', letter: 'z' },
+    chord: 'Ctrl-Z',
+    suffix: '',
+    label: PHONE_KEY_LABELS['ctrl-z'],
+    ariaLabel: 'press Control-Z in the session',
+  },
+  {
+    id: 'ctrl-r',
+    key: { kind: 'control', letter: 'r' },
+    chord: 'Ctrl-R',
+    suffix: '',
+    label: PHONE_KEY_LABELS['ctrl-r'],
+    ariaLabel: 'press Control-R in the session',
+  },
+  {
+    id: 'ctrl-a',
+    key: { kind: 'control', letter: 'a' },
+    chord: 'Ctrl-A',
+    suffix: '',
+    label: PHONE_KEY_LABELS['ctrl-a'],
+    ariaLabel: 'press Control-A in the session',
+  },
+  {
+    id: 'ctrl-e',
+    key: { kind: 'control', letter: 'e' },
+    chord: 'Ctrl-E',
+    suffix: '',
+    label: PHONE_KEY_LABELS['ctrl-e'],
+    ariaLabel: 'press Control-E in the session',
+  },
+  {
+    id: 'ctrl-w',
+    key: { kind: 'control', letter: 'w' },
+    chord: 'Ctrl-W',
+    suffix: '',
+    label: PHONE_KEY_LABELS['ctrl-w'],
+    ariaLabel: 'press Control-W in the session',
+  },
+  {
+    id: 'ctrl-u',
+    key: { kind: 'control', letter: 'u' },
+    chord: 'Ctrl-U',
+    suffix: '',
+    label: PHONE_KEY_LABELS['ctrl-u'],
+    ariaLabel: 'press Control-U in the session',
+  },
 ];
+
+/** The strip chips' shared text-pill skin (`data-tap-pill`, `styles.css`). */
+const STRIP_PILL =
+  'flex h-[30px] min-w-[30px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-line-strong bg-card px-1 font-mono text-control text-ink-quiet active:bg-line-strong';
 
 /** The strip button's plain-text caption -- what `sendKey` reports in the
  *  shared "sent"/"sending…" banner, where a component has no home. Read off
@@ -10320,114 +10418,32 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
               // overflow at 360px.
               className="vam-no-scrollbar flex flex-none items-center gap-1 overflow-x-auto overscroll-x-contain"
             >
-              {/* THE KEYS THEMSELVES COME FIRST NOW (the composer follow-up:
-                  "put the keys first, then keyboard-toggle, paste and »" --
-                  Esc, the most-used key, must be reachable with no overflow
-                  at 360px, and the only position that guarantees it
-                  regardless of screen width is the row's own FIRST child,
-                  visible at `scrollLeft: 0` before any scroll happens at
-                  all. `hasLocalTerminalChannel`/`paneKeyToRemoteKeyId`
-                  filter which of the eight actually reach a channel, exactly
-                  as before -- only the ORDER moved, not the filter. */}
-              {(hasLocalTerminalChannel
-                ? KEY_STRIP
-                : KEY_STRIP.filter((item) => paneKeyToRemoteKeyId(item.key) !== null)
-              ).map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  data-key-strip-key={item.id}
-                  aria-label={item.ariaLabel}
-                  onClick={() => void sendKey(item)}
-                  className="vam-tap flex flex-none items-center justify-center"
-                >
-                  <span
-                    data-tap-skin
-                    // `data-tap-pill` (`styles.css`): the shared
-                    // `.vam-phone .vam-tap > [data-tap-skin]` rule pins every
-                    // skin to a 30x30 SQUARE, which is correct for the icon
-                    // skins it was written for and wrong for a skin holding
-                    // TEXT. This opts out of the square into a
-                    // width-to-content pill, hit still 44, paint still 30
-                    // tall. `px-1` (4px), not `px-1.5` (6px): the operator's
-                    // own follow-up ("compact chips sized to their short
-                    // labels") -- `item.label` below is at most five
-                    // characters (`⇧Tab`, `Space`) now rather than a
-                    // `chordSymbols` caption plus a " → agent" suffix, so the
-                    // chip needs less breathing room to read cleanly, and the
-                    // narrower padding is what lets more of the eight fit
-                    // before the row's own edge.
-                    data-tap-pill
-                    className="flex h-[30px] min-w-[30px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-line-strong bg-card px-1 font-mono text-control text-ink-quiet active:bg-line-strong"
-                  >
-                    {phoneKeyLabelNodes(item.label)}
-                  </span>
-                </button>
-              ))}
-              {/* THE KEYBOARD-TOGGLE, Orca's own leading icon and shown only
-                  while there is a keyboard to hide (`composerFocused`, above
-                  -- real DOM focus, not `composing`). `inputRef.current
-                  ?.blur()` is the exact release the composer's own Escape/
-                  `Mod-[` handler already uses a few lines down; this is a
-                  second door to the same act, for a device with no Escape
-                  key of its own. MOVED AFTER THE KEYS (the composer follow-up):
-                  this and the three icons below it are reached-for less
-                  often than any of the eight keys, so they now trail rather
-                  than lead the row a drag has to cross to reach them. */}
-              {composerFocused && (
-                <button
-                  type="button"
-                  data-key-strip-hide-keyboard
-                  aria-label="hide the keyboard"
-                  onClick={() => inputRef.current?.blur()}
-                  className="vam-tap flex flex-none items-center justify-center"
-                >
-                  <span
-                    data-tap-skin
-                    className="flex h-[30px] w-[30px] items-center justify-center rounded-[8px] border border-line-strong bg-card text-ink-quiet active:bg-line-strong"
-                  >
-                    <KeyboardOff size={14} strokeWidth={1.7} />
-                  </span>
-                </button>
-              )}
-              {/* THE SCREEN ICON: Orca's own terminal-view shortcut, offered
-                  only where there IS a terminal view to jump to
-                  (`terminal !== false` -- the exact test `visibleTabs` itself
-                  applies to decide whether `PhoneShell`'s own view row draws
-                  one at all). On the phone build this composer strip
-                  actually ships to -- served remotely, where `terminal`
-                  reads `false` by design (`UNSERVED.terminal`,
-                  `remote/server.ts`) -- there is no Terminal tab anywhere on
-                  this screen, so this icon is honestly absent rather than a
-                  button that opens nowhere; a source that DOES carry a
-                  terminal (a desktop Electron window narrow enough to draw
-                  the phone shell) still gets it. */}
-              {terminal !== false && props.onRequestTab !== undefined && (
-                <button
-                  type="button"
-                  data-key-strip-screen
-                  aria-label="show the terminal view"
-                  onClick={() => props.onRequestTab?.('Terminal')}
-                  className="vam-tap flex flex-none items-center justify-center"
-                >
-                  <span
-                    data-tap-skin
-                    className="flex h-[30px] w-[30px] items-center justify-center rounded-[8px] border border-line-strong bg-card text-ink-quiet active:bg-line-strong"
-                  >
-                    <SquareTerminal size={14} strokeWidth={1.7} />
-                  </span>
-                </button>
-              )}
+              {/* EVERY CHIP IS A TEXT PILL (item 21), in the operator's order:
+                  Keyboard, Paste, the keys, then Terminal and More. Keyboard
+                  is always drawn and toggles the composer's own focus
+                  (`inputRef.current` focus/blur -- the same release the
+                  composer's Escape/`Mod-[` handler uses), so a device with
+                  no keyboard up can raise one. Only Backspace keeps a glyph.
+                  The pill skin is `data-tap-pill` (`styles.css`). */}
+              <button
+                type="button"
+                data-key-strip-keyboard
+                aria-label={composerFocused ? 'hide the keyboard' : 'show the keyboard'}
+                aria-pressed={composerFocused}
+                onClick={() =>
+                  composerFocused ? inputRef.current?.blur() : inputRef.current?.focus()
+                }
+                className="vam-tap flex flex-none items-center justify-center"
+              >
+                <span data-tap-skin data-tap-pill className={STRIP_PILL}>
+                  Keyboard
+                </span>
+              </button>
               {/* PASTE: reads the phone's OWN clipboard and types the result
                   through the EXISTING prompt path (`onPasteFromClipboard`,
                   above) -- never through `sendKey`/the remote route, which
                   stays allowlist-only. Disabled, with its `Note` explaining
-                  why, wherever the read cannot work: no
-                  `navigator.clipboard.readText` at all (`clipboardReadAvailable`),
-                  or the last attempt was denied (`pasteDenied`) -- the
-                  operator's own instruction: "if clipboard read is
-                  unavailable or denied, disable the key and explain why in
-                  its tooltip or title". */}
+                  why, wherever the read cannot work. */}
               <Note
                 text={
                   !clipboardReadAvailable
@@ -10445,22 +10461,50 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                   onClick={() => void onPasteFromClipboard()}
                   className="vam-tap flex flex-none items-center justify-center disabled:opacity-40"
                 >
-                  <span
-                    data-tap-skin
-                    className="flex h-[30px] w-[30px] items-center justify-center rounded-[8px] border border-line-strong bg-card text-ink-quiet active:bg-line-strong"
-                  >
-                    <ClipboardPaste size={14} strokeWidth={1.7} />
+                  <span data-tap-skin data-tap-pill className={STRIP_PILL}>
+                    Paste
                   </span>
                 </button>
               </Note>
-              {/* THE "»" OVERFLOW: this row already scrolls
-                  (`overflow-x-auto`, this nav's own comment above) --
-                  Up/Down, vam's own addition over Orca's six, sit at its
-                  far end. This is a shortcut TO that end, a `scrollTo`
-                  rather than a second, hidden state to keep in step with
-                  the real one: nothing here is ever hidden that a drag
-                  could not already reach. TRAILS EVERYTHING NOW, its own
-                  natural place once the keys it points past lead the row. */}
+              {/* THE KEYS: `hasLocalTerminalChannel`/`paneKeyToRemoteKeyId`
+                  filter which reach a channel; every listed key has a remote
+                  id, so on a phone none is dropped. */}
+              {(hasLocalTerminalChannel
+                ? KEY_STRIP
+                : KEY_STRIP.filter((item) => paneKeyToRemoteKeyId(item.key) !== null)
+              ).map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  data-key-strip-key={item.id}
+                  aria-label={item.ariaLabel}
+                  onClick={() => void sendKey(item)}
+                  className="vam-tap flex flex-none items-center justify-center"
+                >
+                  <span data-tap-skin data-tap-pill className={STRIP_PILL}>
+                    {phoneKeyLabelNodes(item.label)}
+                  </span>
+                </button>
+              ))}
+              {/* THE TERMINAL VIEW: offered only where there IS one to jump
+                  to (`terminal !== false`, the test `visibleTabs` applies);
+                  on the remote phone `terminal` reads `false` by design, so
+                  it is honestly absent there. */}
+              {terminal !== false && props.onRequestTab !== undefined && (
+                <button
+                  type="button"
+                  data-key-strip-screen
+                  aria-label="show the terminal view"
+                  onClick={() => props.onRequestTab?.('Terminal')}
+                  className="vam-tap flex flex-none items-center justify-center"
+                >
+                  <span data-tap-skin data-tap-pill className={STRIP_PILL}>
+                    Terminal
+                  </span>
+                </button>
+              )}
+              {/* MORE: a `scrollTo` the row's end, not a second hidden state
+                  -- nothing here is hidden that a drag could not reach. */}
               <button
                 type="button"
                 data-key-strip-more
@@ -10473,11 +10517,8 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                 }
                 className="vam-tap flex flex-none items-center justify-center"
               >
-                <span
-                  data-tap-skin
-                  className="flex h-[30px] w-[30px] items-center justify-center rounded-[8px] border border-line-strong bg-card font-mono text-control text-ink-quiet active:bg-line-strong"
-                >
-                  »
+                <span data-tap-skin data-tap-pill className={STRIP_PILL}>
+                  More
                 </span>
               </button>
             </nav>

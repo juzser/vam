@@ -91,4 +91,13 @@ describe('no hand-written key glyph escapes chords.ts’s one table', () => {
     }
     expect(offenders, offenders.join('\n')).toEqual([]);
   });
+
+  it('the exempt phone label table spells no chord glyph but Backspace’s ⌫', () => {
+    // The strip's labels are words (`Enter`, `Shift+Tab`, `Ctrl+C`) since item
+    // 21; the exemption above must not quietly let `⇧`/`↵` back in.
+    const code = stripComments(
+      readFileSync(join(RENDERER_ROOT, 'keyboard/phone-key-labels.tsx'), 'utf8'),
+    );
+    expect(GLYPHS.filter((glyph) => code.includes(glyph))).toEqual(['⌫']);
+  });
 });
