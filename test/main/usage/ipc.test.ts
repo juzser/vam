@@ -183,6 +183,91 @@ describe('registerUsageIpc rate limiting', () => {
   });
 });
 
+describe('a forced read', () => {
+  const known = { kind: 'known' as const, percent: 1, resetsAt: 't' };
+  const ok = (observedAt: string) => ({
+    kind: 'ok' as const,
+    windows: { fiveHour: known, sevenDay: known },
+    observedAt,
+  });
+
+  it('skips the floor: a plain call 1 s later is cached, a forced one reads again', async () => {
+    const ipcMain = fakeIpcMain();
+    let reads = 0;
+    let now = 1_000_000;
+    registerUsageIpc(
+      ipcMain,
+      async () => {
+        reads += 1;
+        return ok(`read-${reads}`);
+      },
+      () => now,
+    );
+
+    await ipcMain.invoke(CHANNELS.usageGet);
+    now += 1_000;
+    await ipcMain.invoke(CHANNELS.usageGet);
+    expect(reads).toBe(1);
+
+    now += 1_000;
+    const fresh = await ipcMain.invoke(CHANNELS.usageGet, true);
+    expect(reads).toBe(2);
+    expect((fresh as { observedAt: string }).observedAt).toBe('read-2');
+  });
+
+  it('still joins a read already in flight', async () => {
+    const ipcMain = fakeIpcMain();
+    let reads = 0;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    registerUsageIpc(ipcMain, async () => {
+      reads += 1;
+      await gate;
+      return ok('slow');
+    });
+
+    const pending = [ipcMain.invoke(CHANNELS.usageGet), ipcMain.invoke(CHANNELS.usageGet, true)];
+    release();
+    await Promise.all(pending);
+    expect(reads).toBe(1);
+  });
+
+  it('applies to the Codex channel too, and the preload forwards the flag', async () => {
+    const ipcMain = fakeIpcMain();
+    let reads = 0;
+    const now = 1_000_000;
+    registerCodexUsageIpc(
+      ipcMain,
+      async () => {
+        reads += 1;
+        return { kind: 'unknown', reason: 'unavailable' } as const;
+      },
+      () => now,
+    );
+    await ipcMain.invoke(CHANNELS.usageCodexGet);
+    await ipcMain.invoke(CHANNELS.usageCodexGet, true);
+    expect(reads).toBe(2);
+
+    const calls: unknown[][] = [];
+    const api = createUsageApi({
+      invoke: (...args: unknown[]) => {
+        calls.push(args);
+        return Promise.resolve(undefined);
+      },
+    } as never);
+    await api.get({ force: true });
+    await api.getCodex({ force: true });
+    await api.get();
+    expect(calls).toEqual([
+      [CHANNELS.usageGet, true],
+      [CHANNELS.usageCodexGet, true],
+      [CHANNELS.usageGet],
+    ]);
+  });
+});
+
 /**
  * `registerCodexUsageIpc`: the same bare-answer, throttled contract as
  * `registerUsageIpc`, on its own channel -- reused rather than duplicated at

@@ -39,13 +39,14 @@
  * section is drawn.
  */
 
-import { CircleUser } from 'lucide-react';
+import { CircleUser, RefreshCw } from 'lucide-react';
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   useEffect,
   useLayoutEffect,
   useRef,
   useState,
+  useSyncExternalStore,
 } from 'react';
 import type { CodexUsageSnapshot, CodexWindowDisplay } from '../../shared/codex-usage.js';
 import { clockTime, describeCodexUsage } from '../../shared/codex-usage.js';
@@ -62,6 +63,23 @@ import { PROVIDER_MARKS } from '../sources/provider-marks.js';
 const UNKNOWN_CLAUDE: UsageSnapshot = { kind: 'unknown', reason: 'unavailable' };
 const UNKNOWN_CODEX: CodexUsageSnapshot = { kind: 'unknown', reason: 'unavailable' };
 
+/** Open state shared with the status bar's usage cell (`Canvas.tsx`), which
+ *  marks itself `data-usage-trigger` so the outside-press dismiss ignores it. */
+let usageOpen = false;
+const usageListeners = new Set<() => void>();
+function setUsageOpen(next: boolean): void {
+  if (next === usageOpen) return;
+  usageOpen = next;
+  for (const listener of usageListeners) listener();
+}
+function subscribeUsageOpen(listener: () => void): () => void {
+  usageListeners.add(listener);
+  return () => usageListeners.delete(listener);
+}
+export function toggleUsagePopover(): void {
+  setUsageOpen(!usageOpen);
+}
+
 /**
  * Polls `get` immediately and then on `POLL_INTERVAL_MS` while `open`,
  * clearing the interval the moment it is not -- the same newest-poll-wins
@@ -69,8 +87,16 @@ const UNKNOWN_CODEX: CodexUsageSnapshot = { kind: 'unknown', reason: 'unavailabl
  * poll the operator has since closed the popover on cannot land after a
  * fresher one (or after `get` goes away because `window.api` never existed).
  */
-function useLiveSnapshot<T>(open: boolean, unknown: T, get?: () => Promise<T>): T {
+function useLiveSnapshot<T>(
+  open: boolean,
+  unknown: T,
+  get?: (opts?: { readonly force?: boolean }) => Promise<T>,
+  refreshTick = 0,
+  onForcedSettled?: () => void,
+): T {
   const [snapshot, setSnapshot] = useState<T>(unknown);
+  const settled = useRef(onForcedSettled);
+  settled.current = onForcedSettled;
   useEffect(() => {
     if (!open || get === undefined) {
       if (!open) setSnapshot(unknown);
@@ -78,20 +104,23 @@ function useLiveSnapshot<T>(open: boolean, unknown: T, get?: () => Promise<T>): 
     }
     let cancelled = false;
     let issued = 0;
-    const poll = () => {
+    const poll = (force = false) => {
       issued += 1;
       const seq = issued;
       const mine = () => !cancelled && seq === issued;
-      get()
+      (force ? get({ force: true }) : get())
         .then((next) => {
           if (mine()) setSnapshot(next);
         })
         .catch(() => {
           if (mine()) setSnapshot(unknown);
+        })
+        .finally(() => {
+          if (force) settled.current?.();
         });
     };
-    poll();
-    const id = window.setInterval(poll, POLL_INTERVAL_MS);
+    poll(refreshTick > 0);
+    const id = window.setInterval(() => poll(), POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
       window.clearInterval(id);
@@ -100,7 +129,7 @@ function useLiveSnapshot<T>(open: boolean, unknown: T, get?: () => Promise<T>): 
     // MODULE-LEVEL constant (`UNKNOWN_CLAUDE`/`UNKNOWN_CODEX`), never a
     // fresh literal, so its identity never changes across renders and this
     // effect does not restart on one.
-  }, [open, get, unknown]);
+  }, [open, get, unknown, refreshTick]);
   return snapshot;
 }
 
@@ -338,7 +367,23 @@ export function usagePanelLeftOffset(
  * it is touched.
  */
 export function UsagePopover() {
-  const [open, setOpen] = useState(false);
+  const open = useSyncExternalStore(subscribeUsageOpen, () => usageOpen);
+  const [refreshTick, setRefreshTick] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const pendingRefreshes = useRef(0);
+  const onRefreshSettled = () => {
+    pendingRefreshes.current -= 1;
+    if (pendingRefreshes.current <= 0) setRefreshing(false);
+  };
+  // Unmounting must not leave the shared state open for the next mount.
+  useEffect(() => () => setUsageOpen(false), []);
+  // A close ends the refresh: the next open polls normally, not with force.
+  useEffect(() => {
+    if (open) return;
+    setRefreshTick(0);
+    setRefreshing(false);
+    pendingRefreshes.current = 0;
+  }, [open]);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const wasOpen = useRef(false);
@@ -365,8 +410,20 @@ export function UsagePopover() {
     return () => window.removeEventListener('resize', measure);
   }, [open]);
 
-  const claude = useLiveSnapshot(open, UNKNOWN_CLAUDE, window.api?.usage?.get);
-  const codex = useLiveSnapshot(open, UNKNOWN_CODEX, window.api?.usage?.getCodex);
+  const claude = useLiveSnapshot(
+    open,
+    UNKNOWN_CLAUDE,
+    window.api?.usage?.get,
+    refreshTick,
+    onRefreshSettled,
+  );
+  const codex = useLiveSnapshot(
+    open,
+    UNKNOWN_CODEX,
+    window.api?.usage?.getCodex,
+    refreshTick,
+    onRefreshSettled,
+  );
 
   // Where the keyboard goes when the panel opens, and where it comes back to
   // when it closes -- the sidebar filter popover's own rule (`SessionList.tsx`).
@@ -387,7 +444,8 @@ export function UsagePopover() {
       if (target === null) return;
       if (panelRef.current?.contains(target) === true) return;
       if (buttonRef.current?.contains(target) === true) return;
-      setOpen(false);
+      if (target instanceof Element && target.closest('[data-usage-trigger]') !== null) return;
+      setUsageOpen(false);
     };
     document.addEventListener('pointerdown', dismiss);
     return () => document.removeEventListener('pointerdown', dismiss);
@@ -395,7 +453,7 @@ export function UsagePopover() {
 
   const onEscape = (event: ReactKeyboardEvent<HTMLElement>) => {
     if (event.key !== 'Escape') return;
-    setOpen(false);
+    setUsageOpen(false);
   };
 
   const hasBridge = window.api !== undefined;
@@ -411,7 +469,7 @@ export function UsagePopover() {
           aria-expanded={open}
           aria-label="usage"
           onKeyDown={onEscape}
-          onClick={() => setOpen((o) => !o)}
+          onClick={toggleUsagePopover}
           // NO FILL AT REST, on desktop too now (settings-views work, item H:
           // "remove the account icon's background, on desktop too") -- its
           // plain-icon neighbours in this same bar (Stats, Settings, Remote,
@@ -440,6 +498,28 @@ export function UsagePopover() {
           style={{ left: leftOffset }}
           className="absolute top-[32px] z-20 flex max-h-[min(480px,calc(100vh-96px))] w-[min(320px,calc(100vw-24px))] flex-col gap-3 overflow-y-auto rounded-[9px] border border-line-strong bg-card p-3 shadow-lg"
         >
+          {hasBridge && (
+            <div data-usage-header className="-mb-1 flex items-center justify-end">
+              <button
+                type="button"
+                aria-label="Refresh"
+                aria-busy={refreshing}
+                disabled={refreshing}
+                onClick={() => {
+                  pendingRefreshes.current = 2;
+                  setRefreshing(true);
+                  setRefreshTick((t) => t + 1);
+                }}
+                className="flex h-[20px] w-[20px] cursor-pointer items-center justify-center rounded-full text-ink-faint hover:bg-line-strong hover:text-ink disabled:cursor-default disabled:opacity-50"
+              >
+                <RefreshCw
+                  size={12}
+                  strokeWidth={1.5}
+                  className={refreshing ? 'animate-spin' : ''}
+                />
+              </button>
+            </div>
+          )}
           {hasBridge ? (
             PROVIDERS.map((provider) =>
               provider.id === 'claude-code' ? (

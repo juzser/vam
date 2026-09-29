@@ -145,6 +145,7 @@ import { triggerStartSession } from '../panels/start-session-registry.js';
 import { StatusMark } from '../panels/status-mark.js';
 import { halfPageTarget } from '../panels/stick-to-bottom.js';
 import { TABS, tabForDigit, visibleTabs } from '../panels/tabs.js';
+import { toggleUsagePopover } from '../panels/UsagePopover.js';
 import { ConfirmCloseSession } from '../phone/ConfirmCloseSession.js';
 import { PhoneShell } from '../phone/PhoneShell.js';
 import { usePhoneViewport } from '../phone/viewport.js';
@@ -371,6 +372,37 @@ export function truncateStatus(text: string): string {
     return text;
   }
   return `${text.slice(0, STATUS_MAX_CHARS - 1).trimEnd()}\u2026`;
+}
+
+/** A usage cell that toggles the popover: the button is the one tab stop, and
+ *  a missing-number `reason` rides on a `Note` around it (opens on focus). */
+function UsageTrigger({
+  label,
+  marker,
+  reason,
+  children,
+}: {
+  readonly label: string;
+  readonly marker: 'data-usage' | 'data-codex-usage';
+  readonly reason: string | null;
+  readonly children: ReactNode;
+}) {
+  // With a `reason` the button itself is the explaining cell: it carries the
+  // cell marker and an explicit tab stop, so focus opens the `Note`.
+  const cell = reason === null ? {} : { [marker]: '', tabIndex: 0 };
+  const button = (
+    <button
+      type="button"
+      data-usage-trigger
+      {...cell}
+      aria-label={label}
+      onClick={toggleUsagePopover}
+      className="flex cursor-pointer items-center gap-2 bg-transparent p-0 text-inherit"
+    >
+      {children}
+    </button>
+  );
+  return reason === null ? button : <Note text={reason}>{button}</Note>;
 }
 
 /**
@@ -8664,46 +8696,30 @@ function CanvasInner({
                   sidebar row and the Stats screen's `ProviderCard` already
                   draw from (`sources/provider-marks.tsx`), never a copied
                   path: one glyph for `claude-code`, drawn once. */}
-              {usage.reason === null ? (
+              <UsageTrigger label="Usage details" marker="data-usage" reason={usage.reason}>
                 <span
-                  data-usage
+                  data-usage={usage.reason === null ? '' : undefined}
                   className={`flex items-center gap-1${usage.highUsage ? ' text-failed' : ''}`}
                 >
                   <SourceMark source="claude-code" lane={12} />
                   {usage.text}
                 </span>
-              ) : (
-                <Note text={usage.reason}>
-                  {/* A tab stop for the same reason `StatusCell` takes one. This
-                      sentence is the explanation for a MISSING NUMBER -- on the
-                      web/Tailscale build it was keyboard-unreachable, and with no
-                      hover on touch it was unreachable at all. */}
-                  <span
-                    data-usage
-                    className="flex items-center gap-1"
-                    // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see `StatusCell`.
-                    tabIndex={0}
-                  >
-                    <SourceMark source="claude-code" lane={12} />
-                    {usage.text}
+                {usage.windows !== null && (
+                  <span className="flex items-center gap-2">
+                    {/* Five hours first: it is the window that moves minute to minute. */}
+                    <UsageBar
+                      label="5h"
+                      usageWindow={usage.windows.fiveHour}
+                      high={usage.highUsage}
+                    />
+                    <UsageBar
+                      label="7d"
+                      usageWindow={usage.windows.sevenDay}
+                      high={usage.highUsage}
+                    />
                   </span>
-                </Note>
-              )}
-              {usage.windows !== null && (
-                <span className="flex items-center gap-2">
-                  {/* Five hours first: it is the window that moves minute to minute. */}
-                  <UsageBar
-                    label="5h"
-                    usageWindow={usage.windows.fiveHour}
-                    high={usage.highUsage}
-                  />
-                  <UsageBar
-                    label="7d"
-                    usageWindow={usage.windows.sevenDay}
-                    high={usage.highUsage}
-                  />
-                </span>
-              )}
+                )}
+              </UsageTrigger>
             </>
           )}
           {prefs.statusBarShowCodexUsage && (
@@ -8720,27 +8736,19 @@ function CanvasInner({
                   resolver, `source="codex"`, so this cell and Claude's read
                   as one family rather than two different widgets that
                   happen to sit beside each other. */}
-              {codexUsage.reason === null ? (
+              <UsageTrigger
+                label="Codex usage details"
+                marker="data-codex-usage"
+                reason={codexUsage.reason}
+              >
                 <span
-                  data-codex-usage
+                  data-codex-usage={codexUsage.reason === null ? '' : undefined}
                   className={`flex items-center gap-1${codexUsage.highUsage ? ' text-failed' : ''}`}
                 >
                   <SourceMark source="codex" lane={12} />
                   {codexUsage.text}
                 </span>
-              ) : (
-                <Note text={codexUsage.reason}>
-                  <span
-                    data-codex-usage
-                    className="flex items-center gap-1"
-                    // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see `StatusCell`.
-                    tabIndex={0}
-                  >
-                    <SourceMark source="codex" lane={12} />
-                    {codexUsage.text}
-                  </span>
-                </Note>
-              )}
+              </UsageTrigger>
             </>
           )}
 
