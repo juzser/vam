@@ -25,7 +25,6 @@ import {
   ArrowLeft,
   Bell,
   Bot,
-  ChartColumn,
   Check,
   ChevronDown,
   ChevronRight,
@@ -81,6 +80,7 @@ import {
 } from '../prefs/foreign-hidden-note.js';
 import type { EffectiveTheme } from '../prefs/prefs.js';
 import { markRegisterOf, SourceMark } from '../sources/provider-marks.js';
+import { StatsPopover } from '../stats/StatsPopover.js';
 import { CacheCountdown } from './CacheCountdown.js';
 import { ConfirmRemoveProject } from './ConfirmRemoveProject.js';
 import { ContextMenu, type ContextMenuItem } from './ContextMenu.js';
@@ -3174,25 +3174,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
               this one did not: there is nothing to move it TO that would
               work there, since a phone build has no bridge to reach it from
               either way. */}
-          {!phone && onStats !== undefined && (
-            <ShortcutTip label="Stats & usage">
-              <button
-                type="button"
-                onClick={onStats}
-                // NOT "stats and usage", though that is this screen's own
-                // title: the account icon right beside it already carries
-                // `aria-label="usage"`, and `e2e/usage-popover-shots.mjs`
-                // finds it with a SUBSTRING match (`getByLabel('usage')`) --
-                // any label containing that word makes the query ambiguous
-                // between the two buttons. Measured: it did, before this
-                // comment existed.
-                aria-label="stats"
-                className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-[7px] text-ink-faint hover:text-ink"
-              >
-                <ChartColumn size={14} strokeWidth={1.5} />
-              </button>
-            </ShortcutTip>
-          )}
+          {!phone && onStats !== undefined && <StatsPopover onStats={onStats} />}
           {/* Pushes the icons to the right edge on every surface. On a
               phone, and only there, it is ALSO where the connectivity dot
               lives now: `min-w-0`/`truncate` so the rare non-healthy arms
