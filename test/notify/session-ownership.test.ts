@@ -59,4 +59,10 @@ describe('isOutsideVamScope', () => {
       expect(isOutsideVamScope(e, scope({ prefs }))).toBe(false);
     }
   });
+  it('keeps an owned session and a dismissed one whose activity has moved on', () => {
+    expect(isOutsideVamScope(entry(), scope())).toBe(false);
+    expect(isOutsideVamScope(entry({ activity: 'new' }), scope({ prefs: dismissed('old') }))).toBe(
+      false,
+    );
+  });
 });

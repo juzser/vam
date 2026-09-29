@@ -160,4 +160,14 @@ describe('in scope, or deliberately not gated: notifies', () => {
     view.rerender(<Canvas source={real} model={model([s('q', waiting)])} />);
     expect(shown()).toEqual(['q']);
   });
+  it('(l) a text query that hides the row does not suppress the notification', () => {
+    const view = poll(real, model([s('q')]));
+    fireEvent.keyDown(document.body, { key: '/' });
+    const box = document.querySelector<HTMLInputElement>('input[placeholder="Search sessions"]');
+    expect(box).not.toBeNull();
+    fireEvent.change(box as HTMLInputElement, { target: { value: 'zzz-no-match' } });
+    expect(document.querySelector('[data-session-row="q"]')).toBeNull();
+    view.rerender(<Canvas source={real} model={model([s('q', waiting)])} />);
+    expect(shown()).toEqual(['q']);
+  });
 });
