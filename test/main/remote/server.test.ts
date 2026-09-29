@@ -16,7 +16,7 @@
 import { chmod, mkdir, mkdtemp, realpath, symlink, writeFile } from 'node:fs/promises';
 import type { Server } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { SourceError } from '../../../src/main/ipc/channels.js';
 import type { DeviceDirectory, Identity } from '../../../src/main/remote/auth.js';
@@ -30,6 +30,20 @@ import { projectIdOf } from '../../../src/main/sources/claude-code/project-id.js
 import type { MainSource } from '../../../src/main/sources/source.js';
 import type { Project } from '../../../src/renderer/domain/model.js';
 import type { TranscriptPage } from '../../../src/shared/history.js';
+
+/**
+ * A PASS-THROUGH spy over `realpath`, for the two rewritten cases below: it
+ * counts calls without changing behaviour, so every other case in this file
+ * -- including `projectFor`'s own use of `realpath` -- runs exactly as it
+ * did before this spy existed (measured 67 passed before/after at main with
+ * only the spy added).
+ */
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return { ...actual, realpath: vi.fn(actual.realpath) };
+});
+
+const realpathSpy = vi.mocked(realpath);
 
 /** A real git repository under `mkdtemp`, never a real path on the operator's disk. */
 async function gitRepo(prefix = 'vam-repo-'): Promise<string> {
@@ -620,40 +634,72 @@ describe('create-session-in: confined to the operator’s existing project set',
     expect(createSessionInDirectory).not.toHaveBeenCalled();
   });
 
-  it('admits a symlink into a member repository, and refuses one pointing out of it', async () => {
+  it(
+    'refuses a differently-named symlink into a member repository (the accepted alias ' +
+      'trade-off), and refuses one pointing out of it',
+    async () => {
+      const repo = await gitRepo();
+      const project = await projectFor(repo);
+      const outside = await gitRepo();
+      const linkIn = join(tmpdir(), `vam-link-in-${Date.now()}`);
+      const linkOut = join(repo, 'escape-hatch');
+      await symlink(repo, linkIn);
+      await symlink(outside, linkOut);
+
+      const createSession = vi.fn(async () => null);
+      const createSessionInDirectory = vi.fn(async () => null);
+      const base = await start({
+        sources: [
+          makeSource({ load: async () => [project], createSession, createSessionInDirectory }),
+        ],
+      });
+
+      // ACCEPTED ALIAS TRADE-OFF (FINDING 3a9f9e70): `linkIn`'s own final
+      // segment is not the member's basename, so the basename gate refuses
+      // it before any `realpath` call runs -- even though `realpath(linkIn)`
+      // would resolve to the member. This is the deliberate cost of
+      // deciding membership from the caller's own spelling rather than the
+      // source's canonical roots.
+      realpathSpy.mockClear();
+      const inResponse = await post(base, '/api/create-session-in', {
+        cwd: linkIn,
+        title: 'a run',
+      });
+      expect(inResponse.status).toBe(403);
+      expect(await inResponse.json()).toEqual({
+        ok: false,
+        error: {
+          kind: 'refused',
+          code: 'unauthorized-directory',
+          message: 'this device may only start a session in a project vam already lists',
+        },
+      });
+      expect(realpathSpy).not.toHaveBeenCalled();
+      expect(createSession).not.toHaveBeenCalled();
+      expect(createSessionInDirectory).not.toHaveBeenCalled();
+
+      const outResponse = await post(base, '/api/create-session-in', {
+        cwd: linkOut,
+        title: 'a run',
+      });
+      expect(outResponse.status).toBe(403);
+      expect(createSessionInDirectory).not.toHaveBeenCalled();
+    },
+  );
+
+  it("admits a two-hop symlink chain into a member repository when the chain's final segment names the member", async () => {
     const repo = await gitRepo();
     const project = await projectFor(repo);
-    const outside = await gitRepo();
-    const linkIn = join(tmpdir(), `vam-link-in-${Date.now()}`);
-    const linkOut = join(repo, 'escape-hatch');
-    await symlink(repo, linkIn);
-    await symlink(outside, linkOut);
-
-    const createSession = vi.fn(async () => null);
-    const createSessionInDirectory = vi.fn(async () => null);
-    const base = await start({
-      sources: [
-        makeSource({ load: async () => [project], createSession, createSessionInDirectory }),
-      ],
-    });
-
-    const inResponse = await post(base, '/api/create-session-in', { cwd: linkIn, title: 'a run' });
-    expect(inResponse.status).toBe(200);
-    expect(createSession).toHaveBeenCalledWith(project.id, 'a run', undefined);
-
-    const outResponse = await post(base, '/api/create-session-in', {
-      cwd: linkOut,
-      title: 'a run',
-    });
-    expect(outResponse.status).toBe(403);
-    expect(createSessionInDirectory).not.toHaveBeenCalled();
-  });
-
-  it('admits a two-hop symlink chain into a member repository', async () => {
-    const repo = await gitRepo();
-    const project = await projectFor(repo);
-    const firstHop = join(tmpdir(), `vam-link-hop1-${Date.now()}`);
-    const secondHop = join(tmpdir(), `vam-link-hop2-${Date.now()}`);
+    // Both hops are named `B`, the member's OWN basename -- the basename
+    // gate looks only at the caller-named path's final segment, so a hop
+    // spelled differently would be refused before `realpath` ever ran it
+    // down to the member (see the alias trade-off test above). This is a
+    // non-regression pin: it passes both on HEAD and after the fix.
+    const memberBasename = basename(repo);
+    const hop1Dir = await mkdtemp(join(tmpdir(), 'vam-link-hop1-'));
+    const hop2Dir = await mkdtemp(join(tmpdir(), 'vam-link-hop2-'));
+    const firstHop = join(hop1Dir, memberBasename);
+    const secondHop = join(hop2Dir, memberBasename);
     await symlink(repo, firstHop);
     await symlink(firstHop, secondHop);
 
@@ -662,12 +708,15 @@ describe('create-session-in: confined to the operator’s existing project set',
       sources: [makeSource({ load: async () => [project], createSession })],
     });
 
+    realpathSpy.mockClear();
     const response = await post(base, '/api/create-session-in', {
       cwd: secondHop,
       title: 'a run',
     });
     expect(response.status).toBe(200);
+    expect(createSession).toHaveBeenCalledTimes(1);
     expect(createSession).toHaveBeenCalledWith(project.id, 'a run', undefined);
+    expect(realpathSpy).toHaveBeenCalledTimes(1);
   });
 
   it(
