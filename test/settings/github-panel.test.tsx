@@ -48,21 +48,41 @@ function fakeApi(over: Partial<GithubApi> = {}): GithubApi {
   };
 }
 
-const PROJECTS: GithubPanelProps['projects'] = [{ id: 'p1', source: 'claude-code', name: 'vam' }];
-
 function setup(over: Partial<GithubPanelProps> = {}) {
-  const onChange = vi.fn();
-  const props: GithubPanelProps = {
-    api: fakeApi(),
-    active: true,
-    prefs: EMPTY_PREFS,
-    onChange,
-    projects: PROJECTS,
-    ...over,
-  };
+  const props: GithubPanelProps = { api: fakeApi(), active: true, ...over };
   render(<GithubPanel {...props} />);
-  return { onChange, props };
+  return { props };
 }
+
+describe('props', () => {
+  it('declares only the props it reads (type-level pin)', () => {
+    const api = fakeApi();
+    render(
+      <GithubPanel
+        api={api}
+        active={false}
+        // @ts-expect-error prefs is not a GithubPanel prop
+        prefs={EMPTY_PREFS}
+      />,
+    );
+    render(
+      <GithubPanel
+        api={api}
+        active={false}
+        // @ts-expect-error onChange is not a GithubPanel prop
+        onChange={() => undefined}
+      />,
+    );
+    render(
+      <GithubPanel
+        api={api}
+        active={false}
+        // @ts-expect-error projects is not a GithubPanel prop
+        projects={[]}
+      />,
+    );
+  });
+});
 
 describe('status', () => {
   it('asks once on mount, and draws the answer', async () => {

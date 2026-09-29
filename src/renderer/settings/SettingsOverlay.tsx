@@ -1607,9 +1607,6 @@ export function SettingsOverlay({
                     // second signal left to thread down for GithubPanel's own
                     // "stop polling a card nobody sees" rule.
                     active={true}
-                    prefs={prefs}
-                    onChange={onChange}
-                    projects={projects}
                     copyText={window.api?.clipboard?.writeText}
                     openExternal={window.api?.link?.open}
                   />

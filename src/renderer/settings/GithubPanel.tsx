@@ -55,9 +55,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { GithubApi } from '../../preload/api.js';
 import type { GithubAuthPaneView, GithubAuthStatus } from '../../shared/github.js';
 import { GITHUB_LOGIN_COMMAND, GITHUB_LOGOUT_COMMAND } from '../../shared/github.js';
-import type { SourceId } from '../domain/model.js';
 import { t } from '../i18n/strings.js';
-import type { Prefs } from '../prefs/prefs.js';
 import { ExternalLink } from './primitives.js';
 
 const FOCUS_RING =
@@ -192,14 +190,6 @@ export type GithubPanelProps = {
   readonly api: GithubApi | undefined;
   /** Polling (the pane's screen) runs only while this section is open. */
   readonly active: boolean;
-  readonly prefs: Prefs;
-  readonly onChange: (next: Prefs) => void;
-  /** Kept for the caller's sake; the repository is chosen in the PRs view, not here. */
-  readonly projects: readonly {
-    readonly id: string;
-    readonly source: SourceId;
-    readonly name: string;
-  }[];
   /** Electron's clipboard; the page's own is denied by the permission policy. */
   readonly copyText?: (text: string) => Promise<boolean>;
   /**
