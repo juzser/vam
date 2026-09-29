@@ -463,6 +463,10 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
     label: () =>
       'interrupt / send Esc to the focused session’s pane — sends whether or not the agent is running',
   },
+  startSession: {
+    group: 'session',
+    label: () => 'Start session',
+  },
 };
 
 type SheetRow = {

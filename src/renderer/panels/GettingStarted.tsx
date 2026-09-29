@@ -87,6 +87,11 @@ export const TERMINAL_ONLY_SHORTCUT_ROWS: readonly StartShortcutRow[] = [
   { label: 'Command palette', actions: [{ kind: 'palette' }] },
 ];
 
+/** The new-session start screen's one row: the chord that starts it. */
+export const START_SESSION_SHORTCUT_ROWS: readonly StartShortcutRow[] = [
+  { label: 'Start session', actions: [{ kind: 'startSession' }] },
+];
+
 /** `GettingStarted`'s two rows -- see this file's own header for why New
  *  session is not one of them here, and why New project carries two chips. */
 export const GETTING_STARTED_SHORTCUT_ROWS: readonly StartShortcutRow[] = [

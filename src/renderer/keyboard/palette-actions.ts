@@ -131,6 +131,7 @@ type PaletteActionSpec = {
 const PALETTE_ACTIONS: readonly PaletteActionSpec[] = [
   { action: { kind: 'newSession' }, title: 'New Session' },
   { action: { kind: 'newProject' }, title: 'New Project…' },
+  { action: { kind: 'startSession' }, title: 'Start Session' },
   { action: { kind: 'close' }, title: 'Close Session' },
   { action: { kind: 'rename' }, title: 'Rename Session' },
   { action: { kind: 'pickView', digit: 1 }, title: 'View: Response' },
