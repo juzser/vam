@@ -142,4 +142,30 @@ describe('useFilesTreeState', () => {
       '/w/atlas/src/index.ts',
     ]);
   });
+  it('a typed filter whose walk failed draws no rows and the filter error, never the unfiltered tree', () => {
+    const base = rootLevel(['/w/atlas/src/index.ts', '/w/atlas/README.md']);
+    const params = (filter: string) => ({
+      tree: base,
+      walk: null,
+      walkPending: false,
+      walkFailed: true,
+      filter,
+      openFile: vi.fn(),
+      setNote: vi.fn(),
+      focusEditor: vi.fn().mockReturnValue(true),
+      focusFilter: vi.fn(),
+      requestRowFocus: vi.fn(),
+      requestEditorFocus: vi.fn(),
+      treeRef: createRef<HTMLDivElement>(),
+    });
+    const typed = renderHook(() => useFilesTreeState(params('index')));
+    expect(typed.result.current.rows).toEqual([]);
+    expect(typed.result.current.filterError).toBe(true);
+    const cleared = renderHook(() => useFilesTreeState(params('')));
+    expect(cleared.result.current.rows.map((row) => row.path)).toEqual([
+      '/w/atlas/src',
+      '/w/atlas/README.md',
+    ]);
+    expect(cleared.result.current.filterError).toBe(false);
+  });
 });

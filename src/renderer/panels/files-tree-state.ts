@@ -34,6 +34,8 @@ export interface UseFilesTreeStateParams {
   readonly walk: FileListResult | null;
   /** True while a filter is typed and its walk has not answered yet. */
   readonly walkPending: boolean;
+  /** True when a filter is typed and its walk failed: no rows, never the unfiltered tree. */
+  readonly walkFailed?: boolean;
   readonly filter: string;
   readonly openFile: (path: string) => void;
   readonly setNote: (note: string | null) => void;
@@ -53,6 +55,8 @@ export interface UseFilesTreeStateParams {
 
 export interface UseFilesTreeStateResult {
   readonly rows: readonly FileTreeRow[];
+  /** A typed filter whose walk failed; the caller shows the error for it. */
+  readonly filterError: boolean;
   readonly cursorIndex: number;
   readonly cursorRow: FileTreeRow | null;
   readonly expanded: ReadonlySet<string>;
@@ -69,6 +73,7 @@ export function useFilesTreeState({
   tree,
   walk,
   walkPending,
+  walkFailed = false,
   filter,
   openFile,
   setNote,
@@ -95,10 +100,10 @@ export function useFilesTreeState({
       if (walk !== null) {
         return fileTreeRows({ root: walk.root, files: walk.files, expanded, filter });
       }
-      if (walkPending) return [];
+      if (walkPending || walkFailed) return [];
     }
     return lazyTreeRows({ root: tree.root, dirs: tree.dirs, loading: tree.loading, expanded });
-  }, [tree, walk, walkPending, expanded, filter]);
+  }, [tree, walk, walkPending, walkFailed, expanded, filter]);
   /**
    * WHERE THE TREE'S CURSOR IS, derived rather than held — the same rule
    * `keyboard/focus-scope.ts` makes about the cursor MODE, for the same
@@ -206,8 +211,11 @@ export function useFilesTreeState({
     ],
   );
 
+  const filterError = walkFailed && filter.trim() !== '' && walk === null;
+
   return {
     rows,
+    filterError,
     cursorIndex,
     cursorRow,
     expanded,

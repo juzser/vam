@@ -401,6 +401,47 @@ describe('the lazy file tree', () => {
     expect(list.mock.calls.filter(([, dir]) => dir === '')).toHaveLength(2);
     expect(list.mock.calls.filter(([, dir]) => dir === 'src')).toHaveLength(2);
   });
+
+  it('a directory read that started before a refresh never overwrites the refreshed level', async () => {
+    let releaseOld: (result: FileDirResult) => void = () => {};
+    let srcCalls = 0;
+    const list = vi.fn(async (_sessionId: string, dir?: string) => {
+      if (dir === undefined) {
+        return { root: '/work/atlas', files: [], truncated: false } as FileListResult;
+      }
+      if (dir === 'src') {
+        srcCalls += 1;
+        if (srcCalls === 1) {
+          return new Promise<FileDirResult>((resolve) => {
+            releaseOld = resolve;
+          });
+        }
+        return level('src', [{ name: 'fresh.ts', kind: 'file' }]);
+      }
+      return level('', [{ name: 'src', kind: 'dir' }]);
+    });
+    withBridge({ list });
+    await draw({ files: true });
+    await openFiles();
+    await click('/work/atlas/src');
+    await act(async () => {
+      q<HTMLButtonElement>('[aria-label="refresh file list"]')?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      releaseOld(level('src', [{ name: 'stale.ts', kind: 'file' }]));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(list.mock.calls.filter(([, dir]) => dir === 'src')).toHaveLength(2);
+    expect(rowPaths()).toContain('/work/atlas/src/fresh.ts');
+    expect(rowPaths()).not.toContain('/work/atlas/src/stale.ts');
+  });
 });
 
 describe('the file tree', () => {
