@@ -271,6 +271,69 @@ describe('registerTerminalStreamIpc -- backpressure (finding 546486bb)', () => {
     expect(created).toBe(2);
   });
 
+  it('AC2: the swap does not reset the unacked count -- an ack of residue r plus the replacement c bytes keeps the stream open', async () => {
+    const { run } = runner({ '-V': TMUX_VERSION_OK, 'list-sessions': LIST_ONE });
+    const { ipcMain, call } = fakeIpcMain();
+    const { webContents, sent } = fakeWebContents();
+    const log: string[] = [];
+    const fake1 = fakeClient('c1', log);
+    const fake2 = fakeClient('c2', log);
+    let created = 0;
+    const createClient = vi.fn(() => {
+      created += 1;
+      return created === 1 ? fake1.client : fake2.client;
+    });
+    registerTerminalStreamIpc(ipcMain, webContents, run, { createClient });
+
+    const openPromise = call(CHANNELS.terminalStreamOpen, ATLAS);
+    await fake1.connectCalled;
+    fake1.resolveConnect('seed');
+    const opened = (await openPromise) as { ok: true; streamId: string };
+    const streamId = opened.streamId;
+
+    const dataSends = (): unknown[] =>
+      sent
+        .filter((s) => s.channel === CHANNELS.terminalStreamData && s.args[0] === streamId)
+        .map((s) => s.args[1]);
+
+    // Flood past the high-water mark so main starts dropping.
+    const CHUNK = 64 * 1024;
+    for (let i = 0; i < 64; i += 1) fake1.dataListeners[0]?.('x'.repeat(CHUNK));
+    expect(dataSends().length).toBe(STREAM_UNACKED_HIGH_WATER_BYTES / CHUNK);
+
+    // A residue that is NOT the low-water mark exactly, so a reset to 0
+    // would be indistinguishable from the kept count at the last step.
+    const r = 12_345;
+    const c = 777;
+    expect(r).toBeGreaterThan(0);
+    expect(r).toBeLessThanOrEqual(STREAM_UNACKED_LOW_WATER_BYTES);
+    expect(r % CHUNK).not.toBe(0);
+
+    // Ack down to the residue r, which queues the resync.
+    const ackPromise = call(CHANNELS.terminalStreamAck, streamId, STREAM_UNACKED_HIGH_WATER_BYTES - r);
+
+    await fake2.connectCalled;
+    fake2.resolveConnect('resync-seed');
+    await ackPromise;
+
+    expect(created).toBe(2);
+    expect(fake1.disposeCount()).toBe(1);
+
+    // The swap clears `dropping`, so the replacement's chunk forwards.
+    fake2.dataListeners[0]?.('y'.repeat(c));
+    expect(dataSends().at(-1)).toBe('y'.repeat(c));
+
+    // THE DIFFERENTIAL ACK: acking r + c only closes the stream (protocol
+    // violation) if `unacked` was reset to 0 by the swap -- if the swap kept
+    // the count, unacked is r + c here and this ack brings it to exactly 0.
+    await call(CHANNELS.terminalStreamAck, streamId, r + c);
+
+    const lengthBeforeFurtherData = dataSends().length;
+    fake2.dataListeners[0]?.('after-residue-ack');
+    expect(dataSends().slice(lengthBeforeFurtherData)).toEqual(['after-residue-ack']);
+    expect(fake2.disposeCount()).toBe(0);
+  });
+
   describe('T4-AC3: closing/dispose mid-resync-connect', () => {
     function floodAndAck(
       call: (channel: string, ...args: unknown[]) => unknown,
