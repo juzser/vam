@@ -331,6 +331,74 @@ describe('Show worktrees (SessionFilters.hideWorktrees)', () => {
     expect(container.querySelectorAll('[data-worktrees-section]')).toHaveLength(1);
   });
 
+  describe('create request under hideWorktrees ON draws only the form', () => {
+    function installWithExternal() {
+      const wt = (id: string, external: boolean) => ({
+        worktreeId: `/alpha-worktrees/${id}`,
+        path: `/alpha-worktrees/${id}`,
+        branch: id,
+        projectId: `claude-code:${id}-00000000`,
+        locked: false,
+        lockReason: null,
+        prunable: false,
+        prunableReason: null,
+        detached: false,
+        external,
+      });
+      const create = vi.fn().mockResolvedValue(undefined);
+      (window as unknown as { api: unknown }).api = {
+        worktrees: {
+          list: vi.fn().mockResolvedValue([wt('feat', false), wt('ext', true), wt('ext2', true)]),
+          create,
+          remove: vi.fn(),
+          status: vi.fn().mockResolvedValue([]),
+        },
+      };
+      return create;
+    }
+
+    async function openRequest() {
+      const create = installWithExternal();
+      const utils = mount({
+        filterMenuOpen: false,
+        originFilters: { ...DEFAULT_SESSION_FILTERS, hideWorktrees: true },
+        createWorktreeRequest: { projectId: 'p1' },
+      });
+      await waitFor(() =>
+        expect(utils.container.querySelector('[data-worktrees-create-form]')).not.toBeNull(),
+      );
+      // let the worktrees list settle so a leaking row would have drawn
+      await new Promise((r) => setTimeout(r, 0));
+      return { ...utils, create };
+    }
+
+    it('draws no worktree row and no hidden note while the request is open', async () => {
+      const { container } = await openRequest();
+      expect(container.querySelector('[data-worktree-row]')).toBeNull();
+      expect(container.querySelector('[data-worktrees-external-hidden-count]')).toBeNull();
+      // the project's own sessions still draw
+      expect(container.textContent).toContain('Zebra');
+    });
+
+    it('draws no Worktrees section after cancel', async () => {
+      const { container } = await openRequest();
+      fireEvent.click(container.querySelector('[data-worktrees-create-cancel]') as HTMLElement);
+      await waitFor(() => expect(container.querySelector('[data-worktrees-section]')).toBeNull());
+      expect(container.querySelector('[data-worktree-row]')).toBeNull();
+    });
+
+    it('draws no Worktrees section after a successful create', async () => {
+      const { container, create } = await openRequest();
+      fireEvent.change(container.querySelector('[data-worktrees-create-name]') as HTMLElement, {
+        target: { value: 'newone' },
+      });
+      fireEvent.click(container.querySelector('[data-worktrees-create-submit]') as HTMLElement);
+      await waitFor(() => expect(create).toHaveBeenCalled());
+      await waitFor(() => expect(container.querySelector('[data-worktrees-section]')).toBeNull());
+      expect(container.querySelector('[data-worktree-row]')).toBeNull();
+    });
+  });
+
   it('draws no create form while hideWorktrees is ON and no request is open', async () => {
     const list = installWorktreesApi();
     const { container } = mount({

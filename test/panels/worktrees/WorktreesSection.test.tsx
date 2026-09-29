@@ -960,3 +960,47 @@ describe('WorktreesSection — the waiting exception carries to the row level', 
     ).toBeNull();
   });
 });
+
+describe('WorktreesSection — formOnly (Show worktrees OFF + open create request)', () => {
+  function mountFormOnly(formOnly: boolean, mainSessionEntries: SessionEntry[] = []) {
+    installApi({});
+    (window as unknown as { api: { worktrees: { list: unknown } } }).api.worktrees.list = vi
+      .fn()
+      .mockResolvedValue([
+        worktree(),
+        worktree({ worktreeId: '/x/ext', path: '/x/ext', branch: 'ext', external: true }),
+      ]);
+    return render(
+      <WorktreesSection
+        project={project}
+        entries={[]}
+        forceOpenCreate={true}
+        onCloseCreate={vi.fn()}
+        renderSessionRow={fakeRenderSessionRow}
+        hideAgentWorktrees={HIDE_AGENT_WORKTREES}
+        hideExternalWorktrees={false}
+        mainSessionEntries={mainSessionEntries}
+        formOnly={formOnly}
+      />,
+    );
+  }
+
+  it('draws the create form but no heading, rows, count, hidden note or external group', async () => {
+    const { container } = mountFormOnly(true);
+    await waitFor(() =>
+      expect(container.querySelector('[data-worktrees-create-form]')).not.toBeNull(),
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    expect(container.textContent).not.toContain('Worktrees');
+    expect(container.querySelector('[data-worktree-row]')).toBeNull();
+    expect(container.querySelector('[data-worktrees-external-hidden-count]')).toBeNull();
+    expect(container.textContent).not.toContain('External worktrees');
+  });
+
+  it('defaults to false: the same mount without formOnly draws heading and rows', async () => {
+    const { container } = mountFormOnly(false);
+    await waitFor(() => expect(container.querySelector('[data-worktree-row]')).not.toBeNull());
+    expect(container.textContent).toContain('Worktrees');
+    expect(container.querySelector('[data-worktrees-create-form]')).not.toBeNull();
+  });
+});

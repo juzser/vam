@@ -5084,7 +5084,8 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                           sessions (it draws those too, via `mainSessionEntries`),
                           so a hidden section falls through to the plain rows.
                           An open create request (`Mod-Shift-w`, the project menu)
-                          still needs the form, so it wins over the hide. */}
+                          still needs the form, so it wins over the hide -- but ONLY the
+                          form (`formOnly`), never the rows or the hidden note. */}
                       {viewOptions.groupBy === 'project' &&
                       (!originFilters.hideWorktrees ||
                         creatingWorktreeFor === section.project.id) ? (
@@ -5099,6 +5100,8 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                           // `renderSessionRow` draws everywhere else.
                           entries={entries}
                           forceOpenCreate={creatingWorktreeFor === section.project.id}
+                          // Filter ON + open request: the form alone.
+                          formOnly={originFilters.hideWorktrees}
                           onCloseCreate={() =>
                             setCreatingWorktreeFor((current) =>
                               current === section.project.id ? null : current,
