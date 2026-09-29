@@ -228,7 +228,19 @@ await page.addInitScript(() => {
     transitionLesson: async () => {},
     usage: { get: async () => ({ kind: 'unavailable' }) },
     files: {
-      list: async () => ({ root: '/work/demo', files: [...files.keys()], truncated: false }),
+      // One level per call, as the real bridge answers a `dir`; the bare call is the full walk.
+      list: async (_sessionId, dir) => {
+        const root = '/work/demo';
+        if (dir === undefined) return { root, files: [...files.keys()], truncated: false };
+        const base = dir === '' ? root : `${root}/${dir}`;
+        const entries = new Map();
+        for (const file of files.keys()) {
+          if (!file.startsWith(`${base}/`)) continue;
+          const [first, ...rest] = file.slice(base.length + 1).split('/');
+          entries.set(first, rest.length > 0 ? 'dir' : 'file');
+        }
+        return { root, dir: base, entries: [...entries].map(([name, kind]) => ({ name, kind })) };
+      },
       read: async (path) => {
         const entry = files.get(path);
         if (entry === undefined) return refuse('not-found', `${path} does not exist`);
