@@ -10,10 +10,12 @@
  *      because a flex child is sized by its context regardless of what
  *      overflows inside it. What that test never asked is whether the row's
  *      CONTENT fits the row -- `scrollWidth` against `clientWidth` -- and it
- *      did not: two of the 24 chips (23 without a terminal) are `data-tap-pill`s holding text
- *      ("Esc → agent", "⏎ → agent"), and the row carried `overflow-x:
+ *      did not: the row then held seven chips, two of them text
+ *      pills ("Esc → agent", "⏎ → agent"), and it carried `overflow-x:
  *      visible`, no wrap and no scroll. The excess simply painted past the
- *      row's own right edge with no way to reach it.
+ *      row's own right edge with no way to reach it. Today the
+ *      strip is 24 text-pill chips (23 without a terminal), all of them
+ *      `data-tap-pill`, and it is a real scroll container.
  *
  *   2. "Overall, the Response view on mobile has a section sticking out on
  *      the right, which makes the screen scroll horizontally." Two distinct
@@ -603,7 +605,7 @@ test.describe('the keystroke strip scrolls horizontally', () => {
     expect(
       info.scrollWidth,
       `scrollWidth (${info.scrollWidth}) must exceed clientWidth (${info.clientWidth}) -- ` +
-        '24 chips (23 without a terminal), two of them text pills, do not fit 361px of clear width',
+        '24 chips (23 without a terminal), all text pills, do not fit 361px of clear width',
     ).toBeGreaterThan(info.clientWidth);
   });
 

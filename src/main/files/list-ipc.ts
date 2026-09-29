@@ -20,7 +20,7 @@
  * contents actually live at, not at whatever string happened to be recorded.
  */
 
-import { isAbsolute, join, normalize } from 'node:path';
+import { isAbsolute, join, normalize, parse } from 'node:path';
 
 import { CHANNELS, type IpcResult, type SourceError } from '../ipc/channels.js';
 import type { IpcMainLike } from '../ipc/handlers.js';
@@ -107,7 +107,11 @@ export function registerFilesListIpc(
       }
       // EC-13: a real path equals its lexical form exactly when no segment
       // below the (already real) cwd is a symlink; refuse any that is followed.
-      if (authorization.realPath !== candidate.replace(/[\\/]+$/, '')) {
+      // A filesystem root ('/', 'C:\\') keeps its own separator.
+      const { root } = parse(candidate);
+      const stripped = candidate.replace(/[\\/]+$/, '');
+      const lexical = stripped.length < root.length ? root : stripped;
+      if (authorization.realPath !== lexical) {
         return {
           ok: false,
           error: refused('symlink', `${dir} is or passes through a symlink, which is not listed`),

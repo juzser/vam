@@ -367,3 +367,17 @@ describe('registerFilesListIpc symlink refusal depth on a real disk', () => {
     );
   });
 });
+
+describe('registerFilesListIpc when the real cwd is a filesystem root', () => {
+  it('lists the root for dir "" and "." rather than refusing it as a symlink', async () => {
+    const { invoke } = harness({
+      resolveCwd: async () => '/',
+      readDir: async (dir) => (dir === '/' ? [dirent('etc', 'dir')] : []),
+    });
+    for (const dir of ['', '.']) {
+      const r = (await invoke('s1', dir)) as { ok: boolean; value?: { entries: unknown[] } };
+      expect(r.ok).toBe(true);
+      expect(r.value?.entries).toEqual([{ name: 'etc', kind: 'dir' }]);
+    }
+  });
+});
