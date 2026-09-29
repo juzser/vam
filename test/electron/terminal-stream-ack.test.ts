@@ -171,6 +171,25 @@ describe('wrapTerminalStreamApiWithAck', () => {
     expect(ackCalls()).toHaveLength(ackedBefore);
   });
 
+  it('calling the same unsubscribe twice is a no-op, not a double release', () => {
+    const fake = fakeApi();
+    const { invoke } = fakeInvoke();
+    const wrapped = wrapTerminalStreamApiWithAck(fake.api, invoke);
+
+    const stopA = wrapped.onData('s1', () => {});
+    const stopB = wrapped.onData('s1', () => {});
+
+    // A caller unsubscribing twice (e.g. an effect cleanup racing a manual
+    // stop) must not remove `stopA`'s listener a second time, and must not
+    // release the shared underlying subscription while `stopB` is still live.
+    stopA();
+    stopA();
+    expect(fake.unsubCount('s1')).toBe(0);
+
+    stopB();
+    expect(fake.unsubCount('s1')).toBe(1);
+  });
+
   it('(5) a rejected ack invoke is caught and never surfaces as an unhandled rejection', async () => {
     const fake = fakeApi();
     const { invoke, rejectNextCall } = fakeInvoke();
