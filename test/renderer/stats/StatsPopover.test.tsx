@@ -5,7 +5,7 @@
  * the contribution graph, a "Details" button that hands over to Settings ->
  * Stats, and the usual dismissal (Escape, outside pointerdown).
  */
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { StatsPopover } from '../../../src/renderer/stats/StatsPopover.js';
 import type { StatsSnapshot } from '../../../src/shared/stats.js';
@@ -48,6 +48,7 @@ async function open(onStats = vi.fn()) {
   await act(async () => {
     fireEvent.click(screen.getByLabelText('stats'));
   });
+  await screen.findByText('agents');
   return { onStats, get };
 }
 
@@ -83,35 +84,58 @@ describe('StatsPopover', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
-  it('shows loading until the snapshot arrives and stays there on a non-ok result', async () => {
-    const get = vi.fn().mockResolvedValue({ kind: 'error', message: 'x' });
+  it.each([
+    ['a non-ok result', () => vi.fn().mockResolvedValue({ kind: 'error', message: 'x' })],
+    ['a rejected read', () => vi.fn().mockRejectedValue(new Error('boom'))],
+  ])('%s shows the failure line, not loading, and Details still works', async (_name, mk) => {
+    const get = mk();
     (window as unknown as { api: unknown }).api = { stats: { get } };
-    render(<StatsPopover onStats={vi.fn()} />);
+    const onStats = vi.fn();
+    render(<StatsPopover onStats={onStats} />);
     await act(async () => {
       fireEvent.click(screen.getByLabelText('stats'));
     });
     const panel = screen.getByRole('dialog');
-    expect(panel.textContent).toContain('loading');
+    await waitFor(() => expect(panel.querySelector('[data-stats-popover-error]')).not.toBeNull());
+    expect(panel.textContent).toContain('Stats unavailable');
+    expect(panel.textContent).not.toContain('loading');
     expect(panel.querySelector('[data-stats-heatmap]')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
+    expect(onStats).toHaveBeenCalledTimes(1);
   });
 
-  it('a rejected stats.get does not crash and leaves the popover open on loading', async () => {
-    const get = vi.fn().mockRejectedValue(new Error('boom'));
+  it('reopening after a failure retries the read', async () => {
+    const get = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('boom'))
+      .mockResolvedValue({ kind: 'ok', snapshot: SNAPSHOT });
     (window as unknown as { api: unknown }).api = { stats: { get } };
     render(<StatsPopover onStats={vi.fn()} />);
+    const button = screen.getByLabelText('stats');
     await act(async () => {
-      fireEvent.click(screen.getByLabelText('stats'));
+      fireEvent.click(button);
     });
-    expect(screen.getByRole('dialog').textContent).toContain('loading');
+    await waitFor(() => expect(screen.getByRole('dialog').textContent).toContain('unavailable'));
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    await waitFor(() => expect(screen.getByRole('dialog').textContent).toContain('18.2B'));
+    expect(get).toHaveBeenCalledTimes(2);
   });
 
-  it('opens without a stats bridge and does not throw', async () => {
+  it('opens without a stats bridge, does not throw and shows the failure line', async () => {
     (window as unknown as { api: unknown }).api = undefined;
     render(<StatsPopover onStats={vi.fn()} />);
     await act(async () => {
       fireEvent.click(screen.getByLabelText('stats'));
     });
-    expect(screen.getByRole('dialog').textContent).toContain('loading');
+    await waitFor(() =>
+      expect(screen.getByRole('dialog').textContent).toContain('Stats unavailable'),
+    );
+    expect(screen.getByRole('dialog').textContent).not.toContain('loading');
   });
 
   it('re-clicking the toggle button closes the popover and reflects aria-expanded', async () => {
@@ -151,7 +175,25 @@ describe('StatsPopover', () => {
       fireEvent.click(screen.getByLabelText('stats'));
     });
     const panel = screen.getByRole('dialog');
-    expect(panel.querySelector('[data-stats-heatmap]')).not.toBeNull();
+    await waitFor(() => expect(panel.querySelector('[data-stats-heatmap]')).not.toBeNull());
+    expect(panel.textContent).not.toContain('loading');
+  });
+
+  it('shows loading while the read is pending, then swaps to the panel', async () => {
+    let resolve: (v: unknown) => void = () => {};
+    const get = vi.fn().mockReturnValue(new Promise((r) => (resolve = r)));
+    (window as unknown as { api: unknown }).api = { stats: { get } };
+    render(<StatsPopover onStats={vi.fn()} />);
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText('stats'));
+    });
+    const panel = screen.getByRole('dialog');
+    expect(panel.textContent).toContain('loading');
+    expect(panel.querySelector('[data-stats-popover-error]')).toBeNull();
+    await act(async () => {
+      resolve({ kind: 'ok', snapshot: SNAPSHOT });
+    });
+    await waitFor(() => expect(panel.textContent).toContain('18.2B'));
     expect(panel.textContent).not.toContain('loading');
   });
 

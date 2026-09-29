@@ -2,7 +2,8 @@
  * The sidebar's stats popover: a few headline numbers from the same
  * `window.api.stats.get()` snapshot Settings -> Stats reads, the contribution
  * graph, and a top-right "Details" button that hands over to that screen
- * (`onStats`) and closes this one. Self-contained like `UsagePopover`: its own
+ * (`onStats`) and closes this one. The trigger, open state and dismissal are
+ * eager; the body (`StatsPopoverPanel`, with the Heatmap) is a lazy chunk. Self-contained like `UsagePopover`: its own
  * open state and its own dismissal (outside pointerdown, Escape).
  *
  * The panel's aria-label deliberately omits the word "usage": e2e finds the
@@ -10,42 +11,15 @@
  */
 
 import { ChartColumn } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
-import { formatCompactNumber } from '../../shared/format-number.js';
-import type { StatsSnapshot } from '../../shared/stats.js';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { ShortcutTip } from '../keyboard/ShortcutTip.js';
-import { Heatmap } from './Heatmap.js';
 
-function Headline({ label, value }: { readonly label: string; readonly value: string }) {
-  return (
-    <div className="flex flex-col">
-      <span className="text-ink text-sm">{value}</span>
-      <span className="text-ink-faint text-control">{label}</span>
-    </div>
-  );
-}
+const StatsPopoverPanel = lazy(() => import('./StatsPopoverPanel.js'));
 
 export function StatsPopover({ onStats }: { readonly onStats: () => void }) {
   const [open, setOpen] = useState(false);
-  const [snapshot, setSnapshot] = useState<StatsSnapshot | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const bridge = window.api?.stats;
-    if (bridge === undefined) return;
-    let cancelled = false;
-    bridge
-      .get()
-      .then((result) => {
-        if (!cancelled && result.kind === 'ok') setSnapshot(result.snapshot);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -67,8 +41,6 @@ export function StatsPopover({ onStats }: { readonly onStats: () => void }) {
   const onEscape = (event: { readonly key: string }) => {
     if (event.key === 'Escape') setOpen(false);
   };
-
-  const overview = snapshot?.usageOverview;
 
   return (
     <div className="relative flex-none">
@@ -110,18 +82,9 @@ export function StatsPopover({ onStats }: { readonly onStats: () => void }) {
               Details
             </button>
           </div>
-          {snapshot === null || overview === undefined ? (
-            <p className="text-control text-ink-dim">loading…</p>
-          ) : (
-            <>
-              <div className="grid grid-cols-3 gap-2">
-                <Headline label="agents" value={String(snapshot.agentsSpawned)} />
-                <Headline label="tokens" value={formatCompactNumber(overview.totalTokens)} />
-                <Headline label="active days" value={String(overview.activeDays)} />
-              </div>
-              <Heatmap buckets={snapshot.heatmap} />
-            </>
-          )}
+          <Suspense fallback={<p className="text-control text-ink-dim">loading…</p>}>
+            <StatsPopoverPanel />
+          </Suspense>
         </div>
       )}
     </div>

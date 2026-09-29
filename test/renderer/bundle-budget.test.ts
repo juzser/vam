@@ -814,6 +814,14 @@ const FILES_TAB_MARKER = 'data-files-editor';
 // data-terminal-stream-mount node_modules` finds nothing.
 const TERMINAL_STREAM_MARKER = 'data-terminal-stream-mount';
 
+// The stats popover panel's own root attribute, one level in from the shell's
+// bare `data-stats-popover`: that shorter string is a PREFIX of this one and
+// of `data-stats-popover-error`, so it would match the eager shell. This one
+// is exact. Verified unique: `grep -rn data-stats-popover-panel src` outside
+// `StatsPopoverPanel.tsx` finds nothing, and `grep -rl
+// data-stats-popover-panel node_modules` finds nothing.
+const STATS_POPOVER_PANEL_MARKER = 'data-stats-popover-panel';
+
 describe.skipIf(!buildAvailable)('electron renderer entry chunk budget', () => {
   let outDir: string;
   let entryBytes: number;
@@ -964,6 +972,20 @@ describe.skipIf(!buildAvailable)('electron renderer entry chunk budget', () => {
 
   it('TerminalStreamTab still ships, in a lazy chunk', () => {
     expect(otherAssetTexts.some((text) => text.includes(TERMINAL_STREAM_MARKER))).toBe(true);
+  });
+
+  it('the stats popover panel (and its Heatmap) is not in the eager entry chunk', () => {
+    // Falsify by importing `StatsPopoverPanel` statically in
+    // `StatsPopover.tsx` instead of through its `lazy(() => import(...))`:
+    //   expect(entryText.includes('data-stats-popover-panel')).toBe(false)
+    //   AssertionError: expected true to be false
+    expect(entryText.includes(STATS_POPOVER_PANEL_MARKER)).toBe(false);
+  });
+
+  it('the stats popover panel ships in exactly one lazy chunk', () => {
+    expect(
+      otherAssetTexts.filter((text) => text.includes(STATS_POPOVER_PANEL_MARKER)),
+    ).toHaveLength(1);
   });
 });
 
