@@ -27,8 +27,10 @@
  * that is vam's to state, and the majority of any real repository stays grey.
  */
 
-import { cleanup, render } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
+import { FilesTab, type ListFiles } from '../../src/renderer/panels/FilesTab.js';
 import { editorFileKind } from '../../src/renderer/panels/files-editor-text.js';
 import { highlightLangFor } from '../../src/renderer/panels/files-highlight.js';
 import {
@@ -255,5 +257,49 @@ describe('the glyph that is actually drawn', () => {
 
   it('is hidden from a screen reader — the row’s own name is the name', () => {
     expect(draw('/w/README.md', false)?.getAttribute('aria-hidden')).toBe('true');
+  });
+});
+
+describe('the directory row’s right-edge chevron', () => {
+  const list = (async (_sessionId: string, dir?: string) => {
+    if (dir === undefined) return { root: '/w', files: [], truncated: false };
+    return {
+      root: '/w',
+      dir: dir === '' ? '/w' : `/w/${dir}`,
+      entries:
+        dir === ''
+          ? [
+              { name: 'src', kind: 'dir' as const },
+              { name: 'a.txt', kind: 'file' as const },
+            ]
+          : [],
+    };
+  }) as ListFiles;
+  const lastSvgClass = (row: Element) => row.lastElementChild?.getAttribute('class') ?? '';
+
+  it('is last in a directory row, flips with the open state, and file rows have none', async () => {
+    render(
+      <FilesTab
+        hidden={false}
+        sessionId="s1"
+        list={list}
+        read={(async () => ({})) as never}
+        write={(async () => ({})) as never}
+        reportUnsaved={undefined}
+        reserveCorner={0}
+        reserveCornerHeight={0}
+        filesTreeWidth={null}
+        onFilesTreeWidth={undefined}
+        onFilesMarkdownView={() => {}}
+      />,
+    );
+    const dir = await screen.findByRole('treeitem', { name: /src/ });
+    expect(dir.lastElementChild?.tagName.toLowerCase()).toBe('svg');
+    expect(lastSvgClass(dir)).toContain('lucide-chevron-right');
+    expect(dir.lastElementChild?.getAttribute('aria-hidden')).toBe('true');
+    await userEvent.click(dir);
+    expect(lastSvgClass(dir)).toContain('lucide-chevron-down');
+    const file = screen.getByRole('treeitem', { name: /a\.txt/ });
+    expect(file.querySelector('.lucide-chevron-right, .lucide-chevron-down')).toBeNull();
   });
 });

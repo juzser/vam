@@ -152,4 +152,26 @@ await page.waitForTimeout(400);
 const out = `${outDir}/files-tab.png`;
 await page.screenshot({ path: out });
 console.log(out);
+
+// The one assertion this script makes, kept out of the picture above: at the tree's 7.5rem floor a
+// directory row's chevron is still inside the row's box and the name is what gives way.
+const geometry = await page.evaluate(() => {
+  const tree = document.querySelector('[data-files-row]')?.closest('[class*="min-w-[7.5rem]"]');
+  if (!tree) return null;
+  tree.style.width = '7.5rem';
+  const row = document.querySelector('[data-files-row-kind="directory"]');
+  const chevron = row?.lastElementChild;
+  const name = row?.querySelector('[data-files-row-name]');
+  if (!row || !chevron || !name) return null;
+  const r = row.getBoundingClientRect();
+  const c = chevron.getBoundingClientRect();
+  return {
+    inside: c.left >= r.left && c.right <= r.right && c.width > 0,
+    truncated: name.clientWidth > 0 && getComputedStyle(name).textOverflow === 'ellipsis',
+  };
+});
+if (!geometry?.inside || !geometry.truncated) {
+  console.error(`chevron geometry at 7.5rem failed: ${JSON.stringify(geometry)}`);
+  process.exitCode = 1;
+}
 await browser.close();
