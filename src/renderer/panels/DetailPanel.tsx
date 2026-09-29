@@ -3367,6 +3367,7 @@ function PaneReady({ provider }: { readonly provider: ProviderId | null }) {
  * control to make it would be naming a fact this screen cannot act on.
  */
 function StartSession({
+  sessionId,
   paneName,
   defaultProvider,
   agentPermissions,
@@ -3376,6 +3377,8 @@ function StartSession({
   onShowTerminal,
   onAnswerTrust,
 }: {
+  /** Keys the `startSession` chord's registry entry to this pane's session. */
+  readonly sessionId: string;
   readonly paneName: string;
   readonly defaultProvider: ProviderId | undefined;
   /**
@@ -3412,8 +3415,8 @@ function StartSession({
   // flight blocks it the way it disables the button.
   useEffect(() => {
     if (onStart === undefined || startBlocked) return;
-    return registerStartSession(() => onStart(chosen, chosenPermission));
-  }, [onStart, startBlocked, chosen, chosenPermission]);
+    return registerStartSession(sessionId, () => onStart(chosen, chosenPermission));
+  }, [sessionId, onStart, startBlocked, chosen, chosenPermission]);
   return (
     <div
       data-start-session
@@ -9313,6 +9316,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
           <PaneReady provider={runningProvider} />
         ) : entry !== null && entry.session.status === 'unstarted' ? (
           <StartSession
+            sessionId={entry.session.id}
             paneName={entry.session.pane ?? entry.session.title}
             defaultProvider={defaultProvider}
             agentPermissions={agentPermissions}

@@ -33,8 +33,8 @@ const UNSTARTED: Session = {
 
 const RUNNING: Session = { ...UNSTARTED, id: 'a1', pane: undefined, status: 'running' };
 
-function modelWith(session: Session): CanvasModel {
-  return { projects: [{ id: 'p1', name: 'alpha', source: 'claude-code', sessions: [session] }] };
+function modelWith(...sessions: Session[]): CanvasModel {
+  return { projects: [{ id: 'p1', name: 'alpha', source: 'claude-code', sessions }] };
 }
 
 function sourceWith(): { source: CanvasSource; recorded: [string, string][] } {
@@ -120,5 +120,29 @@ describe('the start chord', () => {
     await pressStart();
     expect(recorded).toEqual([]);
     expect(statusBar()).toContain('no start screen');
+  });
+
+  it('starts the FOCUSED pane when two panes show a start screen', async () => {
+    (window as unknown as { api: unknown }).api = {};
+    const second: Session = { ...UNSTARTED, id: 'pane:vam-alpha-cc22dd', pane: 'vam-alpha-cc22dd' };
+    const { source, recorded } = sourceWith();
+    render(<Canvas model={modelWith(UNSTARTED, second)} source={source} />);
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'v', bubbles: true }));
+    });
+    const panes = [...document.querySelectorAll('[data-split-pane]')];
+    expect(panes.filter((p) => p.querySelector('[data-start-session]'))).toHaveLength(2);
+    const focused = panes.find((p) => p.getAttribute('data-split-focused') === 'true');
+    const other = panes.find((p) => p !== focused);
+    // The OTHER pane's screen re-registers last with codex; the chord must still
+    // start the focused pane's own choice (the default, not codex).
+    await act(async () => {
+      other?.querySelector<HTMLElement>('[data-start-provider="codex"]')?.click();
+    });
+    await pressStart();
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]?.[1]).not.toContain('codex');
+    expect(focused?.querySelector('[data-start-session]')).not.toBeNull();
   });
 });
