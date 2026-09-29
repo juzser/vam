@@ -159,6 +159,13 @@ describe('the phone shell’s hit areas', () => {
       })
       .map((el) => `${el.tagName} ${el.getAttribute('aria-label') ?? ''}`);
     expect(wrong, 'toolbar controls not floored at 30px').toEqual([]);
+    // The two controls promoted out of the removed 3-dots menu must be in that
+    // swept set, so the sweep cannot pass by never seeing them.
+    for (const hook of ['data-remote-toggle', 'data-theme-toggle']) {
+      const btn = (toolbar as HTMLElement).querySelector(`[${hook}]`);
+      expect(btn, hook).not.toBeNull();
+      expect(toolbarControls, `${hook} in the 30px sweep`).toContain(btn);
+    }
   });
 
   it('does not leak the 30px floor into the workspace-options popover it opens', () => {
