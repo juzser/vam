@@ -9582,9 +9582,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                  resolves to nothing inside the per-turn wrapper and the pinned
                  prompt can cover the answer again (audit F2). `TurnBlock`'s
                  own comment carries the measurement. */
-              className={`vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pl-3.5 pr-11 [container-type:size] ${
-                phone ? 'pb-[max(6rem,20vh)]' : 'pb-[max(12rem,33vh)]'
-              }`}
+              className={`vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pl-3.5 pr-11 [container-type:size]`}
             >
               {/*
               WHAT THE TOP OF THE COLUMN IS — said, not left to be inferred.
@@ -9989,6 +9987,18 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                     phone
                   />
                 </div>
+              )}
+              {/* The breathing room at the scroll end is a trailing SPACER, not
+                scroller padding: Chromium treats a scroller's bottom padding as
+                the `sticky bottom-0` inset, which floated the phone inline
+                question above the composer. Skipped while that question is
+                drawn -- it IS the end of the column and pins flush. */}
+              {!(phone && current === 'Response' && newestQuestion !== null) && (
+                <div
+                  data-detail-spacer
+                  aria-hidden="true"
+                  className={`flex-none ${phone ? 'h-[max(6rem,20vh)]' : 'h-[max(12rem,33vh)]'}`}
+                />
               )}
             </div>
             {/* Decoration only, and derived from the SAME `hasContentBelow`

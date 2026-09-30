@@ -71,11 +71,14 @@ function stub(box: HTMLElement, scrollHeight: number, clientHeight: number) {
 }
 
 describe('the scroller ends with a large bottom spacing', () => {
-  it('carries a viewport-tied bottom padding on the scroller itself', () => {
+  it('ends with a viewport-tied trailing spacer, and the scroller carries no bottom padding', () => {
     draw();
-    expect(column()?.className).toContain('pb-[max(12rem,33vh)]');
-    // On the scroller, not a spacer child.
-    expect(column()?.querySelector('[data-detail-spacer]')).toBeNull();
+    const box = column() as HTMLElement;
+    const spacer = box.querySelector('[data-detail-spacer]');
+    expect(spacer).not.toBeNull();
+    expect(box.lastElementChild).toBe(spacer);
+    expect(spacer?.className).toContain('h-[max(12rem,33vh)]');
+    expect(box.className).not.toMatch(/(^|\s)pb-/);
   });
 
   it('keeps the BOTTOM_SLACK_PX rule as it was', () => {

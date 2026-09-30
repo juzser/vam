@@ -125,6 +125,17 @@ describe('the bottom fade', () => {
     );
     expect(q('[data-out-to-bottom]')).not.toBeNull();
   });
+
+  it('leaves the jump control clickable: a click still jumps while the fade is drawn', () => {
+    draw();
+    const box = column() as HTMLElement;
+    stubMetrics(box, 0);
+    expect(fade()).not.toBeNull();
+    box.scrollTop = 0;
+    fireEvent.click(q('[data-out-to-bottom]') as HTMLElement);
+    // jumpTo('bottom') moves the box to its scrollHeight.
+    expect(box.scrollTop).toBe(1000);
+  });
 });
 
 describe('the model label', () => {
