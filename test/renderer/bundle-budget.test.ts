@@ -778,6 +778,32 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * (218,289 B) plus ~411 B (~0.2%) of the slack the thirteenth paragraph
  * showed a different machine's zlib can eat. `ENTRY_BUDGET_BYTES` is NOT
  * moved: 727,087 B still clears 728,700 by 1,613 B.
+ *
+ * A FIFTEENTH, EPIC-WIDE ALLOWANCE: THE REMAINING UI TASKS. The entry grows
+ * with every renderer task the vam-ux-3 epic still has to land, the phone
+ * terminal and create-plus task first: merged onto the integration branch it
+ * failed BOTH budgets above (entry 728,731 B against 728,700, gzip 218,716 B
+ * against 218,700), by 31 B and 16 B. Because the epic's other UI tasks grow
+ * the entry too, the budget is sized once for the epic here instead of being
+ * bumped at every merge. Measured, `electron-vite build --mode production`
+ * (this machine's `darwin` zlib), the way this test measures it:
+ *
+ *     integration 70278b8c            entry 728,231 B  (218,640 B gzip)
+ *     integration + phone terminal    entry 728,731 B  (218,716 B gzip)
+ *     integration + phone terminal
+ *       + the four held heads         entry 729,147 B  (218,875 B gzip)
+ *
+ * Wave 1's 8 renderer tasks grew the entry by a mean of 181.4 B raw and
+ * 53.5 B gzip each. Sixteen renderer tasks remain that can grow it, so the
+ * projection is 16 x 181.4 = +2,902 B raw and 16 x 53.5 = +856 B gzip on top
+ * of the 729,147 B / 218,875 B base (integration + phone terminal + the four
+ * held heads, planner-measured; the 728,731 B / 218,716 B line above is
+ * integration + phone terminal alone): 732,049 B / 219,731 B (an estimate from the wave-1
+ * mean, not a measurement), plus ~0.2% slack for another machine's zlib, the
+ * thirteenth paragraph's lesson. `ENTRY_BUDGET_BYTES` moves 728,700 ->
+ * 733,600 and `ENTRY_GZIP_BUDGET_BYTES` moves 218,700 -> 220,200. This is an
+ * epic-wide allowance, not headroom any one PR may assume: the next PR to
+ * land here still re-measures rather than assuming there is room.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -788,8 +814,8 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 // depends on is even present, decided BEFORE anything tries to build.
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
-const ENTRY_BUDGET_BYTES = 728_700;
-const ENTRY_GZIP_BUDGET_BYTES = 218_700;
+const ENTRY_BUDGET_BYTES = 733_600;
+const ENTRY_GZIP_BUDGET_BYTES = 220_200;
 
 // The one string this repo's markdown stack ships that nothing else in the
 // dependency graph or vam's own source does: `gfmTable`, the extension name
