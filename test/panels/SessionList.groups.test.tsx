@@ -156,9 +156,7 @@ describe('the group lifecycle', () => {
     expect(header.querySelector('[data-new-project]')?.getAttribute('aria-label')).toBe(
       'new project',
     );
-    expect(header.querySelector('[data-new-group]')?.getAttribute('aria-label')).not.toBe(
-      'new project',
-    );
+    expect(header.querySelector('[data-new-group]')?.getAttribute('aria-label')).toBe('new group');
     const controls = [...header.querySelectorAll('button')].map((el) =>
       el.hasAttribute('data-new-group')
         ? 'new-group'

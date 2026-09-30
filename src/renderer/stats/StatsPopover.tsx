@@ -70,7 +70,8 @@ export function StatsPopover({ onStats }: { readonly onStats: () => void }) {
           onKeyDown={onEscape}
           className="absolute top-[32px] left-0 z-20 flex w-[min(320px,calc(100vw-24px))] flex-col gap-3 rounded-[9px] border border-line-strong bg-card p-3 shadow-lg"
         >
-          <div className="flex items-center justify-end">
+          <div className="flex items-center justify-between">
+            <h2 className="font-mono text-meta text-ink-dim uppercase tracking-[0.12em]">Usage</h2>
             <button
               type="button"
               onClick={() => {

@@ -281,7 +281,8 @@ export default function UsagePopoverPanel() {
   return (
     <>
       {hasBridge && (
-        <div data-usage-header className="-mb-1 flex items-center justify-end">
+        <div data-usage-header className="-mb-1 flex items-center justify-between">
+          <h2 className="font-mono text-meta text-ink-dim uppercase tracking-[0.12em]">Account</h2>
           <button
             type="button"
             aria-label="Refresh"

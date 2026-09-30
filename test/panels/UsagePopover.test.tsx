@@ -366,6 +366,11 @@ describe('the refresh button', () => {
     const header = panel()?.querySelector('[data-usage-header]');
     const button = screen.getByRole('button', { name: 'Refresh' });
     expect(header?.contains(button)).toBe(true);
+    const title = header?.firstElementChild as HTMLElement;
+    expect(title.tagName).toBe('H2');
+    expect(title.textContent).toBe('Account');
+    expect(header?.className).toContain('justify-between');
+    expect(header?.children[1]).toBe(button);
     await act(async () => {
       button.click();
     });

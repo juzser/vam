@@ -202,17 +202,28 @@ describe('shortcutLines: the pure reading of the table', () => {
 });
 
 describe('the sidebar is wired to it', () => {
-  it('gives the "new group" and "new repo" header buttons a tooltip each, and says which is which', () => {
+  it('names the group button "New group" and the directory picker "New project" with its chord', () => {
     render(<SessionList {...baseProps(entriesOf([makeSession()]))} onCreateGroup={() => {}} />);
-    const groupText =
-      openByFocus(screen.getByLabelText('new project (a group of repos)')).textContent ?? '';
+    const groupText = openByFocus(screen.getByLabelText('new group')).textContent ?? '';
     cleanup();
     render(<SessionList {...baseProps(entriesOf([makeSession()]))} onCreateGroup={() => {}} />);
     const repoText = openByFocus(screen.getByLabelText('new project')).textContent ?? '';
-    // Two side-by-side "+" squares that both say "project" is the confusion
-    // the operator reported; the tooltips must not repeat it.
-    expect(groupText.toLowerCase()).toContain('group');
-    expect(repoText.toLowerCase()).not.toContain('group');
+    expect(groupText).toBe('New group');
+    expect(repoText).toContain('New project');
+    expect(repoText).not.toContain('Choose a directory');
+    expect(repoText).toMatch(/Shift\+P/);
+  });
+
+  it('lets a set newSessionDecline replace the "+" tooltip', () => {
+    render(
+      <SessionList
+        {...baseProps(entriesOf([makeSession()]))}
+        newSessionDecline="factory has no new-session command"
+      />,
+    );
+    const text = openByFocus(screen.getByLabelText('new project')).textContent ?? '';
+    expect(text).toContain('factory has no new-session command');
+    expect(text).not.toContain('New project');
   });
 
   it('gives the filter toggle a tooltip too (already wired, pinned here alongside its siblings)', () => {
