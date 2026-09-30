@@ -4,7 +4,7 @@
  * This browser build has no `window.api` (no preload), so the bridge is stubbed
  * the way `settings-panels-shots.mjs` stubs `window.api.adhdSkill`. The stub
  * carries every member of `UpdateApi` (`getStatus`, `check`, `download`,
- * `dismiss`, `getAutoCheck`, `setAutoCheck`, `openNotes`, `onStatus`).
+ * `dismiss`, `getAutoCheck`, `setAutoCheck`, `getLastCheck`, `openNotes`, `onStatus`).
  *
  * Two states are drawn: a `check` that never settles (the button is busy and
  * the status line reads "checking…") and a `check` that settles into the calm
@@ -59,6 +59,7 @@ console.log('=== the Update section, stuck (a check that never answers)');
         dismiss: async () => ({ kind: 'idle' }),
         getAutoCheck: async () => true,
         setAutoCheck: async (enabled) => enabled,
+        getLastCheck: async () => null,
         openNotes: async () => true,
         onStatus: () => () => {},
       },
@@ -81,6 +82,8 @@ console.log('=== the Update section, stuck (a check that never answers)');
   check('the status line says it is checking', /checking/i.test(pending ?? ''), pending ?? '(none)');
   const switchCount = await page.locator('[data-switch="auto-update"]').count();
   check('the automatic-check switch is drawn', switchCount === 1);
+  const never = await page.locator('[data-update-last-check]').textContent();
+  check('the last-check line says it never checked', /never checked/i.test(never ?? ''), never ?? '(none)');
 
   await screenshotBothThemes(page, 'before');
   await page.close();
@@ -95,15 +98,21 @@ console.log(
   // Resolves at once to a network error, whose sentence is "GitHub could not
   // be reached…".
   await page.addInitScript(() => {
+    // Main stamps the time when a check goes out; the stub does the same.
+    let lastCheckAt = null;
     globalThis.window.api = {
       ...(globalThis.window.api ?? {}),
       update: {
         getStatus: async () => ({ kind: 'idle' }),
-        check: async () => ({ kind: 'error', code: 'network', message: 'network' }),
+        check: async () => {
+          lastCheckAt = Date.now();
+          return { kind: 'error', code: 'network', message: 'network' };
+        },
         download: async () => ({ kind: 'idle' }),
         dismiss: async () => ({ kind: 'idle' }),
         getAutoCheck: async () => true,
         setAutoCheck: async (enabled) => enabled,
+        getLastCheck: async () => lastCheckAt,
         openNotes: async () => true,
         onStatus: () => () => {},
       },
@@ -130,6 +139,13 @@ console.log(
   );
   const busy = await page.locator('[data-update-check]').getAttribute('aria-busy');
   check('the button is no longer busy -- an operator can ask again', busy === 'false');
+  await page.waitForFunction(
+    () => /just now/i.test(document.querySelector('[data-update-last-check]')?.textContent ?? ''),
+    undefined,
+    { timeout: 5_000 },
+  );
+  const lastCheck = await page.locator('[data-update-last-check]').textContent();
+  check('the last-check line moves on once the check has finished', /last checked just now/i.test(lastCheck ?? ''), lastCheck ?? '(none)');
 
   await screenshotBothThemes(page, 'after');
   await page.close();
