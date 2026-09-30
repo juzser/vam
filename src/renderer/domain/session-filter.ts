@@ -99,8 +99,8 @@ export type SessionFilters = {
    * has an opinion about this one already, the operator's stated ask, not a
    * status nobody has weighed in on yet.
    *
-   * `hide`-SHAPED, as are all fields of this type except `onlyPrompted`
-   * (`:37`), though the popover's own label for it reads "Show external
+   * `hide`-SHAPED, as are all fields of this type except `onlyPrompted`,
+   * though the popover's own label for it reads "Show external
    * worktrees" -- the operator's own words, the other way round. Naming the
    * STORED field the same direction as its six hide-shaped neighbours is what
    * keeps this file (and `prefs.ts`'s parser) one convention rather than
@@ -108,8 +108,8 @@ export type SessionFilters = {
    */
   readonly hideExternalWorktrees: boolean;
   /**
-   * The per-project Worktrees section, hidden. ON by default (`:134`). One
-   * exception: an open create request still draws the create form alone,
+   * The per-project Worktrees section, hidden. ON by default
+   * (`DEFAULT_SESSION_FILTERS.hideWorktrees`). One exception: an open create request still draws the create form alone,
    * without the external group, heading, note or rows
    * (`SessionList.tsx:5250`, `formOnly={originFilters.hideWorktrees}`).
    * `hide`-shaped, though the filter menu's own label reads "Show worktrees"
