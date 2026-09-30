@@ -544,6 +544,8 @@ export type AgentQuestion = {
   readonly options: readonly QuestionOption[];
   /** `null` while the question is still open; otherwise what was answered. */
   readonly answer: string | null;
+  /** Present and `true` only when the closing tool_result carried `is_error`. */
+  readonly cancelled?: true;
 };
 
 export type Session = {
