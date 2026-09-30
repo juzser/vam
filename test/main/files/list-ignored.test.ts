@@ -63,4 +63,22 @@ describe('listDirectory git marks', () => {
     expect(marked(out)).toEqual([]);
     expect(out.length).toBeGreaterThan(0);
   });
+
+  it('feeds NUL-separated names on stdin, runs in the listed directory, never passes --no-index', async () => {
+    const root = repo('build/\n');
+    let seen: { cwd: string; args: readonly string[]; input: string } | undefined;
+    await listDirectory(root, 'build', readDir, async (cwd, args, input) => {
+      seen = { cwd, args, input };
+      return '';
+    });
+    expect(seen?.cwd).toBe(`${root}/build`);
+    expect(seen?.args).not.toContain('--no-index');
+    expect(seen?.input).toBe('sub\0');
+  });
+
+  it('a tracked file that matches an ignore rule is not marked', async () => {
+    const root = repo('*.log\n');
+    execFileSync('git', ['add', '-f', 'debug.log'], { cwd: root });
+    expect(marked(await listDirectory(root, '', readDir))).toEqual(['keep.log']);
+  });
 });
