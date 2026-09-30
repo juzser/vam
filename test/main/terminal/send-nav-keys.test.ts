@@ -18,8 +18,8 @@
  *   1. THE KEY ARRIVES INTERPRETED. `send-keys -l -- 'Up'` would TYPE the two
  *      letters into the operator's own prompt; only an interpreted send-keys
  *      presses the key.
- *   2. NOTHING OFF THE BRIDGE CAN NAME A TMUX KEY. `nav` is one of eight,
- *      checked against a frozen set, and looked up in a table of eight
+ *   2. NOTHING OFF THE BRIDGE CAN NAME A TMUX KEY. `nav` is one of nine,
+ *      checked against a frozen set, and looked up in a table of nine
  *      constants -- a value from the bridge is a table INDEX, never a name.
  *   3. IT IS AIMED BY THE SAME GUARD AS EVERYTHING ELSE. An arrow key in the
  *      wrong pane moves the wrong person's cursor.
@@ -33,7 +33,7 @@ import { sendNavArgv } from '../../../src/main/sources/tmux/argv.js';
 import type { TmuxRun, TmuxRunResult } from '../../../src/main/sources/tmux/spawn.js';
 import { registerTerminalIpc } from '../../../src/main/terminal/ipc.js';
 import { sendSessionKey } from '../../../src/main/terminal/pane.js';
-import { NAV_KEYS, type NavKey } from '../../../src/shared/terminal.js';
+import { isNavKey, NAV_KEYS, type NavKey } from '../../../src/shared/terminal.js';
 
 const ok = (stdout: string): TmuxRunResult => ({ failure: null, stdout, stderr: '' });
 const failed = (stderr: string): TmuxRunResult => ({
@@ -85,10 +85,10 @@ describe('a navigation key reaches the pane as a real key, never as its letters'
   });
 
   /**
-   * EVERY ONE OF THE EIGHT, AND THE COUNT IS ASSERTED INSIDE THE LOOP'S OWN
+   * EVERY ONE OF THE NINE, AND THE COUNT IS ASSERTED INSIDE THE LOOP'S OWN
    * EXPRESSION -- a sweep that finds nothing passes silently otherwise.
    */
-  it('spells all eight the one way tmux spells them, and no other way', async () => {
+  it('spells all nine the one way tmux spells them, and no other way', async () => {
     const names: string[] = [];
     for (const nav of NAV_KEYS) {
       const { run, argvs } = runner(atlasIsListed);
@@ -98,8 +98,18 @@ describe('a navigation key reaches the pane as a real key, never as its letters'
       expect(argv.slice(0, 4)).toEqual(['send-keys', '-t', PANE, '--']);
       names.push(argv[4] ?? '');
     }
-    expect(names).toHaveLength(8);
-    expect(names).toEqual(['Up', 'Down', 'Left', 'Right', 'Home', 'End', 'PageUp', 'PageDown']);
+    expect(names).toHaveLength(9);
+    expect(names).toEqual([
+      'Up',
+      'Down',
+      'Left',
+      'Right',
+      'Home',
+      'End',
+      'PageUp',
+      'PageDown',
+      'DC',
+    ]);
     expect(names.some((name) => name.startsWith('-'))).toBe(false);
   });
 
@@ -119,7 +129,15 @@ describe('a navigation key reaches the pane as a real key, never as its letters'
   });
 });
 
-describe('the bridge cannot name a tmux key, only index a table of eight', () => {
+describe('delete is a navigation key', () => {
+  it('isNavKey accepts delete and the set has nine members', () => {
+    expect(isNavKey('delete')).toBe(true);
+    expect(NAV_KEYS).toHaveLength(9);
+    expect(NAV_KEYS.filter((key) => isNavKey(key))).toHaveLength(9);
+  });
+});
+
+describe('the bridge cannot name a tmux key, only index a table of nine', () => {
   function handler() {
     const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
     const { run, argvs } = runner(atlasIsListed);
@@ -173,5 +191,11 @@ describe('the builder refuses a nav key it has no constant for', () => {
     // the alternative to a refusal is an argv with a hole in it.
     const notANavKey: string = 'Up';
     expect(() => sendNavArgv('vam-atlas-a1b2c3', notANavKey as NavKey)).toThrow(/navigation/i);
+  });
+
+  it('names the count as nine in the refusal, and echoes the offending key', () => {
+    expect(() => sendNavArgv('vam-atlas-a1b2c3', 'Up' as NavKey)).toThrow(
+      /`Up` is not one of the nine navigation keys/,
+    );
   });
 });

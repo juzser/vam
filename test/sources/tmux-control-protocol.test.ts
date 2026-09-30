@@ -95,6 +95,12 @@ describe('encodeControlLine', () => {
     );
   });
 
+  it('encodes the nav argv for `delete` exactly like Up/Home, not null', () => {
+    expect(encodeControlLine(sendNavArgv('vam-a1b2c3', 'delete'))?.line).toBe(
+      'send-keys -t =vam-a1b2c3: -- DC',
+    );
+  });
+
   it('encodes each of the eight navigation keys untouched, `--` and all', () => {
     // vam/terminal-arrows. `sendNavArgv`'s own shape -- `send-keys -t <target>
     // -- <Name>` -- rather than the six-token `-l --` shape above, so this

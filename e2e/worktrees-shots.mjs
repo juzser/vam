@@ -296,6 +296,13 @@ await page.addInitScript(install, {
 await page.goto(`${origin}/`, { waitUntil: 'networkidle' });
 await page.waitForSelector('[data-session-row]', { timeout: 10_000 });
 
+// `hideWorktrees` ships ON (the Worktrees section is not drawn), so every state
+// below starts by turning "Show worktrees" on from the filter popover.
+await page.locator('[data-filter-toggle]').click();
+await page.waitForSelector('[data-origin-toggle="worktrees"]', { timeout: 5_000 });
+await page.locator('[data-origin-toggle="worktrees"]').click();
+await page.locator('[data-filter-toggle]').click();
+
 // ---------------------------------------------------------------------------
 // STATE 1: the sidebar, "Worktrees" already open, THE SHIPPED DEFAULT -- one
 // plain (vam-made, unlocked) row, and a quiet note for the two phase-2b
@@ -570,7 +577,11 @@ await externalGroup.waitFor({ state: 'detached', timeout: 5_000 });
 // ---------------------------------------------------------------------------
 // STATE 2: the create form, open, with a name typed in.
 // ---------------------------------------------------------------------------
-await page.locator(`[data-worktrees-add="${PROJECT_ID}"]`).click();
+// The header `+` is gone: the create form opens from the project menu.
+await page.locator(`[data-project-menu="${PROJECT_ID}"]`).click();
+await page
+  .locator(`[data-project-menu-panel="${PROJECT_ID}"] [data-project-menu-item="new-worktree"]`)
+  .click();
 await page.waitForSelector('[data-worktrees-create-form]', { timeout: 5_000 });
 await page.fill('[data-worktrees-create-name]', 'fix-transcript-paging');
 check(

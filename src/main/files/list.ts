@@ -47,7 +47,7 @@
  * bad branch must not blank the whole picture.
  */
 
-import type { FileListResult } from './types.js';
+import type { FileDirEntry, FileListResult } from './types.js';
 
 export type { FileListResult };
 
@@ -117,4 +117,25 @@ export async function listFiles(
 
   await walk(root);
   return { root, files, truncated };
+}
+
+/**
+ * One level of `root/dir` (`dir` relative, '' for the root itself): files and
+ * directories sorted by name, each with a `kind`. Directories are listed but
+ * never descended into (node_modules included), and a symlink is neither
+ * `isDirectory()` nor `isFile()`, so it drops out exactly as in `listFiles`.
+ * The caller is responsible for authorising `dir` first; a read error throws.
+ */
+export async function listDirectory(
+  root: string,
+  dir: string,
+  readDir: ReadDir,
+): Promise<readonly FileDirEntry[]> {
+  const entries = await readDir(dir === '' ? root : `${root}/${dir}`);
+  const out: FileDirEntry[] = [];
+  for (const entry of [...entries].sort((a, b) => a.name.localeCompare(b.name))) {
+    if (entry.isDirectory()) out.push({ name: entry.name, kind: 'dir' });
+    else if (entry.isFile()) out.push({ name: entry.name, kind: 'file' });
+  }
+  return out;
 }

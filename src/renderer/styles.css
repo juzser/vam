@@ -2896,10 +2896,23 @@ html {
 [data-phone-shell] [data-phone-toolbar] [data-new-project],
 [data-phone-shell] [data-phone-toolbar] [data-filter-toggle],
 [data-phone-shell] [data-phone-toolbar] [data-group-toggle],
-[data-phone-shell] [data-phone-toolbar] [data-usage-toggle],
-[data-phone-shell] [data-phone-toolbar] [data-more-toggle],
+[data-phone-shell] [data-phone-toolbar] [data-remote-toggle],
+[data-phone-shell] [data-phone-toolbar] [data-theme-toggle],
 [data-phone-shell] [data-phone-toolbar] [data-search-toggle],
 [data-phone-shell] [data-phone-toolbar] [data-search-cancel] {
+  min-height: 30px;
+  min-width: 30px;
+}
+
+/* THE SECOND NAMED EXCEPTION: the keystroke strip's chips. Each button is a
+ * 30px painted chip inside a `vam-tap` hit box, and the 44px floor drew ~7px
+ * of invisible padding a side on top of the nav's own `gap-1` (about 18px
+ * between painted chips, and the first chip inset 7px from the pill's left
+ * edge below it). Flooring the strip at 30 makes hit and paint one box. Same
+ * enumerated form as the toolbar exemption above, scoped by `[data-key-strip]`
+ * (an attribute plus two classes' worth of specificity beats the floor).
+ * Still clear of WCAG 2.2 SC 2.5.8's 24px minimum. */
+[data-phone-shell] [data-key-strip] .vam-tap {
   min-height: 30px;
   min-width: 30px;
 }
@@ -3073,9 +3086,10 @@ html {
  * the top-right of the row it sat INVISIBLE over the row's own tap area and a
  * tap meant to open a session could close it instead. `display: none` is what
  * makes it absent rather than merely unseen: gone from hit testing and gone
- * from the accessibility tree. Closing a session has a deliberate, visible
- * route on the session screen's app bar instead -- `data-phone-close`, which
- * is why this rule has to exempt it: it carries a `close ...` label too.
+ * from the accessibility tree. Closing a session has a deliberate route
+ * instead -- the trash a right-to-left swipe reveals on the row,
+ * `data-swipe-trash`, which is why this rule has to exempt it: it carries a
+ * `close session` label too.
  *
  * MATCHED AGAINST THE REAL TREE, not written from memory of it. The first
  * version of this rule read `[data-phone-shell] [data-session-row] button[...]`
@@ -3084,7 +3098,7 @@ html {
  * rule's TEXT stayed green over that for a whole release; only a computed
  * style on the rendered node, or a hit test at 390px, can tell a rule that
  * applies from a rule that was merely typed. Both now exist. */
-[data-phone-shell] button[aria-label^='close ']:not([data-phone-close]) {
+[data-phone-shell] button[aria-label^='close ']:not([data-swipe-trash]) {
   display: none;
 }
 

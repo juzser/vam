@@ -97,6 +97,7 @@ import {
   PALETTE_TEMPLATES,
   templatePalette,
 } from '../prefs/palette-templates.js';
+import { DEFAULT_PANES } from '../prefs/panes.js';
 import {
   clearPalette,
   clearPaletteColor,
@@ -180,6 +181,11 @@ import { desktopUpdateApi, UpdatePanel } from './UpdatePanel.js';
 
 export type SettingsOverlayProps = {
   readonly prefs: Prefs;
+  /**
+   * The main sidebar's rendered width, so the wide section rail is exactly as
+   * wide. Absent falls back to the sidebar's own default.
+   */
+  readonly sidebarWidth?: number;
   /**
    * The theme ON SCREEN, resolved — which is the theme whose colours this
    * overlay edits. Passed in rather than derived from `prefs.theme` for the
@@ -365,6 +371,7 @@ export function SettingsOverlay({
   initialSection,
   declines = {},
   projects = [],
+  sidebarWidth,
 }: SettingsOverlayProps) {
   const closeButton = useRef<HTMLButtonElement | null>(null);
   const dialog = useRef<HTMLDivElement | null>(null);
@@ -745,6 +752,7 @@ export function SettingsOverlay({
             control drawn twice. */}
         {wide && !phone ? (
           <SectionRail
+            width={sidebarWidth}
             section={section}
             visibleSections={visibleSections}
             onGo={go}
@@ -1607,11 +1615,7 @@ export function SettingsOverlay({
                     // second signal left to thread down for GithubPanel's own
                     // "stop polling a card nobody sees" rule.
                     active={true}
-                    prefs={prefs}
-                    onChange={onChange}
-                    projects={projects}
                     copyText={window.api?.clipboard?.writeText}
-                    chooseDirectory={window.api?.dialog?.chooseDirectory}
                     openExternal={window.api?.link?.open}
                   />
                   {/* GitLab, next to GitHub -- operator: "GitLab now via glab,
@@ -1869,17 +1873,18 @@ function navItemProps(props: NavProps, id: SectionId) {
  * desktop or tablet width still reads this as `wide`, and that reader gets no
  * second chance either.
  */
-function SectionRail(props: NavProps & { readonly onClose: () => void }) {
+function SectionRail(props: NavProps & { readonly onClose: () => void; readonly width?: number }) {
   return (
     <nav
       data-settings-nav
-      className="hidden w-[168px] flex-none flex-col border-line border-r bg-sidebar md:flex"
+      className="hidden flex-none flex-col border-line border-r bg-sidebar md:flex"
+      style={{ width: props.width ?? DEFAULT_PANES.sidebar }}
     >
       <button
         type="button"
         data-settings-back
         onClick={props.onClose}
-        className={`flex h-[44px] w-full flex-none cursor-pointer items-center gap-2 border-line border-b px-3 text-control text-ink-dim hover:text-ink ${FOCUS_RING}`}
+        className={`flex h-[44px] w-full flex-none cursor-pointer items-center gap-2 border-line border-b px-3 text-body text-ink-dim hover:text-ink ${FOCUS_RING}`}
       >
         <ArrowLeft size={14} strokeWidth={1.8} aria-hidden="true" />
         {t('settings.nav.back')}
@@ -1895,7 +1900,7 @@ function SectionRail(props: NavProps & { readonly onClose: () => void }) {
               // author-drawn state needs — so a 2px rail in `ink` (14.4:1)
               // carries the selection. The unselected items reserve the same
               // 2px in `transparent`, or the label jumps when selection moves.
-              className={`flex h-[28px] w-full cursor-pointer items-center gap-2 rounded-[7px] border-l-2 pr-2 pl-[6px] text-left text-control ${FOCUS_RING} ${
+              className={`flex h-[28px] w-full cursor-pointer items-center gap-2 rounded-[7px] border-l-2 pr-2 pl-[6px] text-left text-body ${FOCUS_RING} ${
                 current
                   ? 'border-ink bg-segment-on font-medium text-ink'
                   : 'border-transparent text-ink-dim hover:text-ink'

@@ -76,12 +76,10 @@ import {
   ChevronsUp,
   Circle,
   CircleSlash,
-  ClipboardPaste,
   FileText,
   GitPullRequest,
   Hand,
   Image as ImageIcon,
-  KeyboardOff,
   ListChecks,
   LoaderCircle,
   MessageSquare,
@@ -195,6 +193,7 @@ import {
   GettingStarted,
   type GettingStartedProps,
   IconFrame,
+  START_SESSION_SHORTCUT_ROWS,
   StartShortcuts,
   TERMINAL_ONLY_SHORTCUT_ROWS,
 } from './GettingStarted.js';
@@ -210,6 +209,7 @@ import { type OutActionResult, OutActionsProvider } from './out-actions.js';
 import { OUT_MARKDOWN, OUT_URL_TRANSFORM } from './out-markdown.js';
 import { newestSet, toolUseOf } from './question-set.js';
 import { sendKeyRemote } from './send-key-remote.js';
+import { registerStartSession } from './start-session-registry.js';
 import { GLYPH_PX, MARK_LANE_PX } from './status-mark.js';
 import { hasContentAbove, hasContentBelow, isAtBottom, shouldStick } from './stick-to-bottom.js';
 import { drawsComposer, narrowsAsProse, TABS, type Tab, visibleTabs } from './tabs.js';
@@ -1655,6 +1655,42 @@ const PR_STATE_INK: Record<PullRequest['state'], string> = {
 };
 
 /**
+ * The session directory's git remote as `owner/name`, through the existing
+ * `window.api.github.projectRemotes` bridge (no new channel). `undefined`
+ * while unasked, when there is no remote, and where the bridge is absent
+ * (browser, phone) -- the caller falls back to the project name.
+ */
+function useSessionRemote(projectId: string | undefined): string | undefined {
+  const [found, setFound] = useState<{ id: string; repo: string } | null>(null);
+  useEffect(() => {
+    const api = (
+      globalThis.window as
+        | {
+            api?: {
+              github?: {
+                projectRemotes?: (id: string) => Promise<readonly { name: string; repo: string }[]>;
+              };
+            };
+          }
+        | undefined
+    )?.api?.github;
+    if (projectId === undefined || api?.projectRemotes === undefined) return;
+    let live = true;
+    void api
+      .projectRemotes(projectId)
+      .then((remotes) => {
+        const pick = remotes.find((r) => r.name === 'origin') ?? remotes[0];
+        if (live) setFound(pick === undefined ? null : { id: projectId, repo: pick.repo });
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [projectId]);
+  return found !== null && found.id === projectId ? found.repo : undefined;
+}
+
+/**
  * The PRs tab's content: what GitHub said about this session's branch, or why
  * vam could not ask.
  *
@@ -1672,6 +1708,7 @@ const PR_STATE_INK: Record<PullRequest['state'], string> = {
 function PullRequestsTab({
   pullRequests,
   repo,
+  projectId,
   sessionId,
   bridge,
   reserveCornerHeight = 0,
@@ -1679,6 +1716,8 @@ function PullRequestsTab({
 }: {
   readonly pullRequests: PullRequestList | undefined;
   readonly repo?: DetailPanelProps['prRepo'];
+  /** The project whose git remote names the repository when nothing is overridden. */
+  readonly projectId?: string;
   /**
    * WHOSE pull requests these are, for the action channel. Main turns this
    * into the directory to act in -- the renderer never names one, which is
@@ -1801,9 +1840,12 @@ function PullRequestsTab({
    * a NAME: the full path is on `title`, where it settles which of two
    * checkouts this is without spending the row on it.
    */
+  const remoteName = useSessionRemote(
+    repo !== undefined && repo.directory === null ? projectId : undefined,
+  );
   const repoName =
     repo?.directory === null || repo?.directory === undefined
-      ? (repo?.projectName ?? t('prs.repo.session'))
+      ? (remoteName ?? repo?.projectName ?? t('prs.repo.session'))
       : (repo.directory.replace(/\/+$/, '').split('/').pop() ?? repo.directory);
   const heading =
     repo === undefined ? null : (
@@ -3365,6 +3407,7 @@ function PaneReady({ provider }: { readonly provider: ProviderId | null }) {
  * control to make it would be naming a fact this screen cannot act on.
  */
 function StartSession({
+  sessionId,
   paneName,
   defaultProvider,
   agentPermissions,
@@ -3374,6 +3417,8 @@ function StartSession({
   onShowTerminal,
   onAnswerTrust,
 }: {
+  /** Keys the `startSession` chord's registry entry to this pane's session. */
+  readonly sessionId: string;
   readonly paneName: string;
   readonly defaultProvider: ProviderId | undefined;
   /**
@@ -3405,6 +3450,13 @@ function StartSession({
     () => agentPermissions ?? 'manual',
   );
   const starting = startingPane ?? null;
+  const startBlocked = starting !== null && !starting.timedOut;
+  // The `startSession` chord starts with what is ON SCREEN; a wait already in
+  // flight blocks it the way it disables the button.
+  useEffect(() => {
+    if (onStart === undefined || startBlocked) return;
+    return registerStartSession(sessionId, () => onStart(chosen, chosenPermission));
+  }, [sessionId, onStart, startBlocked, chosen, chosenPermission]);
   return (
     <div
       data-start-session
@@ -3431,6 +3483,9 @@ function StartSession({
         </p>
       </div>
       {onStart !== undefined && (
+        <StartShortcuts testId="start-session-shortcuts" rows={START_SESSION_SHORTCUT_ROWS} />
+      )}
+      {onStart !== undefined && (
         <ProviderStartControls
           chosen={chosen}
           onChosenChange={setChosen}
@@ -3441,7 +3496,7 @@ function StartSession({
           // that already admits vam has nothing further to wait on
           // (`StartTimeoutHint`'s own header) must not go on disabling the
           // operator's own retry, whatever path got it there.
-          disabled={starting !== null && !starting.timedOut}
+          disabled={startBlocked}
           starting={
             starting?.kind === 'start'
               ? {
@@ -4460,10 +4515,10 @@ function modelSwitchNote(result: ModelSwitchResult, title: string, choice: strin
  * exactly them, the same report the Terminal tab's own keyboard fix answers.
  * Left/Right are not here: nothing on this strip is a line of text to move a
  * caret through, and every picker this strip exists for walks its rows with
- * Up/Down alone. THEY ARE NOT SERVED REMOTELY -- `paneKeyToRemoteKeyId`
- * (`shared/remote-key.ts`) answers `null` for both, Orca's own phone layout
- * carries neither, and the strip filters them out of its own render wherever
- * `hasLocalTerminalChannel` is false (see the render site).
+ * Up/Down alone. THEY ARE SERVED REMOTELY -- `paneKeyToRemoteKeyId`
+ * (`shared/remote-key.ts`) answers `arrow-up`/`arrow-down` for them, so the
+ * render site's `hasLocalTerminalChannel` filter (which drops only keys with
+ * no remote id) keeps both on a phone.
  *
  * Escape and Enter carry a visible caption naming a different destination
  * than their textarea siblings already claim (`Esc → sidebar`, the send
@@ -4552,6 +4607,14 @@ const KEY_STRIP: readonly {
     ariaLabel: 'press Backspace in the session',
   },
   {
+    id: 'delete',
+    key: { kind: 'nav', nav: 'delete' },
+    chord: 'Delete',
+    suffix: '',
+    label: PHONE_KEY_LABELS.delete,
+    ariaLabel: 'press Delete in the session',
+  },
+  {
     id: 'up',
     key: { kind: 'nav', nav: 'up' },
     chord: 'ArrowUp',
@@ -4567,7 +4630,35 @@ const KEY_STRIP: readonly {
     label: PHONE_KEY_LABELS.down,
     ariaLabel: 'press the down arrow in the session',
   },
+  {
+    id: 'left',
+    key: { kind: 'nav', nav: 'left' },
+    chord: 'ArrowLeft',
+    suffix: '',
+    label: PHONE_KEY_LABELS.left,
+    ariaLabel: 'press the left arrow in the session',
+  },
+  {
+    id: 'right',
+    key: { kind: 'nav', nav: 'right' },
+    chord: 'ArrowRight',
+    suffix: '',
+    label: PHONE_KEY_LABELS.right,
+    ariaLabel: 'press the right arrow in the session',
+  },
+  ...(['c', 'd', 'l', 'z', 'r', 'a', 'e', 'w', 'u'] as const).map((letter) => ({
+    id: `ctrl-${letter}` as const,
+    key: { kind: 'control', letter } as const,
+    chord: `Ctrl-${letter.toUpperCase()}`,
+    suffix: '',
+    label: PHONE_KEY_LABELS[`ctrl-${letter}`],
+    ariaLabel: `press Control-${letter.toUpperCase()} in the session`,
+  })),
 ];
+
+/** The strip chips' shared text-pill skin (`data-tap-pill`, `styles.css`). */
+const STRIP_PILL =
+  'flex h-[30px] min-w-[30px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-line-strong bg-card px-1 font-mono text-control text-ink-quiet active:bg-line-strong';
 
 /** The strip button's plain-text caption -- what `sendKey` reports in the
  *  shared "sent"/"sending…" banner, where a component has no home. Read off
@@ -6917,9 +7008,11 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
     // channel than the desktop's own `terminal.send`. It only ever carries a
     // SINGLE stroke (every caller of this function passes one -- `sendKey`,
     // `cycleMode`, the composer's own Escape -- `pressPaneKey`'s own doc),
-    // and only one of the six allowlisted ids `paneKeyToRemoteKeyId` answers
-    // for (`shared/remote-key.ts`); `up`/`down` and any multi-stroke run
-    // answer `null` and fall through to the same refusal the desktop build
+    // and only one of the twenty allowlisted ids `paneKeyToRemoteKeyId` answers
+    // for (`shared/remote-key.ts`: the four arrows, delete, Ctrl c/d/l/z/r/a/e/w/u,
+    // escape, back-tab, backspace, enter, space, tab); Home/End/PageUp/PageDown,
+    // an unnamed Ctrl letter, shift-Enter, any other text and any multi-stroke
+    // run answer `null` and fall through to the same refusal the desktop build
     // without `window.api` has always shown.
     const remoteId =
       send === undefined && strokes.length === 1 && strokes[0] !== undefined
@@ -9257,21 +9350,13 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                nothing to notice. `undefined` in the browser build, where
                the tab says so instead of taking keys it cannot deliver. */
             send={globalThis.window?.api?.terminal?.send}
-            /* THE BRANCH, for the rule under the screen. Passed from here
-               rather than read inside the tab for the reason the three
-               members above are: this panel is where the session is in
-               scope, and a fact reached for invisibly is a fact a later
-               edit drops with nothing to notice. `null` when there is no
-               session and when the source cannot say -- neither renderer
-               draws anything for either, and their `branch` prop says why
-               that is not a dash. */
-            branch={entry?.session.branch ?? null}
           />
         ) : current === 'Agents' ? (
           <AgentsTab agents={entry?.session.agents} sessionId={entry?.session.id ?? ''} />
         ) : current === 'PRs' ? (
           <PullRequestsTab
             pullRequests={entry?.session.pullRequests}
+            projectId={entry?.project.id}
             repo={
               prRepo === undefined
                 ? undefined
@@ -9310,6 +9395,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
           <PaneReady provider={runningProvider} />
         ) : entry !== null && entry.session.status === 'unstarted' ? (
           <StartSession
+            sessionId={entry.session.id}
             paneName={entry.session.pane ?? entry.session.title}
             defaultProvider={defaultProvider}
             agentPermissions={agentPermissions}
@@ -10268,114 +10354,36 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
               // overflow at 360px.
               className="vam-no-scrollbar flex flex-none items-center gap-1 overflow-x-auto overscroll-x-contain"
             >
-              {/* THE KEYS THEMSELVES COME FIRST NOW (the composer follow-up:
-                  "put the keys first, then keyboard-toggle, paste and »" --
-                  Esc, the most-used key, must be reachable with no overflow
-                  at 360px, and the only position that guarantees it
-                  regardless of screen width is the row's own FIRST child,
-                  visible at `scrollLeft: 0` before any scroll happens at
-                  all. `hasLocalTerminalChannel`/`paneKeyToRemoteKeyId`
-                  filter which of the eight actually reach a channel, exactly
-                  as before -- only the ORDER moved, not the filter. */}
-              {(hasLocalTerminalChannel
-                ? KEY_STRIP
-                : KEY_STRIP.filter((item) => paneKeyToRemoteKeyId(item.key) !== null)
-              ).map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  data-key-strip-key={item.id}
-                  aria-label={item.ariaLabel}
-                  onClick={() => void sendKey(item)}
-                  className="vam-tap flex flex-none items-center justify-center"
-                >
-                  <span
-                    data-tap-skin
-                    // `data-tap-pill` (`styles.css`): the shared
-                    // `.vam-phone .vam-tap > [data-tap-skin]` rule pins every
-                    // skin to a 30x30 SQUARE, which is correct for the icon
-                    // skins it was written for and wrong for a skin holding
-                    // TEXT. This opts out of the square into a
-                    // width-to-content pill, hit still 44, paint still 30
-                    // tall. `px-1` (4px), not `px-1.5` (6px): the operator's
-                    // own follow-up ("compact chips sized to their short
-                    // labels") -- `item.label` below is at most five
-                    // characters (`⇧Tab`, `Space`) now rather than a
-                    // `chordSymbols` caption plus a " → agent" suffix, so the
-                    // chip needs less breathing room to read cleanly, and the
-                    // narrower padding is what lets more of the eight fit
-                    // before the row's own edge.
-                    data-tap-pill
-                    className="flex h-[30px] min-w-[30px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-line-strong bg-card px-1 font-mono text-control text-ink-quiet active:bg-line-strong"
-                  >
-                    {phoneKeyLabelNodes(item.label)}
-                  </span>
-                </button>
-              ))}
-              {/* THE KEYBOARD-TOGGLE, Orca's own leading icon and shown only
-                  while there is a keyboard to hide (`composerFocused`, above
-                  -- real DOM focus, not `composing`). `inputRef.current
-                  ?.blur()` is the exact release the composer's own Escape/
-                  `Mod-[` handler already uses a few lines down; this is a
-                  second door to the same act, for a device with no Escape
-                  key of its own. MOVED AFTER THE KEYS (the composer follow-up):
-                  this and the three icons below it are reached-for less
-                  often than any of the eight keys, so they now trail rather
-                  than lead the row a drag has to cross to reach them. */}
-              {composerFocused && (
-                <button
-                  type="button"
-                  data-key-strip-hide-keyboard
-                  aria-label="hide the keyboard"
-                  onClick={() => inputRef.current?.blur()}
-                  className="vam-tap flex flex-none items-center justify-center"
-                >
-                  <span
-                    data-tap-skin
-                    className="flex h-[30px] w-[30px] items-center justify-center rounded-[8px] border border-line-strong bg-card text-ink-quiet active:bg-line-strong"
-                  >
-                    <KeyboardOff size={14} strokeWidth={1.7} />
-                  </span>
-                </button>
-              )}
-              {/* THE SCREEN ICON: Orca's own terminal-view shortcut, offered
-                  only where there IS a terminal view to jump to
-                  (`terminal !== false` -- the exact test `visibleTabs` itself
-                  applies to decide whether `PhoneShell`'s own view row draws
-                  one at all). On the phone build this composer strip
-                  actually ships to -- served remotely, where `terminal`
-                  reads `false` by design (`UNSERVED.terminal`,
-                  `remote/server.ts`) -- there is no Terminal tab anywhere on
-                  this screen, so this icon is honestly absent rather than a
-                  button that opens nowhere; a source that DOES carry a
-                  terminal (a desktop Electron window narrow enough to draw
-                  the phone shell) still gets it. */}
-              {terminal !== false && props.onRequestTab !== undefined && (
-                <button
-                  type="button"
-                  data-key-strip-screen
-                  aria-label="show the terminal view"
-                  onClick={() => props.onRequestTab?.('Terminal')}
-                  className="vam-tap flex flex-none items-center justify-center"
-                >
-                  <span
-                    data-tap-skin
-                    className="flex h-[30px] w-[30px] items-center justify-center rounded-[8px] border border-line-strong bg-card text-ink-quiet active:bg-line-strong"
-                  >
-                    <SquareTerminal size={14} strokeWidth={1.7} />
-                  </span>
-                </button>
-              )}
+              {/* EVERY CHIP IS A TEXT PILL (item 21), in the operator's order:
+                  Keyboard, Paste, the keys, then Terminal and More. Keyboard
+                  is always drawn and toggles the composer's own focus
+                  (`inputRef.current` focus/blur -- the same release the
+                  composer's Escape/`Mod-[` handler uses), so a device with
+                  no keyboard up can raise one. Only Backspace keeps a glyph.
+                  The pill skin is `data-tap-pill` (`styles.css`). */}
+              <button
+                type="button"
+                data-key-strip-keyboard
+                aria-label={composerFocused ? 'hide the keyboard' : 'show the keyboard'}
+                aria-pressed={composerFocused}
+                // A press would blur the composer before the click, so the
+                // click would read `composerFocused` false and re-focus.
+                // Cancelling mousedown keeps focus put; click stays intact.
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() =>
+                  composerFocused ? inputRef.current?.blur() : inputRef.current?.focus()
+                }
+                className="vam-tap flex flex-none items-center justify-center"
+              >
+                <span data-tap-skin data-tap-pill className={STRIP_PILL}>
+                  Keyboard
+                </span>
+              </button>
               {/* PASTE: reads the phone's OWN clipboard and types the result
                   through the EXISTING prompt path (`onPasteFromClipboard`,
                   above) -- never through `sendKey`/the remote route, which
                   stays allowlist-only. Disabled, with its `Note` explaining
-                  why, wherever the read cannot work: no
-                  `navigator.clipboard.readText` at all (`clipboardReadAvailable`),
-                  or the last attempt was denied (`pasteDenied`) -- the
-                  operator's own instruction: "if clipboard read is
-                  unavailable or denied, disable the key and explain why in
-                  its tooltip or title". */}
+                  why, wherever the read cannot work. */}
               <Note
                 text={
                   !clipboardReadAvailable
@@ -10393,22 +10401,50 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                   onClick={() => void onPasteFromClipboard()}
                   className="vam-tap flex flex-none items-center justify-center disabled:opacity-40"
                 >
-                  <span
-                    data-tap-skin
-                    className="flex h-[30px] w-[30px] items-center justify-center rounded-[8px] border border-line-strong bg-card text-ink-quiet active:bg-line-strong"
-                  >
-                    <ClipboardPaste size={14} strokeWidth={1.7} />
+                  <span data-tap-skin data-tap-pill className={STRIP_PILL}>
+                    Paste
                   </span>
                 </button>
               </Note>
-              {/* THE "»" OVERFLOW: this row already scrolls
-                  (`overflow-x-auto`, this nav's own comment above) --
-                  Up/Down, vam's own addition over Orca's six, sit at its
-                  far end. This is a shortcut TO that end, a `scrollTo`
-                  rather than a second, hidden state to keep in step with
-                  the real one: nothing here is ever hidden that a drag
-                  could not already reach. TRAILS EVERYTHING NOW, its own
-                  natural place once the keys it points past lead the row. */}
+              {/* THE KEYS: `hasLocalTerminalChannel`/`paneKeyToRemoteKeyId`
+                  filter which reach a channel; every listed key has a remote
+                  id, so on a phone none is dropped. */}
+              {(hasLocalTerminalChannel
+                ? KEY_STRIP
+                : KEY_STRIP.filter((item) => paneKeyToRemoteKeyId(item.key) !== null)
+              ).map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  data-key-strip-key={item.id}
+                  aria-label={item.ariaLabel}
+                  onClick={() => void sendKey(item)}
+                  className="vam-tap flex flex-none items-center justify-center"
+                >
+                  <span data-tap-skin data-tap-pill className={STRIP_PILL}>
+                    {phoneKeyLabelNodes(item.label)}
+                  </span>
+                </button>
+              ))}
+              {/* THE TERMINAL VIEW: offered only where there IS one to jump
+                  to (`terminal !== false`, the test `visibleTabs` applies);
+                  on the remote phone `terminal` reads `false` by design, so
+                  it is honestly absent there. */}
+              {terminal !== false && props.onRequestTab !== undefined && (
+                <button
+                  type="button"
+                  data-key-strip-screen
+                  aria-label="show the terminal view"
+                  onClick={() => props.onRequestTab?.('Terminal')}
+                  className="vam-tap flex flex-none items-center justify-center"
+                >
+                  <span data-tap-skin data-tap-pill className={STRIP_PILL}>
+                    Terminal
+                  </span>
+                </button>
+              )}
+              {/* MORE: a `scrollTo` the row's end, not a second hidden state
+                  -- nothing here is hidden that a drag could not reach. */}
               <button
                 type="button"
                 data-key-strip-more
@@ -10421,11 +10457,8 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                 }
                 className="vam-tap flex flex-none items-center justify-center"
               >
-                <span
-                  data-tap-skin
-                  className="flex h-[30px] w-[30px] items-center justify-center rounded-[8px] border border-line-strong bg-card font-mono text-control text-ink-quiet active:bg-line-strong"
-                >
-                  »
+                <span data-tap-skin data-tap-pill className={STRIP_PILL}>
+                  More
                 </span>
               </button>
             </nav>
@@ -10913,8 +10946,11 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                    Desktop is unaffected: both classes are phone-only. */
                   className={[
                     'vam-no-scrollbar vam-tap min-w-0 flex-1 resize-none bg-transparent text-body text-ink outline-none placeholder:text-ink-faint',
+                    // `py-3` (12px a side) centres the one line in the 44px
+                    // box: with no vertical padding the text sat flush
+                    // against the pill's top border (item 19, measured).
                     phone
-                      ? 'overflow-x-auto overflow-y-hidden whitespace-nowrap'
+                      ? 'overflow-x-auto overflow-y-hidden whitespace-nowrap py-3'
                       : 'overflow-y-auto max-h-[120px]',
                   ].join(' ')}
                   aria-label="prompt to session"
@@ -12017,7 +12053,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                           the word it replaces. The whole name is one hover or
                           one Tab away, in the note and the accessible name. */}
                       <span data-model-label className="truncate">
-                        {recordedModel ?? 'model'}
+                        {running?.name ?? recordedModel ?? 'model'}
                       </span>
                       <ChevronDown size={11} strokeWidth={2} className="flex-none" />
                     </button>

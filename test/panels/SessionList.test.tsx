@@ -22,6 +22,12 @@ import {
   type SessionFilters,
 } from '../../src/renderer/domain/session-filter.js';
 import {
+  actionId,
+  bindingChords,
+  chordSymbols,
+  NO_BINDINGS,
+} from '../../src/renderer/keyboard/chords.js';
+import {
   BRANCH_TAIL_MAX_CHARS,
   FILTER_POPOVER_WIDTH,
   RESTORE_STRIP_VISIBLE_MS,
@@ -767,6 +773,7 @@ describe('SessionList projects header', () => {
         hideIdle: false,
         hideAgentWorktrees: true,
         hideExternalWorktrees: true,
+        hideWorktrees: false,
       },
     });
     expect(two.querySelector('[data-filter-badge]')?.textContent).toBe('1');
@@ -782,6 +789,7 @@ describe('SessionList projects header', () => {
         hideIdle: false,
         hideAgentWorktrees: true,
         hideExternalWorktrees: true,
+        hideWorktrees: false,
       },
     });
     expect(three.querySelector('[data-filter-badge]')?.textContent).toBe('2');
@@ -877,6 +885,7 @@ describe('SessionList filter popover', () => {
         hideIdle: false,
         hideAgentWorktrees: true,
         hideExternalWorktrees: true,
+        hideWorktrees: true,
       },
     ]);
   });
@@ -916,6 +925,7 @@ describe('SessionList filter popover', () => {
         hideIdle: false,
         hideAgentWorktrees: true,
         hideExternalWorktrees: true,
+        hideWorktrees: false,
       },
     });
     expect(two.querySelector('[data-filter-badge]')?.textContent).toBe('2');
@@ -955,6 +965,7 @@ describe('SessionList filter popover', () => {
         hideIdle: false,
         hideAgentWorktrees: true,
         hideExternalWorktrees: true,
+        hideWorktrees: true,
       },
     ]);
   });
@@ -994,6 +1005,7 @@ describe('SessionList filter popover', () => {
         hideIdle: false,
         hideAgentWorktrees: true,
         hideExternalWorktrees: true,
+        hideWorktrees: true,
       },
     ]);
   });
@@ -1046,6 +1058,7 @@ describe('SessionList filter popover', () => {
         hideIdle: false,
         hideAgentWorktrees: false,
         hideExternalWorktrees: true,
+        hideWorktrees: true,
       },
     ]);
   });
@@ -1086,6 +1099,7 @@ describe('SessionList filter popover', () => {
         hideIdle: false,
         hideAgentWorktrees: true,
         hideExternalWorktrees: false,
+        hideWorktrees: true,
       },
     ]);
   });
@@ -1626,6 +1640,16 @@ describe('SessionList new-project control', () => {
     expect(add?.getAttribute('title')).toBeNull();
   });
 
+  it('shows the newProject chord on the header `+` tooltip', () => {
+    const { container } = mount(twoProjects());
+    const add = container.querySelector<HTMLButtonElement>('[data-new-project]') as HTMLElement;
+    fireEvent.focus(add);
+    const text = screen.getByRole('tooltip').textContent ?? '';
+    const keys = bindingChords(NO_BINDINGS, actionId({ kind: 'newProject' }));
+    expect(keys.length).toBeGreaterThan(0);
+    for (const chord of keys) expect(text).toContain(chordSymbols(chord));
+  });
+
   it('names the per-project add for what it does, and no longer calls it a placeholder', () => {
     const entries = twoProjects();
     const { container } = mountWith(entries, { focusedSessionId: 'b1' });
@@ -2119,5 +2143,22 @@ describe('A15.3: the restore strip shows for a while, then goes — reachably', 
       <SessionList {...baseProps(entries)} hiddenProjects={[]} filterMenuOpen />,
     );
     expect(container.querySelector('[data-filter-hidden-projects]')).toBeNull();
+  });
+
+  it('the stats button opens the stats popover and does not call onStats', async () => {
+    const onStats = vi.fn();
+    (window as unknown as { api: unknown }).api = {
+      stats: { get: vi.fn().mockResolvedValue({ kind: 'error', message: 'x' }) },
+    };
+    try {
+      const { container } = render(<SessionList {...baseProps(entries)} onStats={onStats} />);
+      await act(async () => {
+        fireEvent.click(screen.getByLabelText('stats'));
+      });
+      expect(container.querySelector('[data-stats-popover]')).not.toBeNull();
+      expect(onStats).not.toHaveBeenCalled();
+    } finally {
+      delete (window as unknown as { api?: unknown }).api;
+    }
   });
 });

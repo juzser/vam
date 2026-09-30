@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type FileTreeRow,
   fileTreeRows,
+  lazyTreeRows,
   parentRowIndex,
   resolveTreeKey,
 } from '../../src/renderer/panels/files-tree.js';
@@ -261,5 +262,40 @@ describe('parentRowIndex', () => {
   it('answers null at the top level, where there is no parent row', () => {
     expect(parentRowIndex(tree, 0)).toBeNull();
     expect(parentRowIndex(tree, 3)).toBeNull();
+  });
+});
+
+describe('building a tree from loaded directory levels', () => {
+  const dirs = new Map<string, readonly { name: string; kind: 'file' | 'dir' }[]>([
+    [
+      ROOT,
+      [
+        { name: 'z.txt', kind: 'file' },
+        { name: 'node_modules', kind: 'dir' },
+        { name: 'src', kind: 'dir' },
+      ],
+    ],
+    [`${ROOT}/src`, [{ name: 'index.ts', kind: 'file' }]],
+  ]);
+  const lazy = (expanded: readonly string[], loading: readonly string[] = []) =>
+    lazyTreeRows({ root: ROOT, dirs, loading: new Set(loading), expanded: new Set(expanded) });
+
+  it('draws only the root level while nothing is open, directories first', () => {
+    expect(shape(lazy([]))).toEqual(['node_modules@0/', 'src@0/', 'z.txt@0']);
+  });
+
+  it('draws an open directory’s loaded level under it', () => {
+    expect(shape(lazy([`${ROOT}/src`]))).toEqual([
+      'node_modules@0/',
+      'src@0/',
+      'index.ts@1',
+      'z.txt@0',
+    ]);
+  });
+
+  it('marks an open directory loading while its level has not arrived', () => {
+    const tree = lazy([`${ROOT}/node_modules`], [`${ROOT}/node_modules`]);
+    expect(tree.find((row) => row.name === 'node_modules')?.loading).toBe(true);
+    expect(tree.some((row) => row.depth === 1)).toBe(false);
   });
 });

@@ -50,8 +50,9 @@ function registerCachedRead<T>(
   let last: { at: number; snapshot: T } | null = null;
   let inFlight: Promise<T> | null = null;
 
-  ipcMain.handle(channel, async (): Promise<T> => {
-    if (last !== null && now() - last.at < MIN_READ_INTERVAL_MS) {
+  // `force` (Refresh) skips the floor only; it still joins a read in flight.
+  ipcMain.handle(channel, async (_event, force?: unknown): Promise<T> => {
+    if (force !== true && last !== null && now() - last.at < MIN_READ_INTERVAL_MS) {
       return last.snapshot;
     }
     // A read already running serves every caller that arrives during it. Two

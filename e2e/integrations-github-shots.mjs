@@ -2,11 +2,11 @@
  * Settings -> Integrations -> GitHub, painted in a real engine.
  *
  * Operator: "add an Integrations section in Settings, to connect a GitHub
- * account and select a repo." `GithubPanel.tsx` is unit-tested against
+ * account." `GithubPanel.tsx` is unit-tested against
  * happy-dom (`test/settings/github-panel.test.tsx`); what jsdom/happy-dom
  * cannot answer, and this file does, is whether the section actually PAINTS:
- * a real box for the status line, the Connect/Disconnect controls and the
- * repo picker, in both themes, logged out and logged in -- and, since the
+ * a real box for the status line and the Connect/Disconnect controls, in
+ * both themes, logged out and logged in -- and, since the
  * settings-views restructure gave this card the Skills-card shape (item F),
  * whether the status PILL paints its own three words honestly, "gh" and
  * all.
@@ -57,12 +57,8 @@ const browser = await chromium.launch();
  * incomplete stub, never `DemoCanvas` with its fixture projects. Verified:
  * the same page, with only `REMOTE_STUB` applied, shows "No sessions yet"
  * too. Every OTHER guard in this family draws a panel that does not need a
- * project (Remote, Update); this is the first one whose repo picker does, so
- * it can only ever observe the picker's own "no project" state here, never
- * "reading pull requests from {name}" -- that per-project rendering is
- * covered instead by `test/settings/github-panel.test.tsx`, which renders
- * `GithubPanel` directly with real project props, no `window.api` branch
- * involved at all. */
+ * project (Remote, Update), and so does this one now that the repo picker is
+ * gone from the card (vam-ux-1 task-7). */
 async function openIntegrations(status, theme) {
   const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
   page.on('pageerror', (err) => console.error('PAGE ERROR:', err));
@@ -114,8 +110,7 @@ for (const theme of ['dark', 'light']) {
         account: document.querySelector('[data-github-account]')?.textContent ?? null,
         connect: box('[data-github-connect]'),
         disconnect: box('[data-github-disconnect]'),
-        repoCurrent: box('[data-github-repo-current]'),
-        repoNoProject: box('[data-github-repo-noproject]'),
+        repoPicker: document.querySelector('[data-github-repo-current], [data-github-repo-noproject]') !== null,
         overflowX: port === null ? null : port.scrollWidth - port.clientWidth,
       };
     });
@@ -155,13 +150,9 @@ for (const theme of ['dark', 'light']) {
         `[${theme}/${name}] the settings scrollport overflows sideways by ${state.overflowX}px`,
       );
     }
-    // Never "reading pull requests from {name}" here -- see this file's own
-    // header note on why this harness cannot reach a project -- but the
-    // picker section itself must still paint its "no project" state rather
-    // than nothing at all.
-    const repoBox = state.repoCurrent ?? state.repoNoProject;
-    if (repoBox === null || repoBox.height === 0) {
-      throw new Error(`[${theme}/${name}] the repo picker drew neither its current-repo nor its no-project line`);
+    // The repo picker was removed from this card on purpose (vam-ux-1 task-7).
+    if (state.repoPicker) {
+      throw new Error(`[${theme}/${name}] the removed repo picker is drawn again`);
     }
 
     await page.screenshot({ path: `${outDir}/settings-integrations-github-${theme}-${name}.png` });
@@ -289,4 +280,4 @@ for (const [name, status] of [
 }
 
 await browser.close();
-console.log('\nSettings -> Integrations -> GitHub paints its status, its controls and its repo picker in both themes, with no sideways overflow.');
+console.log('\nSettings -> Integrations -> GitHub paints its status and its controls in both themes, with no sideways overflow.');

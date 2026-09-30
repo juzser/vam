@@ -361,14 +361,8 @@ for (const size of SIZES) {
       `the rule is ${boxes.status?.height}px tall`,
     );
     const text = await page.evaluate(() => ({
-      branch: document.querySelector('[data-terminal-branch]')?.textContent ?? null,
       name: document.querySelector('[data-terminal-badge]')?.textContent ?? null,
     }));
-    check(
-      'the branch is drawn on the rule, from the session rather than invented',
-      text.branch === BRANCH,
-      `the rule says ${JSON.stringify(text.branch)}`,
-    );
     check(
       'and so is the tmux session name, which is what tells two panes apart',
       (text.name ?? '').includes('vam-atlas-fit'),

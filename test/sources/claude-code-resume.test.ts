@@ -18,12 +18,29 @@
  * (`claude-code-tail-window.test.ts`). Nothing here spawns tmux or claude.
  */
 
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+
+// Assigning `dir` hands it to the status-line module, as `main/index.ts` does at startup.
+const holder = {
+  current: '',
+  get dir(): string {
+    return this.current;
+  },
+  set dir(dir: string) {
+    this.current = dir;
+    setStatusLineUserDataDir(dir);
+  },
+};
+
 import type { LiveAgent } from '../../src/main/sources/claude-code/agents.js';
 import {
   claudeResumeCommand,
   resumeClaudeSession,
 } from '../../src/main/sources/claude-code/resume.js';
+import { setStatusLineUserDataDir } from '../../src/main/sources/claude-code/statusline.js';
 import { loginShellCommand } from '../../src/main/sources/tmux/shell.js';
 import type { TmuxRun } from '../../src/main/sources/tmux/spawn.js';
 
@@ -64,8 +81,15 @@ const attempt = async (over: Partial<Parameters<typeof resumeClaudeSession>[0]> 
 };
 
 describe('claudeResumeCommand', () => {
-  it('is the provider’s own command plus `--resume <id>`', () => {
-    expect(claudeResumeCommand(SESSION)).toEqual(['claude', '--resume', SESSION]);
+  it('is the provider’s own command plus `--resume <id>`, then `--settings <path>`', () => {
+    holder.dir = mkdtempSync(join(tmpdir(), 'vam-resume-'));
+    expect(claudeResumeCommand(SESSION)).toEqual([
+      'claude',
+      '--resume',
+      SESSION,
+      '--settings',
+      `'${holder.dir}/statusline-settings.json'`,
+    ]);
   });
 
   /**
@@ -84,6 +108,7 @@ describe('claudeResumeCommand', () => {
 });
 
 describe('resumeClaudeSession', () => {
+  holder.dir = mkdtempSync(join(tmpdir(), 'vam-resume-'));
   it('starts a SHELL in the session’s own directory, then types `claude --resume` into it', async () => {
     // Not a direct spawn any more -- see the module header for the measured
     // reason (Ctrl+C used to end the whole tmux session, not just Claude).
@@ -93,14 +118,8 @@ describe('resumeClaudeSession', () => {
     expect(spawnArgv).toContain('new-session');
     expect(spawnArgv.slice(-2)).toEqual(loginShellCommand());
     expect(spawnArgv[spawnArgv.indexOf('-c') + 1]).toBe(CWD);
-    expect(calls).toContainEqual([
-      'send-keys',
-      '-t',
-      '=vam-fixed-name:',
-      '-l',
-      '--',
-      `claude --resume ${SESSION}`,
-    ]);
+    const typed = calls.find((argv) => argv[0] === 'send-keys' && argv.includes('--'))?.at(-1);
+    expect(typed).toMatch(new RegExp(`^claude --resume ${SESSION} --settings '.+'$`));
     expect(calls).toContainEqual(['send-keys', '-t', '=vam-fixed-name:', 'Enter']);
     // TYPED AFTER THE PANE EXISTS: the send-keys calls come after new-session,
     // never before it.

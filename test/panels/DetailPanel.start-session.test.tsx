@@ -389,3 +389,13 @@ describe('the ready state -- confirmed running, ahead of the agents-list poll', 
     expect(q('[data-start-session]')).not.toBeNull();
   });
 });
+
+describe('the start screen shortcut row', () => {
+  it('shows a "Start session" row carrying the chord glyphs', () => {
+    draw({ onStartSession: () => {} });
+    const row = q('[data-start-session] [data-start-session-shortcuts]');
+    expect(row).not.toBeNull();
+    expect(row?.textContent).toContain('Start session');
+    expect(row?.querySelector('[data-inline-chord]')?.textContent ?? '').not.toBe('');
+  });
+});

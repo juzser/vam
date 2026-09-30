@@ -61,11 +61,19 @@ const noAgents = (): Promise<AgentsResult> => Promise.resolve({ kind: 'ok', agen
 const noPanes = (): Promise<ReadonlyMap<string, string>> => Promise.resolve(new Map());
 
 describe('the allowlist', () => {
-  it('accepts exactly the six ids the phone strip presses', () => {
+  it('accepts exactly the twenty ids the phone strip presses', () => {
     for (const id of REMOTE_KEY_IDS) {
       expect(isRemoteKeyId(id)).toBe(true);
     }
-    expect(REMOTE_KEY_IDS).toEqual(['escape', 'tab', 'enter', 'back-tab', 'space', 'backspace']);
+    expect(REMOTE_KEY_IDS).toHaveLength(20);
+    expect(REMOTE_KEY_IDS.slice(0, 6)).toEqual([
+      'escape',
+      'tab',
+      'enter',
+      'back-tab',
+      'space',
+      'backspace',
+    ]);
   });
 
   /**
@@ -83,8 +91,8 @@ describe('the allowlist', () => {
       'BTab',
       'Space',
       'BSpace',
-      'up',
-      'down', // the desktop strip's own extra two -- not served remotely
+      'up', // not an id: the arrows travel as `arrow-up` and its siblings
+      'down',
       'control',
       'wheel',
       'paste',
@@ -116,6 +124,8 @@ describe('a pane row (no agent yet)', () => {
       ['backspace', ['send-keys', '-t', `=${NAME}:`, 'BSpace']],
       ['space', ['send-keys', '-t', `=${NAME}:`, '-l', '--', ' ']],
       ['tab', ['send-keys', '-t', `=${NAME}:`, '-l', '--', '\t']],
+      ['ctrl-c', ['send-keys', '-t', `=${NAME}:`, '--', 'C-c']],
+      ['delete', ['send-keys', '-t', `=${NAME}:`, '--', 'DC']],
     ];
     for (const [id, expected] of cases) {
       const { run, argvs } = runner({
@@ -130,6 +140,24 @@ describe('a pane row (no agent yet)', () => {
       expect(result, `sending ${id}`).toBeNull();
       const sendKeysCall = argvs.find((argv) => argv[0] === 'send-keys');
       expect(sendKeysCall, `the send-keys argv for ${id}`).toEqual(expected);
+    }
+  });
+
+  it('refuses every id off the closed list with the existing refusal, and never touches tmux', async () => {
+    for (const id of ['ctrl-b', 'ctrl-x', 'ctrl-', 'C-c', 'up', 'Delete']) {
+      expect(isRemoteKeyId(id), id).toBe(false);
+      const { run, argvs } = runner({
+        'list-sessions': ok(sessionLine({ name: NAME })),
+        'send-keys': ok(''),
+      });
+      const result = await sendRemoteKey(ROW, id as never, {
+        run,
+        listAgents: noAgents,
+        readPanes: noPanes,
+      });
+      expect(result?.kind, id).toBe('refused');
+      expect(result?.code, id).toBe('invalid-key');
+      expect(argvs, `no tmux call for ${id}`).toHaveLength(0);
     }
   });
 
@@ -233,5 +261,84 @@ describe('an agent row (a live session)', () => {
       readPanes: noPanes,
     });
     expect(result?.code).toBe('no-terminal');
+  });
+});
+
+describe('every one of the twenty ids at the send boundary', () => {
+  const NAME = 'vam-atlas-a1b2c3';
+  const ROW = `pane:${NAME}`;
+  const target = `=${NAME}:`;
+
+  it('sends exactly one send-keys argv per id, with the argv tmux is given', async () => {
+    const expected: Record<(typeof REMOTE_KEY_IDS)[number], readonly string[]> = {
+      escape: ['send-keys', '-t', target, 'Escape'],
+      tab: ['send-keys', '-t', target, '-l', '--', '\t'],
+      enter: ['send-keys', '-t', target, 'Enter'],
+      'back-tab': ['send-keys', '-t', target, 'BTab'],
+      space: ['send-keys', '-t', target, '-l', '--', ' '],
+      backspace: ['send-keys', '-t', target, 'BSpace'],
+      delete: ['send-keys', '-t', target, '--', 'DC'],
+      'arrow-up': ['send-keys', '-t', target, '--', 'Up'],
+      'arrow-down': ['send-keys', '-t', target, '--', 'Down'],
+      'arrow-left': ['send-keys', '-t', target, '--', 'Left'],
+      'arrow-right': ['send-keys', '-t', target, '--', 'Right'],
+      'ctrl-c': ['send-keys', '-t', target, '--', 'C-c'],
+      'ctrl-d': ['send-keys', '-t', target, '--', 'C-d'],
+      'ctrl-l': ['send-keys', '-t', target, '--', 'C-l'],
+      'ctrl-z': ['send-keys', '-t', target, '--', 'C-z'],
+      'ctrl-r': ['send-keys', '-t', target, '--', 'C-r'],
+      'ctrl-a': ['send-keys', '-t', target, '--', 'C-a'],
+      'ctrl-e': ['send-keys', '-t', target, '--', 'C-e'],
+      'ctrl-w': ['send-keys', '-t', target, '--', 'C-w'],
+      'ctrl-u': ['send-keys', '-t', target, '--', 'C-u'],
+    };
+    let sent = 0;
+    for (const id of REMOTE_KEY_IDS) {
+      const { run, argvs } = runner({
+        'list-sessions': ok(sessionLine({ name: NAME })),
+        'send-keys': ok(''),
+      });
+      expect(
+        await sendRemoteKey(ROW, id, { run, listAgents: noAgents, readPanes: noPanes }),
+        id,
+      ).toBeNull();
+      const calls = argvs.filter((argv) => argv[0] === 'send-keys');
+      expect(calls, `one send-keys for ${id}`).toEqual([expected[id]]);
+      sent += 1;
+    }
+    expect(sent).toBe(20);
+  });
+
+  it('refuses every non-string and near-miss id with invalid-key and zero tmux calls', async () => {
+    const bad: unknown[] = [
+      'ctrl-b',
+      'ctrl-f',
+      'CTRL-C',
+      'arrow_up',
+      'home',
+      'page-up',
+      'delete ',
+      '',
+      42,
+      null,
+      undefined,
+      {},
+      ['ctrl-c'],
+      { toString: () => 'ctrl-c' },
+    ];
+    for (const id of bad) {
+      const { run, argvs } = runner({
+        'list-sessions': ok(sessionLine({ name: NAME })),
+        'send-keys': ok(''),
+      });
+      const result = await sendRemoteKey(ROW, id as never, {
+        run,
+        listAgents: noAgents,
+        readPanes: noPanes,
+      });
+      expect(result?.kind, String(id)).toBe('refused');
+      expect(result?.code, String(id)).toBe('invalid-key');
+      expect(argvs, `no tmux call for ${String(id)}`).toHaveLength(0);
+    }
   });
 });

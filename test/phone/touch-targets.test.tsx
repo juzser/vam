@@ -25,7 +25,13 @@ import { cleanup, fireEvent, render } from '@testing-library/react';
 import { act } from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
-import type { AgentQuestion, CanvasModel } from '../../src/renderer/domain/model.js';
+import type {
+  AgentQuestion,
+  CanvasModel,
+  Decision,
+  Session,
+} from '../../src/renderer/domain/model.js';
+import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/DetailPanel.js';
 import { FIVE_STEPS, installPhoneGlobals, MODEL, phoneSource, session } from './harness.js';
 
 const CSS = readFileSync(resolve(process.cwd(), 'src/renderer/styles.css'), 'utf8');
@@ -159,6 +165,75 @@ describe('the phone shell’s hit areas', () => {
       })
       .map((el) => `${el.tagName} ${el.getAttribute('aria-label') ?? ''}`);
     expect(wrong, 'toolbar controls not floored at 30px').toEqual([]);
+    // The two controls promoted out of the removed 3-dots menu must be in that
+    // swept set, so the sweep cannot pass by never seeing them.
+    for (const hook of ['data-remote-toggle', 'data-theme-toggle']) {
+      const btn = (toolbar as HTMLElement).querySelector(`[${hook}]`);
+      expect(btn, hook).not.toBeNull();
+      expect(toolbarControls, `${hook} in the 30px sweep`).toContain(btn);
+    }
+  });
+
+  it('floors the key-strip chips at 30px while an ordinary phone tap target stays 44px', () => {
+    // The strip's painted chip is 30px; the blanket 44px floor drew ~7px of
+    // invisible padding a side around it (~18px between painted chips). Same
+    // named exception as the toolbar row, enumerated by `[data-key-strip]`.
+    const decision: Decision = {
+      id: 'd1',
+      label: 'plan',
+      input: 'ask',
+      output: 'ok',
+      commands: [],
+    };
+    const sess: Session = {
+      id: 's1',
+      title: 'sess',
+      epic: null,
+      branch: null,
+      status: 'idle',
+      runningAgents: 0,
+      activity: null,
+      age: '1m',
+      decisions: [decision],
+      vamControlled: true,
+    };
+    const props = {
+      entry: { project: { id: 'p1', name: 'atlas', sessions: [sess] }, session: sess },
+      decision,
+      draft: '',
+      onDraftChange: () => {},
+      onSubmit: () => {},
+      composing: false,
+      onCompose: () => {},
+      onStopComposing: () => {},
+      active: false,
+      actionIndex: 0,
+      width: 390,
+      resizeHandle: null,
+      phone: true,
+      delivers: true,
+      terminal: true,
+      pickImageAttachment: async () => null,
+      onSetDefaultProvider: () => {},
+    } satisfies DetailPanelProps;
+    render(
+      <div data-phone-shell className="vam-phone">
+        <DetailPanel {...props} />
+      </div>,
+    );
+    const keys = [...document.querySelectorAll('[data-key-strip] button')];
+    expect(keys.length, 'key-strip buttons').toBeGreaterThan(3);
+    const wrong = keys
+      .filter((el) => {
+        const cs = getComputedStyle(el);
+        return cs.minHeight !== '30px' || cs.minWidth !== '30px';
+      })
+      .map((el) => el.getAttribute('data-key-strip-key') ?? el.tagName);
+    expect(wrong, 'strip buttons not floored at 30px').toEqual([]);
+    const composerTap = document.querySelector('[data-composer-bar] textarea');
+    expect(composerTap, 'an ordinary vam-tap outside the strip').not.toBeNull();
+    const cs = getComputedStyle(composerTap as Element);
+    expect([cs.minHeight, cs.minWidth]).toEqual(['44px', '44px']);
   });
 
   it('does not leak the 30px floor into the workspace-options popover it opens', () => {
@@ -196,22 +271,27 @@ describe('the phone shell’s hit areas', () => {
     // sat invisible over the row's own tap area.
     const rowCloses = [
       ...document.querySelectorAll("[data-phone-shell] button[aria-label^='close ']"),
-    ].filter((el) => !el.hasAttribute('data-phone-close'));
+    ].filter((el) => !el.hasAttribute('data-swipe-trash'));
     expect(rowCloses.length).toBeGreaterThan(0);
     for (const el of rowCloses) expect(getComputedStyle(el).display).toBe('none');
   });
 
-  it('leaves the session bar’s own close control alone, label and all', () => {
+  it('keeps the revealed swipe trash visible and above the 44px floor', () => {
     phone();
+    const row = document.querySelector('[data-session-row]') as Element;
     act(() => {
-      fireEvent.click(document.querySelector('[data-session-row]') as Element);
+      fireEvent.pointerDown(row, { clientX: 300, clientY: 100, pointerId: 1 });
+      fireEvent.pointerMove(row, { clientX: 200, clientY: 100, pointerId: 1 });
+      fireEvent.pointerUp(row, { clientX: 200, clientY: 100, pointerId: 1 });
     });
-    const close = document.querySelector('[data-phone-close]');
-    expect(close).not.toBeNull();
-    // It reads `close session`, so the rule above would take it too without
-    // its exemption -- and then a phone would have no way to close one.
-    expect(close?.getAttribute('aria-label')).toMatch(/^close /);
-    expect(getComputedStyle(close as Element).display).not.toBe('none');
+    const trash = document.querySelector('[data-swipe-trash]');
+    expect(trash).not.toBeNull();
+    // It reads `close session`, so the hide rule above would take it without
+    // its exemption -- and then the swipe would reveal nothing.
+    expect(trash?.getAttribute('aria-label')).toBe('close session');
+    const cs = getComputedStyle(trash as Element);
+    expect(cs.display).not.toBe('none');
+    expect([cs.minHeight, cs.minWidth]).toEqual(['44px', '44px']);
   });
 
   it('sets 16px on every box you type in, which is the iOS zoom threshold', () => {

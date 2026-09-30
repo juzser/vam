@@ -427,16 +427,16 @@ export function isPaneSize(size: PaneSize): boolean {
  * driven from inside vam's pane at all. `ArrowLeft`/`ArrowRight` were not even
  * that lucky: `strokeFor` declined them outright (a named key is never one
  * printable character) and they reached neither the pane nor vam's own
- * grammar. `nav` is the eight keys a terminal is navigated with -- the four
- * arrows and Home/End/PageUp/PageDown -- PRESSED rather than typed, for the
+ * grammar. `nav` is the nine keys a terminal is navigated with -- the four
+ * arrows, Home/End/PageUp/PageDown and Delete -- PRESSED rather than typed, for the
  * same reason `control` is: `send-keys -l -- 'Up'` would type the two letters
  * into the operator's own prompt. `sources/tmux/argv.ts`'s `sendNavArgv`
  * carries the measurement of what a real pane receives for each.
  *
- * A KIND CARRYING A CLOSED VALUE, NOT EIGHT KINDS, matching `control`'s own
+ * A KIND CARRYING A CLOSED VALUE, NOT NINE KINDS, matching `control`'s own
  * shape rather than `enter`/`escape`/`backspace`/`back-tab`'s: `nav` is one
  * FAMILY of the pane's own keys, exactly as `control` is one family of Ctrl
- * chords, and `isNavKey` checks it against a frozen eight-member set the same
+ * chords, and `isNavKey` checks it against a frozen nine-member set the same
  * way `isControlLetter` does its twenty-six.
  */
 export type PaneKey =
@@ -573,14 +573,13 @@ export function isControlLetter(value: unknown): value is ControlLetter {
  * THE WHOLE ALLOWLIST OF NAVIGATION KEYS -- the four arrows and Home, End,
  * PageUp, PageDown, written out exactly as `CONTROL_LETTERS` is.
  *
- * EIGHT, AND CLOSED FOR THE SAME REASON THAT LIST IS: these are the keys a
+ * NINE, AND CLOSED FOR THE SAME REASON THAT LIST IS: these are the keys a
  * terminal is navigated with (`PaneKey`'s own `nav` doc has the report), and
  * anything else a keyboard sends is either a character `strokeFor` already
  * carries or a browser/vam chord this file has no business claiming.
- * `Insert` and `Delete` are deliberately NOT here -- the operator's report was
- * about the arrows and the pickers they walk, `Delete` already means
- * something to a browser (and nothing measured yet to a pane), and a list
- * grown on a guess is a list this file would have to defend twice.
+ * `Delete` joined the eight for the phone's key strip (vam-ux-1, the remote
+ * route's `delete` id) and is sent to tmux as `DC`; `Insert` is still NOT
+ * here.
  *
  * SPELLED AS LITERALS, so a `string` narrowed by a regular expression can
  * never stand in for it -- the same defence `CONTROL_LETTERS` makes.
@@ -594,15 +593,16 @@ export const NAV_KEYS = [
   'end',
   'page-up',
   'page-down',
+  'delete',
 ] as const;
 
-/** One of the eight above, and nothing else is assignable to it. */
+/** One of the nine above, and nothing else is assignable to it. */
 export type NavKey = (typeof NAV_KEYS)[number];
 
 const NAV_KEY_SET: ReadonlySet<string> = new Set<string>(NAV_KEYS);
 
 /**
- * Whether a value off the bridge names one of the eight navigation keys --
+ * Whether a value off the bridge names one of the nine navigation keys --
  * `isControlLetter`'s own reasoning, unchanged: a `Set` built FROM the list
  * so membership of the array IS the definition, and exported because the
  * renderer decides with it too (`TerminalTab.tsx`).

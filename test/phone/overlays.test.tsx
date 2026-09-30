@@ -57,12 +57,7 @@ describe('the overlays at phone width', () => {
   it('opens settings as a full-window screen, not a bottom sheet', async () => {
     render(<Canvas model={MODEL} source={phoneSource()} />);
     expect(document.querySelector('button[aria-label="settings"]')).toBeNull();
-    // Remote is one tap further in now, behind the toolbar's "more actions"
-    // overflow button (Orca one-row pass) -- opening it is what reveals the
-    // Remote item this test then clicks.
-    act(() => {
-      fireEvent.click(document.querySelector('button[aria-label="more actions"]') as Element);
-    });
+    // Remote is a direct button in the toolbar row.
     act(() => {
       fireEvent.click(document.querySelector('button[aria-label="remote access"]') as Element);
     });

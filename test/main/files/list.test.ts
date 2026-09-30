@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type DirentLike,
   LIST_LIMIT,
+  listDirectory,
   listFiles,
   type ReadDir,
 } from '../../../src/main/files/list.js';
@@ -153,5 +154,39 @@ describe('listFiles', () => {
 
   it('the default limit is a real, positive cap', () => {
     expect(LIST_LIMIT).toBeGreaterThan(0);
+  });
+});
+
+describe('listDirectory', () => {
+  it('lists one level: dirs and files sorted, node_modules listed but never walked', async () => {
+    const reads: string[] = [];
+    const inner = fakeFs({
+      '/r': [
+        { name: 'z.md', kind: 'file' },
+        { name: 'node_modules', kind: 'dir' },
+        { name: 'a', kind: 'dir' },
+      ],
+      '/r/a': [{ name: 'b.ts', kind: 'file' }],
+    });
+    const readDir: ReadDir = async (p) => {
+      reads.push(p);
+      return inner(p);
+    };
+    expect(await listDirectory('/r', '', readDir)).toEqual([
+      { name: 'a', kind: 'dir' },
+      { name: 'node_modules', kind: 'dir' },
+      { name: 'z.md', kind: 'file' },
+    ]);
+    expect(reads).toEqual(['/r']);
+  });
+
+  it('reads a subdirectory and omits symlinks', async () => {
+    const readDir = fakeFs({
+      '/r/a': [
+        { name: 'l', kind: 'symlink' },
+        { name: 'f', kind: 'file' },
+      ],
+    });
+    expect(await listDirectory('/r', 'a', readDir)).toEqual([{ name: 'f', kind: 'file' }]);
   });
 });

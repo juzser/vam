@@ -624,3 +624,9 @@ describe('normalizeKey — the digit row is a position, not a character', () => 
     expect(normalizeKey({ key: '1', metaKey: true })).toBe('Mod-1');
   });
 });
+
+describe('startSession default binding', () => {
+  it('resolves Mod-Enter to startSession', () => {
+    expect(resolveChord(EMPTY_CHORD, 'Mod-Enter').action).toEqual({ kind: 'startSession' });
+  });
+});

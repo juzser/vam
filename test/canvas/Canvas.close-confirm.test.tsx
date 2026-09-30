@@ -44,7 +44,7 @@ function session(id: string, over: Partial<Session> = {}): Session {
 /** One project, two sessions: the focused one is what each case closes, and
  *  the second exists only so a tab strip has something to draw beside it —
  *  the same shape `Canvas.tab-close-session.test.tsx` renders against. */
-function modelWith(status: Session['status']): CanvasModel {
+function modelWith(status: Session['status'], runningAgents = 0): CanvasModel {
   return {
     projects: [
       {
@@ -52,7 +52,7 @@ function modelWith(status: Session['status']): CanvasModel {
         name: 'alpha',
         source: 'claude-code',
         sessions: [
-          session('a1', { title: 'nightly sweep', status }),
+          session('a1', { title: 'nightly sweep', status, runningAgents }),
           session('a2', { title: 'second pass' }),
         ],
       },
@@ -352,5 +352,75 @@ describe('the desktop confirm dialog is keyboard-friendly', () => {
     });
     expect(confirmDialog()).toBeNull();
     expect(calls).toEqual([]);
+  });
+});
+
+/**
+ * BACKGROUND AGENTS COUNT AS "STILL RUNNING". `Session.runningAgents` is the
+ * live count of the session's background agents, and closing the session ends
+ * them, so a `waiting` row with agents alive asks first -- with copy that says
+ * what will be lost -- while a row with none keeps the old rule.
+ */
+describe('background agents gate the same confirm', () => {
+  const heading = () =>
+    confirmDialog()?.querySelector('span.font-semibold')?.textContent?.trim() ?? '';
+
+  it('asks on a waiting row with 2 agents, names them, and sends nothing until answered', async () => {
+    const calls: string[] = [];
+    const { source } = sessionSourceWith(async (id) => {
+      calls.push(id);
+    });
+    render(<Canvas model={modelWith('waiting', 2)} source={source} />);
+    await pressAsync('x');
+    expect(confirmDialog(), 'agents alive ask first').not.toBeNull();
+    expect(heading()).toBe('Close session with background agents running?');
+    expect(confirmDialog()?.textContent).toContain(
+      '2 background agents still running. Closing the session ends them.',
+    );
+    expect(calls).toEqual([]);
+
+    await act(async () => {
+      confirmCancel()?.click();
+    });
+    expect(confirmDialog()).toBeNull();
+    expect(calls, 'Cancel sends nothing').toEqual([]);
+
+    await pressAsync('x');
+    await act(async () => {
+      confirmGo()?.click();
+    });
+    expect(calls).toEqual(['a1']);
+  });
+
+  it('keeps the existing copy on a running row with no agents', async () => {
+    const { source } = sessionSourceWith(async () => {});
+    render(<Canvas model={modelWith('running', 0)} source={source} />);
+    await pressAsync('x');
+    expect(confirmDialog()).not.toBeNull();
+    expect(heading()).toBe('Close “nightly sweep”?');
+    expect(confirmDialog()?.textContent).toContain('This ends the agent running in it.');
+    expect(confirmDialog()?.textContent).not.toContain('background agent');
+  });
+
+  it('closes at once on a waiting or idle row with no agents', async () => {
+    for (const status of ['waiting', 'idle'] as const) {
+      const calls: string[] = [];
+      const { source } = sessionSourceWith(async (id) => {
+        calls.push(id);
+      });
+      render(<Canvas model={modelWith(status, 0)} source={source} />);
+      await pressAsync('x');
+      expect(confirmDialog(), status).toBeNull();
+      expect(calls, status).toEqual(['a1']);
+      cleanup();
+    }
+  });
+
+  it('says `1 background agent` in the singular', async () => {
+    const { source } = sessionSourceWith(async () => {});
+    render(<Canvas model={modelWith('waiting', 1)} source={source} />);
+    await pressAsync('x');
+    expect(confirmDialog()?.textContent).toContain('1 background agent still running.');
+    expect(confirmDialog()?.textContent).not.toContain('1 background agents');
   });
 });

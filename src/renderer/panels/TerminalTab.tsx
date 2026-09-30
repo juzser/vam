@@ -47,7 +47,6 @@
  * and it gets its own line rather than being folded into either.
  */
 
-import { GitBranch } from 'lucide-react';
 import {
   type ClipboardEvent,
   type CompositionEvent,
@@ -874,7 +873,6 @@ export function TerminalTab({
   read,
   resize,
   send,
-  branch,
   notice,
 }: {
   readonly projectId: string | null;
@@ -897,20 +895,6 @@ export function TerminalTab({
    * the compiler is what notices.
    */
   readonly send: SendKey | undefined;
-  /**
-   * The git branch the session's working directory is on, for the rule under
-   * the screen -- `Session.branch`, passed through unexamined.
-   *
-   * `null` AND `undefined` DRAW NOTHING, and they are the same thing here on
-   * purpose. `model.ts` is explicit that `null` means "the source cannot say",
-   * never "not on a branch"; `undefined` is a caller that did not pass one at
-   * all (every existing test fixture, and the phone shell). Neither is a fact
-   * about a branch, and on a one-line rule the sidebar's em-dash placeholder
-   * would read as a branch actually called `—`. The sidebar draws one because
-   * its rows are a table whose columns have to line up whatever a row knows;
-   * this is a sentence, and a sentence says nothing rather than saying a dash.
-   */
-  readonly branch?: string | null;
   /**
    * ONE LINE, drawn above the pane exactly like `data-terminal-blank`/
    * `data-terminal-refused` already are, when this tab is standing in for
@@ -2531,12 +2515,9 @@ export function TerminalTab({
           price of the name being readable, and it is the row every terminal
           multiplexer already spends on a status line.
 
-          THE ORDER IS FACTS FIRST, IDENTITY LAST. What the session is doing --
-          which branch it is on -- is what an operator reads while working; the
-          name is what they read when they have lost track of which pane this
-          is. So the branch sits at the left where reading starts, and the name
-          is pushed to the right end, where it is also out of the way of a
-          branch long enough to need the room.
+          THE NAME SITS AT THE RIGHT END. It is what an operator reads when they
+          have lost track of which pane this is, so it stays out of the way. The
+          branch is not drawn here: Claude Code's own statusLine carries it.
 
           WHAT IS DELIBERATELY NOT ON IT. No model name and no context
           percentage: vam's model has neither (`domain/model.ts`), and a status
@@ -2554,19 +2535,6 @@ export function TerminalTab({
         data-terminal-status
         className="flex flex-none items-center gap-2 border-line border-t pt-1 font-mono text-meta text-ink-faint"
       >
-        {/* THE BRANCH, when the source knows it. Absent means ABSENT: see the
-            `branch` prop for why this draws nothing at all rather than the
-            sidebar's em-dash. The glyph is the sidebar's, at the sidebar's
-            size and weight, so the same fact reads the same way in both
-            places. */}
-        {typeof branch === 'string' && branch !== '' && (
-          <span className="flex min-w-0 items-center gap-1">
-            <GitBranch size={10} strokeWidth={1.6} aria-hidden="true" />
-            <span data-terminal-branch title={branch} className="truncate">
-              {branch}
-            </span>
-          </span>
-        )}
         {/* The gap. A spacer rather than `justify-between`, so that the name
             keeps its own right edge whether or not anything is drawn on the
             left. */}

@@ -12,21 +12,13 @@
  *     (`main/integrations/github-pane.ts`) -- so the operator watches the
  *     device code and the browser prompt exactly as they would any other
  *     pane. Never read back here for vam's own use, only rendered.
- *  3. THE REPO PICKER, per project. `gh repo list <owner>`, the viewer's own
- *     orgs, and the project's own git remotes as first suggestions -- a
- *     search box over all three. THE OVERRIDE STAYS A DIRECTORY: picking the
- *     project's own remote clears it, and picking anything else opens vam's
- *     existing native directory chooser so the operator confirms WHERE that
- *     repository is checked out, then `setProjectPrRepo` writes exactly what
- *     it always has (`Canvas.tsx`'s prior wiring, retired in favour of this
- *     panel). This keeps `pull-requests.ts`'s own invariant intact: `gh`
- *     still resolves the remote from where vam stands, and no `--repo`
- *     reaches its argv from a value this panel produced.
+ *  There is no repository picker here: the repository is chosen only in the
+ *  PRs view (`DetailPanel.tsx`), defaulting to the session directory's own
+ *  git remote.
  *
  * A CONTROL THAT CANNOT ACT IS NOT DRAWN AS ONE -- `RemotePanel.tsx`'s rule,
  * kept here: no bridge means no section content at all (this panel is
- * desktop-only end to end, so `SettingsOverlay` never mounts it for a phone);
- * no project means no repo picker, because there is nothing to point it at.
+ * desktop-only end to end, so `SettingsOverlay` never mounts it for a phone).
  *
  * THE SKILLS-CARD SHAPE (settings-views restructure, item F). Operator:
  * "restyle GitHub connect UI to match the Skills card shape (icon, title,
@@ -61,11 +53,9 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { GithubApi } from '../../preload/api.js';
-import type { GithubAuthPaneView, GithubAuthStatus, GithubRemote } from '../../shared/github.js';
+import type { GithubAuthPaneView, GithubAuthStatus } from '../../shared/github.js';
 import { GITHUB_LOGIN_COMMAND, GITHUB_LOGOUT_COMMAND } from '../../shared/github.js';
-import type { SourceId } from '../domain/model.js';
 import { t } from '../i18n/strings.js';
-import { type Prefs, prRepoFor, setProjectPrRepo } from '../prefs/prefs.js';
 import { ExternalLink } from './primitives.js';
 
 const FOCUS_RING =
@@ -200,19 +190,8 @@ export type GithubPanelProps = {
   readonly api: GithubApi | undefined;
   /** Polling (the pane's screen) runs only while this section is open. */
   readonly active: boolean;
-  readonly prefs: Prefs;
-  readonly onChange: (next: Prefs) => void;
-  /** Every project vam knows about, so the repo picker can be aimed at one. */
-  readonly projects: readonly {
-    readonly id: string;
-    readonly source: SourceId;
-    readonly name: string;
-  }[];
   /** Electron's clipboard; the page's own is denied by the permission policy. */
   readonly copyText?: (text: string) => Promise<boolean>;
-  /** The native folder picker behind "choose another repo" -- absent in the
-   *  browser build, which has no dialog bridge either. */
-  readonly chooseDirectory?: () => Promise<string | null>;
   /**
    * Opens the gh-missing guide's two external links (brew.sh, cli.github.com)
    * in the operating system's browser -- `window.api.link.open`, the same
@@ -224,16 +203,7 @@ export type GithubPanelProps = {
   readonly openExternal?: (url: string) => Promise<unknown>;
 };
 
-export function GithubPanel({
-  api,
-  active,
-  prefs,
-  onChange,
-  projects,
-  copyText,
-  chooseDirectory,
-  openExternal,
-}: GithubPanelProps) {
+export function GithubPanel({ api, active, copyText, openExternal }: GithubPanelProps) {
   const [status, setStatus] = useState<GithubAuthStatus | null>(null);
   const [checking, setChecking] = useState(false);
   const [pane, setPane] = useState<GithubAuthPaneView>({ kind: 'none' });
@@ -593,195 +563,9 @@ export function GithubPanel({
                 ) : null}
               </div>
             ) : null}
-
-            <RepoPicker
-              api={api}
-              prefs={prefs}
-              onChange={onChange}
-              projects={projects}
-              chooseDirectory={chooseDirectory}
-            />
           </>
         )}
       </div>
-    </div>
-  );
-}
-
-type RepoPickerProps = {
-  readonly api: GithubApi;
-  readonly prefs: Prefs;
-  readonly onChange: (next: Prefs) => void;
-  readonly projects: GithubPanelProps['projects'];
-  readonly chooseDirectory?: () => Promise<string | null>;
-};
-
-function RepoPicker({ api, prefs, onChange, projects, chooseDirectory }: RepoPickerProps) {
-  const [selected, setSelected] = useState(0);
-  const [open, setOpen] = useState(false);
-  const [remotes, setRemotes] = useState<readonly GithubRemote[]>([]);
-  const [search, setSearch] = useState('');
-  const [results, setResults] = useState<readonly string[]>([]);
-  const [searching, setSearching] = useState(false);
-  const project = projects[selected];
-
-  /** Switching WHICH project this picker is aimed at (the `<select>` below)
-   *  closes any open search rather than leaving a stale search or its
-   *  results on screen for a project they no longer describe. Done inline,
-   *  in the one place `selected` can change, rather than a `useEffect`
-   *  keyed on a value nothing in its body reads. */
-  const selectProject = (index: number) => {
-    setSelected(index);
-    setOpen(false);
-    setResults([]);
-    setSearch('');
-  };
-
-  useEffect(() => {
-    if (!open || project === undefined) return;
-    let live = true;
-    void api.projectRemotes(project.id).then((next) => {
-      if (live) setRemotes(next);
-    });
-    return () => {
-      live = false;
-    };
-  }, [open, project, api]);
-
-  if (project === undefined) {
-    return (
-      <p data-github-repo-noproject className="text-control text-ink-dim">
-        {t('settings.integrations.repo.noProject')}
-      </p>
-    );
-  }
-
-  const override = prRepoFor(prefs, project.source, project.id);
-  const currentName =
-    override === null
-      ? t('settings.integrations.repo.own')
-      : override.replace(/\/+$/, '').split('/').pop() || override;
-
-  const runSearch = async () => {
-    const owner = search.trim().split('/')[0] ?? '';
-    if (owner === '') return;
-    setSearching(true);
-    try {
-      const answer = await api.reposList(owner);
-      setResults(answer.kind === 'ok' ? answer.repos : []);
-    } finally {
-      setSearching(false);
-    }
-  };
-
-  const isOwnRemote = (repo: string) => remotes.some((r) => r.repo === repo);
-
-  const pick = async (repo: string) => {
-    if (isOwnRemote(repo)) {
-      onChange(setProjectPrRepo(prefs, project.source, project.id, ''));
-      return;
-    }
-    if (chooseDirectory === undefined) return;
-    const picked = await chooseDirectory();
-    if (picked === null) return;
-    onChange(setProjectPrRepo(prefs, project.source, project.id, picked));
-  };
-
-  const filteredRemotes = remotes.filter(
-    (r) => search.trim() === '' || r.repo.toLowerCase().includes(search.trim().toLowerCase()),
-  );
-  const candidates = [
-    ...filteredRemotes.map((r) => r.repo),
-    ...results.filter((r) => !filteredRemotes.some((f) => f.repo === r)),
-  ];
-
-  return (
-    <div className="flex flex-col gap-2 border-line border-t pt-4">
-      <h4 className="font-medium text-body text-ink capitalize">
-        {t('settings.integrations.repo.heading')}
-      </h4>
-      {projects.length > 1 ? (
-        <select
-          aria-label="project"
-          value={selected}
-          onChange={(event) => selectProject(Number(event.target.value))}
-          className="h-[28px] w-fit rounded border border-line bg-panel px-2 text-control text-ink"
-        >
-          {projects.map((p, i) => (
-            <option key={p.id} value={i}>
-              {p.name}
-            </option>
-          ))}
-        </select>
-      ) : null}
-      <p data-github-repo-current className="text-control text-ink-dim">
-        {t('settings.integrations.repo.current', { name: currentName })}
-      </p>
-      <div className="flex gap-2">
-        {override !== null ? (
-          <button
-            type="button"
-            data-github-repo-clear
-            onClick={() => onChange(setProjectPrRepo(prefs, project.source, project.id, ''))}
-            className={BUTTON}
-          >
-            {t('settings.integrations.repo.clear')}
-          </button>
-        ) : null}
-        <button
-          type="button"
-          data-github-repo-change
-          onClick={() => setOpen((was) => !was)}
-          className={BUTTON}
-        >
-          {t('settings.integrations.repo.change')}
-        </button>
-      </div>
-      {open ? (
-        <div className="flex flex-col gap-2 rounded border border-line p-2">
-          <label className="flex flex-col gap-1 text-control text-ink-dim">
-            {t('settings.integrations.repo.searchLabel')}
-            <div className="flex gap-2">
-              <input
-                data-github-repo-search
-                type="text"
-                value={search}
-                placeholder={t('settings.integrations.repo.searchPlaceholder')}
-                onChange={(event) => setSearch(event.target.value)}
-                className="h-[28px] flex-1 rounded border border-line bg-panel px-2 text-control text-ink"
-              />
-              <button
-                type="button"
-                data-github-repo-search-button
-                disabled={searching}
-                onClick={() => void runSearch()}
-                className={BUTTON}
-              >
-                {t('settings.integrations.repo.searchButton')}
-              </button>
-            </div>
-          </label>
-          {filteredRemotes.length > 0 ? (
-            <p className="text-control text-ink-faint">
-              {t('settings.integrations.repo.suggested')}
-            </p>
-          ) : null}
-          <ul className="flex flex-col gap-1">
-            {candidates.map((repo) => (
-              <li key={repo}>
-                <button
-                  type="button"
-                  data-github-repo-candidate
-                  onClick={() => void pick(repo)}
-                  className="vam-tap w-full cursor-pointer rounded px-2 py-1 text-left text-control text-ink hover:bg-segment-on"
-                >
-                  {repo}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
     </div>
   );
 }

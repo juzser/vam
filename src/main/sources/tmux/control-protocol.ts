@@ -42,7 +42,7 @@
  * `tmux-control-protocol.test.ts` asserts neither contains a character this
  * file would ever need to escape. Every other token has to be an EXACT
  * literal this file already knows about (a verb, a flag, `Enter`, one of the
- * twenty-six `C-<letter>` names, one of the eight navigation keys). Anything
+ * twenty-six `C-<letter>` names, one of the nine navigation keys, `DC` (Delete) among them). Anything
  * that does not match one of these shapes makes `encodeControlLine` return
  * `null`, and the caller falls back to a real spawn for that one call -- the
  * SAME fallback the whole client degrades to when the persistent connection
@@ -116,7 +116,7 @@ const SAFE_LITERALS: ReadonlySet<string> = new Set([
   'BSpace',
   'BTab',
   'Escape',
-  // The eight navigation keys (`argv.ts`'s `sendNavArgv`/`NAV_KEY_NAMES`) --
+  // The nine navigation keys, `DC` (Delete) among them (`argv.ts`'s `sendNavArgv`/`NAV_KEY_NAMES`) --
   // pressed with `--`, exactly as a control chord is, so each reaches this
   // loop as its own bareword token rather than the six-token `-l --` shape
   // above.
@@ -128,6 +128,7 @@ const SAFE_LITERALS: ReadonlySet<string> = new Set([
   'End',
   'PageUp',
   'PageDown',
+  'DC',
   ...'abcdefghijklmnopqrstuvwxyz'.split('').map((letter) => `C-${letter}`),
 ]);
 

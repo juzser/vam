@@ -7,7 +7,7 @@
  * `used`/`remaining` mode shared by both.
  */
 
-import { act, cleanup, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel } from '../../src/renderer/domain/model.js';
@@ -179,5 +179,23 @@ describe('statusBarUsageMode', () => {
     render(<Canvas model={EMPTY} />);
     await act(async () => {});
     expect(codexCell()?.textContent).toContain('89% left');
+  });
+});
+
+describe('usage trigger aria-expanded', () => {
+  it('marks only the activated trigger expanded, not both', async () => {
+    serve();
+    seed({ statusBarShowCodexUsage: true });
+    render(<Canvas model={EMPTY} />);
+    await act(async () => {});
+    const [claude, codex] = Array.from(
+      document.querySelectorAll<HTMLElement>('button[data-usage-trigger]'),
+    );
+    expect(claude?.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(claude as HTMLElement);
+    expect(claude?.getAttribute('aria-expanded')).toBe('true');
+    expect(codex?.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(claude as HTMLElement);
+    expect(claude?.getAttribute('aria-expanded')).toBe('false');
   });
 });

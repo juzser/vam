@@ -19,12 +19,23 @@
 
 import type { KeyboardEvent, RefObject } from 'react';
 import { useCallback, useMemo, useState } from 'react';
-import type { FileListResult } from '../../main/files/types.js';
+import type { FileDirEntry, FileListResult } from '../../main/files/types.js';
 import { normalizeKey } from '../keyboard/chords.js';
-import { type FileTreeRow, fileTreeRows, resolveTreeKey } from './files-tree.js';
+import { type FileTreeRow, fileTreeRows, lazyTreeRows, resolveTreeKey } from './files-tree.js';
 
 export interface UseFilesTreeStateParams {
-  readonly ready: FileListResult | null;
+  /** The session root and the directory levels loaded so far (absolute paths). */
+  readonly tree: {
+    readonly root: string;
+    readonly dirs: ReadonlyMap<string, readonly FileDirEntry[]>;
+    readonly loading: ReadonlySet<string>;
+  } | null;
+  /** The full walk, once a filter asked for it; `null` until it lands. */
+  readonly walk: FileListResult | null;
+  /** True while a filter is typed and its walk has not answered yet. */
+  readonly walkPending: boolean;
+  /** True when a filter is typed and its walk failed: no rows, never the unfiltered tree. */
+  readonly walkFailed: boolean;
   readonly filter: string;
   readonly openFile: (path: string) => void;
   readonly setNote: (note: string | null) => void;
@@ -57,7 +68,10 @@ export interface UseFilesTreeStateResult {
 }
 
 export function useFilesTreeState({
-  ready,
+  tree,
+  walk,
+  walkPending,
+  walkFailed,
   filter,
   openFile,
   setNote,
@@ -77,13 +91,17 @@ export function useFilesTreeState({
   const [cursorPath, setCursorPath] = useState<string | null>(null);
 
   /** The visible rows, in draw order. See `files-tree.ts`. */
-  const rows: readonly FileTreeRow[] = useMemo(
-    () =>
-      ready === null
-        ? []
-        : fileTreeRows({ root: ready.root, files: ready.files, expanded, filter }),
-    [ready, expanded, filter],
-  );
+  const rows: readonly FileTreeRow[] = useMemo(() => {
+    if (tree === null) return [];
+    if (filter.trim() !== '') {
+      // A filter needs every path: the full walk, once it has landed.
+      if (walk !== null) {
+        return fileTreeRows({ root: walk.root, files: walk.files, expanded, filter });
+      }
+      if (walkPending || walkFailed) return [];
+    }
+    return lazyTreeRows({ root: tree.root, dirs: tree.dirs, loading: tree.loading, expanded });
+  }, [tree, walk, walkPending, walkFailed, expanded, filter]);
   /**
    * WHERE THE TREE'S CURSOR IS, derived rather than held — the same rule
    * `keyboard/focus-scope.ts` makes about the cursor MODE, for the same

@@ -13,11 +13,19 @@ import { describe, expect, it, vi } from 'vitest';
 import type { FileListResult } from '../../src/main/files/types.js';
 import { useFilesTreeState } from '../../src/renderer/panels/files-tree-state.js';
 
-const listing = (files: readonly string[]): FileListResult => ({
-  root: '/w/atlas',
-  files,
-  truncated: false,
-});
+/** The root level of `files` only, the shape the lazy tree loads first. */
+const rootLevel = (files: readonly string[]) => {
+  const entries = new Map<string, 'file' | 'dir'>();
+  for (const file of files) {
+    const [first, ...rest] = file.slice('/w/atlas/'.length).split('/');
+    entries.set(first as string, rest.length > 0 ? 'dir' : 'file');
+  }
+  return {
+    root: '/w/atlas',
+    dirs: new Map([['/w/atlas', [...entries].map(([name, kind]) => ({ name, kind }) as const)]]),
+    loading: new Set<string>(),
+  };
+};
 
 function setup(files: readonly string[]) {
   const openFile = vi.fn();
@@ -29,7 +37,10 @@ function setup(files: readonly string[]) {
   const treeRef = createRef<HTMLDivElement>();
   const { result } = renderHook(() =>
     useFilesTreeState({
-      ready: listing(files),
+      tree: rootLevel(files),
+      walk: null,
+      walkPending: false,
+      walkFailed: false,
       filter: '',
       openFile,
       setNote,
@@ -96,5 +107,65 @@ describe('useFilesTreeState', () => {
 
     expect(result.current.cursorIndex).toBe(0);
     expect(result.current.cursorPath).toBe(result.current.rows[0]?.path ?? null);
+  });
+
+  it('an open directory draws the level loaded for it, and none until it arrives', () => {
+    const { result } = setup(['/w/atlas/src/index.ts']);
+    act(() => result.current.toggleDir('/w/atlas/src', true));
+    // The level for `src` was never loaded: the row is there, its children are not.
+    expect(result.current.rows.map((row) => row.path)).toEqual(['/w/atlas/src']);
+  });
+
+  it('a typed filter draws no rows while its walk is pending, and the walk once it lands', () => {
+    const base = rootLevel(['/w/atlas/src/index.ts', '/w/atlas/README.md']);
+    const params = (walk: FileListResult | null, walkPending: boolean) => ({
+      tree: base,
+      walk,
+      walkPending,
+      walkFailed: false,
+      filter: 'index',
+      openFile: vi.fn(),
+      setNote: vi.fn(),
+      focusEditor: vi.fn().mockReturnValue(true),
+      focusFilter: vi.fn(),
+      requestRowFocus: vi.fn(),
+      requestEditorFocus: vi.fn(),
+      treeRef: createRef<HTMLDivElement>(),
+    });
+    const pending = renderHook(() => useFilesTreeState(params(null, true)));
+    expect(pending.result.current.rows).toEqual([]);
+    const landed = renderHook(() =>
+      useFilesTreeState(
+        params({ root: '/w/atlas', files: ['/w/atlas/src/index.ts'], truncated: false }, false),
+      ),
+    );
+    expect(landed.result.current.rows.map((row) => row.path)).toEqual([
+      '/w/atlas/src',
+      '/w/atlas/src/index.ts',
+    ]);
+  });
+  it('a typed filter whose walk failed draws no rows and the filter error, never the unfiltered tree', () => {
+    const base = rootLevel(['/w/atlas/src/index.ts', '/w/atlas/README.md']);
+    const params = (filter: string) => ({
+      tree: base,
+      walk: null,
+      walkPending: false,
+      walkFailed: true,
+      filter,
+      openFile: vi.fn(),
+      setNote: vi.fn(),
+      focusEditor: vi.fn().mockReturnValue(true),
+      focusFilter: vi.fn(),
+      requestRowFocus: vi.fn(),
+      requestEditorFocus: vi.fn(),
+      treeRef: createRef<HTMLDivElement>(),
+    });
+    const typed = renderHook(() => useFilesTreeState(params('index')));
+    expect(typed.result.current.rows).toEqual([]);
+    const cleared = renderHook(() => useFilesTreeState(params('')));
+    expect(cleared.result.current.rows.map((row) => row.path)).toEqual([
+      '/w/atlas/src',
+      '/w/atlas/README.md',
+    ]);
   });
 });

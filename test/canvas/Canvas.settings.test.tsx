@@ -87,6 +87,28 @@ afterEach(() => {
 });
 
 describe(', opens the settings overlay', () => {
+  it('sizes the wide section rail from the same width as the main sidebar', async () => {
+    const widths = () => ({
+      rail: (document.querySelector('[data-settings-nav]') as HTMLElement).style.width,
+      sidebar: (document.querySelector('[data-sidebar-pane]') as HTMLElement).style.width,
+    });
+    seed({ panes: { sidebar: 284, detail: 480 } });
+    render(<Canvas model={MODEL} />);
+    await openSettings();
+    const first = widths();
+    expect(first.sidebar).not.toBe('');
+    expect(first.rail).toBe(first.sidebar);
+    press('Escape');
+    cleanup();
+
+    seed({ panes: { sidebar: 336, detail: 480 } });
+    render(<Canvas model={MODEL} />);
+    await openSettings();
+    const second = widths();
+    expect(second.rail).toBe(second.sidebar);
+    expect(second.rail).not.toBe(first.rail);
+  });
+
   it('is closed until , is pressed, and Escape closes it again', async () => {
     render(<Canvas model={MODEL} />);
     expect(overlay()).toBeNull();

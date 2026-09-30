@@ -143,7 +143,16 @@
  * without either side enumerating the other's keys.
  */
 
-import { AlignLeft, Code, Eye, FilePlus, RefreshCw, Search } from 'lucide-react';
+import {
+  AlignLeft,
+  ChevronDown,
+  ChevronRight,
+  Code,
+  Eye,
+  FilePlus,
+  RefreshCw,
+  Search,
+} from 'lucide-react';
 import {
   type KeyboardEvent,
   lazy,
@@ -158,6 +167,8 @@ import {
   useSyncExternalStore,
 } from 'react';
 import type {
+  FileDirEntry,
+  FileDirResult,
   FileListResult,
   FileReadResult,
   FileSignature,
@@ -201,7 +212,12 @@ export type WriteFile = (
   content: string,
   baseSignature: FileSignature | null,
 ) => Promise<FileWriteResult>;
-export type ListFiles = (sessionId: string) => Promise<FileListResult>;
+export type ListFiles = {
+  /** The full walk -- only ever asked for when a filter is typed. */
+  (sessionId: string): Promise<FileListResult>;
+  /** ONE level of `dir` (relative to the session root; `''` is the root). */
+  (sessionId: string, dir: string): Promise<FileDirResult>;
+};
 
 /**
  * HOW WIDE THE TREE IS WHEN NOBODY HAS SAID, and why that is still a clamp
@@ -416,8 +432,20 @@ export type FilesTabProps = {
 
 type ListState =
   | { readonly kind: 'loading' }
-  | { readonly kind: 'ready'; readonly result: FileListResult }
+  | { readonly kind: 'ready'; readonly result: FileDirResult }
   | { readonly kind: 'error'; readonly error: SourceError };
+
+/** One expanded directory's own level, cached per session and directory. */
+type DirState =
+  | { readonly kind: 'loading' }
+  | { readonly kind: 'ready'; readonly entries: readonly FileDirEntry[] }
+  | { readonly kind: 'error' };
+
+/** The filter's full walk, per session. */
+type WalkState =
+  | { readonly kind: 'loading' }
+  | { readonly kind: 'ready'; readonly result: FileListResult }
+  | { readonly kind: 'error'; readonly message: string };
 
 const NO_BRIDGE: SourceError = {
   kind: 'unreachable',
@@ -440,7 +468,17 @@ export function FilesTab({
   onFilesMarkdownView,
   openRequest = null,
 }: FilesTabProps) {
+  /** The ROOT level, per session; deeper levels live in `dirs`. */
   const [listing, setListing] = useState<Record<string, ListState>>({});
+  /** Loaded directory levels: session id, then absolute directory path. */
+  const [dirs, setDirs] = useState<Record<string, Record<string, DirState>>>({});
+  /**
+   * Per session, bumped by every refresh. A read carries the generation it
+   * started under and is dropped if a refresh has bumped it since, so a level
+   * that lands late can never overwrite what the refresh loaded.
+   */
+  const generation = useRef<Record<string, number>>({});
+  const [walks, setWalks] = useState<Record<string, WalkState>>({});
   const [newFileName, setNewFileName] = useState('');
   const [filter, setFilter] = useState('');
   /**
@@ -518,6 +556,21 @@ export function FilesTab({
   const currentListing = sessionId === null ? undefined : listing[sessionId];
   const ready = currentListing?.kind === 'ready' ? currentListing.result : null;
   const root = ready?.root ?? null;
+  const sessionDirs = sessionId === null ? undefined : dirs[sessionId];
+  const currentWalk = sessionId === null ? undefined : walks[sessionId];
+  const filtering = filter.trim() !== '';
+  const walkPending = filtering && currentWalk?.kind === 'loading';
+  const walkFailed = filtering && currentWalk?.kind === 'error';
+  const tree = useMemo(() => {
+    if (ready === null) return null;
+    const levels = new Map<string, readonly FileDirEntry[]>([[ready.root, ready.entries]]);
+    const loading = new Set<string>();
+    for (const [path, state] of Object.entries(sessionDirs ?? {})) {
+      if (state.kind === 'ready') levels.set(path, state.entries);
+      else if (state.kind === 'loading') loading.add(path);
+    }
+    return { root: ready.root, dirs: levels, loading };
+  }, [ready, sessionDirs]);
 
   // Declared before `useFileBuffers` below, which reads both through
   // `onNormalizedBeforeSave`: the caret it restores after a save trims the
@@ -639,12 +692,21 @@ export function FilesTab({
   const fetchListing = useCallback(() => {
     if (sessionId === null || list === undefined) return;
     const forSession = sessionId;
+    const gen = (generation.current[forSession] ?? 0) + 1;
+    generation.current[forSession] = gen;
+    const current = () => generation.current[forSession] === gen;
     setListing((prev) => ({ ...prev, [forSession]: { kind: 'loading' } }));
-    list(forSession)
+    // A refresh drops every cached level and the walk; the effects below ask
+    // again for whatever is still open or still filtered.
+    setDirs(({ [forSession]: _dropped, ...rest }) => rest);
+    setWalks(({ [forSession]: _dropped, ...rest }) => rest);
+    list(forSession, '')
       .then((result) => {
+        if (!current()) return;
         setListing((prev) => ({ ...prev, [forSession]: { kind: 'ready', result } }));
       })
       .catch((reason: unknown) => {
+        if (!current()) return;
         setListing((prev) => ({
           ...prev,
           [forSession]: { kind: 'error', error: reason as SourceError },
@@ -1008,7 +1070,10 @@ export function FilesTab({
     focusCursorRow,
     onTreeKeyDown,
   } = useFilesTreeState({
-    ready,
+    tree,
+    walk: currentWalk?.kind === 'ready' ? currentWalk.result : null,
+    walkPending,
+    walkFailed,
     filter,
     openFile,
     setNote,
@@ -1018,6 +1083,57 @@ export function FilesTab({
     requestEditorFocus,
     treeRef,
   });
+
+  /** The filter's own walk error stays up while the filter is typed. */
+  const shownNote =
+    note ?? (walkFailed && currentWalk?.kind === 'error' ? currentWalk.message : null);
+
+  // LAZY LEVELS: an open directory whose level nobody has asked for yet is
+  // read once. The cache entry (loading, ready or error) is the dedupe, so a
+  // collapse and re-expand never calls again; a collapsed directory is never
+  // read at all, however heavy (`node_modules`, build output).
+  useEffect(() => {
+    if (sessionId === null || list === undefined || root === null) return;
+    const forSession = sessionId;
+    const prefix = `${root}/`;
+    for (const path of expanded) {
+      if (!path.startsWith(prefix) || sessionDirs?.[path] !== undefined) continue;
+      const gen = generation.current[forSession] ?? 0;
+      const put = (state: DirState) => {
+        if ((generation.current[forSession] ?? 0) !== gen) return;
+        setDirs((prev) => ({ ...prev, [forSession]: { ...prev[forSession], [path]: state } }));
+      };
+      put({ kind: 'loading' });
+      list(forSession, path.slice(prefix.length))
+        .then((result) => put({ kind: 'ready', entries: result.entries }))
+        .catch((reason: unknown) => {
+          if ((generation.current[forSession] ?? 0) !== gen) return;
+          put({ kind: 'error' });
+          setNote((reason as SourceError).message);
+        });
+    }
+  }, [expanded, root, sessionId, sessionDirs, list]);
+
+  // THE FILTER'S FULL WALK, on demand: the first keystroke asks, opening the
+  // tab never does. Cached per session until the refresh button drops it.
+  useEffect(() => {
+    if (sessionId === null || list === undefined || !filtering) return;
+    if (currentWalk !== undefined) return;
+    const forSession = sessionId;
+    const gen = generation.current[forSession] ?? 0;
+    const put = (state: WalkState) => {
+      if ((generation.current[forSession] ?? 0) !== gen) return;
+      setWalks((prev) => ({ ...prev, [forSession]: state }));
+    };
+    put({ kind: 'loading' });
+    list(forSession)
+      .then((result) => put({ kind: 'ready', result }))
+      .catch((reason: unknown) => {
+        const message = (reason as SourceError).message;
+        put({ kind: 'error', message });
+        setNote(message);
+      });
+  }, [filtering, sessionId, currentWalk, list]);
 
   /**
    * THE LINE A REQUEST ASKED FOR, held until the file is actually there to
@@ -1724,13 +1840,13 @@ export function FilesTab({
           because they answer the same question ("what just happened, and can
           I take it back"), and because a second banner would push the editor
           down every time the operator pressed Format. */}
-      {(note !== null || formatUndoReady) && (
+      {(shownNote !== null || formatUndoReady) && (
         <p
           data-files-note
           role="status"
           className="flex flex-none items-center gap-2 text-control text-waiting"
         >
-          <span className="min-w-0 flex-1">{note}</span>
+          <span className="min-w-0 flex-1">{shownNote}</span>
           {formatUndoReady && (
             <button
               type="button"
@@ -1891,7 +2007,7 @@ export function FilesTab({
           buffers={buffers}
           filter={filter}
           onFilterChange={setFilter}
-          listing={currentListing}
+          listing={walkPending ? { kind: 'loading' } : currentListing}
           onRefresh={fetchListing}
           onKeyDown={onTreeKeyDown}
           onBoxKeyDown={onBoxKeyDown}
@@ -2440,6 +2556,7 @@ function Tree({
                 data-files-row-path={row.path}
                 data-files-row-kind={row.isDirectory ? 'directory' : 'file'}
                 {...(row.isDirectory ? { 'data-files-row-open': String(open) } : {})}
+                {...(row.loading ? { 'data-files-row-loading': '', 'aria-busy': true } : {})}
                 {...(isCursor ? { 'data-files-cursor': '' } : {})}
                 {...(row.path === activePath ? { 'data-files-row-active': '' } : {})}
                 aria-expanded={row.isDirectory ? open : undefined}
@@ -2461,24 +2578,24 @@ function Tree({
                   isCursor ? 'bg-line-strong text-ink' : 'hover:bg-raised hover:text-ink',
                 ].join(' ')}
               >
-                {/* ONE SLOT, ONE GLYPH — and it replaces the `▸`/`▾` twisty
-                    this row used to draw rather than sitting beside it.
+                {/* ONE GLYPH BEFORE THE NAME, AND A CHEVRON AT THE RIGHT EDGE.
 
-                    The operator asked for "an icon before the folder name",
-                    singular, and a chevron NEXT TO a folder is two icons
-                    before it. One that changes shape when the row opens
-                    (`Folder`/`FolderOpen`) carries the same open/shut fact in
-                    12px instead of 24, which is width this column genuinely
-                    does not have: at vam's narrowest legal pane the tree is
-                    `TREE_WIDTH`'s 7.5rem floor and every pixel of chrome comes
-                    off the NAME. The state a screen reader hears is unchanged
-                    — `aria-expanded` above was always what carried it, and the
-                    twisty was `aria-hidden` exactly as this is.
+                    The leading slot is one glyph — `Folder`/`FolderOpen` for a
+                    directory, a file-family glyph otherwise — which replaced
+                    the `▸`/`▾` twisty that used to sit beside it. That
+                    one-icon rule is REVERSED for directories (operator item
+                    12): a folder that only changes shape is easy to miss as
+                    expandable, so a directory row also draws a trailing
+                    `ChevronRight` (collapsed) / `ChevronDown` (open) below.
+                    It lives at the RIGHT edge, so the name keeps its place
+                    beside the icon; it is `flex-none` and the name is the
+                    `truncate`d item, so at `TREE_WIDTH`'s 7.5rem floor the
+                    name gives way and the chevron never does. It is
+                    `aria-hidden` exactly as the icon is: `aria-expanded`
+                    above is what a screen reader hears.
 
-                    `e2e/files-tab-keyboard-shots.mjs` measures what is left
-                    for the name at that floor, as a rectangle: a glyph that
-                    fits the column while squeezing the names down to an
-                    ellipsis would pass every check in this file. */}
+                    `e2e/files-tab-shots.mjs` measures the chevron's rectangle
+                    against the row's at that floor. */}
                 <FileRowIcon path={row.path} isDirectory={row.isDirectory} open={open} />
                 <span data-files-row-name className="min-w-0 flex-1 truncate">
                   {row.name}
@@ -2504,16 +2621,26 @@ function Tree({
                     style={{ width: 5, height: 5 }}
                   />
                 )}
+                {row.isDirectory &&
+                  (open ? (
+                    <ChevronDown
+                      size={12}
+                      strokeWidth={1.6}
+                      className="flex-none text-ink-faint"
+                      aria-hidden="true"
+                    />
+                  ) : (
+                    <ChevronRight
+                      size={12}
+                      strokeWidth={1.6}
+                      className="flex-none text-ink-faint"
+                      aria-hidden="true"
+                    />
+                  ))}
               </button>
             );
           })}
         </div>
-        {listing?.kind === 'ready' && listing.result.truncated && (
-          <p className="px-2 py-1 text-meta text-ink-faint">
-            Showing the first {listing.result.files.length.toLocaleString()} files — this directory
-            has more.
-          </p>
-        )}
       </OverlayScroll>
     </div>
   );

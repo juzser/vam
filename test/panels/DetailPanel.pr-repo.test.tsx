@@ -19,7 +19,7 @@
  * and -- the part that matters most -- WHEN the directory is named at all.
  */
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Decision, Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
@@ -81,7 +81,93 @@ const name = () => document.querySelector<HTMLElement>('[data-prs-repo-name]');
 const choose = () => document.querySelector<HTMLElement>('[data-prs-repo-choose]');
 const clear = () => document.querySelector<HTMLElement>('[data-prs-repo-clear]');
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+function stubRemotes(projectRemotes: unknown) {
+  vi.stubGlobal('window', Object.assign(window, { api: { github: { projectRemotes } } }));
+}
+
+describe('with no override the heading names the session directory’s git remote', () => {
+  const noOverride = {
+    directory: null,
+    projectName: 'blacksmith',
+    choose: () => {},
+    clear: () => {},
+  };
+
+  it('reads owner/name from the project remotes', async () => {
+    const projectRemotes = vi.fn(async () => [{ name: 'origin', repo: 'owner/blacksmith' }]);
+    stubRemotes(projectRemotes);
+    draw({ prRepo: noOverride });
+    await waitFor(() => expect(name()?.textContent).toBe('owner/blacksmith'));
+    expect(projectRemotes).toHaveBeenCalledWith('p1');
+  });
+
+  it('falls back to the project name when there is no remote', async () => {
+    const projectRemotes = vi.fn(async () => []);
+    stubRemotes(projectRemotes);
+    draw({ prRepo: noOverride });
+    await waitFor(() => expect(projectRemotes).toHaveBeenCalled());
+    expect(name()?.textContent).toBe('blacksmith');
+  });
+
+  it('falls back to the project name when the bridge is absent', () => {
+    draw({ prRepo: noOverride });
+    expect(name()?.textContent).toBe('blacksmith');
+  });
+
+  it('prefers origin over an earlier-listed remote', async () => {
+    const projectRemotes = vi.fn(async () => [
+      { name: 'upstream', repo: 'up/blacksmith' },
+      { name: 'origin', repo: 'me/blacksmith' },
+    ]);
+    stubRemotes(projectRemotes);
+    draw({ prRepo: noOverride });
+    await waitFor(() => expect(name()?.textContent).toBe('me/blacksmith'));
+  });
+
+  it('takes the first remote when none is called origin', async () => {
+    const projectRemotes = vi.fn(async () => [
+      { name: 'fork', repo: 'f/blacksmith' },
+      { name: 'upstream', repo: 'up/blacksmith' },
+    ]);
+    stubRemotes(projectRemotes);
+    draw({ prRepo: noOverride });
+    await waitFor(() => expect(name()?.textContent).toBe('f/blacksmith'));
+  });
+
+  it('falls back to the project name when the bridge rejects', async () => {
+    const projectRemotes = vi.fn(async () => {
+      throw new Error('boom');
+    });
+    stubRemotes(projectRemotes);
+    draw({ prRepo: noOverride });
+    await waitFor(() => expect(projectRemotes).toHaveBeenCalled());
+    await Promise.resolve();
+    expect(name()?.textContent).toBe('blacksmith');
+  });
+
+  it('keeps the clear control and the override name when overridden, remote ignored', async () => {
+    const projectRemotes = vi.fn(async () => [{ name: 'origin', repo: 'owner/blacksmith' }]);
+    stubRemotes(projectRemotes);
+    draw({ prRepo: { ...noOverride, directory: DIR } });
+    await Promise.resolve();
+    expect(name()?.textContent).toBe('other-repo');
+    expect(clear()).not.toBeNull();
+    expect(projectRemotes).not.toHaveBeenCalled();
+  });
+
+  it('does not ask, and keeps the chosen directory, when one is overridden', () => {
+    const projectRemotes = vi.fn(async () => [{ name: 'origin', repo: 'owner/blacksmith' }]);
+    stubRemotes(projectRemotes);
+    draw({ prRepo: { ...noOverride, directory: DIR } });
+    expect(name()?.textContent).toBe('other-repo');
+    expect(projectRemotes).not.toHaveBeenCalled();
+  });
+});
 
 describe('the PRs pane says where it is asking from', () => {
   it('draws nothing at all where there is no directory picker', () => {

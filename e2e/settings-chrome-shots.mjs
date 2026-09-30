@@ -1589,5 +1589,44 @@ console.log("\n=== a heading's own bottom line clears the config below it");
   console.log(`  every card header and every subgroup heading clears at least ${GAP_FLOOR}px before its own body, over all ${sectionIds.length} sections`);
 }
 
+// ---------------------------------------------------------------- RAIL WIDTH.
+// The wide section rail is exactly as wide as the main sidebar (one width
+// value, `Canvas.tsx`'s `sidebarWidth`), and its labels read at 13px. Measured
+// as the rail's right edge against the sidebar's right edge with Settings
+// closed, at the default width and at a widened one.
+console.log('settings rail: right edge lines up with the main sidebar, labels at 13px');
+for (const stored of [null, 320]) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  page.on('pageerror', (err) => console.error('PAGE ERROR:', err));
+  if (stored !== null) {
+    await page.addInitScript((width) => {
+      localStorage.setItem('vam.prefs.v1', JSON.stringify({ panes: { sidebar: width, detail: 480 } }));
+    }, stored);
+  }
+  await page.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('button[aria-label="settings"]', { timeout: 15_000 });
+  const sidebarEdge = await page.evaluate(
+    () => document.querySelector('[data-sidebar-pane]').getBoundingClientRect().right,
+  );
+  await page.locator('button[aria-label="settings"]').first().click();
+  await page.waitForSelector('[data-settings-nav]', { timeout: 5_000 });
+  const rail = await page.evaluate(() => ({
+    edge: document.querySelector('[data-settings-nav]').getBoundingClientRect().right,
+    fonts: [...document.querySelectorAll('[data-settings-nav-item]')].map(
+      (el) => getComputedStyle(el).fontSize,
+    ),
+  }));
+  const label = stored === null ? 'default' : `${stored}px`;
+  if (Math.abs(rail.edge - sidebarEdge) > 1) {
+    throw new Error(`${label}: rail right edge ${rail.edge} vs sidebar ${sidebarEdge}, beyond 1px`);
+  }
+  if (rail.fonts.some((size) => size !== '13px')) {
+    throw new Error(`${label}: section labels are not 13px: ${JSON.stringify(rail.fonts)}`);
+  }
+  await page.screenshot({ path: `${outDir}/settings-rail-width-${stored === null ? 'default' : 'wide'}.png` });
+  console.log(`  ${label}: rail edge ${rail.edge}px = sidebar edge ${sidebarEdge}px, labels 13px`);
+  await page.close();
+}
+
 await browser.close();
 console.log('settings chrome: the narrow nav is named at every width, the Remote button paints, the case ladder holds, and the switch reads as one.');

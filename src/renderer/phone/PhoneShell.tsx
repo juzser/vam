@@ -747,14 +747,13 @@ export function PhoneShell({
              the 16px lucide icons in this same bar rather than against a text
              step. A chevron paints far smaller than its em box -- at the
              scale's 15px `heading` it would be the smallest mark in a 44px
-             target. The `×` below is 16 for the same reason in the other
-             direction: a multiplication sign fills its box where this does
-             not. Two glyphs, two optical sizes, and neither is prose. */
+             target. It is the only glyph in this bar; the rest are lucide
+             icons or prose. */
           className={`${TOUCH} ${FOCUS_RING} flex-none rounded-[7px] text-[18px] text-ink-dim`}
         >
           ‹
         </button>
-        {/* ONE ROW: back, the session's name, the views, close. This bar used
+        {/* ONE ROW: back, the session's name, the views. This bar used
             to carry a second line (`project · epic · N agents`); the operator
             asked for the header block to go, so it did, and the project and
             the epic are not shown on a phone any more. The NAME stays and
@@ -774,38 +773,9 @@ export function PhoneShell({
             setViewRequest({ tab });
           }}
         />
-        {/* Closing a session, drawn where it can be seen and read.
-            The list row's own `x` is revealed by hover and a finger has no
-            hover, so on a phone it is not a control at all (styles.css) -- and
-            it sat over the row's primary tap, which is the worst place for one.
-            Here it is visible, and it is at the other end of the bar from the
-            back chevron.
-
-            IT GOES THROUGH `sidebar.onClose` -- THE SAME `onSidebarClose`
-            THE DESKTOP SIDEBAR ROW'S OWN `×` CALLS -- rather than opening a
-            dialog here first. DECISION 1 moved the question into
-            `Canvas.tsx`'s own `closeSession`, which every close route now
-            calls before any of them touch a source: it reads the row's
-            status and shows `ConfirmCloseSession` (rendered once, as a
-            sibling of the phone shell and the desktop columns alike) only
-            while the session is `running`. This used to be a phone-only,
-            unconditional question -- `ConfirmCloseSession`'s own header
-            explains why that was superseded. What the geometry argument
-            below still justifies is the CONTROL'S placement, not a second,
-            local gate in front of it: the Agents icon ends 8px before this
-            control starts, so a view switch and an end-a-running-agent tap
-            are neighbours under one finger, and putting the question one
-            level up rather than here is what stops a phone-only bypass from
-            ever being possible again. */}
-        <button
-          type="button"
-          data-phone-close
-          aria-label="close session"
-          onClick={() => sidebar.onClose(entry.session.id)}
-          className={`${TOUCH} ${FOCUS_RING} flex-none rounded-[7px] text-[16px] text-ink-dim`}
-        >
-          ×
-        </button>
+        {/* No close control here: it sat beside the Agents icon and was easy to
+            hit by accident. A session is closed by swiping its row on the list
+            (`SessionList.tsx`), which reaches the same `closeSession` gate. */}
       </header>
 
       {/* The same refusal channel the list screen has. A rename or a close

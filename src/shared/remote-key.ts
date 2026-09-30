@@ -9,17 +9,39 @@
  * than typed twice, which is how the two drifted before (`KEY_STRIP`'s own
  * history: a caption and a glyph table kept in two places once, and it did).
  *
- * SIX IDS, closed. Vam's own naming (`escape`, `back-tab`, ...), not tmux's
- * key names and not Claude Code's -- see `PaneKey` in `terminal.ts`, which
- * this is a small, closed SUBSET of. `up`/`down` are the desktop key strip's
- * own addition (vam/terminal-arrows) and are deliberately not here: Orca's
- * own phone layout, which the remote strip matches, has no arrow keys, and
- * arrows never travel this route in any build.
+ * TWENTY IDS, closed: the original six, then `delete`, the four arrows and
+ * nine named Ctrl chords (vam-ux-1). Vam's own naming (`escape`, `back-tab`,
+ * `arrow-up`, `ctrl-c`, ...), not tmux's key names and not Claude Code's --
+ * see `PaneKey` in `terminal.ts`, which this is a closed SUBSET of. Every
+ * id is matched by exact string equality and maps to one fixed `PaneKey`;
+ * nothing is parsed, prefixed or pattern-matched. `ctrl-b` (tmux's prefix)
+ * and every Ctrl letter not named are deliberately absent.
  */
 
 import type { PaneKey } from './terminal.js';
 
-export const REMOTE_KEY_IDS = ['escape', 'tab', 'enter', 'back-tab', 'space', 'backspace'] as const;
+export const REMOTE_KEY_IDS = [
+  'escape',
+  'tab',
+  'enter',
+  'back-tab',
+  'space',
+  'backspace',
+  'delete',
+  'arrow-up',
+  'arrow-down',
+  'arrow-left',
+  'arrow-right',
+  'ctrl-c',
+  'ctrl-d',
+  'ctrl-l',
+  'ctrl-z',
+  'ctrl-r',
+  'ctrl-a',
+  'ctrl-e',
+  'ctrl-w',
+  'ctrl-u',
+] as const;
 
 export type RemoteKeyId = (typeof REMOTE_KEY_IDS)[number];
 
@@ -32,9 +54,10 @@ export function isRemoteKeyId(value: unknown): value is RemoteKeyId {
 /**
  * The allowlisted id, turned into the `PaneKey` the tmux-sending path already
  * knows how to deliver (`main/terminal/pane.ts`'s `sendToPane`). A closed
- * `switch` with no default arm: every id in `REMOTE_KEY_IDS` has exactly one
- * case, so adding a seventh id to the array without adding its arm here is a
- * compile error, never a silently-`undefined` key.
+ * `switch` over `REMOTE_KEY_IDS`: every id has exactly one case. The default
+ * arm assigns the id to a `never` (`const unreachable: never = id`), so adding
+ * a further id to the array without adding its arm here is a compile error,
+ * never a silently-`undefined` key.
  *
  * `tab` IS `{ kind: 'text', text: '\t' }`, NOT A NEW `PaneKey` KIND. There is
  * no dedicated kind for a plain Tab (`DetailPanel.tsx`'s `KEY_STRIP` never
@@ -60,14 +83,46 @@ export function remoteKeyToPaneKey(id: RemoteKeyId): PaneKey {
       return { kind: 'text', text: ' ' };
     case 'tab':
       return { kind: 'text', text: '\t' };
+    case 'delete':
+      return { kind: 'nav', nav: 'delete' };
+    case 'arrow-up':
+      return { kind: 'nav', nav: 'up' };
+    case 'arrow-down':
+      return { kind: 'nav', nav: 'down' };
+    case 'arrow-left':
+      return { kind: 'nav', nav: 'left' };
+    case 'arrow-right':
+      return { kind: 'nav', nav: 'right' };
+    case 'ctrl-c':
+      return { kind: 'control', letter: 'c' };
+    case 'ctrl-d':
+      return { kind: 'control', letter: 'd' };
+    case 'ctrl-l':
+      return { kind: 'control', letter: 'l' };
+    case 'ctrl-z':
+      return { kind: 'control', letter: 'z' };
+    case 'ctrl-r':
+      return { kind: 'control', letter: 'r' };
+    case 'ctrl-a':
+      return { kind: 'control', letter: 'a' };
+    case 'ctrl-e':
+      return { kind: 'control', letter: 'e' };
+    case 'ctrl-w':
+      return { kind: 'control', letter: 'w' };
+    case 'ctrl-u':
+      return { kind: 'control', letter: 'u' };
+    default: {
+      const unreachable: never = id;
+      return unreachable;
+    }
   }
 }
 
 /**
  * The other direction, for the phone strip: which of ITS keys can even be
- * offered over the remote route. `null` for anything outside the six --
- * `up`/`down` among them -- which is what tells the strip to render that
- * button only where `window.api.terminal.send` (the LOCAL, Electron-only
+ * offered over the remote route. `null` for anything outside the twenty --
+ * Home, PageUp, an unnamed Ctrl letter -- which is what tells the strip to
+ * render that button only where `window.api.terminal.send` (the LOCAL, Electron-only
  * channel) is present.
  */
 export function paneKeyToRemoteKeyId(key: PaneKey): RemoteKeyId | null {
@@ -77,5 +132,45 @@ export function paneKeyToRemoteKeyId(key: PaneKey): RemoteKeyId | null {
   if (key.kind === 'enter' && !key.shift) return 'enter';
   if (key.kind === 'text' && key.text === ' ') return 'space';
   if (key.kind === 'text' && key.text === '\t') return 'tab';
+  if (key.kind === 'nav') {
+    switch (key.nav) {
+      case 'delete':
+        return 'delete';
+      case 'up':
+        return 'arrow-up';
+      case 'down':
+        return 'arrow-down';
+      case 'left':
+        return 'arrow-left';
+      case 'right':
+        return 'arrow-right';
+      default:
+        return null;
+    }
+  }
+  if (key.kind === 'control') {
+    switch (key.letter) {
+      case 'c':
+        return 'ctrl-c';
+      case 'd':
+        return 'ctrl-d';
+      case 'l':
+        return 'ctrl-l';
+      case 'z':
+        return 'ctrl-z';
+      case 'r':
+        return 'ctrl-r';
+      case 'a':
+        return 'ctrl-a';
+      case 'e':
+        return 'ctrl-e';
+      case 'w':
+        return 'ctrl-w';
+      case 'u':
+        return 'ctrl-u';
+      default:
+        return null;
+    }
+  }
   return null;
 }

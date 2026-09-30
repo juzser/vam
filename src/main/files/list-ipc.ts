@@ -20,12 +20,15 @@
  * contents actually live at, not at whatever string happened to be recorded.
  */
 
+import { isAbsolute, join, normalize, parse } from 'node:path';
+
 import { CHANNELS, type IpcResult, type SourceError } from '../ipc/channels.js';
 import type { IpcMainLike } from '../ipc/handlers.js';
-import type { RealpathFn } from './authorize.js';
-import { listFiles, type ReadDir } from './list.js';
-import type { FileListResult } from './types.js';
+import { authorize, type RealpathFn } from './authorize.js';
+import { listDirectory, listFiles, type ReadDir } from './list.js';
+import type { FileDirResult, FileListResult } from './types.js';
 
+export type { FileDirResult } from './types.js';
 export type { FileListResult };
 
 /** The session's own working directory, or `null` if nothing live answers to this id. */
@@ -45,7 +48,7 @@ export function registerFilesListIpc(
 ): void {
   ipcMain.handle(
     CHANNELS.filesList,
-    async (_event, ...args): Promise<IpcResult<FileListResult>> => {
+    async (_event, ...args): Promise<IpcResult<FileListResult | FileDirResult>> => {
       const sessionId = args[0];
       if (typeof sessionId !== 'string' || sessionId.length === 0) {
         return { ok: false, error: refused('invalid-payload', 'filesList takes one session id') };
@@ -72,8 +75,56 @@ export function registerFilesListIpc(
           ),
         };
       }
-      const result = await listFiles(realCwd, readDir);
-      return { ok: true, value: result };
+      const dir = args[1];
+      if (dir === undefined) {
+        const result = await listFiles(realCwd, readDir);
+        return { ok: true, value: result };
+      }
+      // Renderer-supplied: containment is decided by `authorize` on the
+      // realpath'd candidate, exactly as `resolve-ipc.ts` does, BEFORE any read.
+      if (typeof dir !== 'string' || dir.includes('\0')) {
+        return { ok: false, error: refused('invalid-payload', 'dir must be a path string') };
+      }
+      const clean = normalize(dir);
+      const candidate = isAbsolute(clean) ? clean : join(realCwd, clean);
+      // `authorize` treats the root itself as not "inside" it, so the root
+      // (dir '' / '.') is admitted by exact match on the realpath'd cwd.
+      const authorization =
+        candidate === realCwd
+          ? { authorized: true as const, realPath: realCwd, existed: true }
+          : await authorize(candidate, [realCwd], realpathFn);
+      if (!authorization.authorized) {
+        return {
+          ok: false,
+          error: refused(
+            'not-authorized',
+            `${dir} is not inside this session's own project directory`,
+          ),
+        };
+      }
+      if (!authorization.existed) {
+        return { ok: false, error: refused('not-found', `${dir} is not a directory here`) };
+      }
+      // EC-13: a real path equals its lexical form exactly when no segment
+      // below the (already real) cwd is a symlink; refuse any that is followed.
+      // A filesystem root ('/', 'C:\\') keeps its own separator.
+      const { root } = parse(candidate);
+      const stripped = candidate.replace(/[\\/]+$/, '');
+      const lexical = stripped.length < root.length ? root : stripped;
+      if (authorization.realPath !== lexical) {
+        return {
+          ok: false,
+          error: refused('symlink', `${dir} is or passes through a symlink, which is not listed`),
+        };
+      }
+      let entries: Awaited<ReturnType<typeof listDirectory>>;
+      try {
+        entries = await listDirectory(authorization.realPath, '', readDir);
+      } catch {
+        return { ok: false, error: refused('unreadable', `${dir} could not be read`) };
+      }
+      const value: FileDirResult = { root: realCwd, dir: authorization.realPath, entries };
+      return { ok: true, value };
     },
   );
 }

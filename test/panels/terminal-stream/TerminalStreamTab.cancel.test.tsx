@@ -139,7 +139,7 @@ describe('finding cbd56848: a cancelled/superseded open closes what it opened', 
           resolveOpen = resolve;
         }),
     });
-    const { unmount } = render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    const { unmount } = render(<TerminalStreamTab projectId="p1" rowId="s1" />);
     await act(async () => {
       await Promise.resolve();
     });
@@ -179,7 +179,7 @@ describe('finding cbd56848: a cancelled/superseded open closes what it opened', 
     });
     try {
       visibility.mockReturnValue('visible');
-      render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      render(<TerminalStreamTab projectId="p1" rowId="s1" />);
       await act(async () => {
         await Promise.resolve();
       });
@@ -245,7 +245,7 @@ describe('finding cbd56848: a cancelled/superseded open closes what it opened', 
     });
     try {
       visibility.mockReturnValue('visible');
-      const { unmount } = render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      const { unmount } = render(<TerminalStreamTab projectId="p1" rowId="s1" />);
       await act(async () => {
         await Promise.resolve();
       });
@@ -312,7 +312,7 @@ describe('finding cbd56848: a cancelled/superseded open closes what it opened', 
     });
     try {
       visibility.mockReturnValue('visible');
-      const { unmount } = render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      const { unmount } = render(<TerminalStreamTab projectId="p1" rowId="s1" />);
       await act(async () => {
         await Promise.resolve();
       });
@@ -364,7 +364,7 @@ describe('finding cbd56848: a cancelled/superseded open closes what it opened', 
     });
     try {
       visibility.mockReturnValue('visible');
-      const { unmount } = render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      const { unmount } = render(<TerminalStreamTab projectId="p1" rowId="s1" />);
       await act(async () => {
         await Promise.resolve();
         await Promise.resolve();
@@ -400,7 +400,7 @@ describe('finding cbd56848: a cancelled/superseded open closes what it opened', 
           resolveOpen = resolve;
         }),
     });
-    const { unmount } = render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    const { unmount } = render(<TerminalStreamTab projectId="p1" rowId="s1" />);
     await act(async () => {
       await Promise.resolve();
     });

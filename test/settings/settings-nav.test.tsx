@@ -22,6 +22,7 @@
 
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_PANES } from '../../src/renderer/prefs/panes.js';
 import { EMPTY_PREFS, type Prefs } from '../../src/renderer/prefs/prefs.js';
 import { SettingsOverlay } from '../../src/renderer/settings/SettingsOverlay.js';
 import { isDesktopOnlySection, SECTIONS } from '../../src/renderer/settings/sections.js';
@@ -275,6 +276,90 @@ describe('the overlay draws a focus indicator', () => {
  * left-arrow row reading "Back to app" at the top of the desktop rail, in
  * place of the plain label, closing Settings the same way Esc/`×` already do.
  */
+describe('the wide rail reads one type-scale step above control', () => {
+  it('sets every section item in text-body, none in text-control', () => {
+    open();
+    const items = [...document.querySelectorAll('[data-settings-nav-item]')];
+    expect(items.length).toBe(VISIBLE_SECTIONS.length);
+    for (const el of items) {
+      expect(el.classList.contains('text-body')).toBe(true);
+      expect(el.classList.contains('text-control')).toBe(false);
+    }
+  });
+});
+
+describe('the wide rail width and back row (sidebar sizing)', () => {
+  const rail = () => document.querySelector<HTMLElement>('[data-settings-nav]');
+
+  it('falls back to the sidebar default width when no sidebarWidth is passed', () => {
+    open();
+    expect(rail()?.style.width).toBe(`${DEFAULT_PANES.sidebar}px`);
+  });
+
+  it('takes the passed sidebarWidth verbatim, and follows a change of it', () => {
+    const props = {
+      prefs: EMPTY_PREFS,
+      theme: 'dark' as const,
+      onChange: vi.fn(),
+      onClose: vi.fn(),
+    };
+    const view = render(<SettingsOverlay {...props} sidebarWidth={312} />);
+    expect(rail()?.style.width).toBe('312px');
+    view.rerender(<SettingsOverlay {...props} sidebarWidth={340} />);
+    expect(rail()?.style.width).toBe('340px');
+  });
+
+  it('no longer carries the fixed 168px width class', () => {
+    open();
+    expect(rail()?.className).not.toContain('w-[168px]');
+  });
+
+  it('sets the Back to app row in text-body, not text-control', () => {
+    open();
+    const back = document.querySelector<HTMLElement>('[data-settings-back]');
+    expect(back?.classList.contains('text-body')).toBe(true);
+    expect(back?.classList.contains('text-control')).toBe(false);
+  });
+});
+
+describe('the narrow strip keeps its own type step', () => {
+  it('leaves strip items in text-control when a sidebarWidth is passed', () => {
+    const wide = Object.getOwnPropertyDescriptor(window, 'matchMedia');
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: (media: string) => ({
+        media,
+        matches: false,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      }),
+    });
+    try {
+      render(
+        <SettingsOverlay
+          prefs={EMPTY_PREFS}
+          theme="dark"
+          sidebarWidth={300}
+          onChange={vi.fn()}
+          onClose={vi.fn()}
+        />,
+      );
+      const items = [...document.querySelectorAll<HTMLElement>('[data-settings-nav-item]')];
+      expect(items.length).toBe(VISIBLE_SECTIONS.length);
+      for (const el of items) {
+        expect(el.classList.contains('text-control')).toBe(true);
+        expect(el.classList.contains('text-body')).toBe(false);
+      }
+      expect(
+        document.querySelector('[data-settings-nav]')?.getAttribute('style') ?? '',
+      ).not.toContain('width');
+    } finally {
+      if (wide === undefined) Reflect.deleteProperty(window, 'matchMedia');
+      else Object.defineProperty(window, 'matchMedia', wide);
+    }
+  });
+});
+
 describe('the rail\'s own "Back to app" row', () => {
   const back = () => document.querySelector<HTMLElement>('[data-settings-back]');
 

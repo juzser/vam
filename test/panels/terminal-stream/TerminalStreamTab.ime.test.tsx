@@ -90,7 +90,7 @@ describe('IME composition, against a real Terminal', () => {
   it('sends the whole composed syllable to terminalStream.write once, uncorrupted', async () => {
     const write = vi.fn();
     withBridge(write);
-    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    render(<TerminalStreamTab projectId="p1" rowId="s1" />);
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();

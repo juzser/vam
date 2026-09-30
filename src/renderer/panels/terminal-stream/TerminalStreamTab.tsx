@@ -25,10 +25,9 @@ import { Unicode11Addon } from '@xterm/addon-unicode11';
 import type { ITheme } from '@xterm/xterm';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
-import { GitBranch } from 'lucide-react';
 import type { CSSProperties } from 'react';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { INSERT_STOP, insertScopeMark } from '../../keyboard/focus-scope.js';
+import { INSERT_STOP, insertScopeMark, releaseInsert } from '../../keyboard/focus-scope.js';
 import {
   activeTerminalFontSize,
   subscribeTerminalFontSize,
@@ -223,7 +222,6 @@ function asXtermSeed(seed: string): string {
 export function TerminalStreamTab(props: {
   readonly projectId: string | null;
   readonly rowId?: string | undefined;
-  readonly branch: string | null;
   /** Fired at most once per mount, the moment this pane learns its tmux
    *  cannot stream at all or has given up reconnecting -- see the type's own
    *  header. This pane keeps drawing its OWN refusal/down text regardless
@@ -232,7 +230,7 @@ export function TerminalStreamTab(props: {
    *  to replace it in time. */
   readonly onFallback?: (reason: StreamFallbackReason) => void;
 }) {
-  const { projectId, rowId, branch, onFallback } = props;
+  const { projectId, rowId, onFallback } = props;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -523,7 +521,24 @@ export function TerminalStreamTab(props: {
         // `TerminalTab.tsx`'s own `onKeyDown` checks `SCROLL_CHORDS`. `true`
         // for everything else, including keyup, so ordinary typing is
         // unaffected.
+        //
+        // ESCAPE LEAVES THE PANE, the way `TerminalTab.tsx`'s own does: back
+        // to Select, not into the pane where it would cancel the Claude
+        // prompt. Unmodified and not composing only -- an IME uses Escape to
+        // cancel a composition -- and `Mod-.` is what sends a literal one.
         liveTerm.attachCustomKeyEventHandler((event) => {
+          if (
+            event.type === 'keydown' &&
+            event.key === 'Escape' &&
+            !event.isComposing &&
+            !event.shiftKey &&
+            !event.ctrlKey &&
+            !event.altKey &&
+            !event.metaKey
+          ) {
+            releaseInsert(document.activeElement);
+            return false;
+          }
           if (event.type !== 'keydown' || !event.shiftKey || !SCROLL_CHORD_KEYS.has(event.key)) {
             return true;
           }
@@ -880,8 +895,7 @@ export function TerminalStreamTab(props: {
         )}
       </div>
       {/* THE STATUS RULE, the same one row `TerminalTab.tsx` draws under its
-         own screen -- branch at the left where reading starts, the tmux
-         session's name pushed to the right (`aria-hidden`: the pane's own
+         own screen -- the tmux session's name pushed to the right (`aria-hidden`: the pane's own
          accessible name already carries it, via `term.textarea`'s
          `aria-label`... which this tab does not set yet, see the design
          doc). `name` is `null` until the stream actually opens
@@ -890,16 +904,8 @@ export function TerminalStreamTab(props: {
          own `view` starts `null` for the identical reason. */}
       <div
         data-terminal-stream-status
-        className="flex flex-none items-center gap-2 border-line border-t pt-1 font-mono text-meta text-ink-faint"
+        className="flex min-h-[21px] flex-none items-center gap-2 border-line border-t pt-1 font-mono text-meta text-ink-faint"
       >
-        {typeof branch === 'string' && branch !== '' && (
-          <span className="flex min-w-0 items-center gap-1">
-            <GitBranch size={10} strokeWidth={1.6} aria-hidden="true" />
-            <span data-terminal-stream-branch title={branch} className="truncate">
-              {branch}
-            </span>
-          </span>
-        )}
         <span className="flex-1" />
         {name !== null && (
           <span

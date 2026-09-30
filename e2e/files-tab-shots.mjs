@@ -117,7 +117,19 @@ await page.addInitScript(() => {
     applyWaivers: async () => {}, transitionLesson: async () => {},
     usage: { get: async () => ({ kind: 'unavailable' }) },
     files: {
-      list: async () => ({ root: '/work/atlas', files: [...files.keys()], truncated: false }),
+      // One level per call, as the real bridge answers a `dir`; the bare call is the full walk.
+      list: async (_sessionId, dir) => {
+        const root = '/work/atlas';
+        if (dir === undefined) return { root, files: [...files.keys()], truncated: false };
+        const base = dir === '' ? root : `${root}/${dir}`;
+        const entries = new Map();
+        for (const file of files.keys()) {
+          if (!file.startsWith(`${base}/`)) continue;
+          const [first, ...rest] = file.slice(base.length + 1).split('/');
+          entries.set(first, rest.length > 0 ? 'dir' : 'file');
+        }
+        return { root, dir: base, entries: [...entries].map(([name, kind]) => ({ name, kind })) };
+      },
       read: async (path) =>
         files.has(path)
           ? { content: files.get(path), isBinary: false, signature: sig(path) }
@@ -140,4 +152,26 @@ await page.waitForTimeout(400);
 const out = `${outDir}/files-tab.png`;
 await page.screenshot({ path: out });
 console.log(out);
+
+// The one assertion this script makes, kept out of the picture above: at the tree's 7.5rem floor a
+// directory row's chevron is still inside the row's box and the name is what gives way.
+const geometry = await page.evaluate(() => {
+  const tree = document.querySelector('[data-files-row]')?.closest('[class*="min-w-[7.5rem]"]');
+  if (!tree) return null;
+  tree.style.width = '7.5rem';
+  const row = document.querySelector('[data-files-row-kind="directory"]');
+  const chevron = row?.lastElementChild;
+  const name = row?.querySelector('[data-files-row-name]');
+  if (!row || !chevron || !name) return null;
+  const r = row.getBoundingClientRect();
+  const c = chevron.getBoundingClientRect();
+  return {
+    inside: c.left >= r.left && c.right <= r.right && c.width > 0,
+    truncated: name.clientWidth > 0 && getComputedStyle(name).textOverflow === 'ellipsis',
+  };
+});
+if (!geometry?.inside || !geometry.truncated) {
+  console.error(`chevron geometry at 7.5rem failed: ${JSON.stringify(geometry)}`);
+  process.exitCode = 1;
+}
 await browser.close();

@@ -60,6 +60,21 @@ export type FileListResult = {
   readonly truncated: boolean;
 };
 
+/** One direct child of a listed directory. Symlinks never appear. */
+export type FileDirEntry = {
+  readonly name: string;
+  readonly kind: 'file' | 'dir';
+};
+
+/** What `CHANNELS.filesList` answers with when given a `dir`: one level only. */
+export type FileDirResult = {
+  /** The (already `realpath`-resolved) session directory. */
+  readonly root: string;
+  /** The realpath-resolved directory that was listed. */
+  readonly dir: string;
+  readonly entries: readonly FileDirEntry[];
+};
+
 /**
  * What `CHANNELS.filesResolve` answers with, on success: one absolute path and
  * the line the agent pointed at. See `resolve-ipc.ts`.

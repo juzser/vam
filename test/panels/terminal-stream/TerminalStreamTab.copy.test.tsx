@@ -71,7 +71,7 @@ describe('Cmd+C (Meta+C), against a real Terminal', () => {
   it('is never forwarded to terminalStream.write as bytes', async () => {
     const write = vi.fn();
     withBridge(write);
-    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    render(<TerminalStreamTab projectId="p1" rowId="s1" />);
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -99,7 +99,7 @@ describe('Cmd+C (Meta+C), against a real Terminal', () => {
   it('a plain Ctrl+C (no Meta) still sends the interrupt byte, selection or not', async () => {
     const write = vi.fn();
     withBridge(write);
-    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    render(<TerminalStreamTab projectId="p1" rowId="s1" />);
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();

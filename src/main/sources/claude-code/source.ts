@@ -97,6 +97,7 @@ import {
   readUserSlashCommands,
 } from './slash-commands.js';
 import { killOwnPane, typeIntoOwnPane } from './start-in-pane.js';
+import { startTextWithStatusLine } from './statusline.js';
 import {
   killPidViaSignal,
   pidHasClaudeSessionFile,
@@ -1119,7 +1120,11 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
     // right: a pane holding a shell IS a terminal, and text sent to it runs.
     const pane = paneNameOf(sessionId);
     if (pane !== null)
-      return typeIntoOwnPane({ run: createTmuxRunner(), name: pane, text: prompt });
+      return typeIntoOwnPane({
+        run: createTmuxRunner(),
+        name: pane,
+        text: startTextWithStatusLine(prompt),
+      });
     const agentsResult = await listLiveAgents();
     if (agentsResult.kind === 'unavailable') return agentsUnavailableError(agentsResult);
     return replyToSession({

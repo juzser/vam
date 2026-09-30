@@ -59,9 +59,8 @@ export function TerminalAutoTab(props: {
   readonly read: ReadPane | undefined;
   readonly resize: ResizePane | undefined;
   readonly send: SendKey | undefined;
-  readonly branch?: string | null;
 }) {
-  const { projectId, rowId, read, resize, send, branch } = props;
+  const { projectId, rowId, read, resize, send } = props;
   const streamingTerminal = useSyncExternalStore(
     subscribeStreamingTerminal,
     activeStreamingTerminal,
@@ -85,7 +84,6 @@ export function TerminalAutoTab(props: {
         read={read}
         resize={resize}
         send={send}
-        branch={branch}
         notice={fallback !== null ? FALLBACK_NOTICE[fallback] : null}
       />
     );
@@ -93,12 +91,7 @@ export function TerminalAutoTab(props: {
 
   return (
     <Suspense fallback={null}>
-      <LazyTerminalStreamTab
-        projectId={projectId}
-        rowId={rowId}
-        branch={branch ?? null}
-        onFallback={setFallback}
-      />
+      <LazyTerminalStreamTab projectId={projectId} rowId={rowId} onFallback={setFallback} />
     </Suspense>
   );
 }

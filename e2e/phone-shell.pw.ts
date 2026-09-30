@@ -51,6 +51,23 @@ const IOS_KEYBOARD_CSS_PX = 336;
 /** WCAG 2.2 SC 2.5.5 (AAA) and Apple's HIG figure -- the shell's own comment. */
 const TOUCH_MIN = 44;
 
+/** Swipe a phone row open (touchscreen can only tap) and return the revealed trash. */
+async function swipeTrash(page: Page, row: Locator): Promise<Locator> {
+  await row.evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    const [x, y] = [box.right - 24, box.top + box.height / 2];
+    const fire = (type: string, dx: number) =>
+      el.dispatchEvent(
+        new PointerEvent(type, { bubbles: true, pointerId: 1, clientX: x + dx, clientY: y }),
+      );
+    for (const [type, dx] of [['pointerdown', 0], ['pointermove', -30], ['pointermove', -100], ['pointerup', -100]] as const)
+      fire(type, dx);
+  });
+  const trash = page.locator('[data-phone-shell] [data-swipe-trash]:visible');
+  await expect(trash).toHaveCount(1);
+  return trash;
+}
+
 /**
  * The painted ceiling, from the UI spec's table (`vam-phone-controls`, 3.2):
  * the widest skin it authorises is the 36px record disc, and the widest square
@@ -287,24 +304,22 @@ test.describe('the phone shell at 390px', () => {
     await expect(page.locator('[data-phone-shell] [data-session-row]').first()).toBeVisible();
   });
 
-  test('the close control is on the session bar, clear of the back chevron', async ({ page }) => {
+  test('the session bar has no close control; a swipe on the list reveals a 44px trash', async ({
+    page,
+  }) => {
     await openDemo(page);
     await openFirstSession(page);
+    await expect(page.locator('[data-phone-shell] header [aria-label="close session"]')).toHaveCount(
+      0,
+    );
+    await page.locator('[data-phone-back]').tap();
 
-    const back = page.locator('[data-phone-back]');
-    const close = page.locator('[data-phone-close]');
-    const backBox = await back.boundingBox();
-    const closeBox = await close.boundingBox();
-    if (backBox === null || closeBox === null) throw new Error('app bar controls missing');
-
-    // Visible, not hover-revealed: this is the deliberate route #191 added
-    // BECAUSE a finger has no hover.
-    await expect(close).toBeVisible();
-    await expect(close).toHaveCSS('opacity', '1');
-    // At the other end of the bar from `back`, with real space between them.
-    expect(closeBox.x).toBeGreaterThan(backBox.x + backBox.width + 8);
-    expect(closeBox.width).toBeGreaterThanOrEqual(TOUCH_MIN);
-    expect(closeBox.height).toBeGreaterThanOrEqual(TOUCH_MIN);
+    const trash = await swipeTrash(page, page.locator('[data-phone-shell] [data-session-row]').first());
+    await expect(trash).toBeVisible();
+    const box = await trash.boundingBox();
+    if (box === null) throw new Error('trash missing');
+    expect(box.width).toBeGreaterThanOrEqual(TOUCH_MIN);
+    expect(box.height).toBeGreaterThanOrEqual(TOUCH_MIN);
   });
 
   /**
@@ -834,10 +849,7 @@ test.describe('settings at 390px', () => {
   async function openSettings(page: Page): Promise<void> {
     await openDemo(page);
     await expect(page.locator('[data-phone-shell] button[aria-label="settings"]')).toHaveCount(0);
-    // Remote is one tap further in now, behind the toolbar's "more actions"
-    // overflow button (Orca one-row pass, follow-up to pull request 527) --
-    // opening it is what reveals the Remote item this then taps.
-    await page.locator('[data-phone-shell] button[aria-label="more actions"]').first().tap();
+    // Remote is a direct button in the toolbar row.
     await page.locator('[data-phone-shell] button[aria-label="remote access"]').first().tap();
     await expect(page.locator('[data-settings-overlay]')).toBeVisible();
   }
@@ -1633,13 +1645,12 @@ test.describe('the sheets behind a source', () => {
    * fewer than it used to take.
    */
   const recordAFailure = async (page: Page): Promise<void> => {
-    const box = await page.locator('[data-phone-shell] [data-session-row]').first().boundingBox();
-    if (box === null) throw new Error('no session row');
-    await page.touchscreen.tap(box.x + 60, box.y + box.height / 2);
-    await expect(page.locator('[data-phone-shell]')).toHaveAttribute('data-phone-shell', 'session');
-    await page.locator('[data-phone-close]').tap();
+    const trash = await swipeTrash(
+      page,
+      page.locator('[data-phone-shell] [data-session-row]').first(),
+    );
+    await trash.tap();
     await expect(page.locator('[data-phone-status]').first()).toContainText('stub');
-    await page.locator('[data-phone-back]').tap();
   };
 
   test('the error log opens as a bottom sheet from the failures button', async ({ page }) => {
@@ -1944,24 +1955,28 @@ test.describe('the session tab strip and the keystroke strip at 390px', () => {
     await expect(waitingTab.locator('[data-phone-session-waiting-badge]')).toBeVisible();
   });
 
-  test('the keystroke strip draws six 44px controls that fit inside 390px', async ({ page }) => {
-    // vam/terminal-arrows added Up/Down to `KEY_STRIP` (a phone has no arrow
-    // keys, and Claude Code's own option pickers need them), and the phone's
-    // own remote channel (`/api/send-key`, `shared/remote-key.ts`) later
-    // added `tab` -- eight keys in `KEY_STRIP` now, not seven. This page has
-    // no `window.api` at all (`?demo=1` is a plain browser build, not
-    // Electron), so `hasLocalTerminalChannel` is false and the strip filters
-    // itself down to the six `paneKeyToRemoteKeyId` answers for -- Up/Down
-    // are withdrawn here for the same reason they are on a real phone served
-    // over Tailscale: absent, not disabled, because this page has no channel
-    // for them either.
+  test('the keystroke strip is one scrolling row of 30px chips inside 390px', async ({ page }) => {
+    // task-16 made the phone strip a horizontally scrolling row of chips:
+    // Keyboard, Paste, the twenty `KEY_STRIP` keys (every one has a remote id
+    // in `shared/remote-key.ts`, so the no-`window.api` filter drops none),
+    // Terminal where the session has one, and More -- 24 with a terminal, 23
+    // without (`test/panels/DetailPanel.keystroke-strip.test.tsx`'s ORDER is
+    // the oracle). The chips scroll INSIDE the strip, so the strip's own box
+    // must still end within the 390px viewport; each chip keeps 30px.
     await stubSource(page);
     await openFirstAlphaSession(page);
 
     const strip = page.locator('[data-key-strip]');
     await expect(strip).toBeVisible();
-    const keys = strip.locator('[data-key-strip-key]');
-    await expect(keys).toHaveCount(6);
+    await expect(strip.locator('[data-key-strip-keyboard]')).toHaveCount(1);
+    await expect(strip.locator('[data-key-strip-paste]')).toHaveCount(1);
+    await expect(strip.locator('[data-key-strip-more]')).toHaveCount(1);
+    await expect(strip.locator('[data-key-strip-key]')).toHaveCount(20);
+    // Measured on this page: the demo session has a terminal
+    // (`terminal !== false`) and the shell passes `onRequestTab`, so the
+    // Terminal chip draws -- 24 chips in all.
+    await expect(strip.locator('[data-key-strip-screen]')).toHaveCount(1);
+    await expect(strip.locator('button')).toHaveCount(24);
 
     const geometry = await strip.evaluate((el) => {
       const r = el.getBoundingClientRect();
@@ -1974,7 +1989,9 @@ test.describe('the session tab strip and the keystroke strip at 390px', () => {
     expect(geometry.right, 'the strip must not overflow the 390px viewport').toBeLessThanOrEqual(
       390,
     );
-    const undersized = geometry.controls.filter((c) => c.w < 44 || c.h < 44);
+    // 30px, not 44: the strip's own named exemption (`styles.css`,
+    // `[data-key-strip] .vam-tap`), so painted chips sit <= 6px apart.
+    const undersized = geometry.controls.filter((c) => c.w < 30 || c.h < 30);
     expect(undersized, JSON.stringify(geometry.controls)).toEqual([]);
   });
 
@@ -2320,11 +2337,15 @@ test.describe('the foreign-hidden quiet line on a phone list screen', () => {
     // sits inside the avatar row now, not in a bar of its own above it.
     expect(geometry.looseHeaderAboveList).toBe(false);
     const { sourceBox, avatarBarBox } = geometry;
-    if (sourceBox === null || avatarBarBox === null) throw new Error('source or avatar bar missing');
-    expect(sourceBox.y, JSON.stringify(geometry)).toBeGreaterThanOrEqual(avatarBarBox.y);
-    expect(sourceBox.y + sourceBox.h, JSON.stringify(geometry)).toBeLessThanOrEqual(
-      avatarBarBox.y + avatarBarBox.h,
-    );
+    // A healthy or demo source draws no readout and no row at all now; when
+    // one is drawn (connecting / error) it must sit inside its bar.
+    if (sourceBox !== null) {
+      if (avatarBarBox === null) throw new Error('source without an avatar bar');
+      expect(sourceBox.y, JSON.stringify(geometry)).toBeGreaterThanOrEqual(avatarBarBox.y);
+      expect(sourceBox.y + sourceBox.h, JSON.stringify(geometry)).toBeLessThanOrEqual(
+        avatarBarBox.y + avatarBarBox.h,
+      );
+    }
 
     // (c) THE BLOCK CENTRES IN THE FREE AREA -- the header above it to the
     // bottom of the screen (the status bar, when it draws anything; the

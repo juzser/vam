@@ -128,16 +128,6 @@ const EXCEPTIONS: ReadonlyArray<{
       'to a text step would make it the smallest thing in a 44px target.',
   },
   {
-    file: 'phone/PhoneShell.tsx',
-    size: '16',
-    count: 1,
-    why:
-      'The close `\u00d7`, the other glyph-as-icon in the same bar, and 2px ' +
-      'smaller than the chevron for the same optical reason in the other ' +
-      'direction: a multiplication sign fills its em box where a chevron does ' +
-      'not.',
-  },
-  {
     file: 'panels/SessionList.tsx',
     size: '13',
     count: 6,

@@ -98,6 +98,7 @@ import {
   isIdle,
   isUnprompted,
 } from '../domain/session-filter.js';
+import { isOutsideVamScope } from '../domain/session-ownership.js';
 import { ErrorLogPanel } from '../errors/ErrorLogPanel.js';
 import { loggedEvents, noteFailure, recordRefusal, subscribeEvents } from '../errors/log.js';
 import {
@@ -141,9 +142,11 @@ import { type ProjectChoice, ProjectPicker } from '../panels/ProjectPicker.js';
 import type { RemovalPlan } from '../panels/remove-project.js';
 import { NEW_PROJECT_PENDING, rowMenuItems, SessionList } from '../panels/SessionList.js';
 import { SplitResizer } from '../panels/SplitResizer.js';
+import { triggerStartSession } from '../panels/start-session-registry.js';
 import { StatusMark } from '../panels/status-mark.js';
 import { halfPageTarget } from '../panels/stick-to-bottom.js';
 import { TABS, tabForDigit, visibleTabs } from '../panels/tabs.js';
+import { toggleUsagePopoverFrom, useUsageOpen } from '../panels/UsagePopover.js';
 import { ConfirmCloseSession } from '../phone/ConfirmCloseSession.js';
 import { PhoneShell } from '../phone/PhoneShell.js';
 import { usePhoneViewport } from '../phone/viewport.js';
@@ -370,6 +373,38 @@ export function truncateStatus(text: string): string {
     return text;
   }
   return `${text.slice(0, STATUS_MAX_CHARS - 1).trimEnd()}\u2026`;
+}
+
+/** A usage cell that toggles the popover: the button is the one tab stop, and
+ *  a missing-number `reason` rides on a `Note` around it (opens on focus). */
+function UsageTrigger({
+  marker,
+  reason,
+  children,
+}: {
+  readonly marker: 'data-usage' | 'data-codex-usage';
+  readonly reason: string | null;
+  readonly children: ReactNode;
+}) {
+  // With a `reason` the button itself is the explaining cell: it carries the
+  // cell marker and an explicit tab stop, so focus opens the `Note`.
+  const cell = reason === null ? {} : { [marker]: '', tabIndex: 0 };
+  const open = useUsageOpen(marker);
+  const button = (
+    <button
+      type="button"
+      data-usage-trigger
+      {...cell}
+      // No `aria-label`: the visible figure names the button (WCAG 2.5.3).
+      aria-haspopup="dialog"
+      aria-expanded={open}
+      onClick={() => toggleUsagePopoverFrom(marker)}
+      className="flex cursor-pointer items-center gap-2 bg-transparent p-0 text-inherit"
+    >
+      {children}
+    </button>
+  );
+  return reason === null ? button : <Note text={reason}>{button}</Note>;
 }
 
 /**
@@ -1560,6 +1595,24 @@ function TabStrip({
       })}
     </div>
   );
+}
+
+/**
+ * The phone list header's row shows ONLY while the source is connecting or in
+ * error (operator decision: a lone healthy dot, or the demo note, is not worth
+ * a row). The desktop canvas bar's readout does not use this.
+ */
+function sourceNeedsReadout(source: CanvasSource): boolean {
+  switch (source.kind) {
+    case 'demo':
+      return false;
+    case 'connecting':
+      return true;
+    case 'session':
+      return source.error !== undefined && source.error !== null;
+    default:
+      return source.status !== 'live';
+  }
 }
 
 /**
@@ -3601,6 +3654,16 @@ function CanvasInner({
     [allEntries],
   );
 
+  const ownershipScope = useMemo(
+    () => ({
+      prefs,
+      hiddenProjectIds: hiddenProjects,
+      vamListingGap,
+      demo: source.kind === 'demo',
+    }),
+    [prefs, hiddenProjects, vamListingGap, source.kind],
+  );
+
   const entries = useMemo(() => {
     // THE FILTERED SET, in an IIFE so both of its own early-return branches
     // (the listing-gap short-circuit below, and the ordinary tail) stay
@@ -3618,7 +3681,7 @@ function CanvasInner({
       // drawn would leave `j` stepping onto a session with no row -- the exact
       // defect the note below this memo describes, reintroduced by a different
       // route. The three views agree on the SET.
-      const visible = allEntries.filter((e) => !hiddenProjects.includes(e.project.id));
+      const visible = allEntries.filter((e) => !isOutsideVamScope(e, ownershipScope));
       const byText =
         query.trim() === '' ? visible : visible.filter((e) => matches.includes(e.session.id));
       const byStatus =
@@ -3701,7 +3764,7 @@ function CanvasInner({
     // dependency array naming a nested field the memo does not otherwise use
     // is a staleness bug waiting for the next field this filter chain grows.
     // The same argument covers `prefs.viewOptions` now too.
-  }, [allEntries, hiddenProjects, matches, query, statusFilter, prefs, vamListingGap, source.kind]);
+  }, [allEntries, ownershipScope, matches, query, statusFilter, prefs, vamListingGap, source.kind]);
 
   /**
    * EVERY SESSION OF THE ACTIVE PROJECT VAM HAS NOT POSITIVELY EXCLUDED --
@@ -4498,21 +4561,23 @@ function CanvasInner({
    * says why the crossing can only be seen where a previous model is held,
    * and `prefs/notify.ts` why there is exactly one switch.
    *
-   * `allEntries`, never the filtered `entries`: a filter hides a row from the
-   * sidebar, it does not make the session stop needing somebody. The titles
-   * carry the operator's renames because `model` has them applied. The
+   * vam's scope (`isOutsideVamScope`), never the view filters: a filter hides
+   * a row from the sidebar, it does not make the session stop needing
+   * somebody. The titles carry the operator's renames because `model` has them applied. The
    * project name rides in the body so a banner about `s1` says which `s1`.
    */
   const notifiable = useMemo(
     () =>
-      allEntries.map((e) => ({
-        sourceId: sourceKeyOf(e),
-        sessionId: e.session.id,
-        status: e.session.status,
-        title: e.session.title,
-        project: e.project.name,
-      })),
-    [allEntries],
+      allEntries
+        .filter((e) => !isOutsideVamScope(e, ownershipScope))
+        .map((e) => ({
+          sourceId: sourceKeyOf(e),
+          sessionId: e.session.id,
+          status: e.session.status,
+          title: e.session.title,
+          project: e.project.name,
+        })),
+    [allEntries, ownershipScope],
   );
   // Keyed on the two strings, not the entry: a fresh `focusedEntry` object
   // arrives with every poll, and the cursor has not moved.
@@ -5397,7 +5462,12 @@ function CanvasInner({
     async (sessionId: string, title: string, force = false): Promise<boolean> => {
       if (!force) {
         const entry = allEntries.find((e) => e.session.id === sessionId);
-        if (entry !== undefined && entry.session.status === 'running') {
+        // Background agents count as running too: closing the session ends
+        // them, and `runningAgents` is the live count of them.
+        if (
+          entry !== undefined &&
+          (entry.session.status === 'running' || entry.session.runningAgents > 0)
+        ) {
           setConfirmCloseSession({ sessionId, title });
           return false;
         }
@@ -6744,6 +6814,13 @@ function CanvasInner({
           );
           return;
         }
+        case 'startSession':
+          // The mounted start screen registers its own callback, so the
+          // provider and permission started with are the ones on screen.
+          if (focusedSessionId === null || !triggerStartSession(focusedSessionId)) {
+            setStatus('no start screen here — this session is already started');
+          }
+          return;
         case 'newSession':
           // Real now: main starts a detached tmux session running `claude` in
           // the project's own directory. Which project is the focused
@@ -8347,7 +8424,7 @@ function CanvasInner({
           sidebar={sidebarProps}
           detail={detailProps}
           paneEligibleEntries={paneEligibleEntries}
-          sourceReadout={<SourceReadout source={source} />}
+          sourceReadout={sourceNeedsReadout(source) ? <SourceReadout source={source} /> : undefined}
           // A read-only server registers no write routes at all, so the box is
           // withdrawn rather than drawn and refused. Only a `session` source
           // can say; the demo and live sources both record.
@@ -8386,6 +8463,7 @@ function CanvasInner({
         <Suspense fallback={null}>
           <SettingsOverlay
             prefs={prefs}
+            sidebarWidth={sidebarWidth}
             theme={effective}
             onChange={savePrefs}
             onClose={() => setSettingsOpen(false)}
@@ -8430,6 +8508,10 @@ function CanvasInner({
       {confirmCloseSession !== null && (
         <ConfirmCloseSession
           title={confirmCloseSession.title}
+          runningAgents={
+            allEntries.find((e) => e.session.id === confirmCloseSession.sessionId)?.session
+              .runningAgents ?? 0
+          }
           onCancel={() => setConfirmCloseSession(null)}
           onConfirm={() => {
             const target = confirmCloseSession;
@@ -8656,46 +8738,30 @@ function CanvasInner({
                   sidebar row and the Stats screen's `ProviderCard` already
                   draw from (`sources/provider-marks.tsx`), never a copied
                   path: one glyph for `claude-code`, drawn once. */}
-              {usage.reason === null ? (
+              <UsageTrigger marker="data-usage" reason={usage.reason}>
                 <span
-                  data-usage
+                  data-usage={usage.reason === null ? '' : undefined}
                   className={`flex items-center gap-1${usage.highUsage ? ' text-failed' : ''}`}
                 >
                   <SourceMark source="claude-code" lane={12} />
                   {usage.text}
                 </span>
-              ) : (
-                <Note text={usage.reason}>
-                  {/* A tab stop for the same reason `StatusCell` takes one. This
-                      sentence is the explanation for a MISSING NUMBER -- on the
-                      web/Tailscale build it was keyboard-unreachable, and with no
-                      hover on touch it was unreachable at all. */}
-                  <span
-                    data-usage
-                    className="flex items-center gap-1"
-                    // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see `StatusCell`.
-                    tabIndex={0}
-                  >
-                    <SourceMark source="claude-code" lane={12} />
-                    {usage.text}
+                {usage.windows !== null && (
+                  <span className="flex items-center gap-2">
+                    {/* Five hours first: it is the window that moves minute to minute. */}
+                    <UsageBar
+                      label="5h"
+                      usageWindow={usage.windows.fiveHour}
+                      high={usage.highUsage}
+                    />
+                    <UsageBar
+                      label="7d"
+                      usageWindow={usage.windows.sevenDay}
+                      high={usage.highUsage}
+                    />
                   </span>
-                </Note>
-              )}
-              {usage.windows !== null && (
-                <span className="flex items-center gap-2">
-                  {/* Five hours first: it is the window that moves minute to minute. */}
-                  <UsageBar
-                    label="5h"
-                    usageWindow={usage.windows.fiveHour}
-                    high={usage.highUsage}
-                  />
-                  <UsageBar
-                    label="7d"
-                    usageWindow={usage.windows.sevenDay}
-                    high={usage.highUsage}
-                  />
-                </span>
-              )}
+                )}
+              </UsageTrigger>
             </>
           )}
           {prefs.statusBarShowCodexUsage && (
@@ -8712,27 +8778,15 @@ function CanvasInner({
                   resolver, `source="codex"`, so this cell and Claude's read
                   as one family rather than two different widgets that
                   happen to sit beside each other. */}
-              {codexUsage.reason === null ? (
+              <UsageTrigger marker="data-codex-usage" reason={codexUsage.reason}>
                 <span
-                  data-codex-usage
+                  data-codex-usage={codexUsage.reason === null ? '' : undefined}
                   className={`flex items-center gap-1${codexUsage.highUsage ? ' text-failed' : ''}`}
                 >
                   <SourceMark source="codex" lane={12} />
                   {codexUsage.text}
                 </span>
-              ) : (
-                <Note text={codexUsage.reason}>
-                  <span
-                    data-codex-usage
-                    className="flex items-center gap-1"
-                    // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see `StatusCell`.
-                    tabIndex={0}
-                  >
-                    <SourceMark source="codex" lane={12} />
-                    {codexUsage.text}
-                  </span>
-                </Note>
-              )}
+              </UsageTrigger>
             </>
           )}
 

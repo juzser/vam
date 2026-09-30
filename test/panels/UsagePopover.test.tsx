@@ -7,9 +7,9 @@
  * real request in the browser build.
  */
 
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { act } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, type Mock, vi } from 'vitest';
 import { UsagePopover, usagePanelLeftOffset } from '../../src/renderer/panels/UsagePopover.js';
 import type { CodexUsageSnapshot } from '../../src/shared/codex-usage.js';
 import type { UsageSnapshot } from '../../src/shared/usage.js';
@@ -125,11 +125,13 @@ describe('the usage popover trigger', () => {
 
     await act(async () => {
       toggle().click();
+      await vi.dynamicImportSettled();
     });
     expect(panel()).not.toBeNull();
 
     await act(async () => {
       toggle().click();
+      await vi.dynamicImportSettled();
     });
     expect(panel()).toBeNull();
   });
@@ -140,6 +142,7 @@ describe('the usage popover trigger', () => {
 
     await act(async () => {
       toggle().click();
+      await vi.dynamicImportSettled();
     });
     expect(panel()).not.toBeNull();
 
@@ -155,6 +158,7 @@ describe('the usage popover trigger', () => {
 
     await act(async () => {
       toggle().click();
+      await vi.dynamicImportSettled();
     });
     expect(panel()).not.toBeNull();
 
@@ -170,6 +174,7 @@ describe('the usage popover trigger', () => {
 
     await act(async () => {
       toggle().click();
+      await vi.dynamicImportSettled();
     });
     const node = panel();
     expect(node).not.toBeNull();
@@ -190,6 +195,7 @@ describe('the usage popover, in the browser build (no window.api)', () => {
 
     await act(async () => {
       toggle().click();
+      await vi.dynamicImportSettled();
     });
 
     expect(document.querySelector('[data-usage-unavailable]')?.textContent).toMatch(/desktop app/i);
@@ -205,6 +211,7 @@ describe('the usage popover, with both providers reachable', () => {
 
     await act(async () => {
       toggle().click();
+      await vi.dynamicImportSettled();
     });
 
     const sections = [...document.querySelectorAll('[data-usage-provider]')];
@@ -222,6 +229,7 @@ describe('the usage popover, with both providers reachable', () => {
 
     await act(async () => {
       toggle().click();
+      await vi.dynamicImportSettled();
     });
 
     const claude = document.querySelector('[data-usage-provider="claude-code"]');
@@ -238,6 +246,7 @@ describe('the usage popover, with both providers reachable', () => {
 
     await act(async () => {
       toggle().click();
+      await vi.dynamicImportSettled();
     });
 
     const codex = document.querySelector('[data-usage-provider="codex"]');
@@ -254,6 +263,7 @@ describe('the usage popover, with both providers reachable', () => {
 
     await act(async () => {
       toggle().click();
+      await vi.dynamicImportSettled();
     });
 
     const claude = document.querySelector('[data-usage-provider="claude-code"]');
@@ -272,6 +282,7 @@ describe('the usage popover, with both providers reachable', () => {
 
     await act(async () => {
       toggle().click();
+      await vi.dynamicImportSettled();
     });
 
     expect(get).toHaveBeenCalledTimes(1);
@@ -325,5 +336,126 @@ describe('usagePanelLeftOffset', () => {
     for (const buttonLeft of [12, 50, 58]) {
       expect(usagePanelLeftOffset(buttonLeft, 390, 320)).toBe(0);
     }
+  });
+});
+
+describe('the refresh button', () => {
+  it('re-reads both snapshots with force and shows the new one', async () => {
+    serve(claudeSnapshot(), codexSnapshot());
+    render(<UsagePopover />);
+    await act(async () => {
+      toggle().click();
+      await vi.dynamicImportSettled();
+    });
+    const api = (window as unknown as { api: { usage: { get: Mock; getCodex: Mock } } }).api;
+    api.usage.get.mockClear();
+    api.usage.getCodex.mockClear();
+    const base = claudeSnapshot();
+    const fresh: UsageSnapshot =
+      base.kind === 'ok'
+        ? {
+            ...base,
+            windows: {
+              ...base.windows,
+              fiveHour: { kind: 'known', percent: 77, resetsAt: '2030-01-01T00:00:00Z' },
+            },
+          }
+        : base;
+    api.usage.get.mockImplementation(async () => fresh);
+
+    const header = panel()?.querySelector('[data-usage-header]');
+    const button = screen.getByRole('button', { name: 'Refresh' });
+    expect(header?.contains(button)).toBe(true);
+    await act(async () => {
+      button.click();
+    });
+
+    expect(api.usage.get).toHaveBeenCalledTimes(1);
+    expect(api.usage.get).toHaveBeenCalledWith({ force: true });
+    expect(api.usage.getCodex).toHaveBeenCalledTimes(1);
+    expect(api.usage.getCodex).toHaveBeenCalledWith({ force: true });
+    expect(panel()?.textContent).toContain('77%');
+  });
+
+  it('keeps focus and Escape while refreshing: aria-disabled, not disabled, and a second click is a no-op', async () => {
+    const pending: Array<() => void> = [];
+    const get = vi.fn(
+      () => new Promise<UsageSnapshot>((resolve) => pending.push(() => resolve(claudeSnapshot()))),
+    );
+    const getCodex = vi.fn(
+      () =>
+        new Promise<CodexUsageSnapshot>((resolve) => pending.push(() => resolve(codexSnapshot()))),
+    );
+    (window as unknown as { api: unknown }).api = { usage: { get, getCodex } };
+    render(<UsagePopover />);
+    await act(async () => {
+      toggle().click();
+      await vi.dynamicImportSettled();
+    });
+    await act(async () => {
+      for (const resolve of pending.splice(0)) resolve();
+    });
+    const button = await screen.findByRole('button', { name: 'Refresh' });
+    get.mockClear();
+    getCodex.mockClear();
+    act(() => {
+      button.focus();
+    });
+    await act(async () => {
+      fireEvent.keyDown(button, { key: 'Enter' });
+      button.click();
+    });
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(getCodex).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(button);
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    expect(button.hasAttribute('disabled')).toBe(false);
+    await act(async () => {
+      button.click();
+    });
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(getCodex).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    });
+    expect(panel()).toBeNull();
+  });
+
+  it('a close and reopen after a refresh polls normally, without force', async () => {
+    serve(claudeSnapshot(), codexSnapshot());
+    render(<UsagePopover />);
+    await act(async () => {
+      toggle().click();
+      await vi.dynamicImportSettled();
+    });
+    await act(async () => {
+      screen.getByRole('button', { name: 'Refresh' }).click();
+    });
+    const api = (window as unknown as { api: { usage: { get: Mock; getCodex: Mock } } }).api;
+    for (const step of ['close', 'reopen']) {
+      if (step === 'reopen') api.usage.get.mockClear();
+      await act(async () => {
+        toggle().click();
+        await vi.dynamicImportSettled();
+      });
+    }
+    expect(api.usage.get.mock.calls).toEqual([[]]);
+  });
+
+  it('a press on it does not dismiss the popover, and the footer trigger is not "outside"', async () => {
+    serve(claudeSnapshot(), codexSnapshot());
+    const outside = document.createElement('button');
+    outside.setAttribute('data-usage-trigger', '');
+    document.body.appendChild(outside);
+    render(<UsagePopover />);
+    await act(async () => {
+      toggle().click();
+      await vi.dynamicImportSettled();
+    });
+    await act(async () => {
+      outside.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    });
+    expect(panel()).not.toBeNull();
+    outside.remove();
   });
 });
