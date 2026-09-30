@@ -114,6 +114,17 @@ describe('EC-20: reserved keys have read-only rows', () => {
     }
   });
 
+  it('keeps reserved rows fixed under an unbound action and out of the group sections', () => {
+    const unbound = shortcutSections(buildBindingSheet({ 'scrollHalf:1': [] }));
+    const reservedOf = (id: string) =>
+      (unbound.find((s) => s.id === id)?.rows ?? []).filter((row) => row.reserved === true);
+    expect(reservedOf('select').map((row) => row.keys[0])).toEqual(['Escape']);
+    expect(reservedOf('insert').map((row) => row.keys[0])).toEqual(['Escape', 'Mod-[']);
+    for (const section of sections().filter((s) => s.id !== 'select' && s.id !== 'insert'))
+      for (const row of section.rows)
+        expect(row.reserved, `${section.id}/${row.id}`).toBeUndefined();
+  });
+
   it('renders no rebind control on a reserved row, but keeps one on Mod-d', () => {
     render(
       <SettingsOverlay
