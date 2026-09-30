@@ -5,7 +5,7 @@
 
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Canvas } from '../../src/renderer/canvas/Canvas.js';
+import { Canvas, START_PANE_WAIT_TIMEOUT_MS } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
 import { setActiveStreamingTerminal } from '../../src/renderer/prefs/streaming-terminal.js';
 import type { SessionSource } from '../../src/renderer/sources/port.js';
@@ -21,7 +21,7 @@ const modelWith = (...sessions: Session[]): CanvasModel => ({
 });
 
 /** Offers a terminal (so a Terminal seed is a real view) and can create. */
-function sourceWith(): CanvasSource {
+function sourceWith(createSession: () => Promise<void> = async () => {}): CanvasSource {
   const inner = {
     id: 'claude-code',
     label: 'Claude Code',
@@ -31,7 +31,7 @@ function sourceWith(): CanvasSource {
     load: async () => [],
     write: {
       recordPrompt: async () => {},
-      createSession: async () => {},
+      createSession,
       createSessionIn: async () => {},
     },
   };
@@ -84,6 +84,7 @@ beforeEach(() => {
   setActiveStreamingTerminal(false);
 });
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   localStorage.clear();
   Reflect.deleteProperty(window, 'api');
@@ -105,15 +106,27 @@ const rerenderWith = (view: ReturnType<typeof render>, source: CanvasSource, ...
   });
 const A1 = session('a1');
 const A2 = session('a2');
+const trigger = (route: string) =>
+  route === 'o' ? press('o') : click(document.querySelector(route));
+/** Render `start` and create through `route`; nothing new has arrived yet. */
+async function begin(route: string, start: Session[], source = sourceWith()) {
+  const view = render(<Canvas model={modelWith(...start)} source={source} />);
+  await trigger(route);
+  return { source, view };
+}
 /** Render `start`, click `route`, then the source reports `next`. */
 async function create(route: string, start: Session[], next: Session[]) {
-  const source = sourceWith();
-  const view = render(<Canvas model={modelWith(...start)} source={source} />);
-  if (route === 'o') press('o');
-  else await click(document.querySelector(route));
+  const { source, view } = await begin(route, start);
   await rerenderWith(view, source, ...next);
   return { source, view };
 }
+const waiting = () => document.querySelector('[data-pane-starting]') !== null;
+const advance = (ms: number) =>
+  act(async () => {
+    vi.advanceTimersByTime(ms);
+  });
+const F1 = session('f1', { vamControlled: false });
+const BOTH_ROUTES = [['o'], ['[data-tab-new]']];
 const a2 = () => click(tabNamed('a2'));
 
 describe('a session vam creates opens on Response, whatever the last run left', () => {
@@ -183,5 +196,89 @@ describe('a started row and its hand-over keep the Response view', () => {
     await a2();
     expect(activeTab()).toBe('a2');
     expect(selectedView()).toBe(expected);
+  });
+});
+
+describe('the wait for vam’s own row', () => {
+  it.each(BOTH_ROUTES)(
+    'a foreign row arriving first neither ends the wait nor takes vam’s Response record (%s)',
+    async (route) => {
+      const prefs = {
+        detailTab: 'Terminal',
+        streamingTerminal: false,
+        streamingTerminalMigrated: true,
+      };
+      localStorage.setItem(
+        'vam.prefs.v1',
+        JSON.stringify({ ...prefs, filters: { hideForeign: false } }),
+      );
+      const { source, view } = await begin(route, [A1]);
+      await rerenderWith(view, source, A1, F1);
+      expect(waiting()).toBe(true);
+      expect(activeTab()).not.toBe('f1');
+      await rerenderWith(view, source, A1, F1, A2);
+      expect(waiting()).toBe(false);
+      if (route === 'o') await a2();
+      expect(activeTab()).toBe('a2');
+      expect(selectedView()).toBe('response');
+      expect(storedTab()).toBe('Terminal');
+      await click(document.querySelector('[data-session-row="f1"]'));
+      expect(activeTab()).toBe('f1');
+      expect(selectedView()).toBe('terminal');
+    },
+  );
+
+  it.each(BOTH_ROUTES)(
+    'the wait ends at START_PANE_WAIT_TIMEOUT_MS when vam’s own row never arrives (%s)',
+    async (route) => {
+      vi.useFakeTimers();
+      const { source, view } = await begin(route, [A1]);
+      await advance(START_PANE_WAIT_TIMEOUT_MS - 1);
+      expect(waiting()).toBe(true);
+      await advance(1);
+      expect(waiting()).toBe(false);
+      await rerenderWith(view, source, A1, A2);
+      expect(activeTab()).toBe('a1');
+      await a2();
+      expect(selectedView()).toBe('terminal');
+      expect(storedTab()).toBe('Terminal');
+    },
+  );
+
+  it.each(BOTH_ROUTES)(
+    'a second create’s wait outlives the first create’s deadline (%s)',
+    async (route) => {
+      vi.useFakeTimers();
+      const { source, view } = await begin(route, [A1]);
+      await advance(START_PANE_WAIT_TIMEOUT_MS / 2);
+      await trigger(route);
+      await advance(START_PANE_WAIT_TIMEOUT_MS / 2 + 1);
+      expect(waiting()).toBe(true);
+      await rerenderWith(view, source, A1, A2);
+      expect(waiting()).toBe(false);
+      if (route === 'o') await a2();
+      expect(activeTab()).toBe('a2');
+      expect(selectedView()).toBe('response');
+    },
+  );
+
+  it('a write slower than START_PANE_WAIT_TIMEOUT_MS never arms the pane’s pending tab', async () => {
+    vi.useFakeTimers();
+    let settle = () => {};
+    const slow = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    const { source, view } = await begin(
+      '[data-tab-new]',
+      [A1],
+      sourceWith(() => slow),
+    );
+    await advance(START_PANE_WAIT_TIMEOUT_MS + 1);
+    expect(waiting()).toBe(false);
+    settle();
+    await rerenderWith(view, source, A1, A2);
+    expect(activeTab()).toBe('a1');
+    await a2();
+    expect(selectedView()).toBe('terminal');
   });
 });

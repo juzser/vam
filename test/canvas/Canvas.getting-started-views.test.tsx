@@ -124,6 +124,24 @@ describe('Get started draws no view switcher and the view chords do nothing', ()
     silent(before);
   });
 
+  it('a digit typed into a focused text input still lands in it', () => {
+    render(<Canvas model={NOTHING} source={makeSource()} />);
+    const box = document.createElement('input');
+    document.body.appendChild(box);
+    box.focus();
+    const event = new KeyboardEvent('keydown', {
+      key: '2',
+      code: 'Digit2',
+      bubbles: true,
+      cancelable: true,
+    });
+    act(() => {
+      box.dispatchEvent(event);
+    });
+    expect(event.defaultPrevented).toBe(false);
+    box.remove();
+  });
+
   it('once one own session is focused the switcher is back', () => {
     const source = makeSource();
     const view = render(<Canvas model={NOTHING} source={source} />);
@@ -133,6 +151,8 @@ describe('Get started draws no view switcher and the view chords do nothing', ()
     expect(switcher()).not.toBeNull();
     viewChord(2);
     expect(selectedView()).toBe('prs');
+    viewChord(1);
+    expect(selectedView()).toBe('response');
   });
 
   it('an empty split pane beside a session keeps the switcher and the chords', () => {
@@ -182,6 +202,14 @@ describe('the pane shows Get started once nothing is visible anywhere', () => {
     expect(gettingStarted()).toBeNull();
     await act(async () => close());
     expect(document.querySelectorAll('[data-session-row]')).toHaveLength(0);
+    expect(gettingStarted()).not.toBeNull();
+  });
+
+  it('the source then reports the session gone', () => {
+    const source = makeSource(true);
+    const view = render(<Canvas model={ONE} source={source} />);
+    expect(gettingStarted()).toBeNull();
+    view.rerender(<Canvas model={NOTHING} source={source} />);
     expect(gettingStarted()).not.toBeNull();
   });
 });
