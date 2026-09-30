@@ -5144,6 +5144,10 @@ function QuestionCard({
       // questions are behind the CLI's own cursor now.
       const got = result.kind === 'sent' ? undefined : result.committed;
       if (got !== undefined) setTaken((already) => [...already, ...got]);
+    } catch {
+      // A rejected bridge call used to end the click silently. The message is
+      // a constant on purpose: an IPC error string is internals, not advice.
+      setRefusal('not sent — vam could not reach the session. Press Submit to try again.');
     } finally {
       // Cleared here ONLY -- resolve or throw, never a timer, never
       // optimistically -- so a slow write still blocks a second send for
@@ -5968,12 +5972,19 @@ function QuestionCard({
            are separate elements for the same reason they are separate state
            -- an operator must be able to tell "vam did not send this" from
            "the picker said no". */
-        <p data-question-refusal className="text-control text-waiting">
+        <p data-question-refusal role="alert" className="text-control text-waiting">
           {refusal}
         </p>
       )}
       {outcome !== null && (
-        <p data-question-outcome data-outcome={outcome.kind} className="text-control text-ink-dim">
+        <p
+          data-question-outcome
+          data-outcome={outcome.kind}
+          // A stop is the operator's Submit not happening, so it takes the
+          // waiting ink and an assertive live region; a sent is confirmation.
+          role={outcome.kind === 'sent' ? 'status' : 'alert'}
+          className={`text-control ${outcome.kind === 'sent' ? 'text-ink-dim' : 'text-waiting'}`}
+        >
           {outcomeWording(outcome)}
         </p>
       )}
@@ -9571,7 +9582,9 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                  resolves to nothing inside the per-turn wrapper and the pinned
                  prompt can cover the answer again (audit F2). `TurnBlock`'s
                  own comment carries the measurement. */
-              className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pl-3.5 pr-11 [container-type:size]"
+              className={`vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pl-3.5 pr-11 [container-type:size] ${
+                phone ? 'pb-[max(6rem,20vh)]' : 'pb-[max(12rem,33vh)]'
+              }`}
             >
               {/*
               WHAT THE TOP OF THE COLUMN IS — said, not left to be inferred.
@@ -9978,6 +9991,17 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                 </div>
               )}
             </div>
+            {/* Decoration only, and derived from the SAME `hasContentBelow`
+                slack as the jump below it: it stands in for the rule that used
+                to sit above the composer. It sits before the jumps so they
+                paint over it. */}
+            {jumps.below && (
+              <div
+                data-detail-fade-bottom
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-x-0 bottom-0 z-0 h-10 bg-[linear-gradient(to_top,var(--color-pane),transparent)]"
+              />
+            )}
             {/* THE JUMPS, FLOATING OVER THE COLUMN — what is left of the bar
                 that used to hold them, and of two more controls that went with
                 it (the turn-list chevron, and the `<select>` that jumped to a
@@ -10341,7 +10365,6 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
             // once the textarea itself stopped over-measuring (§4.7's own
             // postmortem, followed up).
             phone ? 'gap-1.5 pt-1 pb-2' : 'gap-2.5 py-3',
-            newestQuestion === null ? 'border-line border-t' : '',
             // NARROWED WITH THE TRANSCRIPT, on the operator's own instruction
             // -- see the body's comment for the decision and the seam argument
             // on the question bar above for why the rule has to move with it.
@@ -11816,7 +11839,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                           data-tap-skin
                           className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-card px-1.5 font-mono text-control hover:bg-line-strong"
                         >
-                          <span data-model-label className="truncate">
+                          <span data-model-label className="truncate text-meta">
                             {modelButtonLabel(running?.name ?? null)}
                           </span>
                           {/* The chevron never gives way: a picker with no
@@ -12093,7 +12116,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                           and a model id a source recorded can be longer than
                           the word it replaces. The whole name is one hover or
                           one Tab away, in the note and the accessible name. */}
-                      <span data-model-label className="truncate">
+                      <span data-model-label className="truncate text-meta">
                         {running?.name ?? recordedModel ?? 'model'}
                       </span>
                       <ChevronDown size={11} strokeWidth={2} className="flex-none" />

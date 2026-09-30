@@ -547,8 +547,8 @@ describe('the question block draws only when there is a question', () => {
   it('renders no empty bar when nothing is being asked', () => {
     draw([]);
     expect(bar()).toBeNull();
-    // And the composer keeps the seam, exactly as it did before the split.
-    expect(composerBar()?.className).toContain('border-t');
+    // The composer draws no rule above the input: the bottom fade stands in.
+    expect(composerBar()?.className).not.toContain('border-t');
   });
 
   it('renders the bar, and takes the seam, when a question is open', () => {

@@ -1,0 +1,125 @@
+// @vitest-environment happy-dom
+
+/**
+ * The transcript scroller ends with a large, viewport-tied bottom spacing, and
+ * the stick-to-bottom rule still lands at the end of it.
+ */
+
+import { act, cleanup, fireEvent, render } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { Decision, Project, Session } from '../../src/renderer/domain/model.js';
+import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
+import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/DetailPanel.js';
+import { BOTTOM_SLACK_PX, isAtBottom } from '../../src/renderer/panels/stick-to-bottom.js';
+
+const turn = (id: string): Decision => ({
+  id,
+  label: `step ${id}`,
+  input: `ask ${id}`,
+  output: `answer ${id}`,
+  commands: [],
+});
+
+/** Newest first, the ordering `model.ts` promises. */
+const TURNS: readonly Decision[] = ['d7', 'd6', 'd5', 'd4', 'd3', 'd2', 'd1'].map(turn);
+
+const SESSION: Session = {
+  vamControlled: true,
+  id: 's1',
+  title: 'Colour study',
+  epic: 'epic-4',
+  branch: null,
+  status: 'running',
+  runningAgents: 0,
+  activity: 'reading files',
+  age: '12m',
+  decisions: TURNS,
+};
+
+const PROJECT: Project = { id: 'p1', name: 'atlas', sessions: [SESSION] };
+
+function draw(over: Partial<DetailPanelProps> = {}) {
+  const entry: SessionEntry = { project: PROJECT, session: SESSION };
+  render(
+    <DetailPanel
+      entry={entry}
+      decision={TURNS[0] as Decision}
+      draft=""
+      onDraftChange={() => {}}
+      onSubmit={() => {}}
+      composing={false}
+      onCompose={() => {}}
+      onStopComposing={() => {}}
+      active={false}
+      actionIndex={0}
+      width={408}
+      resizeHandle={null}
+      delivers
+      {...over}
+    />,
+  );
+}
+
+const q = <T extends Element>(selector: string) => document.querySelector<T>(selector);
+const column = () => q<HTMLElement>('[data-detail-column]');
+
+afterEach(cleanup);
+
+function stub(box: HTMLElement, scrollHeight: number, clientHeight: number) {
+  Object.defineProperty(box, 'scrollHeight', { value: scrollHeight, configurable: true });
+  Object.defineProperty(box, 'clientHeight', { value: clientHeight, configurable: true });
+}
+
+describe('the scroller ends with a large bottom spacing', () => {
+  it('carries a viewport-tied bottom padding on the scroller itself', () => {
+    draw();
+    expect(column()?.className).toContain('pb-[max(12rem,33vh)]');
+    // On the scroller, not a spacer child.
+    expect(column()?.querySelector('[data-detail-spacer]')).toBeNull();
+  });
+
+  it('keeps the BOTTOM_SLACK_PX rule as it was', () => {
+    expect(BOTTOM_SLACK_PX).toBe(24);
+    expect(isAtBottom({ scrollTop: 900, scrollHeight: 1000, clientHeight: 100 })).toBe(true);
+    expect(isAtBottom({ scrollTop: 800, scrollHeight: 1000, clientHeight: 100 })).toBe(false);
+  });
+
+  it('lands scrollTop at scrollHeight and stays stuck when a turn arrives', () => {
+    const scrollTo = vi.fn();
+    const entry: SessionEntry = { project: PROJECT, session: SESSION };
+    const props = {
+      entry,
+      decision: TURNS[0] as Decision,
+      draft: '',
+      onDraftChange: () => {},
+      onSubmit: () => {},
+      composing: false,
+      onCompose: () => {},
+      onStopComposing: () => {},
+      active: false,
+      actionIndex: 0,
+      width: 408,
+      resizeHandle: null,
+      delivers: true,
+    };
+    const view = render(<DetailPanel {...props} />);
+    const box = column() as HTMLElement;
+    stub(box, 1400, 500);
+    box.scrollTo = scrollTo as unknown as typeof box.scrollTo;
+    box.scrollTop = 900;
+    fireEvent.scroll(box);
+    const grown: Session = { ...SESSION, decisions: [turn('d8'), ...TURNS] };
+    stub(box, 1600, 500);
+    act(() => {
+      view.rerender(
+        <DetailPanel
+          {...props}
+          entry={{ project: { ...PROJECT, sessions: [grown] }, session: grown }}
+          decision={grown.decisions[0] as Decision}
+        />,
+      );
+    });
+    // Stuck means the effect moved the box to the padding's end.
+    expect(box.scrollTop === 1600 || scrollTo.mock.calls.length > 0).toBe(true);
+  });
+});
