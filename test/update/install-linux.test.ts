@@ -19,6 +19,7 @@ import {
   linuxInstallPlan,
   prepareLinuxInstall,
 } from '../../src/main/update/install-linux.js';
+import { fakeChild } from './fake-child.js';
 
 describe('linuxInstallPlan', () => {
   it('stages beside the target with mode 0o755', () => {
@@ -122,7 +123,7 @@ describe('replace an AppImage in a real directory', () => {
       expect(statSync(r.handle.plan.tempPath).mode & 0o777).toBe(0o755);
 
       const unref = vi.fn();
-      const spawn = vi.fn(() => ({ unref }));
+      const spawn = vi.fn(() => fakeChild({ unref }));
       const out = await launchLinuxInstall(r.handle, {
         rename: (await import('node:fs/promises')).rename,
         rm: async () => undefined,
@@ -148,7 +149,7 @@ describe('replace an AppImage in a real directory', () => {
     async () => {
       const r = await prepareLinuxInstall({ filePath: download, env: { APPIMAGE: target } });
       if (!r.ok || r.handle.kind !== 'appimage') throw new Error('prepare failed');
-      const spawn = vi.fn(() => ({ unref: () => undefined }));
+      const spawn = vi.fn(() => fakeChild());
       const out = await launchLinuxInstall(r.handle, {
         rename: async () => {
           throw new Error('EXDEV');
@@ -161,6 +162,30 @@ describe('replace an AppImage in a real directory', () => {
       expect(readFileSync(target, 'utf8')).toBe('old');
       expect(readdirSync(join(dir, 'apps'))).toEqual(['vam.AppImage']);
       expect(spawn).toHaveBeenCalled();
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'survives a spawn error and never hangs on a silent child',
+    async () => {
+      const r = await prepareLinuxInstall({ filePath: download, env: { APPIMAGE: target } });
+      if (!r.ok || r.handle.kind !== 'appimage') throw new Error('prepare failed');
+      // Created at spawn time: the error event fires right after, listener or not.
+      let child: ReturnType<typeof fakeChild> | undefined;
+      const deps = {
+        rename: (await import('node:fs/promises')).rename,
+        rm: async () => undefined,
+        pid: 1,
+      };
+      await launchLinuxInstall(r.handle, {
+        ...deps,
+        spawn: () => {
+          child = fakeChild({ error: new Error('ENOENT') });
+          return child;
+        },
+      });
+      expect(child?.listenerCount('error')).toBeGreaterThan(0);
+      await launchLinuxInstall(r.handle, { ...deps, spawn: () => fakeChild({ silent: true }) }, 20);
     },
   );
 

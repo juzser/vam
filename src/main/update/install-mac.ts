@@ -222,13 +222,54 @@ export async function prepareMacInstall(
   }
 }
 
-export type Spawner = (
+/** What a detached spawn hands back: enough to hear `spawn`/`error` and let go. */
+export type SpawnedChild = {
+  unref(): void;
+  on(event: 'spawn' | 'error', listener: () => void): unknown;
+};
+
+export type Spawner = (cmd: string, args: readonly string[], opts: SpawnOptions) => SpawnedChild;
+
+/** How long to wait for `spawn`/`error` before moving on. */
+export const SPAWN_SETTLE_MS = 1000;
+
+/**
+ * Spawn detached and settle on `spawn`, `error` or a short timeout, never
+ * hanging. The `error` listener stays attached (a spawn failure with none is an
+ * uncaught exception in main during will-quit); a failure is swallowed, as
+ * there is nothing left to do at will-quit but quit.
+ */
+export function spawnDetached(
+  spawner: Spawner,
   cmd: string,
   args: readonly string[],
   opts: SpawnOptions,
-) => { unref(): void };
+  settleMs: number = SPAWN_SETTLE_MS,
+): Promise<void> {
+  return new Promise((resolve) => {
+    const child = spawner(cmd, args, opts);
+    const timer = setTimeout(resolve, settleMs);
+    const done = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    child.on('spawn', done);
+    child.on('error', done);
+    child.unref();
+  });
+}
 
 /** Start the swap script detached, so it outlives this process. Call at will-quit. */
-export function launchMacInstall(handle: MacHandle, spawner: Spawner = spawn): void {
-  spawner('/bin/sh', [handle.scriptPath], { detached: true, stdio: 'ignore' }).unref();
+export function launchMacInstall(
+  handle: MacHandle,
+  spawner: Spawner = spawn,
+  settleMs?: number,
+): Promise<void> {
+  return spawnDetached(
+    spawner,
+    '/bin/sh',
+    [handle.scriptPath],
+    { detached: true, stdio: 'ignore' },
+    settleMs,
+  );
 }

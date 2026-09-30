@@ -138,13 +138,13 @@ export async function prepareInstall(input: PrepareInput): Promise<PrepareResult
 export async function launchInstall(handle: InstallHandle): Promise<void> {
   switch (handle.kind) {
     case 'mac-zip':
-      launchMacInstall(handle);
+      await launchMacInstall(handle);
       return;
     case 'appimage':
       await launchLinuxInstall(handle);
       return;
     case 'nsis':
-      launchWinInstall(handle);
+      await launchWinInstall(handle);
       return;
   }
 }

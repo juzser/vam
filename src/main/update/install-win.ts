@@ -23,10 +23,10 @@
  * a UAC prompt even with `/S`.
  */
 
-import { type SpawnOptions, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { statSync } from 'node:fs';
 import { posix, win32 } from 'node:path';
-import type { InstallFailure } from './install-mac.js';
+import { type InstallFailure, type Spawner, spawnDetached } from './install-mac.js';
 
 export function winInstallArgs(): string[] {
   return ['/S', '--updated', '--force-run'];
@@ -68,17 +68,19 @@ export function prepareWinInstall(
   return { ok: true, handle: { kind: 'nsis', installerPath: input.installerPath } };
 }
 
-export type WinSpawner = (
-  cmd: string,
-  args: readonly string[],
-  opts: SpawnOptions,
-) => { unref(): void };
+export type WinSpawner = Spawner;
 
 /** Start the setup detached, so it outlives this process. Call at will-quit. */
-export function launchWinInstall(handle: WinHandle, spawner: WinSpawner = spawn): void {
-  spawner(handle.installerPath, winInstallArgs(), {
-    detached: true,
-    stdio: 'ignore',
-    windowsHide: true,
-  }).unref();
+export function launchWinInstall(
+  handle: WinHandle,
+  spawner: WinSpawner = spawn,
+  settleMs?: number,
+): Promise<void> {
+  return spawnDetached(
+    spawner,
+    handle.installerPath,
+    winInstallArgs(),
+    { detached: true, stdio: 'ignore', windowsHide: true },
+    settleMs,
+  );
 }

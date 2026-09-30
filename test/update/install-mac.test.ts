@@ -10,14 +10,16 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   appBundleFromExecPath,
+  launchMacInstall,
   macInstallBlocker,
   macInstallScript,
   prepareMacInstall,
   shellQuote,
 } from '../../src/main/update/install-mac.js';
+import { fakeChild } from './fake-child.js';
 
 const posix = process.platform !== 'win32';
 const MSG = 'Move vam to /Applications and try again';
@@ -297,5 +299,27 @@ describe('prepareMacInstall', () => {
     });
     const r = await prepareMacInstall(input, d);
     expect(r).toMatchObject({ ok: false, code: 'install-failed' });
+  });
+});
+
+describe('launchMacInstall', () => {
+  const handle = { kind: 'mac-zip', scriptPath: '/u/updates/install-0.2.0.sh' } as const;
+  it('runs the script through /bin/sh, detached, unref-ed', async () => {
+    const unref = vi.fn();
+    const spawner = vi.fn(() => fakeChild({ unref }));
+    await launchMacInstall(handle, spawner);
+    expect(spawner).toHaveBeenCalledWith('/bin/sh', [handle.scriptPath], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    expect(unref).toHaveBeenCalled();
+  });
+  it('survives a spawn error and settles', async () => {
+    const child = fakeChild({ error: new Error('EAGAIN') });
+    await expect(launchMacInstall(handle, () => child)).resolves.toBeUndefined();
+    expect(child.listenerCount('error')).toBeGreaterThan(0);
+  });
+  it('never hangs when the child emits nothing', async () => {
+    await launchMacInstall(handle, () => fakeChild({ silent: true }), 20);
   });
 });

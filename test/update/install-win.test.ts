@@ -5,6 +5,7 @@ import {
   prepareWinInstall,
   winInstallArgs,
 } from '../../src/main/update/install-win.js';
+import { fakeChild } from './fake-child.js';
 
 describe('winInstallArgs', () => {
   it('is silent, marks the run as an update, and starts the app afterwards', () => {
@@ -58,15 +59,30 @@ describe('prepareWinInstall', () => {
 });
 
 describe('launchWinInstall', () => {
-  it('spawns the installer detached, hidden, unref-ed', () => {
+  it('spawns the installer detached, hidden, unref-ed', async () => {
     const unref = vi.fn();
-    const spawner = vi.fn(() => ({ unref }));
-    launchWinInstall({ kind: 'nsis', installerPath: 'C:\\U\\setup.exe' }, spawner);
+    const spawner = vi.fn(() => fakeChild({ unref }));
+    await launchWinInstall({ kind: 'nsis', installerPath: 'C:\\U\\setup.exe' }, spawner);
     expect(spawner).toHaveBeenCalledWith('C:\\U\\setup.exe', ['/S', '--updated', '--force-run'], {
       detached: true,
       stdio: 'ignore',
       windowsHide: true,
     });
     expect(unref).toHaveBeenCalled();
+  });
+
+  it('survives a spawn error (no uncaught exception) and still settles', async () => {
+    const child = fakeChild({ error: new Error('ENOENT') });
+    const spawner = vi.fn(() => child);
+    await expect(
+      launchWinInstall({ kind: 'nsis', installerPath: 'C:\\U\\setup.exe' }, spawner),
+    ).resolves.toBeUndefined();
+    expect(child.listenerCount('error')).toBeGreaterThan(0);
+    expect(() => child.emit('error', new Error('late'))).not.toThrow();
+  });
+
+  it('never hangs when the child emits nothing', async () => {
+    const spawner = vi.fn(() => fakeChild({ silent: true }));
+    await launchWinInstall({ kind: 'nsis', installerPath: 'C:\\U\\setup.exe' }, spawner, 20);
   });
 });

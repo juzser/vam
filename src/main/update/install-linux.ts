@@ -8,11 +8,16 @@
  * Linux: the old inode lives on until the process exits.
  */
 
-import { type SpawnOptions, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { statSync } from 'node:fs';
 import { chmod, copyFile, rename, rm } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join } from 'node:path';
-import { defaultIsWritable, type InstallFailure } from './install-mac.js';
+import {
+  defaultIsWritable,
+  type InstallFailure,
+  type Spawner,
+  spawnDetached,
+} from './install-mac.js';
 
 export const APPIMAGE_MODE = 0o755;
 
@@ -111,7 +116,7 @@ export async function prepareLinuxInstall(
 export type LinuxLaunchDeps = {
   readonly rename: (from: string, to: string) => Promise<void>;
   readonly rm: (path: string) => Promise<void>;
-  readonly spawn: (cmd: string, args: readonly string[], opts: SpawnOptions) => { unref(): void };
+  readonly spawn: Spawner;
   /** The running app's pid: the relaunch waits for it to be gone. */
   readonly pid: number;
 };
@@ -146,6 +151,7 @@ exec "$2" --updated`;
 export async function launchLinuxInstall(
   handle: LinuxHandle,
   deps: LinuxLaunchDeps = realLinuxLaunchDeps,
+  settleMs?: number,
 ): Promise<{ readonly replaced: boolean }> {
   let replaced = false;
   try {
@@ -154,12 +160,12 @@ export async function launchLinuxInstall(
   } catch {
     await deps.rm(handle.plan.tempPath).catch(() => undefined);
   }
-  deps
-    .spawn(
-      '/bin/sh',
-      ['-c', LINUX_RELAUNCH_SCRIPT, 'vam-relaunch', String(deps.pid), handle.plan.target],
-      { detached: true, stdio: 'ignore' },
-    )
-    .unref();
+  await spawnDetached(
+    deps.spawn,
+    '/bin/sh',
+    ['-c', LINUX_RELAUNCH_SCRIPT, 'vam-relaunch', String(deps.pid), handle.plan.target],
+    { detached: true, stdio: 'ignore' },
+    settleMs,
+  );
   return { replaced };
 }
