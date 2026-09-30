@@ -6006,7 +6006,16 @@ function CanvasInner({
    */
   useEffect(() => {
     if (starting === null) return;
-    if (allEntries.some((entry) => !starting.known.has(entry.session.id))) {
+    const arrived = allEntries.filter((entry) => !starting.known.has(entry.session.id));
+    if (arrived.length > 0) {
+      // A session vam just created opens on Response, not on `viewSeed` (the
+      // view a previous run was left on). Only where the operator has not
+      // picked one, and `prefs.detailTab` is never written.
+      setViewBySession((current) => {
+        const next = { ...current };
+        for (const entry of arrived) next[entry.session.id] ??= 'Response';
+        return next;
+      });
       setStarting(null);
     }
   }, [allEntries, starting]);
@@ -6259,6 +6268,30 @@ function CanvasInner({
     },
     [entries, focusedEntry, focusSession, setStatus],
   );
+
+  // Still asking for the FIRST answer, on whichever transport this canvas has:
+  // 'connecting' and 'session' carry it from `useSourceModel`, 'live' has its
+  // own `status`, 'demo' never loads.
+  const sidebarLoading =
+    source.kind === 'connecting'
+      ? source.error === undefined || source.error === null
+      : source.kind === 'session'
+        ? source.loading === true
+        : source.kind === 'live'
+          ? source.status === 'loading'
+          : false;
+
+  /**
+   * THE GET STARTED SCREEN IS ON: the first load has answered and no session
+   * is visible anywhere. With `entries` empty every pane's own `entry` is
+   * null, so this one fact says what the focused pane draws. It is what
+   * `buildDetailProps` hands DetailPanel as `gettingStarted`, what hides the
+   * view switcher (`paneFocused` false) and what makes `pickView` inert.
+   * `hasOwnSession` is deliberately NOT a term: a vam session that was closed
+   * or dismissed is still in the unfiltered model, and reading it here left
+   * the pane blank once the last session was closed.
+   */
+  const gettingStartedOn = entries.length === 0 && !sidebarLoading;
 
   /**
    * Every `KeyAction` the grammar can produce, run — the ONE place a
@@ -6561,6 +6594,9 @@ function CanvasInner({
           // means this route cannot become the one that disagrees if that ever
           // changes. `tabs.ts` is where a view's presence is decided; this is
           // a caller reporting which shell it is, not deciding anything.
+          // Nothing to switch on the Get started screen: the switcher is not
+          // drawn there, so its chords and palette entries are silent no-ops.
+          if (gettingStartedOn) return;
           const drawn = visibleTabs(terminalTab, filesTab, phone);
           const view = tabForDigit(drawn, action.digit);
           if (view === undefined) {
@@ -7102,6 +7138,7 @@ function CanvasInner({
       projectTabIds,
       sessionIds,
       entries,
+      gettingStartedOn,
       matches,
       query,
       copyAllCommands,
@@ -7621,18 +7658,6 @@ function CanvasInner({
    * so there is one assembly of each panel’s props and not a second one that
    * could drift from it.
    */
-  // Still asking for the FIRST answer, on whichever transport this canvas has:
-  // 'connecting' and 'session' carry it from `useSourceModel`, 'live' has its
-  // own `status`, 'demo' never loads.
-  const sidebarLoading =
-    source.kind === 'connecting'
-      ? source.error === undefined || source.error === null
-      : source.kind === 'session'
-        ? source.loading === true
-        : source.kind === 'live'
-          ? source.status === 'loading'
-          : false;
-
   /**
    * Whether THIS BUILD can open a native directory picker at all --
    * `window.api?.dialog?.chooseDirectory`, the same bridge `newProject` and
@@ -7999,9 +8024,9 @@ function CanvasInner({
         // already agree is "what's visible right now" -- unchanged from
         // before: a sibling pane or another project with something visible
         // still counts), AND the app truly owns none, `entries.length === 0`
-        // alone -- `hasOwnSession`'s own header explains why a session vam
-        // started that is merely hidden by dismiss/filters must not reach
-        // this screen. NOR BEFORE THE FIRST LOAD HAS ANSWERED: `sidebarLoading`
+        // alone (`gettingStartedOn`; a session vam started and then closed or
+        // dismissed does not keep it off -- the pane would be blank). NOR
+        // BEFORE THE FIRST LOAD HAS ANSWERED: `sidebarLoading`
         // reads `EMPTY: CanvasModel` the exact same shape as a genuinely
         // empty workspace, and without this guard the screen flashed on at
         // every launch before `useSourceModel`'s first answer landed. Unlike
@@ -8010,7 +8035,7 @@ function CanvasInner({
         // hold nothing while a sibling pane, or another project, still has a
         // real session, and only the truly-empty state gets this screen.
         gettingStarted:
-          entry !== null || entries.length > 0 || hasOwnSession || sidebarLoading
+          entry !== null || !gettingStartedOn
             ? undefined
             : {
                 onNewProject: () => void newProject(),
@@ -8056,7 +8081,7 @@ function CanvasInner({
         // (operator instruction) — the SAME fact `viewNote` above is gated
         // on, which is the point: a pane that cannot consume an `Alt+<digit>`
         // should not be showing the row that names one.
-        paneFocused: isFocused,
+        paneFocused: isFocused && !gettingStartedOn,
         // THIS SESSION'S VIEW, not this pane's and not the app's. `undefined`
         // for a pane showing no session at all -- there is no per-session fact
         // to name, so the panel falls back to owning its own, seeded the same
@@ -8134,14 +8159,12 @@ function CanvasInner({
       resumeInPane,
       setViewFor,
       mode,
-      entries,
       newProject,
       newSessionDecline,
       hasDirectoryPicker,
       foreignHiddenCount,
       onSidebarOriginFilters,
-      hasOwnSession,
-      sidebarLoading,
+      gettingStartedOn,
       pendingAction,
       clearStartingPane,
     ],

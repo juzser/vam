@@ -337,7 +337,7 @@ describe('the getting-started screen does not trigger prematurely', () => {
     expect(stripText()).toBe('no sessions yet');
   });
 
-  it('stays off once a session vam started is merely dismissed, not gone', async () => {
+  it('shows once a session vam started is dismissed and nothing else is visible (event #21)', async () => {
     const source = sourceWithDismiss();
     withDialog(async () => CHOSEN);
     render(<Canvas model={ONE_VISIBLE_MODEL} source={source} />);
@@ -347,7 +347,9 @@ describe('the getting-started screen does not trigger prematurely', () => {
     // The row really did leave the filtered list -- otherwise this proves
     // nothing about the unfiltered read the fix is about.
     expect(document.querySelectorAll('[data-session-row]')).toHaveLength(0);
-    expect(gettingStarted()).toBeNull();
+    // Was `toBeNull()` (this test was 'stays off once a session vam started is
+    // merely dismissed, not gone'): that pinned the blank pane of event #21.
+    expect(gettingStarted()).not.toBeNull();
     expect(stripText()).not.toBe('no sessions yet');
   });
 });
