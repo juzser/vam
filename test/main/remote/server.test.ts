@@ -1060,6 +1060,13 @@ describe('the descriptor the server serves', () => {
     expect(UNSERVED.terminal).toContain(`${REMOTE_KEY_IDS.length}-key allowlist`);
   });
 
+  it('serves the send-key allowlist text as descriptor.declines.terminal', async () => {
+    const value = await served();
+    expect(value.declines.terminal).toBe(UNSERVED.terminal);
+    expect(value.declines.terminal).toContain(`${REMOTE_KEY_IDS.length}-key allowlist`);
+    expect(value.declines.terminal).not.toMatch(/six[^a-z]{0,3}keys?/i);
+  });
+
   it('turns off every write capability when the write routes are unregistered', async () => {
     const value = await served({ allowWrites: false });
     expect(value.capabilities.recordPrompt).toBe(false);
