@@ -1,62 +1,52 @@
 // @vitest-environment happy-dom
 
-/**
- * EVENT #23: the view switcher is meaningless on the Get started screen (no
- * session, so no views), so while the focused pane draws it the corner
- * switcher is not drawn and every view chord is a silent no-op. The moment a
- * session exists, or when an empty pane sits beside sessions, nothing changes.
- */
+/** EVENT #21/#23: with no session visible the pane shows Get started, with no
+ *  view switcher and silent view chords; a session or a sibling changes that. */
 
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
+import { clearEvents } from '../../src/renderer/errors/log.js';
 import type { SessionSource } from '../../src/renderer/sources/port.js';
 import type { CanvasSource } from '../../src/renderer/sources/source.js';
 
-// Each case renders a whole canvas; a loaded machine needs more than 5 s.
 vi.setConfig({ testTimeout: 30_000 });
 
-const session = (id: string): Session => ({
-  id,
-  title: id,
-  epic: null,
-  branch: null,
-  status: 'done',
-  runningAgents: 0,
-  activity: null,
-  age: null,
-  decisions: [],
+const sess = (id: string) =>
+  ({
+    id,
+    title: id,
+    status: 'done',
+    branch: null,
+    epic: null,
+    runningAgents: 0,
+    activity: null,
+    age: null,
+    decisions: [],
+  }) as unknown as Session;
+const modelOf = (...ids: string[]): CanvasModel => ({
+  projects: [{ id: 'p1', name: 'alpha', source: 'claude-code', sessions: ids.map(sess) }],
 });
+const NOTHING = modelOf();
+const ONE = modelOf('a1');
 
-const NOTHING: CanvasModel = { projects: [] };
-const ONE: CanvasModel = {
-  projects: [{ id: 'p1', name: 'alpha', source: 'claude-code', sessions: [session('a1')] }],
-};
-
-function makeSource(): CanvasSource {
+/** `dismiss`: `closeSession` refuses `not-vam-started`, so a closed row is
+ *  dismissed, leaving `entries` while staying in the unfiltered model. */
+function makeSource(dismiss = false): CanvasSource {
   const inner = {
     id: 'claude-code',
     label: 'Claude Code',
-    capabilities: {
-      liveUpdates: false,
-      recordPrompt: true,
-      deliverPrompt: false,
-      promptAttachments: false,
-      slashCommands: false,
-      renameSession: false,
-      closeSession: false,
-      createSession: false,
-      governance: false,
-      pullRequests: false,
-      terminal: false,
-      agentRoster: false,
-      resumeSession: false,
-    },
+    capabilities: { recordPrompt: true, closeSession: dismiss },
     declines: {},
     viewerScope: { kind: 'connection', note: 'one local process' },
     load: async () => [],
-    write: { recordPrompt: async () => {} },
+    write: {
+      recordPrompt: async () => {},
+      closeSession: async () => {
+        throw { kind: 'refused', code: 'not-vam-started', message: 'not vam’s' };
+      },
+    },
   };
   return { kind: 'session', source: inner as unknown as SessionSource, onWrote: () => {} };
 }
@@ -76,7 +66,6 @@ function press(key: string, modifiers: KeyboardEventInit = {}) {
 }
 const viewChord = (n: number) =>
   press(String(n), { ctrlKey: true, altKey: true, code: `Digit${n}` });
-const bareDigit = (n: number) => press(String(n), { code: `Digit${n}` });
 
 beforeAll(() => {
   globalThis.ResizeObserver ??= class {
@@ -88,72 +77,63 @@ beforeAll(() => {
     m22 = 1;
   } as unknown as typeof DOMMatrixReadOnly;
 });
+beforeEach(clearEvents);
 afterEach(() => {
   cleanup();
   localStorage.clear();
 });
 
+function paletteViewEntry() {
+  press('k', { metaKey: true });
+  const input = q<HTMLInputElement>('[data-command-palette] input') as HTMLInputElement;
+  fireEvent.change(input, { target: { value: '/View: PRs' } });
+  const item = [...document.querySelectorAll('[cmdk-item]')].find((el) =>
+    (el.textContent ?? '').includes('View: PRs'),
+  );
+  expect(item).toBeDefined();
+  act(() => (item as HTMLElement).click());
+}
+
+const silent = (before: string) => {
+  expect(gettingStarted()).not.toBeNull();
+  expect(q('[data-view-note]')).toBeNull();
+  expect(statusText()).toBe(before);
+  expect(localStorage.getItem('vam.prefs.v1') ?? '').not.toContain('"detailTab"');
+};
+
 describe('Get started draws no view switcher and the view chords do nothing', () => {
-  it('state 1: the switcher is absent while Get started is on screen', () => {
+  it.each([
+    ['unseeded', {}],
+    ['seeded to Terminal', { detailTab: 'Terminal' }],
+  ])('the switcher is absent while Get started is on screen (%s)', (_name, prefs) => {
+    localStorage.setItem('vam.prefs.v1', JSON.stringify(prefs));
     render(<Canvas model={NOTHING} source={makeSource()} />);
     expect(gettingStarted()).not.toBeNull();
     expect(switcher()).toBeNull();
     expect(q('[data-view]')).toBeNull();
   });
 
-  it('state 1: Ctrl-Alt-digit changes nothing and says nothing', () => {
+  it.each([
+    ['Ctrl-Alt-digit', () => [2, 1].forEach(viewChord)],
+    ['a bare digit in Select mode', () => press('2', { code: 'Digit2' })],
+    ['the palette’s view entry', paletteViewEntry],
+  ])('%s changes nothing and says nothing', (_name, act1) => {
     render(<Canvas model={NOTHING} source={makeSource()} />);
     const before = statusText();
-    viewChord(2);
-    viewChord(1);
-    expect(gettingStarted()).not.toBeNull();
-    expect(q('[data-view-note]')).toBeNull();
-    expect(statusText()).toBe(before);
-    expect(localStorage.getItem('vam.prefs.v1') ?? '').not.toContain('"detailTab"');
+    act1();
+    silent(before);
   });
 
-  it('state 1: a bare digit in Select mode changes nothing and says nothing', () => {
-    render(<Canvas model={NOTHING} source={makeSource()} />);
-    const before = statusText();
-    bareDigit(2);
-    expect(q('[data-view-note]')).toBeNull();
-    expect(statusText()).toBe(before);
-    expect(localStorage.getItem('vam.prefs.v1') ?? '').not.toContain('"detailTab"');
-  });
-
-  it('state 1: the palette’s view entry is a silent no-op', () => {
-    render(<Canvas model={NOTHING} source={makeSource()} />);
-    press('k', { metaKey: true });
-    const input = q<HTMLInputElement>('[data-command-palette] input');
-    expect(input).not.toBeNull();
-    fireEvent.change(input as HTMLInputElement, { target: { value: '/View: PRs' } });
-    const item = [...document.querySelectorAll('[cmdk-item]')].find((el) =>
-      (el.textContent ?? '').includes('View: PRs'),
-    );
-    if (item !== undefined) act(() => (item as HTMLElement).click());
-    expect(q('[data-view-note]')).toBeNull();
-    expect(localStorage.getItem('vam.prefs.v1') ?? '').not.toContain('"detailTab"');
-  });
-
-  it('state 1: a digit typed into a focused text input still lands in it', () => {
+  it('a digit typed into a focused text input still lands in it', () => {
     render(<Canvas model={NOTHING} source={makeSource()} />);
     const box = document.createElement('input');
     document.body.appendChild(box);
     box.focus();
-    const event = new KeyboardEvent('keydown', {
-      key: '2',
-      code: 'Digit2',
-      bubbles: true,
-      cancelable: true,
-    });
-    act(() => {
-      box.dispatchEvent(event);
-    });
-    expect(event.defaultPrevented).toBe(false);
+    expect(fireEvent.keyDown(box, { key: '2', code: 'Digit2' })).toBe(true);
     box.remove();
   });
 
-  it('state 2 (boundary): once one own session is focused the switcher is back', () => {
+  it('once one own session is focused the switcher is back', () => {
     const source = makeSource();
     const view = render(<Canvas model={NOTHING} source={source} />);
     expect(switcher()).toBeNull();
@@ -166,7 +146,7 @@ describe('Get started draws no view switcher and the view chords do nothing', ()
     expect(selectedView()).toBe('response');
   });
 
-  it('state 3: an empty split pane beside a session keeps the switcher and the chords', () => {
+  it('an empty split pane beside a session keeps the switcher and the chords', () => {
     render(<Canvas model={ONE} source={makeSource()} />);
     press('z');
     press('v');
@@ -175,5 +155,36 @@ describe('Get started draws no view switcher and the view chords do nothing', ()
     expect(switcher()).not.toBeNull();
     viewChord(2);
     expect(selectedView()).toBe('prs');
+  });
+});
+
+describe('the pane shows Get started once nothing is visible anywhere', () => {
+  it.each([
+    ['no projects and no sessions', { projects: [] }],
+    ['projects, but no sessions', NOTHING],
+  ])('%s', (_name, model) => {
+    render(<Canvas model={model} />);
+    expect(gettingStarted()).not.toBeNull();
+  });
+
+  it.each([
+    [
+      'the x key',
+      () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true })),
+    ],
+    ['its tab’s ×', () => q<HTMLButtonElement>('[data-tab-close]')?.click()],
+  ])('the last open session is closed with %s', async (_name, close) => {
+    render(<Canvas model={ONE} source={makeSource(true)} />);
+    expect(gettingStarted()).toBeNull();
+    await act(async () => close());
+    expect(document.querySelectorAll('[data-session-row]')).toHaveLength(0);
+    expect(gettingStarted()).not.toBeNull();
+  });
+
+  it('the source then reports the session gone', () => {
+    const source = makeSource(true);
+    const view = render(<Canvas model={ONE} source={source} />);
+    view.rerender(<Canvas model={NOTHING} source={source} />);
+    expect(gettingStarted()).not.toBeNull();
   });
 });

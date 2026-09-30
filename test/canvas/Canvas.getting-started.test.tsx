@@ -347,8 +347,6 @@ describe('the getting-started screen does not trigger prematurely', () => {
     // The row really did leave the filtered list -- otherwise this proves
     // nothing about the unfiltered read the fix is about.
     expect(document.querySelectorAll('[data-session-row]')).toHaveLength(0);
-    // Was `toBeNull()` (this test was 'stays off once a session vam started is
-    // merely dismissed, not gone'): that pinned the blank pane of event #21.
     expect(gettingStarted()).not.toBeNull();
     expect(stripText()).not.toBe('no sessions yet');
   });

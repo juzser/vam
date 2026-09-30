@@ -1,16 +1,7 @@
 // @vitest-environment happy-dom
 
-/**
- * EVENT #22: a new session opens on the Response view. A session with no
- * `viewBySession` record opens on `viewSeed`, which is `prefs.detailTab` as
- * the previous run left it, so every route that creates a session must record
- * Response for it, and none of them may write the preference. (The Start
- * button lives on the Response view, so a started row already has one.)
- *
- * Precedence: (1) a session vam creates or starts this run opens on Response;
- * (2) a view the operator picks for it wins from then on; (3) an existing
- * session with no pick this run still opens on the seed.
- */
+/** EVENT #22: a session vam creates opens on Response, not on the seeded
+ *  `prefs.detailTab`, and never writes it; an operator's pick wins. */
 
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -20,47 +11,21 @@ import { setActiveStreamingTerminal } from '../../src/renderer/prefs/streaming-t
 import type { SessionSource } from '../../src/renderer/sources/port.js';
 import type { CanvasSource } from '../../src/renderer/sources/source.js';
 
-// Each case renders a whole canvas; a loaded machine needs more than 5 s.
 vi.setConfig({ testTimeout: 30_000 });
 
-const session = (id: string, over: Partial<Session> = {}): Session => ({
-  id,
-  title: id,
-  epic: null,
-  branch: null,
-  status: 'done',
-  runningAgents: 0,
-  activity: null,
-  age: null,
-  decisions: [],
-  ...over,
-});
+const session = (id: string, over: Partial<Session> = {}): Session =>
+  ({ id, title: id, status: 'done', branch: null, decisions: [], ...over }) as Session;
 
 const modelWith = (...sessions: Session[]): CanvasModel => ({
   projects: [{ id: 'p1', name: 'alpha', source: 'claude-code', sessions }],
 });
 
-/** A source that offers a terminal (so a Terminal seed is a real view), can
- *  create. */
-function sourceWith(): { source: CanvasSource } {
+/** Offers a terminal (so a Terminal seed is a real view) and can create. */
+function sourceWith(): CanvasSource {
   const inner = {
     id: 'claude-code',
     label: 'Claude Code',
-    capabilities: {
-      liveUpdates: false,
-      recordPrompt: true,
-      deliverPrompt: true,
-      promptAttachments: false,
-      slashCommands: false,
-      renameSession: false,
-      closeSession: false,
-      createSession: true,
-      governance: false,
-      pullRequests: false,
-      terminal: true,
-      agentRoster: false,
-      resumeSession: false,
-    },
+    capabilities: { recordPrompt: true, deliverPrompt: true, createSession: true, terminal: true },
     declines: {},
     viewerScope: { kind: 'connection', note: 'one local process' },
     load: async () => [],
@@ -70,9 +35,7 @@ function sourceWith(): { source: CanvasSource } {
       createSessionIn: async () => {},
     },
   };
-  return {
-    source: { kind: 'session', source: inner as unknown as SessionSource, onWrote: () => {} },
-  };
+  return { kind: 'session', source: inner as unknown as SessionSource, onWrote: () => {} };
 }
 
 const selectedView = () =>
@@ -90,11 +53,10 @@ function press(key: string, modifiers: KeyboardEventInit = {}) {
 }
 const viewChord = (n: number) =>
   press(String(n), { ctrlKey: true, altKey: true, code: `Digit${n}` });
-const click = async (el: Element | null) => {
-  await act(async () => {
+const click = (el: Element | null) =>
+  act(async () => {
     (el as HTMLElement | null)?.click();
   });
-};
 
 beforeAll(() => {
   globalThis.ResizeObserver ??= class {
@@ -105,40 +67,20 @@ beforeAll(() => {
   globalThis.DOMMatrixReadOnly ??= class {
     m22 = 1;
   } as unknown as typeof DOMMatrixReadOnly;
-  Object.defineProperty(window, 'matchMedia', {
-    configurable: true,
-    value: (query: string) => ({
-      matches: false,
-      media: query,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }),
-  });
 });
+
+const SCREEN = { kind: 'ok', name: 'x', text: '', cursor: { kind: 'unreadable' } };
 
 beforeEach(() => {
   (window as unknown as { api: unknown }).api = {
     terminal: {
-      read: vi.fn(async () => ({
-        kind: 'ok',
-        name: 'vam-alpha-a1b2c3',
-        text: 'the screen',
-        cursor: { kind: 'unreadable' },
-      })),
-      send: vi.fn(async () => 'sent'),
+      read: vi.fn(async () => SCREEN),
     },
     dialog: { chooseDirectory: async () => '/srv/work/orchard' },
   };
-  // The previous run was left on Terminal; the classic renderer keeps the
-  // Terminal view light enough to draw in a unit environment.
-  localStorage.setItem(
-    'vam.prefs.v1',
-    JSON.stringify({
-      detailTab: 'Terminal',
-      streamingTerminal: false,
-      streamingTerminalMigrated: true,
-    }),
-  );
+  // Previous run left on Terminal; the classic renderer draws it lightly.
+  const p = { detailTab: 'Terminal', streamingTerminal: false, streamingTerminalMigrated: true };
+  localStorage.setItem('vam.prefs.v1', JSON.stringify(p));
   setActiveStreamingTerminal(false);
 });
 afterEach(() => {
@@ -148,78 +90,62 @@ afterEach(() => {
   setActiveStreamingTerminal(true);
 });
 
+const PANE = 'vam-alpha-aa11bb';
+const OWN = { source: 'claude-code', pane: PANE } as const;
+const unstarted = () =>
+  session(`pane:${PANE}`, { ...OWN, status: 'unstarted', vamControlled: true });
+const successor = () => session('a2', OWN);
+const tabNamed = (name: string) =>
+  [...document.querySelectorAll('[data-tab-select]')].find((e) =>
+    (e.textContent ?? '').includes(name),
+  ) ?? null;
+const rerenderWith = (view: ReturnType<typeof render>, source: CanvasSource, ...s: Session[]) =>
+  act(async () => {
+    view.rerender(<Canvas model={modelWith(...s)} source={source} />);
+  });
+const A1 = session('a1');
+const A2 = session('a2');
+/** Render `start`, click `route`, then the source reports `next`. */
+async function create(route: string, start: Session[], next: Session[]) {
+  const source = sourceWith();
+  const view = render(<Canvas model={modelWith(...start)} source={source} />);
+  if (route === 'o') press('o');
+  else await click(document.querySelector(route));
+  await rerenderWith(view, source, ...next);
+  return { source, view };
+}
+const a2 = () => click(tabNamed('a2'));
+
 describe('a session vam creates opens on Response, whatever the last run left', () => {
   it('base line: an existing session still opens on the seed (precedence 3)', () => {
-    const { source } = sourceWith();
-    render(<Canvas model={modelWith(session('a1'))} source={source} />);
+    render(<Canvas model={modelWith(A1)} source={sourceWith()} />);
     expect(selectedView()).toBe('terminal');
   });
 
-  it('(i) the pane’s new-tab route', async () => {
-    const { source } = sourceWith();
-    const view = render(<Canvas model={modelWith(session('a1'))} source={source} />);
-    await click(document.querySelector('[data-tab-new]'));
-    await act(async () => {
-      view.rerender(<Canvas model={modelWith(session('a1'), session('a2'))} source={source} />);
-    });
-    expect(activeTab()).toBe('a2');
-    expect(selectedView()).toBe('response');
-    expect(storedTab()).toBe('Terminal');
-  });
-
-  it('(ii) the newSession chord (o)', async () => {
-    const { source } = sourceWith();
-    const view = render(<Canvas model={modelWith(session('a1'))} source={source} />);
-    press('o');
-    await act(async () => {
-      view.rerender(<Canvas model={modelWith(session('a1'), session('a2'))} source={source} />);
-    });
-    await click(
-      [...document.querySelectorAll('[data-tab-select]')].find((e) => e.textContent === 'a2') ??
-        null,
-    );
-    expect(activeTab()).toBe('a2');
-    expect(selectedView()).toBe('response');
-    expect(storedTab()).toBe('Terminal');
-  });
-
-  it('(ii) the sidebar’s New session control', async () => {
-    const { source } = sourceWith();
-    const view = render(<Canvas model={modelWith(session('a1'))} source={source} />);
-    await click(document.querySelector('[data-new-session-in-project="p1"]'));
-    await act(async () => {
-      view.rerender(<Canvas model={modelWith(session('a1'), session('a2'))} source={source} />);
-    });
-    await click(
-      [...document.querySelectorAll('[data-tab-select]')].find((e) => e.textContent === 'a2') ??
-        null,
-    );
-    expect(activeTab()).toBe('a2');
-    expect(selectedView()).toBe('response');
-    expect(storedTab()).toBe('Terminal');
-  });
-
-  it('(ii) New project, from the Projects header', async () => {
-    const { source } = sourceWith();
-    const view = render(<Canvas model={{ projects: [] }} source={source} />);
-    await click(document.querySelector('[data-new-project]'));
-    await act(async () => {
-      view.rerender(<Canvas model={modelWith(session('a1'))} source={source} />);
-    });
-    expect(activeTab()).toBe('a1');
+  it.each([
+    ['the pane’s new-tab route', '[data-tab-new]', [A1], [A1, A2], 'a2', false],
+    ['the newSession chord (o)', 'o', [A1], [A1, A2], 'a2', true],
+    [
+      'the sidebar’s New session control',
+      '[data-new-session-in-project="p1"]',
+      [A1],
+      [A1, A2],
+      'a2',
+      true,
+    ],
+    ['New project, from the Projects header', '[data-new-project]', [], [A1], 'a1', false],
+  ])('%s', async (_name, route, start, next, active, needsPick) => {
+    await create(route, start, next);
+    if (needsPick) await a2();
+    expect(activeTab()).toBe(active);
     expect(selectedView()).toBe('response');
     expect(storedTab()).toBe('Terminal');
   });
 });
 
 describe('a view the operator picks wins over vam’s choice', () => {
-  it('(2) a new session switched to Terminal stays there across a round trip', async () => {
-    const { source } = sourceWith();
-    const view = render(<Canvas model={modelWith(session('a1'))} source={source} />);
-    await click(document.querySelector('[data-tab-new]'));
-    await act(async () => {
-      view.rerender(<Canvas model={modelWith(session('a1'), session('a2'))} source={source} />);
-    });
+  it('a new session switched to Terminal stays there across a round trip', async () => {
+    await create('[data-tab-new]', [A1], [A1, A2]);
     expect(selectedView()).toBe('response');
     viewChord(3);
     expect(selectedView()).toBe('terminal');
@@ -231,90 +157,31 @@ describe('a view the operator picks wins over vam’s choice', () => {
   });
 });
 
-const PANE = 'vam-alpha-aa11bb';
-const unstarted = (): Session =>
-  session(`pane:${PANE}`, {
-    status: 'unstarted',
-    source: 'claude-code',
-    vamControlled: true,
-    pane: PANE,
-  });
-
 describe('a started row and its hand-over keep the Response view', () => {
-  it('(iii) an unstarted row started through onStart lands on Response after hand-over', async () => {
-    const { source } = sourceWith();
-    const view = render(<Canvas model={modelWith(session('a1'), unstarted())} source={source} />);
-    await click(
-      [...document.querySelectorAll('[data-tab-select]')].find((e) =>
-        (e.textContent ?? '').includes(PANE),
-      ) ?? null,
-    );
+  it('an unstarted row started through onStart lands on Response after hand-over', async () => {
+    const source = sourceWith();
+    const view = render(<Canvas model={modelWith(A1, unstarted())} source={source} />);
+    await click(tabNamed(PANE));
     viewChord(1);
     expect(selectedView()).toBe('response');
     await click(document.querySelector('[data-start-session-button]'));
-    await act(async () => {
-      view.rerender(
-        <Canvas
-          model={modelWith(session('a1'), session('a2', { source: 'claude-code', pane: PANE }))}
-          source={source}
-        />,
-      );
-    });
-    await click(
-      [...document.querySelectorAll('[data-tab-select]')].find((e) => e.textContent === 'a2') ??
-        null,
-    );
+    await rerenderWith(view, source, A1, successor());
+    await a2();
     expect(activeTab()).toBe('a2');
     expect(selectedView()).toBe('response');
   });
 
-  it('(iv) the successor id inherits the new row’s Response record (renameTab path)', async () => {
-    const { source } = sourceWith();
-    const view = render(<Canvas model={modelWith(session('a1'))} source={source} />);
-    await click(document.querySelector('[data-tab-new]'));
-    await act(async () => {
-      view.rerender(<Canvas model={modelWith(session('a1'), unstarted())} source={source} />);
-    });
+  it.each([
+    ['inherits the new row’s Response record (renameTab path)', null, 'response'],
+    ['travels with an operator pick on the new row', 3, 'terminal'],
+  ])('the successor id %s', async (_name, pick, expected) => {
+    const { source, view } = await create('[data-tab-new]', [A1], [A1, unstarted()]);
     expect(activeTab()).toContain(PANE);
-    expect(selectedView()).toBe('response');
-    await act(async () => {
-      view.rerender(
-        <Canvas
-          model={modelWith(session('a1'), session('a2', { source: 'claude-code', pane: PANE }))}
-          source={source}
-        />,
-      );
-    });
-    await click(
-      [...document.querySelectorAll('[data-tab-select]')].find((e) => e.textContent === 'a2') ??
-        null,
-    );
+    if (pick !== null) viewChord(pick);
+    expect(selectedView()).toBe(expected);
+    await rerenderWith(view, source, A1, successor());
+    await a2();
     expect(activeTab()).toBe('a2');
-    expect(selectedView()).toBe('response');
-  });
-
-  it('(iv) an operator pick on the new row travels to the successor id', async () => {
-    const { source } = sourceWith();
-    const view = render(<Canvas model={modelWith(session('a1'))} source={source} />);
-    await click(document.querySelector('[data-tab-new]'));
-    await act(async () => {
-      view.rerender(<Canvas model={modelWith(session('a1'), unstarted())} source={source} />);
-    });
-    viewChord(3);
-    expect(selectedView()).toBe('terminal');
-    await act(async () => {
-      view.rerender(
-        <Canvas
-          model={modelWith(session('a1'), session('a2', { source: 'claude-code', pane: PANE }))}
-          source={source}
-        />,
-      );
-    });
-    await click(
-      [...document.querySelectorAll('[data-tab-select]')].find((e) => e.textContent === 'a2') ??
-        null,
-    );
-    expect(activeTab()).toBe('a2');
-    expect(selectedView()).toBe('terminal');
+    expect(selectedView()).toBe(expected);
   });
 });

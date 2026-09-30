@@ -6008,9 +6008,8 @@ function CanvasInner({
     if (starting === null) return;
     const arrived = allEntries.filter((entry) => !starting.known.has(entry.session.id));
     if (arrived.length > 0) {
-      // A session vam just created opens on Response, not on `viewSeed` (the
-      // view a previous run was left on). Only where the operator has not
-      // picked one, and `prefs.detailTab` is never written.
+      // A session vam just created opens on Response, not `viewSeed`, unless
+      // the operator already picked a view. `prefs.detailTab` is not written.
       setViewBySession((current) => {
         const next = { ...current };
         for (const entry of arrived) next[entry.session.id] ??= 'Response';
@@ -6269,9 +6268,7 @@ function CanvasInner({
     [entries, focusedEntry, focusSession, setStatus],
   );
 
-  // Still asking for the FIRST answer, on whichever transport this canvas has:
-  // 'connecting' and 'session' carry it from `useSourceModel`, 'live' has its
-  // own `status`, 'demo' never loads.
+  // Still waiting for the FIRST answer, on whichever transport.
   const sidebarLoading =
     source.kind === 'connecting'
       ? source.error === undefined || source.error === null
@@ -6281,16 +6278,9 @@ function CanvasInner({
           ? source.status === 'loading'
           : false;
 
-  /**
-   * THE GET STARTED SCREEN IS ON: the first load has answered and no session
-   * is visible anywhere. With `entries` empty every pane's own `entry` is
-   * null, so this one fact says what the focused pane draws. It is what
-   * `buildDetailProps` hands DetailPanel as `gettingStarted`, what hides the
-   * view switcher (`paneFocused` false) and what makes `pickView` inert.
-   * `hasOwnSession` is deliberately NOT a term: a vam session that was closed
-   * or dismissed is still in the unfiltered model, and reading it here left
-   * the pane blank once the last session was closed.
-   */
+  // Get started is on: first load answered, no session visible anywhere. Gates
+  // `gettingStarted`, the view switcher and `pickView`. `hasOwnSession` is not
+  // a term: a closed vam session stays in the unfiltered model (blank pane).
   const gettingStartedOn = entries.length === 0 && !sidebarLoading;
 
   /**
@@ -6594,8 +6584,7 @@ function CanvasInner({
           // means this route cannot become the one that disagrees if that ever
           // changes. `tabs.ts` is where a view's presence is decided; this is
           // a caller reporting which shell it is, not deciding anything.
-          // Nothing to switch on the Get started screen: the switcher is not
-          // drawn there, so its chords and palette entries are silent no-ops.
+          // No switcher on Get started: its chords are silent no-ops.
           if (gettingStartedOn) return;
           const drawn = visibleTabs(terminalTab, filesTab, phone);
           const view = tabForDigit(drawn, action.digit);
@@ -8024,9 +8013,7 @@ function CanvasInner({
         // already agree is "what's visible right now" -- unchanged from
         // before: a sibling pane or another project with something visible
         // still counts), AND the app truly owns none, `entries.length === 0`
-        // alone (`gettingStartedOn`; a session vam started and then closed or
-        // dismissed does not keep it off -- the pane would be blank). NOR
-        // BEFORE THE FIRST LOAD HAS ANSWERED: `sidebarLoading`
+        // alone (`gettingStartedOn`). NOR BEFORE THE FIRST LOAD HAS ANSWERED: `sidebarLoading`
         // reads `EMPTY: CanvasModel` the exact same shape as a genuinely
         // empty workspace, and without this guard the screen flashed on at
         // every launch before `useSourceModel`'s first answer landed. Unlike
@@ -8090,7 +8077,13 @@ function CanvasInner({
         // `sendFailureBySession`. `null` for a pane showing no session: there
         // is nothing that could have failed in it.
         sendFailure: sessionId === null ? null : (sendFailureBySession[sessionId] ?? null),
-        tab: sessionId === null ? undefined : (viewBySession[sessionId] ?? viewSeed),
+        // Get started only draws on Response: force it over the seeded view.
+        tab:
+          sessionId === null
+            ? gettingStartedOn
+              ? 'Response'
+              : undefined
+            : (viewBySession[sessionId] ?? viewSeed),
         initialTab: viewSeed,
         onTabChange: (next) => {
           // Re-narrowed rather than cast. `onTabChange` is typed `string`
