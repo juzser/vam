@@ -14,7 +14,7 @@
  * one you would send a real prompt to.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import type {
   AdhdSkillApi,
   ClipboardApi,
@@ -49,7 +49,14 @@ import { describeFailure, type SessionSource } from './sources/port.js';
 import { createSourceFromPreload } from './sources/preload-factory.js';
 import { writeRemoteToken } from './sources/remote-token.js';
 import { useSourceModel } from './sources/useSourceModel.js';
-import { UpdateNotice } from './update/UpdateNotice.js';
+
+// The update card, in its own lazy chunk (the `LazyMarkdown.tsx` split). It
+// draws nothing until main reports an update state, and it reads the current
+// status (`getStatus`) when it mounts, so a `null` fallback costs no first
+// paint and no state is lost while the chunk loads.
+const UpdateNotice = lazy(() =>
+  import('./update/UpdateNotice.js').then((m) => ({ default: m.UpdateNotice })),
+);
 
 declare global {
   interface Window {
@@ -449,7 +456,11 @@ export function DesktopCanvas({
   // the failure the banner in `SourceCanvas` documents.
   return (
     <>
-      <UpdateNotice update={update} />
+      {update !== undefined && (
+        <Suspense fallback={null}>
+          <UpdateNotice update={update} />
+        </Suspense>
+      )}
       <SourceCanvas source={source} failure={assembleError} />
     </>
   );
