@@ -75,6 +75,10 @@ describe('no comment cites its own file by line number', () => {
     const p = 'src/renderer/panels/DetailPanel.tsx';
     expect(scan(p, '// see :4553').violations).toHaveLength(1);
     expect(scan(p, '/* DetailPanel.tsx:4553 */').violations).toHaveLength(1);
+    expect(scan(p, '// DetailPanel:4553').violations).toHaveLength(1);
+    const sf = 'src/renderer/domain/session-filter.ts';
+    expect(scan(sf, '// session-filter:12').violations).toHaveLength(1);
+    expect(scan(sf, '/* session-filter.ts:12 */').violations).toHaveLength(1);
     for (const ok of [
       '// shared/remote-key.ts:128',
       '// DetailPanel.keystroke-strip.test.tsx:496-521',
