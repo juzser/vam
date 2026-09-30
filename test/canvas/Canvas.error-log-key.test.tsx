@@ -93,6 +93,14 @@ describe('the error log is reachable from the keyboard', () => {
     expect(errorLog()).not.toBeNull();
   });
 
+  it('closes on Escape, like every other overlay', () => {
+    render(<Canvas model={MODEL} />);
+    press(errorLogKeys()[0] as string);
+    expect(errorLog()).not.toBeNull();
+    press('Escape');
+    expect(errorLog()).toBeNull();
+  });
+
   it('takes a key nothing else in the grammar holds', () => {
     const key = errorLogKeys()[0] as string;
     expect(sheetKeys().filter((k) => k === key)).toHaveLength(1);

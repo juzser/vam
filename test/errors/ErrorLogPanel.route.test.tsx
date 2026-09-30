@@ -57,7 +57,7 @@ describe('opening the prefilled issue', () => {
     const event = recordFailure('new session', { code: 'tmux-failed', message: MESSAGE });
     render(<ErrorLogPanel onClose={() => {}} />);
     fireEvent.click(screen.getByRole('button', { name: /report/i }));
-    fireEvent.click(await screen.findByRole('button', { name: /open in browser/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /create issue/i }));
 
     const composed = composeReport(event);
     expect(asked).toEqual([[composed.title, composed.body]]);
@@ -75,8 +75,36 @@ describe('opening the prefilled issue', () => {
     recordFailure('new session', { code: 'tmux-failed', message: MESSAGE });
     render(<ErrorLogPanel onClose={() => {}} />);
     fireEvent.click(screen.getByRole('button', { name: /report/i }));
-    fireEvent.click(await screen.findByRole('button', { name: /open in browser/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /create issue/i }));
     expect(await screen.findByText(/no browser opened/i)).toBeTruthy();
+  });
+
+  /**
+   * NO URL ABOVE THE BUTTON. Where the button can create the issue, the raw
+   * prefilled URL is noise under the preview -- the operator asked for it
+   * gone. It stays only in the browser build, where there is no button and
+   * the selectable URL is the one route left.
+   */
+  it('shows no URL where Create issue can open it', async () => {
+    withBridge({
+      issue: { open: async () => true },
+      clipboard: { writeText: async () => true },
+    });
+    const event = recordFailure('new session', { code: 'tmux-failed', message: MESSAGE });
+    const { container } = render(<ErrorLogPanel onClose={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: /report/i }));
+    expect(await screen.findByRole('button', { name: /create issue/i })).toBeTruthy();
+    expect(container.textContent).not.toContain(composeReport(event).url);
+    expect(screen.queryByRole('button', { name: /open in browser/i })).toBeNull();
+  });
+
+  it('keeps the URL where there is no button to create the issue', async () => {
+    withBridge({ clipboard: { writeText: async () => true } });
+    const event = recordFailure('new session', { code: 'tmux-failed', message: MESSAGE });
+    const { container } = render(<ErrorLogPanel onClose={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: /report/i }));
+    expect(await screen.findByTestId('report-preview')).toBeTruthy();
+    expect(container.textContent).toContain(composeReport(event).url);
   });
 
   /**
@@ -90,7 +118,7 @@ describe('opening the prefilled issue', () => {
     const { container } = render(<ErrorLogPanel onClose={() => {}} />);
     fireEvent.click(screen.getByRole('button', { name: /report/i }));
     expect(await screen.findByTestId('report-preview')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /open in browser/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /create issue/i })).toBeNull();
     expect(container.querySelector('.select-text')).not.toBeNull();
   });
 });

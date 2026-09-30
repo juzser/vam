@@ -7066,6 +7066,7 @@ function CanvasInner({
           setPaletteOpen(false);
           setKeySheetOpen(false);
           setSettingsOpen(false);
+          setErrorLogOpen(false);
           setFilterMenuOpen(false);
           setFiltering(false);
           setComposing(false);

@@ -86,7 +86,7 @@ describe('reaching github from a recorded failure', () => {
     // Any of the three would do: an anchor, a control that asks main to open
     // it, or a selectable element holding the URL.
     const anchor = container.querySelector(`a[href^="${NEW_ISSUE_URL}"]`);
-    const opener = screen.queryByRole('button', { name: /open|github|browser/i });
+    const opener = screen.queryByRole('button', { name: /create issue|open|github|browser/i });
     const selectableUrl = container.querySelector('.select-text');
     expect(
       anchor !== null || opener !== null || selectableUrl !== null,
