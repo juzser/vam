@@ -259,6 +259,9 @@ console.log(`${outDir}/key-sheet-column.png`);
       title: s.querySelector('h3')?.textContent ?? '',
       lefts: [...new Set([...s.querySelectorAll('li')].map((li) => round(li.getBoundingClientRect().left)))],
       headLeft: round(s.querySelector('h3')?.getBoundingClientRect().left ?? -1),
+      rule: getComputedStyle(s).borderTopWidth,
+      pad: getComputedStyle(s).paddingTop,
+      head: round(s.querySelector('h3')?.getBoundingClientRect().top ?? -1),
     }));
     return { panelWidth: round(panel?.getBoundingClientRect().width ?? 0), sections };
   });
@@ -272,6 +275,19 @@ console.log(`${outDir}/key-sheet-column.png`);
     split.length === 0,
     split.map((section) => section.title).join(' | '),
   );
+  {
+    const starts = columns.map((left) => wide.sections.find((section) => section.headLeft === left));
+    check(
+      'the first section of each column paints no top rule and no top padding',
+      starts.every((section) => section && section.rule === '0px' && section.pad === '0px'),
+      JSON.stringify(starts.map((section) => section && [section.title, section.rule, section.pad])),
+    );
+    check(
+      'and both columns start at the same height',
+      starts.every((section) => section && Math.abs(section.head - starts[0].head) < 1),
+      JSON.stringify(starts.map((section) => section?.head)),
+    );
+  }
   await page.screenshot({ path: `${outDir}/key-sheet-two-columns.png` });
   console.log(`${outDir}/key-sheet-two-columns.png`);
   await page.setViewportSize({ width: 900, height: 800 });

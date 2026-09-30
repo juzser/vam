@@ -125,21 +125,31 @@ describe('the sheet is the registry (EC-16)', () => {
   it('keeps the reserved keys off the sheet', () => {
     withPlatform(PC_PLATFORM, () => {
       render(<KeySheet onClose={() => {}} />);
+      // The criterion allows PREFIXES chords; every other RESERVED_KEYS entry
+      // may appear in no row. ONE NARROWER EXEMPTION, stated and pinned: the
+      // files section paints Escape and Mod-[ because they are that tab's own
+      // way out (EDITOR_KEYS) — no other row anywhere may, and no other
+      // reserved chord may appear in the files section either.
       const reserved = RESERVED_KEYS.filter(
         (key) => !(PREFIXES as readonly string[]).includes(key),
       );
       expect(reserved.length).toBeGreaterThan(0);
-      // Files rows carry Escape and Mod-[ on purpose (that tab's own keys);
-      // everywhere else a reserved key is the Settings page's.
-      const outsideFiles = [...document.querySelectorAll('[data-key-sheet-groups] section')].filter(
-        (s) => s.querySelector('h3')?.getAttribute('data-key-sheet-group') !== 'files',
+      const filesOwn = ['Escape', 'Mod-['];
+      expect(filesOwn.every((key) => reserved.includes(key) && EDITOR_KEYS.includes(key))).toBe(
+        true,
       );
-      const painted = outsideFiles.flatMap((s) =>
-        [...s.querySelectorAll('[data-key-sheet-keys]')].map((k) => k.textContent),
-      );
-      for (const key of reserved) {
-        expect(painted).not.toContain(chordSymbols(key, false));
+      let rows = 0;
+      for (const section of document.querySelectorAll('[data-key-sheet-groups] section')) {
+        const group = section.querySelector('h3')?.getAttribute('data-key-sheet-group');
+        for (const k of section.querySelectorAll('[data-key-sheet-keys]')) {
+          rows++;
+          for (const key of reserved) {
+            if (group === 'files' && filesOwn.includes(key)) continue;
+            expect(k.textContent, `${group}: reserved ${key}`).not.toBe(chordSymbols(key, false));
+          }
+        }
       }
+      expect(rows).toBeGreaterThan(80);
       expect(document.querySelector('[data-reserved]')).toBeNull();
     });
   });
@@ -154,10 +164,10 @@ describe('the sheet lays out in two columns (EC-17)', () => {
     expect(panel?.classList.contains('w-[min(620px,92vw)]')).toBe(false);
     expect(panel?.classList.contains('max-h-[80vh]')).toBe(false);
     const groups = document.querySelector('[data-key-sheet-groups]');
-    expect(groups?.classList.contains('lg:columns-2')).toBe(true);
+    expect(groups?.classList.contains('lg:grid-cols-2')).toBe(true);
     expect(groups?.classList.contains('lg:gap-x-8')).toBe(true);
-    // Below lg the default single column applies: no unprefixed column class.
-    expect([...(groups?.classList ?? [])].filter((c) => /^columns-/.test(c))).toEqual([]);
+    // Below lg the default single column applies: no unprefixed grid/column class.
+    expect([...(groups?.classList ?? [])].filter((c) => /^(columns-|grid)/.test(c))).toEqual([]);
   });
 
   it('keeps every section whole across the column break', () => {
@@ -167,5 +177,16 @@ describe('the sheet lays out in two columns (EC-17)', () => {
     for (const section of sections) {
       expect(section.classList.contains('break-inside-avoid')).toBe(true);
     }
+  });
+
+  it('drops the top rule on the first section of each column, keeps it on the rest', () => {
+    render(<KeySheet onClose={() => {}} />);
+    const sections = [...document.querySelectorAll('[data-key-sheet-groups] section')];
+    expect(sections[0]?.classList.contains('border-t')).toBe(false);
+    expect(sections.filter((s) => s.classList.contains('lg:border-0'))).toHaveLength(1);
+    // Every section but the very first keeps its rule below lg.
+    expect(sections.filter((s) => s.classList.contains('border-t'))).toHaveLength(
+      sections.length - 1,
+    );
   });
 });
