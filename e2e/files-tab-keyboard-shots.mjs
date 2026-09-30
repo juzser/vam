@@ -553,6 +553,8 @@ const pillBox = await page.evaluate(() => {
     // was written to catch, asked of its replacement.
     format: r('[data-files-format]'),
     path: r('[data-files-path]'),
+    strip: r('[data-files-content-controls]'),
+    editorText: r('[data-files-editor] .cm-line'),
     tree: r('[data-files-tree]'),
     editorColumn: r('[data-files-editor-column]'),
     icons: document.querySelectorAll('[data-view-overlay] [data-view]').length,
@@ -563,12 +565,31 @@ check(
   pillBox.icons === 5,
   `it carries ${pillBox.icons}`,
 );
+// Format now lives in the content strip at the top of the editor column, not
+// in the header row: the same rectangle question, asked at its new position.
 check(
   'the Format button clears the view pill entirely, not just at its centre',
   pillBox.format !== null &&
     pillBox.overlay !== null &&
-    pillBox.format.right <= pillBox.overlay.left,
-  `format ends at ${pillBox.format?.right}, pill starts at ${pillBox.overlay?.left}`,
+    (pillBox.format.right <= pillBox.overlay.left || pillBox.format.top >= pillBox.overlay.bottom),
+  `format ${JSON.stringify(pillBox.format)}, pill ${JSON.stringify(pillBox.overlay)}`,
+);
+check(
+  'Format sits in the top band of the editor column, against its right edge',
+  pillBox.format !== null &&
+    pillBox.editorColumn !== null &&
+    pillBox.format.top >= pillBox.editorColumn.top &&
+    pillBox.format.bottom <= pillBox.editorColumn.top + 40 &&
+    Math.abs(pillBox.format.right - pillBox.editorColumn.right) <= 1,
+  `format ${JSON.stringify(pillBox.format)}, column ${JSON.stringify(pillBox.editorColumn)}`,
+);
+check(
+  'Format does not touch the tree or the first text line',
+  pillBox.format !== null &&
+    pillBox.tree !== null &&
+    pillBox.format.right <= pillBox.tree.left &&
+    (pillBox.editorText === null || pillBox.format.bottom <= pillBox.editorText.top),
+  `format ${JSON.stringify(pillBox.format)}, tree ${JSON.stringify(pillBox.tree)}, first line ${JSON.stringify(pillBox.editorText)}`,
 );
 check(
   'and so does the file path beside it',
@@ -662,25 +683,22 @@ check(
   (await page.locator('[data-files-dirty]').count()) > 0,
 );
 
-const dotGap = await page.evaluate(() => {
+// Format moved into the content strip, so the dot and Format no longer share
+// a row: the adjacency question becomes "they never overlap", and the 6px
+// gap moves to the strip's own toggle/Format gap (files-markdown-shots.mjs).
+const dotOverlap = await page.evaluate(() => {
   const r = (sel) => {
     const e = document.querySelector(sel);
     if (e === null) return null;
     const b = e.getBoundingClientRect();
-    return { left: b.left, right: b.right };
+    return { top: b.top, bottom: b.bottom, left: b.left, right: b.right };
   };
   return { dot: r('[data-files-dirty]'), format: r('[data-files-format]') };
 });
 check(
-  'Format really does trail the dot directly for a .env — nothing else sits between them',
-  dotGap.dot !== null && dotGap.format !== null && dotGap.format.left >= dotGap.dot.right,
-  JSON.stringify(dotGap),
-);
-const dotFormatGap = (dotGap.format?.left ?? 0) - (dotGap.dot?.right ?? 0);
-check(
-  'and a visible gap separates them — at least one toolbar gap unit (the row’s own gap-1.5, 6px)',
-  dotFormatGap >= 6,
-  `measured ${dotFormatGap}px between the dot and Format`,
+  'the dot (header) and Format (content strip) never overlap — Format sits entirely below the dot',
+  dotOverlap.dot !== null && dotOverlap.format !== null && dotOverlap.format.top >= dotOverlap.dot.bottom,
+  JSON.stringify(dotOverlap),
 );
 
 /** The real paint of a CSS custom property, off a throwaway probe node — the
@@ -714,7 +732,7 @@ for (const theme of ['dark', 'light']) {
   // THE OPERATOR'S OWN ASK, LOOKED AT — not just measured. Clipped to the
   // header row alone (dot, gap, Format) rather than the whole pane: this is
   // the one control the report is about, and a full-page shot would bury it.
-  await page.locator('[data-files-header]').screenshot({ path: `${outDir}/files-dirty-${theme}.png` });
+  await page.locator('[data-files-editor-column]').screenshot({ path: `${outDir}/files-dirty-${theme}.png` });
   console.log(`${outDir}/files-dirty-${theme}.png`);
 }
 // Restored before anything below relies on the file's own dark default.

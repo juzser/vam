@@ -72,6 +72,8 @@ await page.addInitScript(() => {
     ['/work/atlas/src/db/pool.ts', 'export const pool = 1;\n'],
     ['/work/atlas/src/db/migrate.ts', 'export const migrate = 1;\n'],
     ['/work/atlas/src/routes/health.ts', 'export const health = 1;\n'],
+    ['/work/atlas/node_modules/left-pad/index.js', 'module.exports = 1;\n'],
+    ['/work/atlas/dist/server.js', 'exports.server = 1;\n'],
   ]);
   const sig = (p) => ({ size: files.get(p).length, mtimeMs: 1, sha256: 'a'.repeat(64) });
   const unavailable = () => ({
@@ -128,7 +130,14 @@ await page.addInitScript(() => {
           const [first, ...rest] = file.slice(base.length + 1).split('/');
           entries.set(first, rest.length > 0 ? 'dir' : 'file');
         }
-        return { root, dir: base, entries: [...entries].map(([name, kind]) => ({ name, kind })) };
+        // `dist` stands in for a git-ignored entry: the main process marks it, the tree mutes it.
+        return {
+          root,
+          dir: base,
+          entries: [...entries].map(([name, kind]) =>
+            dir === '' && name === 'dist' ? { name, kind, ignored: true } : { name, kind },
+          ),
+        };
       },
       read: async (path) =>
         files.has(path)
@@ -152,6 +161,21 @@ await page.waitForTimeout(400);
 const out = `${outDir}/files-tab.png`;
 await page.screenshot({ path: out });
 console.log(out);
+
+// Muted rows (dot names, node_modules, a git-ignored dist) in both themes, tree only.
+const muted = await page.locator('[data-files-row-muted]').count();
+if (muted < 3) {
+  console.error(`expected muted rows for .env, node_modules and dist, found ${muted}`);
+  process.exitCode = 1;
+}
+for (const theme of ['light', 'dark']) {
+  await page.evaluate((t) => document.documentElement.classList.toggle('light', t === 'light'), theme);
+  await page.waitForTimeout(150);
+  const shot = `${outDir}/files-tab-muted-${theme}.png`;
+  await page.locator('[data-files-tree]').screenshot({ path: shot });
+  console.log(shot);
+}
+await page.evaluate(() => document.documentElement.classList.remove('light'));
 
 // The one assertion this script makes, kept out of the picture above: at the tree's 7.5rem floor a
 // directory row's chevron is still inside the row's box and the name is what gives way.

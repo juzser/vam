@@ -607,6 +607,10 @@ const corner = await page.evaluate(() => {
     preview: r('[data-files-preview]'),
     format: r('[data-files-format]'),
     header: r('[data-files-header]'),
+    column: r('[data-files-editor-column]'),
+    strip: r('[data-files-content-controls]'),
+    tree: r('[data-files-tree]'),
+    firstText: r('[data-files-preview-view] > :first-child'),
     icons: document.querySelectorAll('[data-view-overlay] [data-view]').length,
   };
 });
@@ -620,17 +624,41 @@ check(
   corner.preview !== null && corner.format !== null && corner.preview.right <= corner.format.left,
   JSON.stringify(corner),
 );
+const clearsPill = (b) =>
+  b !== null && corner.overlay !== null && (b.right <= corner.overlay.left || b.top >= corner.overlay.bottom);
 check(
-  'and every control in the row clears the view pill entirely, not just at its centre',
-  corner.overlay !== null &&
-    [corner.preview, corner.format].every((b) => b !== null && b.right <= corner.overlay.left),
+  'and every control clears the view pill entirely, not just at its centre',
+  [corner.preview, corner.format].every(clearsPill),
+  JSON.stringify(corner),
+);
+// The controls moved from the header row into the strip at the top of the
+// editor column: the same rectangle questions, asked at the new position.
+check(
+  'both controls sit in the top band of the editor column, against its right edge',
+  corner.column !== null &&
+    corner.strip !== null &&
+    [corner.preview, corner.format].every(
+      (b) => b !== null && b.top >= corner.column.top && b.bottom <= corner.column.top + 40,
+    ) &&
+    corner.format !== null &&
+    Math.abs(corner.format.right - corner.column.right) <= 1,
   JSON.stringify(corner),
 );
 check(
-  'and neither is taller than the row that reserves the corner’s height',
-  corner.header !== null &&
+  'a gap of at least 6px separates the toggle from Format',
+  corner.preview !== null && corner.format !== null && corner.format.left - corner.preview.right >= 6,
+  JSON.stringify(corner),
+);
+check(
+  'neither control touches the tree, the header, or the first text line',
+  corner.tree !== null &&
+    corner.header !== null &&
     [corner.preview, corner.format].every(
-      (b) => b !== null && b.top >= corner.header.top && b.bottom <= corner.header.bottom,
+      (b) =>
+        b !== null &&
+        b.right <= corner.tree.left &&
+        b.top >= corner.header.bottom &&
+        (corner.firstText === null || b.bottom <= corner.firstText.top),
     ),
   JSON.stringify(corner),
 );
@@ -1235,6 +1263,7 @@ const narrowHeader = await page.evaluate(() => {
       left: Math.round(b.left),
       right: Math.round(b.right),
       top: Math.round(b.top),
+      bottom: Math.round(b.bottom),
       height: Math.round(b.height),
     };
   };
@@ -1266,7 +1295,8 @@ check(
   'and neither control sits under the floating view-icon pill',
   narrowHeader.overlay !== null &&
     [narrowHeader.preview, narrowHeader.format].every(
-      (b) => b !== null && b.right <= narrowHeader.overlay.left,
+      (b) =>
+        b !== null && (b.right <= narrowHeader.overlay.left || b.top >= narrowHeader.overlay.bottom),
     ),
   JSON.stringify(narrowHeader),
 );
