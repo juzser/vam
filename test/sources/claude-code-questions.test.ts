@@ -65,6 +65,29 @@ describe('AskUserQuestion, as the transcript records it', () => {
     expect(facts(tail).questions[0]?.answer).toBe('Providers: Codex CLI');
   });
 
+  it('marks a set closed by an is_error result, and only that one', () => {
+    const closing = (isError: boolean | undefined): Json => ({
+      type: 'user',
+      message: {
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'toolu_1',
+            content: 'The user rejected this tool use',
+            ...(isError === undefined ? {} : { is_error: isError }),
+          },
+        ],
+      },
+    });
+    const rejected = facts(jsonl(ask('toolu_1', [PROVIDERS]), closing(true))).questions[0];
+    const answered = facts(jsonl(ask('toolu_1', [PROVIDERS]), closing(undefined))).questions[0];
+    const explicitFalse = facts(jsonl(ask('toolu_1', [PROVIDERS]), closing(false))).questions[0];
+    expect(rejected?.cancelled).toBe(true);
+    expect(rejected?.answer).toBe('The user rejected this tool use');
+    expect(answered).not.toHaveProperty('cancelled');
+    expect(explicitFalse).not.toHaveProperty('cancelled');
+  });
+
   it('does not close a question because SOME other tool_result arrived', () => {
     const tail = jsonl(ask('toolu_1', [PROVIDERS]), answer('toolu_9', 'unrelated'));
     expect(facts(tail).questions[0]?.answer).toBeNull();

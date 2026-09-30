@@ -38,9 +38,18 @@ describe('the set the card draws', () => {
     expect(set.map((one) => one.id)).toEqual(['b:0', 'b:1', 'b:2']);
   });
 
-  it('prefers a call that is still open over a newer one that is settled', () => {
+  it('never returns an older open call over a newer settled one (an orphan tool_use)', () => {
     const set = newestSet([q('a:0'), q('a:1'), q('b:0', 'done'), q('b:1', 'done')]);
-    expect(set.map((one) => one.id)).toEqual(['a:0', 'a:1']);
+    expect(set.map((one) => one.id)).toEqual(['b:0', 'b:1']);
+  });
+
+  it('returns the newer call when it is open and the older one settled', () => {
+    const set = newestSet([q('a:0', 'x'), q('b:0')]);
+    expect(set.map((one) => one.id)).toEqual(['b:0']);
+  });
+
+  it('returns the only call when it is open', () => {
+    expect(newestSet([q('a:0')]).map((one) => one.id)).toEqual(['a:0']);
   });
 
   it('falls back to the newest settled call when nothing is open', () => {
