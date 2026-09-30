@@ -23,7 +23,10 @@ import { readFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const FILES = ['src/renderer/panels/DetailPanel.tsx', 'src/renderer/domain/session-filter.ts'] as const;
+const FILES = [
+  'src/renderer/panels/DetailPanel.tsx',
+  'src/renderer/domain/session-filter.ts',
+] as const;
 
 const COMMENT = /\/\*[\s\S]*?\*\/|\/\/.*$/gm;
 const CITATION = /([A-Za-z0-9_./-]*):(\d+)/g;
