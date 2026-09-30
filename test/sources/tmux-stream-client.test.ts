@@ -159,9 +159,9 @@ describe('StreamClient', () => {
   });
 
   // ── Operator report: "the terminal often turns characters into ?." ──────
-  // `#decoder` (`node:string_decoder`, `client.ts#wire`) is persistent
+  // `#paneDecoder` (a streaming `TextDecoder`, `client.ts#wire`) is persistent
   // ACROSS raw `child.stdout` chunks for the life of one connection --
-  // Node's own documented contract is that it buffers an incomplete
+  // the streaming decode buffers an incomplete
   // multi-byte sequence at a chunk boundary rather than emitting U+FFFD for
   // it early. This is the adversarial version of the single euro-sign test
   // above: EVERY byte boundary of a realistic line carrying Vietnamese (both
@@ -199,6 +199,119 @@ describe('StreamClient', () => {
 
       splitClient.dispose();
     }
+  });
+
+  // ── tmux can end one %output line in the middle of a UTF-8 character and
+  // finish it on the next line (bytes >= 0x80 cross raw). client.ts decodes
+  // stdout as latin1 and reassembles UTF-8 per pane, so the halves join. ──
+  const bytes = (...parts: (string | number[])[]): Buffer =>
+    Buffer.concat(
+      parts.map((p) => (typeof p === 'string' ? Buffer.from(p, 'latin1') : Buffer.from(p))),
+    );
+
+  async function connected(paneId = '%3', seed = 'seed') {
+    const { client, children } = harness();
+    const connecting = client.connect();
+    const child = at(children, 0);
+    await connectWith(child, paneId, seed);
+    const seedText = await connecting;
+    const received: string[] = [];
+    client.onData((chunk) => received.push(chunk));
+    return { client, children, child, received, seedText };
+  }
+
+  /** The %pause -> nested %continue -> reseed round trip. */
+  async function pauseAndReseed(child: FakeChild, during?: () => void): Promise<void> {
+    child.data('%pause %3\n');
+    await tick();
+    during?.();
+    child.data('%begin 2 2 1\n%continue %3\n%end 2 2 1\n');
+    await tick();
+    await answerCapturePane(child, 'fresh-seed', 3);
+  }
+
+  it('reassembles a UTF-8 character tmux split across two %output lines', async () => {
+    const { child, received } = await connected();
+    child.data(bytes('%output %3 a', [0xe2, 0x94], '\n%output %3 ', [0x80], 'b\n'));
+    const joined = received.join('');
+    expect(joined).toBe('a─b');
+    expect(joined.split('─')).toHaveLength(2);
+    expect(joined).not.toContain('�');
+
+    const second = await connected();
+    second.child.data('%output %3 a\\342\\224\n%output %3 \\200b\n');
+    expect(second.received.join('')).toBe('a─b');
+  });
+
+  it('a reconnect starts a fresh UTF-8 decoder', async () => {
+    vi.useFakeTimers();
+    const { client, children, child, received } = await connected();
+    child.data(bytes('%output %3 ', [0xe2, 0x94], '\n'));
+    received.length = 0;
+    child.emit('exit');
+    await tick();
+    await vi.advanceTimersByTimeAsync(RECONNECT_BACKOFF_MS);
+    const second = at(children, 1);
+    await answerPauseAfter(second);
+    await answerCapturePane(second, 'reconnect-seed', 1);
+    second.data('%output %3 x\n');
+    expect(received.join('')).toBe('x');
+    client.dispose();
+  });
+
+  it('a reseed after %pause starts a fresh UTF-8 decoder', async () => {
+    const { child, received } = await connected();
+    child.data(bytes('%output %3 ', [0xe2, 0x94], '\n'));
+    received.length = 0;
+    await pauseAndReseed(child);
+    child.data('%output %3 x\n');
+    expect(received).toEqual(['x']);
+  });
+
+  it('block bodies stay UTF-8 text', async () => {
+    const { seedText } = await connected('%3', 'rule ─ ✓ tiếng');
+    expect(seedText).toBe('rule ─ ✓ tiếng');
+  });
+
+  describe('a fresh decoder skips the orphan tail of a character the gate dropped', () => {
+    it('after a pause', async () => {
+      const { child, received } = await connected();
+      await pauseAndReseed(child, () => child.data(bytes('%output %3 a', [0xe2, 0x94], '\n')));
+      received.length = 0;
+      child.data(bytes('%output %3 ', [0x80], 'x\n'));
+      expect(received.join('')).toBe('x');
+    });
+
+    it('before the seed, and only at the boundary', async () => {
+      const { client, children } = harness();
+      const connecting = client.connect();
+      const child = at(children, 0);
+      const received: string[] = [];
+      client.onData((chunk) => received.push(chunk));
+      await answerPauseAfter(child);
+      await answerListPanes(child, '%3');
+      child.data(bytes('%output %3 a', [0xe2, 0x94], '\n'));
+      await answerCapturePane(child, 'seed');
+      await connecting;
+      child.data(bytes('%output %3 ', [0x80], 'x\n'));
+      expect(received.join('')).toBe('x');
+      received.length = 0;
+      child.data(bytes('%output %3 ', [0x80], 'y\n'));
+      expect(received.join('')).toBe('�y');
+    });
+
+    it('skips at most three continuation bytes', async () => {
+      const { child, received } = await connected();
+      child.data(bytes('%output %3 ', [0x80, 0x80, 0x80, 0x80], 'z\n'));
+      expect(received.join('')).toBe('�z');
+    });
+  });
+
+  it('a U+FEFF in pane output and in a block body is kept', async () => {
+    const { child, received, seedText } = await connected('%3', '\uFEFFseed');
+    expect(seedText).toBe('\uFEFFseed');
+    child.data(bytes('%output %3 ', [0xef, 0xbb, 0xbf], 'x\n'));
+    expect(received.join('')).toBe('\uFEFFx');
   });
 
   it('drops %output for the resolved pane that arrives before capture-pane replies', async () => {

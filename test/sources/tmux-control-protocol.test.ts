@@ -384,8 +384,8 @@ describe('ControlFramer.feedEvents (streaming reuse -- one framer, not two)', ()
 
   it('decodes a multi-byte UTF-8 character split across two feed() chunks', () => {
     // 'à' is 0xc3 0xa0 in UTF-8. Split the %output line so the chunk boundary
-    // lands between the two bytes of the character -- StreamClient decodes
-    // with node:string_decoder over the RAW BYTES the child process hands it,
+    // lands between the two bytes of the character -- StreamClient reads
+    // the RAW BYTES the child process hands it as latin1 and decodes UTF-8 per pane,
     // but the octal-escape unwrap this framer does operates on already-
     // decoded JS string characters one at a time, so this pins that a
     // %output LINE split mid-line (the framer's own buffering) still decodes

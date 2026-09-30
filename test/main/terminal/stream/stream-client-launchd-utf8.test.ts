@@ -14,7 +14,7 @@
  * `decodeOutputPayload`'s own header (`control-protocol.ts`) already
  * argues no: tmux's control-mode wire only octal-escapes bytes below 32;
  * everything else, multi-byte UTF-8 included, crosses raw and is decoded by
- * THIS file's own `node:string_decoder`, never by anything that consults a
+ * `client.ts`'s per-pane `TextDecoder`, never by anything that consults a
  * process locale. `e2e/terminal-stream-glitch-shots.mjs`'s own header
  * records the same conclusion, reached by hand once, with `LANG`/`LC_*`
  * stripped from that harness's whole process. THIS file is the automated,
