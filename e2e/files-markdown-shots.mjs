@@ -608,6 +608,9 @@ const corner = await page.evaluate(() => {
     format: r('[data-files-format]'),
     header: r('[data-files-header]'),
     column: r('[data-files-editor-column]'),
+    tree: r('[data-files-tree]'),
+    // The first text line lives at the top of whichever content box is drawn.
+    text: r('[data-files-editor]') ?? r('[data-files-preview-view]'),
     icons: document.querySelectorAll('[data-view-overlay] [data-view]').length,
   };
 });
@@ -631,6 +634,37 @@ check(
         (b.right <= corner.overlay.left || b.top >= corner.overlay.bottom) &&
         b.bottom <= corner.column.top + 40,
     ),
+  JSON.stringify(corner),
+);
+const hit = (a, b) =>
+  a !== null &&
+  b !== null &&
+  a.left < b.right &&
+  b.left < a.right &&
+  a.top < b.bottom &&
+  b.top < a.bottom;
+const controlGap = (corner.format?.left ?? 0) - (corner.preview?.right ?? 0);
+check(
+  'the horizontal gap between the toggle and Tidy is at least one strip gap step (gap-1.5, 6px)',
+  corner.preview !== null && corner.format !== null && controlGap >= 6,
+  `measured ${controlGap}px`,
+);
+check(
+  'Tidy sits against the right edge of the editor column (within 1px, no inset)',
+  corner.format !== null &&
+    corner.column !== null &&
+    Math.abs(corner.column.right - corner.format.right) <= 1,
+  `Tidy right ${corner.format?.right}, column right ${corner.column?.right}`,
+);
+check(
+  'neither control intersects the tree, the corner pill or the first text line',
+  [corner.preview, corner.format].every(
+    (b) =>
+      b !== null &&
+      !hit(b, corner.tree) &&
+      !hit(b, corner.overlay) &&
+      (corner.text === null || b.bottom <= corner.text.top),
+  ),
   JSON.stringify(corner),
 );
 /**

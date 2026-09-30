@@ -571,6 +571,17 @@ check(
   `format ends at ${pillBox.format?.right}, pill starts at ${pillBox.overlay?.left}`,
 );
 check(
+  'the Format button sits in the top band of the editor column, against its right edge, clear of the tree',
+  pillBox.format !== null &&
+    pillBox.editorColumn !== null &&
+    pillBox.tree !== null &&
+    pillBox.format.top >= pillBox.editorColumn.top &&
+    pillBox.format.bottom <= pillBox.editorColumn.top + 40 &&
+    Math.abs(pillBox.editorColumn.right - pillBox.format.right) <= 1 &&
+    (pillBox.format.right <= pillBox.tree.left || pillBox.format.left >= pillBox.tree.right),
+  JSON.stringify({ format: pillBox.format, column: pillBox.editorColumn, tree: pillBox.tree }),
+);
+check(
   'and so does the file path beside it',
   pillBox.path !== null && pillBox.overlay !== null && pillBox.path.right <= pillBox.overlay.left,
   `path ends at ${pillBox.path?.right}, pill starts at ${pillBox.overlay?.left}`,

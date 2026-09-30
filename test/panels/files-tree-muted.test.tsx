@@ -49,6 +49,7 @@ afterEach(() => {
 
 const row = (path: string) =>
   document.querySelector(`[data-files-row-path="${ROOT}/${path}"]`) as HTMLElement;
+const cls = (path: string) => row(path).className.split(' ');
 const muted = (path: string) => row(path).hasAttribute('data-files-row-muted');
 const click = (path: string) =>
   act(async () => {
@@ -58,7 +59,7 @@ const click = (path: string) =>
 
 const q = (sel: string) => document.querySelector<HTMLElement>(sel);
 
-async function mount(tree = TREE) {
+async function mount(tree = TREE, content = '# hi\n') {
   Object.defineProperty(window, 'api', {
     configurable: true,
     value: {
@@ -69,7 +70,7 @@ async function mount(tree = TREE) {
           entries: tree[dir ?? ''] ?? [],
         }),
         read: async () => ({
-          content: '# hi\n',
+          content,
           isBinary: false,
           signature: { size: 1, mtimeMs: 1, sha256: 'a' },
         }),
@@ -116,7 +117,9 @@ describe('muted rows in the Files tree', () => {
       'README.md': false,
     })) {
       expect(muted(name), name).toBe(on);
-      expect(row(name).className.includes('text-ink-faint'), name).toBe(on);
+      // The row under the keyboard cursor reads full ink instead (asserted below).
+      const cursor = row(name).hasAttribute('data-files-cursor');
+      expect(cls(name).includes('text-ink-faint'), name).toBe(on && !cursor);
       // The glyph inherits the row's ink instead of keeping its family hue.
       expect(row(name).querySelector('[class*="text-inherit"]') !== null, name).toBe(on);
     }
@@ -135,7 +138,8 @@ describe('muted rows in the Files tree', () => {
     await click('.env');
     expect(document.querySelector('[data-files-editor]')).not.toBeNull();
     expect(row('.env').hasAttribute('data-files-row-active')).toBe(true);
-    expect(row('.env').className).toContain('text-ink');
+    expect(cls('.env')).toContain('text-ink');
+    expect(cls('.env')).not.toContain('text-ink-faint');
     await act(async () => {
       fireEvent.keyDown(document.querySelector('[role="tree"]') as HTMLElement, { key: 'j' });
       await Promise.resolve();
@@ -145,8 +149,8 @@ describe('muted rows in the Files tree', () => {
   });
 });
 
-async function mountOne(name: string, open = true) {
-  await mount({ '': [{ name, kind: 'file' }] });
+async function mountOne(name: string, open = true, content?: string) {
+  await mount({ '': [{ name, kind: 'file' }] }, content);
   if (open) await click(name);
 }
 
@@ -160,12 +164,17 @@ describe('the content controls strip', () => {
     expect(strip.contains(toggle) && strip.contains(tidy)).toBe(true);
     for (const outside of ['[data-files-header]', '[data-files-tree]'])
       expect(q(outside)?.contains(toggle) || q(outside)?.contains(tidy)).toBe(false);
-    expect(strip.className).toContain('justify-end');
-    expect(strip.className).toContain('gap-1.5');
+    const stripCls = strip.className.split(' ');
+    expect(stripCls).toContain('justify-end');
+    expect(stripCls).toContain('gap-1.5');
     const kids = [...strip.children];
     const at = (el: HTMLElement) => kids.findIndex((k) => k === el || k.contains(el));
     expect(at(toggle)).toBeGreaterThanOrEqual(0);
     expect(at(toggle)).toBeLessThan(at(tidy));
+    // Direct children (or wrappers) carry no negative margin.
+    const negMargin = /^-m[xylrtb]?-/;
+    for (const el of [toggle, tidy, kids[at(toggle)] as HTMLElement, kids[at(tidy)] as HTMLElement])
+      expect(el.className.split(' ').some((c) => negMargin.test(c))).toBe(false);
   });
 
   it('a non-markdown file shows only Tidy; with no file open neither renders', async () => {
@@ -187,5 +196,36 @@ describe('the content controls strip', () => {
       await Promise.resolve();
     });
     expect(q('[data-files-preview]')?.getAttribute('data-files-preview-state')).toBe('preview');
+  });
+});
+
+describe('muted row under the keyboard cursor', () => {
+  it('reads as the cursor row: text-ink, never text-ink-faint; off-cursor it stays faint', async () => {
+    await mount();
+    const tree = document.querySelector('[role="tree"]') as HTMLElement;
+    const key = (k: string) =>
+      act(async () => {
+        fireEvent.keyDown(tree, { key: k });
+        await Promise.resolve();
+      });
+    await key('j');
+    expect(document.querySelector('[data-files-cursor]')).toBe(row('build'));
+    expect(cls('build')).toContain('text-ink');
+    expect(cls('build')).not.toContain('text-ink-faint');
+    expect(cls('node_modules')).toContain('text-ink-faint');
+    expect(cls('node_modules')).not.toContain('text-ink');
+  });
+});
+
+describe('the Mod-Shift-f chord with the controls in the strip', () => {
+  it('runs Tidy on the open file', async () => {
+    await mountOne('a.json', true, '{"a":1}');
+    const editor = q('[data-files-editor]') as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.keyDown(editor, { key: 'f', metaKey: true, shiftKey: true });
+      fireEvent.keyDown(editor, { key: 'f', ctrlKey: true, shiftKey: true });
+      await Promise.resolve();
+    });
+    expect(editor.value).toBe('{\n  "a": 1\n}\n');
   });
 });

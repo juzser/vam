@@ -2582,12 +2582,12 @@ function Tree({
                   'flex w-full cursor-pointer items-center gap-1 rounded-[6px] py-0.5 pr-1 text-left font-mono text-control outline-none',
                   // One ink per row: active reads full ink, a muted row
                   // reads `ink-faint` (never `ghost`), the rest `ink-dim`.
-                  row.path === activePath
+                  row.path === activePath || isCursor
                     ? 'text-ink'
                     : row.muted
                       ? 'text-ink-faint'
                       : 'text-ink-dim',
-                  isCursor ? 'bg-line-strong text-ink' : 'hover:bg-raised hover:text-ink',
+                  isCursor ? 'bg-line-strong' : 'hover:bg-raised hover:text-ink',
                 ].join(' ')}
               >
                 {/* ONE GLYPH BEFORE THE NAME, AND A CHEVRON AT THE RIGHT EDGE.
