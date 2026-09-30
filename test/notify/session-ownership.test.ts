@@ -43,6 +43,15 @@ describe('isOutsideVamScope', () => {
     const prefs = dismissed(null);
     expect(isOutsideVamScope(entry(), scope({ prefs }))).toBe(true);
     expect(isOutsideVamScope(entry(), scope({ prefs, vamListingGap: 'x' }))).toBe(true);
+    expect(isOutsideVamScope(entry(), scope({ prefs, demo: true }))).toBe(true);
+  });
+  it('the demo stands down the foreign rule only', () => {
+    const demo = { demo: true };
+    expect(isOutsideVamScope(foreign, scope(demo))).toBe(false);
+    expect(isOutsideVamScope(entry(), scope({ ...demo, prefs: dismissed(null) }))).toBe(true);
+    expect(isOutsideVamScope(entry({}, 'p1'), scope({ ...demo, hiddenProjectIds: ['p1'] }))).toBe(
+      true,
+    );
   });
   it('drops a foreign session only while hideForeign is on and nothing stands it down', () => {
     expect(isOutsideVamScope(foreign, scope())).toBe(true);
