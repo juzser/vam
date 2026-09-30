@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import {
   chmodSync,
   mkdirSync,
@@ -12,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  LINUX_RELAUNCH_SCRIPT,
   launchLinuxInstall,
   linuxInstallBlocker,
   linuxInstallPlan,
@@ -50,6 +52,50 @@ describe('linuxInstallBlocker', () => {
   });
 });
 
+describe('LINUX_RELAUNCH_SCRIPT', () => {
+  it.skipIf(process.platform === 'win32')('is valid sh', () => {
+    const r = spawnSync('/bin/sh', ['-n', '-c', LINUX_RELAUNCH_SCRIPT], { encoding: 'utf8' });
+    expect(r.stderr).toBe('');
+    expect(r.status).toBe(0);
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'starts the app with --updated only after the pid is gone, paths with spaces intact',
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "vam linux it's-"));
+      try {
+        const out = join(dir, 'out.txt');
+        const fake = join(dir, "fake app's.AppImage");
+        writeFileSync(fake, '#!/bin/sh\necho "$@" > "$(dirname "$0")/out.txt"\n', { mode: 0o755 });
+        const { spawn } = await import('node:child_process');
+        const sleeper = spawn('/bin/sleep', ['1'], { stdio: 'ignore' });
+        const pid = sleeper.pid as number;
+        const t0 = Date.now();
+        const child = spawn('/bin/sh', ['-c', LINUX_RELAUNCH_SCRIPT, 'x', String(pid), fake], {
+          stdio: 'ignore',
+        });
+        await new Promise((r) => child.on('exit', r));
+        expect(Date.now() - t0).toBeGreaterThanOrEqual(800);
+        expect(readFileSync(out, 'utf8').trim()).toBe('--updated');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'gives up without launching if the pid never exits',
+    () => {
+      const r = spawnSync(
+        '/bin/sh',
+        ['-c', LINUX_RELAUNCH_SCRIPT.replace('240', '2'), 'x', String(process.pid), '/bin/false'],
+        { encoding: 'utf8' },
+      );
+      expect(r.status).not.toBe(0);
+    },
+  );
+});
+
 describe('replace an AppImage in a real directory', () => {
   let dir: string;
   let target: string;
@@ -81,15 +127,18 @@ describe('replace an AppImage in a real directory', () => {
         rename: (await import('node:fs/promises')).rename,
         rm: async () => undefined,
         spawn,
+        pid: 4242,
       });
       expect(out.replaced).toBe(true);
       expect(readFileSync(target, 'utf8')).toBe('new');
       expect(statSync(target).mode & 0o777).toBe(0o755);
       expect(readdirSync(join(dir, 'apps'))).toEqual(['vam.AppImage']);
-      expect(spawn).toHaveBeenCalledWith(target, ['--updated'], {
-        detached: true,
-        stdio: 'ignore',
-      });
+      // Relaunch waits for this pid to be gone; paths are positional, never interpolated.
+      expect(spawn).toHaveBeenCalledWith(
+        '/bin/sh',
+        ['-c', LINUX_RELAUNCH_SCRIPT, 'vam-relaunch', '4242', target],
+        { detached: true, stdio: 'ignore' },
+      );
       expect(unref).toHaveBeenCalled();
     },
   );
@@ -106,6 +155,7 @@ describe('replace an AppImage in a real directory', () => {
         },
         rm: (await import('node:fs/promises')).rm,
         spawn,
+        pid: 4242,
       });
       expect(out.replaced).toBe(false);
       expect(readFileSync(target, 'utf8')).toBe('old');

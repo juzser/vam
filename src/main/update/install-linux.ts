@@ -112,18 +112,36 @@ export type LinuxLaunchDeps = {
   readonly rename: (from: string, to: string) => Promise<void>;
   readonly rm: (path: string) => Promise<void>;
   readonly spawn: (cmd: string, args: readonly string[], opts: SpawnOptions) => { unref(): void };
+  /** The running app's pid: the relaunch waits for it to be gone. */
+  readonly pid: number;
 };
 
 export const realLinuxLaunchDeps: LinuxLaunchDeps = {
   rename: (a, b) => rename(a, b),
   rm: (p) => rm(p, { force: true }),
   spawn,
+  pid: process.pid,
 };
+
+/**
+ * Relaunch script. `$1` is the old pid, `$2` the AppImage: passed as
+ * positional args, never interpolated. Waits up to ~120s (240 x 0.5s) for the
+ * old process to be gone so the two instances never share userData or the tmux
+ * teardown; on timeout it launches nothing.
+ */
+export const LINUX_RELAUNCH_SCRIPT = `i=0
+while kill -0 "$1" 2>/dev/null; do
+  i=$((i + 1))
+  [ "$i" -ge 240 ] && exit 1
+  sleep 0.5
+done
+exec "$2" --updated`;
 
 /**
  * At will-quit: rename the staged file over the AppImage, then start it.
  * If the rename fails the staged copy is dropped and the OLD file is
- * relaunched: the operator is never left with no app.
+ * relaunched: the operator is never left with no app. The relaunch runs from
+ * a detached script that first waits for this process to exit.
  */
 export async function launchLinuxInstall(
   handle: LinuxHandle,
@@ -136,6 +154,12 @@ export async function launchLinuxInstall(
   } catch {
     await deps.rm(handle.plan.tempPath).catch(() => undefined);
   }
-  deps.spawn(handle.plan.target, ['--updated'], { detached: true, stdio: 'ignore' }).unref();
+  deps
+    .spawn(
+      '/bin/sh',
+      ['-c', LINUX_RELAUNCH_SCRIPT, 'vam-relaunch', String(deps.pid), handle.plan.target],
+      { detached: true, stdio: 'ignore' },
+    )
+    .unref();
   return { replaced };
 }
