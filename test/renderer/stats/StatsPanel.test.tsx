@@ -154,7 +154,9 @@ describe('StatsPanel', () => {
     stubApi({ kind: 'ok', snapshot: { ...SNAPSHOT, prsCreated: { kind: 'loading' } } }, { prs });
     render(<StatsPanel />);
     await screen.findByText('42');
-    expect(prs).toHaveBeenCalledTimes(1);
+    // prs() is called from a passive effect that can flush after the commit
+    // that drew "42", so wait for the call rather than assert it synchronously.
+    await vi.waitFor(() => expect(prs).toHaveBeenCalledTimes(1));
     expect(screen.getByText('…')).toBeTruthy();
 
     resolvePrs?.({ kind: 'ok', prsCreated: { kind: 'ok', count: 7 } });

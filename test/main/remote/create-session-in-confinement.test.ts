@@ -103,6 +103,9 @@ function deferred<T>(): {
 }
 
 afterEach(async () => {
+  // Restores the pass-through implementation, so a `mockImplementationOnce`
+  // a case queued but never consumed cannot leak into the next test.
+  realpathSpy.mockReset();
   await Promise.all(
     servers
       .splice(0)
@@ -167,12 +170,20 @@ describe('create-session-in: an absent createSession capability', () => {
 
 describe('create-session-in: the same count of awaited work on every cause (task-12)', () => {
   let memberRepo: string;
+  // A symlink named like the member, so its lexical spelling is never the
+  // member's canonical path -- on any host, whether or not tmpdir() is itself
+  // canonical (it is on Linux, it is not on macOS). Reaching the member
+  // through it is what makes the server run `realpath`.
+  let memberAlias: string;
   let project: Project;
 
   beforeEach(async () => {
     realpathSpy.mockClear();
     memberRepo = await mkdtemp(join(tmpdir(), 'vam-task12-member-'));
     await mkdir(join(memberRepo, '.git'), { recursive: true });
+    const aliasParent = await mkdtemp(join(tmpdir(), 'vam-task12-alias-'));
+    memberAlias = join(aliasParent, basename(memberRepo));
+    await symlink(memberRepo, memberAlias);
     project = {
       id: projectIdOf(await realpath(memberRepo)),
       name: 'demo',
@@ -220,7 +231,7 @@ describe('create-session-in: the same count of awaited work on every cause (task
         // d, f: the final segment names the member, so `realpath` runs once.
         {
           label: 'd: realpath rejects EACCES',
-          cwd: memberRepo,
+          cwd: memberAlias,
           status: 403,
           realpathOnce: eaccess,
           realpathCalls: 1,
@@ -234,7 +245,7 @@ describe('create-session-in: the same count of awaited work on every cause (task
           loadRejects: true,
           realpathCalls: 0,
         },
-        { label: 'f: member path, success', cwd: memberRepo, status: 200, realpathCalls: 1 },
+        { label: 'f: member path, success', cwd: memberAlias, status: 200, realpathCalls: 1 },
       ];
 
       const refusalTexts: string[] = [];
@@ -311,7 +322,7 @@ describe('create-session-in: the same count of awaited work on every cause (task
       const base = await start({ descriptor, load, createSession: vi.fn(async () => null) });
 
       const responsePromise = post(base, '/api/create-session-in', {
-        cwd: memberRepo,
+        cwd: memberAlias,
         title: 'a run',
       });
 
