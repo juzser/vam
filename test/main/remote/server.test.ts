@@ -25,11 +25,13 @@ import {
   createStreamRegistry,
   type RemoteServerOptions,
   startRemoteServer,
+  UNSERVED,
 } from '../../../src/main/remote/server.js';
 import { projectIdOf } from '../../../src/main/sources/claude-code/project-id.js';
 import type { MainSource } from '../../../src/main/sources/source.js';
 import type { Project } from '../../../src/renderer/domain/model.js';
 import type { TranscriptPage } from '../../../src/shared/history.js';
+import { REMOTE_KEY_IDS } from '../../../src/shared/remote-key.js';
 
 /**
  * A PASS-THROUGH spy over `realpath`, for the two rewritten cases below: it
@@ -1051,6 +1053,11 @@ describe('the descriptor the server serves', () => {
     expect(value.declines.terminal).toMatch(/terminal/i);
     expect(value.declines.renameSession).toBeTruthy();
     expect(value.declines.governance).toBeTruthy();
+  });
+
+  it('UNSERVED.terminal describes the send-key allowlist as it now is', () => {
+    expect(UNSERVED.terminal).not.toMatch(/six[^a-z]{0,3}keys?/i);
+    expect(UNSERVED.terminal).toContain(`${REMOTE_KEY_IDS.length}-key allowlist`);
   });
 
   it('turns off every write capability when the write routes are unregistered', async () => {
