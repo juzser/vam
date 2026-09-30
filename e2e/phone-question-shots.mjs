@@ -146,6 +146,35 @@ for (const theme of ['light', 'dark']) {
     JSON.stringify(shape.options),
   );
 
+  // EC-6 gap 0: at the column's end the inline card pins flush on the scroller's
+  // bottom edge, with no trailing spacer and no fade painting over it.
+  await page.evaluate(() => {
+    const column = document.querySelector('[data-phone-shell] [data-detail-column]');
+    if (column !== null) column.scrollTop = column.scrollHeight;
+  });
+  await page.waitForTimeout(150);
+  const edge = await page.evaluate(() => {
+    const column = document.querySelector('[data-phone-shell] [data-detail-column]');
+    const inline = document.querySelector('[data-phone-shell] [data-question-bar-inline]');
+    return {
+      gap:
+        column !== null && inline !== null
+          ? Math.abs(
+              column.getBoundingClientRect().bottom - inline.getBoundingClientRect().bottom,
+            )
+          : null,
+      spacer: document.querySelector('[data-phone-shell] [data-detail-spacer]') !== null,
+      fade: document.querySelector('[data-phone-shell] [data-detail-fade-bottom]') !== null,
+    };
+  });
+  check(
+    `${theme}: the inline card's bottom edge is within 1px of the column's`,
+    edge.gap !== null && edge.gap <= 1,
+    JSON.stringify(edge),
+  );
+  check(`${theme}: no trailing spacer in the phone shell`, !edge.spacer, JSON.stringify(edge));
+  check(`${theme}: no bottom fade in the phone shell`, !edge.fade, JSON.stringify(edge));
+
   await page.screenshot({ path: `${outDir}/phone-question-inline-${theme}.png` });
   console.log(`${outDir}/phone-question-inline-${theme}.png`);
   await page.close();

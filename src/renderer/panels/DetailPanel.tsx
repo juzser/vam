@@ -8395,6 +8395,8 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
           },
         ];
   const newestQuestion = newestQuestions[0] ?? null;
+  // The phone Response view draws the question inline, as the column's end.
+  const inlineQuestionEnds = phone && current === 'Response' && newestQuestion !== null;
   /* FOUR THINGS HAVE TO BE TRUE before a Submit is drawn: the source really
      delivers prompts, the shell really has the bridge (there is none in the
      browser build), there is a row to aim at, and VAM STARTED THAT ROW'S
@@ -9993,7 +9995,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                 the `sticky bottom-0` inset, which floated the phone inline
                 question above the composer. Skipped while that question is
                 drawn -- it IS the end of the column and pins flush. */}
-              {!(phone && current === 'Response' && newestQuestion !== null) && (
+              {!inlineQuestionEnds && (
                 <div
                   data-detail-spacer
                   aria-hidden="true"
@@ -10005,7 +10007,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                 slack as the jump below it: it stands in for the rule that used
                 to sit above the composer. It sits before the jumps so they
                 paint over it. */}
-            {jumps.below && (
+            {jumps.below && !inlineQuestionEnds && (
               <div
                 data-detail-fade-bottom
                 aria-hidden="true"

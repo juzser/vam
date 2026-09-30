@@ -7,7 +7,7 @@
 
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Decision, Project, Session } from '../../src/renderer/domain/model.js';
+import type { AgentQuestion, Decision, Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/DetailPanel.js';
 import { BOTTOM_SLACK_PX, isAtBottom } from '../../src/renderer/panels/stick-to-bottom.js';
@@ -38,8 +38,22 @@ const SESSION: Session = {
 
 const PROJECT: Project = { id: 'p1', name: 'atlas', sessions: [SESSION] };
 
-function draw(over: Partial<DetailPanelProps> = {}) {
-  const entry: SessionEntry = { project: PROJECT, session: SESSION };
+const QUESTION: AgentQuestion = {
+  id: 'toolu_1:0',
+  header: 'Colours',
+  question: 'Which colour do you prefer?',
+  multiSelect: false,
+  options: [
+    { label: 'Crimson', description: null },
+    { label: 'Cobalt', description: null },
+  ],
+  answer: null,
+};
+
+function draw(over: Partial<DetailPanelProps> = {}, questions?: readonly AgentQuestion[]) {
+  const session: Session = questions === undefined ? SESSION : { ...SESSION, questions };
+  const project: Project = { ...PROJECT, sessions: [session] };
+  const entry: SessionEntry = { project, session };
   render(
     <DetailPanel
       entry={entry}
@@ -79,6 +93,35 @@ describe('the scroller ends with a large bottom spacing', () => {
     expect(box.lastElementChild).toBe(spacer);
     expect(spacer?.className).toContain('h-[max(12rem,33vh)]');
     expect(box.className).not.toMatch(/(^|\s)pb-/);
+  });
+
+  it('phone, no question: keeps the spacer with the phone value, not the desktop one', () => {
+    draw({ phone: true });
+    const spacer = column()?.querySelector('[data-detail-spacer]');
+    expect(spacer).not.toBeNull();
+    expect(spacer?.className).toContain('h-[max(6rem,20vh)]');
+    expect(spacer?.className).not.toContain('h-[max(12rem,33vh)]');
+  });
+
+  it('phone with an open question: no spacer, no fade, the inline card is the column end', () => {
+    draw({ phone: true }, [QUESTION]);
+    const box = column() as HTMLElement;
+    expect(box.querySelector('[data-detail-spacer]')).toBeNull();
+    expect(box.lastElementChild).toBe(q('[data-question-bar-inline]'));
+    stub(box, 1000, 100);
+    box.scrollTop = 0;
+    fireEvent.scroll(box);
+    expect(q('[data-detail-fade-bottom]')).toBeNull();
+  });
+
+  it('desktop with an open question keeps the spacer and the fade rule', () => {
+    draw({}, [QUESTION]);
+    const box = column() as HTMLElement;
+    expect(box.lastElementChild).toBe(box.querySelector('[data-detail-spacer]'));
+    stub(box, 1000, 100);
+    box.scrollTop = 0;
+    fireEvent.scroll(box);
+    expect(q('[data-detail-fade-bottom]')).not.toBeNull();
   });
 
   it('keeps the BOTTOM_SLACK_PX rule as it was', () => {
