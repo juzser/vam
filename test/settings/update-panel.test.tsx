@@ -109,6 +109,18 @@ describe('the automatic-check switch', () => {
     expect(autoSwitch()?.getAttribute('aria-label')).toMatch(/automatically check for updates/i);
   });
 
+  it('sits in a settings row with a visible label and hint, like every other switch', async () => {
+    await mount(fullApi().bridge);
+    const row = autoSwitch()?.closest('[role="group"]');
+    expect(row).not.toBeNull();
+    const labelId = row?.getAttribute('aria-labelledby') ?? '';
+    const heading = document.getElementById(labelId);
+    expect(heading?.textContent).toMatch(/automatically check for updates/i);
+    // Not the switch's own aria-label: text a sighted operator can read.
+    expect(autoSwitch()?.contains(heading ?? null)).toBe(false);
+    expect(row?.textContent).toMatch(/once a day/i);
+  });
+
   it('stores the flip through main and shows what main answered', async () => {
     const { bridge } = fullApi();
     await mount(bridge);

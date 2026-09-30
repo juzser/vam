@@ -501,6 +501,8 @@ const EN = {
   'settings.update.check': 'check now',
   'settings.update.checking': 'checking…',
   'settings.update.auto.label': 'automatically check for updates',
+  'settings.update.auto.hint':
+    'look for a newer release once a day and when the computer wakes; check now works either way',
   'settings.update.auto.on': 'on',
   'settings.update.auto.off': 'off',
   'settings.update.idle': 'press check now to look for a newer release',
