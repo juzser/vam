@@ -27,6 +27,9 @@ import { DownloadError, type DownloadOptions } from './download.js';
 import type { InstallFailure, InstallHandle, PrepareInput, PrepareResult } from './install.js';
 import type { UpdateState, UpdateStatePatch } from './state-file.js';
 
+/** After `app.quit()`, how long before a quit that never reached will-quit counts as cancelled. */
+export const QUIT_SETTLE_MS = 5_000;
+
 export const QUIT_CANCELLED_MESSAGE = 'Save or discard your edits, then press Update again';
 
 export type UpdateControllerDeps = {
@@ -54,6 +57,9 @@ export type UpdateControllerDeps = {
   readonly quit: () => void;
   readonly broadcast: (status: UpdateStatus) => void;
   readonly now: () => number;
+  /** Timer seam, as in the scheduler. */
+  readonly setTimeout: (fn: () => void, ms: number) => unknown;
+  readonly clearTimeout: (handle: unknown) => void;
 };
 
 export type UpdateController = {
@@ -103,6 +109,18 @@ export function createUpdateController(deps: UpdateControllerDeps): UpdateContro
   let status: UpdateStatus = { kind: 'idle' };
   let offer: Offer | null = null;
   let pending: InstallHandle | null = null;
+  let quitTimer: unknown = null;
+
+  const disarmQuitTimer = (): void => {
+    if (quitTimer === null) return;
+    deps.clearTimeout(quitTimer);
+    quitTimer = null;
+  };
+  const cancelPending = (): void => {
+    disarmQuitTimer();
+    pending = null;
+    failWith('quit-cancelled', QUIT_CANCELLED_MESSAGE);
+  };
 
   const set = (next: UpdateStatus): void => {
     if (next === status) return;
@@ -251,6 +269,13 @@ export function createUpdateController(deps: UpdateControllerDeps): UpdateContro
 
     pending = prepared.handle;
     deps.quit();
+    // A window close / beforeunload veto can cancel the quit AFTER before-quit,
+    // and then neither hook fires again. No will-quit in time: it was cancelled.
+    disarmQuitTimer();
+    quitTimer = deps.setTimeout(() => {
+      quitTimer = null;
+      if (pending !== null) cancelPending();
+    }, QUIT_SETTLE_MS);
     return status;
   }
 
@@ -285,13 +310,13 @@ export function createUpdateController(deps: UpdateControllerDeps): UpdateContro
 
     onBeforeQuit(prevented: boolean): void {
       if (onQuitOutcome({ pending: pending !== null, prevented }) !== 'vetoed') return;
-      pending = null;
-      failWith('quit-cancelled', QUIT_CANCELLED_MESSAGE);
+      cancelPending();
     },
 
     onWillQuit(): Promise<void> | null {
       const handle = pending;
       if (handle === null) return null;
+      disarmQuitTimer();
       pending = null;
       return deps.launchInstall(handle).catch(() => {});
     },

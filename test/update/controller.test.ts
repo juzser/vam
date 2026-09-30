@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CheckResult } from '../../src/main/update/check.js';
 import {
   createUpdateController,
@@ -63,6 +63,8 @@ function make(over: Partial<UpdateControllerDeps> = {}, initial: Partial<UpdateS
     }),
     broadcast: (s) => broadcasts.push(s),
     now: () => 1_000,
+    setTimeout: (fn, ms) => setTimeout(fn, ms),
+    clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
     ...over,
   };
   return { controller: createUpdateController(deps), deps, broadcasts, order, state: () => state };
@@ -311,6 +313,35 @@ describe('download and install', () => {
 });
 
 describe('quit flow', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('a quit cancelled AFTER before-quit (window veto) times out into quit-cancelled and forgets the launch', async () => {
+    vi.useFakeTimers();
+    const { controller, deps } = make();
+    await controller.check({ manual: true });
+    await controller.download();
+    controller.onBeforeQuit(false);
+    expect(controller.getStatus().kind).toBe('installing');
+    vi.advanceTimersByTime(5_000);
+    expect(controller.getStatus()).toMatchObject({ kind: 'error', code: 'quit-cancelled' });
+    expect(controller.onWillQuit()).toBeNull();
+    expect(deps.launchInstall).not.toHaveBeenCalled();
+    // The verified file stays: pressing Update again skips the download.
+    vi.mocked(deps.isVerified).mockResolvedValue(true);
+    await controller.download();
+    expect(deps.download).toHaveBeenCalledTimes(1);
+  });
+
+  it('will-quit disarms the timeout', async () => {
+    vi.useFakeTimers();
+    const { controller } = make();
+    await controller.check({ manual: true });
+    await controller.download();
+    await controller.onWillQuit();
+    vi.advanceTimersByTime(10_000);
+    expect(controller.getStatus().kind).toBe('installing');
+  });
+
   it('will-quit launches the prepared installer once, and only when one is pending', async () => {
     const { controller, deps } = make();
     expect(controller.onWillQuit()).toBeNull();

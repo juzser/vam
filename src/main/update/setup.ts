@@ -64,6 +64,8 @@ export async function createUpdater(options: UpdaterOptions): Promise<Updater> {
     quit: options.quit,
     broadcast: options.broadcast,
     now: Date.now,
+    setTimeout: (fn, ms) => setTimeout(fn, ms),
+    clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
   });
 
   const scheduler = createScheduler({
