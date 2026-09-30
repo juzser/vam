@@ -242,4 +242,29 @@ describe('EC-3b: a screen that fails verification receives no key past the last 
     });
     expect(t.keys()).toEqual([['Down'], ['Enter'], ['Down'], ['Down']]);
   });
+  it('a fold onto an unindented row is not part of the label', async () => {
+    const screen = LABEL_WRAPPED.replace('     from scratch', 'from scratch');
+    const t = recorder([screen]);
+    const result = await answerQuestion(t.run, ID, one(LABEL_Q, [LONG_LABEL]));
+    expect(result).toEqual({ kind: 'unmatched', label: LONG_LABEL });
+    expect(t.keys()).toEqual([]);
+  });
+
+  it('a fold that reads to a different label is not the asked label', async () => {
+    const t = recorder([LABEL_WRAPPED]);
+    const other = 'Rewrite the whole module from nothing';
+    const result = await answerQuestion(t.run, ID, one(LABEL_Q, [other]));
+    expect(result).toEqual({ kind: 'unmatched', label: other });
+    expect(t.keys()).toEqual([]);
+  });
+});
+
+describe('a label folded over three rows', () => {
+  const THREE = LABEL_WRAPPED.replace('     from scratch', '     from\n     scratch');
+  it('is matched and delivered', async () => {
+    const t = recorder([...visits(THREE, 1), cursorOn(THREE, 2), cursorOn(THREE, 1), RESOLVED]);
+    const result = await answerQuestion(t.run, ID, one(LABEL_Q, [LONG_LABEL]));
+    expect(result.kind).toBe('sent');
+    expect(t.keys()).toEqual([['Down'], ['Down'], ['Enter']]);
+  });
 });
