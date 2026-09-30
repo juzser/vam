@@ -114,6 +114,14 @@ export const MAX_RECONNECT_BACKOFF_MS = RECONNECT_BACKOFF_MS * 8;
  */
 export const PAUSE_AFTER_SECONDS = 1;
 
+/** How many history rows above the visible screen a seed asks tmux for
+ * (`capture-pane -S -<N>`). Bounded, never `-S -`, and no larger than the
+ * renderer's `TERMINAL_STREAM_SCROLLBACK` so the seed never holds more rows
+ * than xterm keeps. `seedWithCursor`'s CUP is absolute on the viewport, which
+ * holds the last `pane_height` rows, so the cursor still lands on tmux's own
+ * cell with history above it. */
+export const SEED_HISTORY_LINES = 2000;
+
 /**
  * The ceiling on bytes held in this file's own stdin FIFO (`#write`'s per-
  * connection state) while a `send-keys`/control-mode line is waiting for a
@@ -447,7 +455,7 @@ export class StreamClient {
   async #reseed(): Promise<BlockResult> {
     const target = paneTarget(this.#target);
     const results = await this.#sendChain(
-      `display-message -p -t ${target} -F "${CURSOR_FORMAT}" ; capture-pane -p -e -N -t ${target}`,
+      `display-message -p -t ${target} -F "${CURSOR_FORMAT}" ; capture-pane -p -e -N -S -${SEED_HISTORY_LINES} -t ${target}`,
       2,
     );
     const cursor = results[0];
