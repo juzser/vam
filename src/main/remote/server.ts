@@ -834,12 +834,12 @@ function routesFor(options: RemoteServerOptions): Map<string, { method: string; 
        * THE PHONE'S ROUTE INTO A RUNNING AGENT, ONE ALLOWLISTED KEY AT A TIME
        * -- see `send-key.ts`'s own header for the whole argument (root cause,
        * resolution, and why the fixed `REMOTE_KEY_IDS` allowlist,
-       * `src/shared/remote-key.ts:23`, is the entire surface). Registered here, under the SAME `allowWrites` gate every
-       * other write is, with the SAME auth and pairing `write()` already gives
-       * `/api/record-prompt` -- and, like it, no per-request rate limit (none
-       * of the write routes has one) -- nothing about this route is a
-       * new decision at the transport layer, only a new, narrow ACT at the
-       * source layer.
+       * `src/shared/remote-key.ts:23`, is the entire surface). Registered here,
+       * under the SAME `allowWrites` gate every other write is, with the SAME
+       * auth and pairing `write()` already gives `/api/record-prompt` -- and,
+       * like it, no per-request rate limit (none of the write routes has one)
+       * -- nothing about this route is a new decision at the transport layer,
+       * only a new, narrow ACT at the source layer.
        *
        * `call` DOES NOT DISPATCH THROUGH `s.*`, unlike every write above it --
        * there is no `MainSource` member for this, deliberately: the write
