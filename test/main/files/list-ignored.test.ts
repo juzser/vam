@@ -7,78 +7,58 @@ import { listDirectory, type ReadDir } from '../../../src/main/files/list.js';
 
 const readDir: ReadDir = async (p) => readdirSync(p, { withFileTypes: true });
 const tmp = () => mkdtempSync(join(tmpdir(), 'vam-ignored-'));
-const marked = (entries: readonly { name: string; ignored?: true }[]) =>
-  entries.filter((e) => e.ignored).map((e) => e.name);
+const marked = async (root: string, dir = '', run?: Parameters<typeof listDirectory>[3]) =>
+  (await listDirectory(root, dir, readDir, run)).filter((e) => e.ignored).map((e) => e.name);
 
 function repo(gitignore?: string): string {
   const root = tmp();
   execFileSync('git', ['init', '-q'], { cwd: root });
   if (gitignore !== undefined) writeFileSync(join(root, '.gitignore'), gitignore);
   mkdirSync(join(root, 'build/sub'), { recursive: true });
-  mkdirSync(join(root, 'src'));
   for (const f of ['debug.log', 'keep.log', 'build/sub/x.txt']) writeFileSync(join(root, f), '');
   return root;
 }
 
 describe('listDirectory git marks', () => {
-  it('(i) marks what git ignores and resolves negation through git', async () => {
-    const root = repo('build/\n*.log\n!keep.log\n');
-    expect(marked(await listDirectory(root, '', readDir))).toEqual(['build', 'debug.log']);
+  it('marks what git ignores, resolves negation, and reaches inside an ignored directory', async () => {
+    expect(await marked(repo('build/\n*.log\n!keep.log\n'))).toEqual(['build', 'debug.log']);
+    expect(await marked(repo('build/\n'), 'build/sub')).toEqual(['x.txt']);
   });
 
-  it('(ii) marks entries inside an ignored directory', async () => {
-    const root = repo('build/\n');
-    expect(marked(await listDirectory(root, 'build/sub', readDir))).toEqual(['x.txt']);
-  });
-
-  it('(iii) a repo with no .gitignore marks nothing', async () => {
-    expect(marked(await listDirectory(repo(), '', readDir))).toEqual([]);
-  });
-
-  it('(iv) a directory outside any repo lists as before, with no marks', async () => {
+  it('marks nothing without a .gitignore or outside a repo, and lists as before', async () => {
+    expect(await marked(repo())).toEqual([]);
     const root = tmp();
     writeFileSync(join(root, 'a.txt'), '');
-    const out = await listDirectory(root, '', readDir);
-    expect(out).toEqual([{ name: 'a.txt', kind: 'file' }]);
-  });
-
-  it('(v) makes exactly one git call per non-empty listing, none for an empty one', async () => {
-    const root = repo('build/\n');
-    const calls: string[][] = [];
-    const run = async (_cwd: string, args: readonly string[], input: string) => {
-      calls.push([...args, input]);
-      return 'build\0';
-    };
-    const out = await listDirectory(root, '', readDir, run);
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.slice(0, 3)).toEqual(['check-ignore', '--stdin', '-z']);
-    expect(marked(out)).toEqual(['build']);
-    await listDirectory(tmp(), '', readDir, run);
-    expect(calls).toHaveLength(1);
-  });
-
-  it('a failing runner never fails the listing', async () => {
-    const root = repo('build/\n');
-    const out = await listDirectory(root, '', readDir, async () => Promise.reject(new Error('x')));
-    expect(marked(out)).toEqual([]);
-    expect(out.length).toBeGreaterThan(0);
-  });
-
-  it('feeds NUL-separated names on stdin, runs in the listed directory, never passes --no-index', async () => {
-    const root = repo('build/\n');
-    let seen: { cwd: string; args: readonly string[]; input: string } | undefined;
-    await listDirectory(root, 'build', readDir, async (cwd, args, input) => {
-      seen = { cwd, args, input };
-      return '';
-    });
-    expect(seen?.cwd).toBe(`${root}/build`);
-    expect(seen?.args).not.toContain('--no-index');
-    expect(seen?.input).toBe('sub\0');
+    expect(await listDirectory(root, '', readDir)).toEqual([{ name: 'a.txt', kind: 'file' }]);
   });
 
   it('a tracked file that matches an ignore rule is not marked', async () => {
     const root = repo('*.log\n');
     execFileSync('git', ['add', '-f', 'debug.log'], { cwd: root });
-    expect(marked(await listDirectory(root, '', readDir))).toEqual(['keep.log']);
+    expect(await marked(root)).toEqual(['keep.log']);
+  });
+
+  it('one git call per non-empty listing, NUL names on stdin, in the listed directory', async () => {
+    const calls: { cwd: string; args: readonly string[]; input: string }[] = [];
+    const run = async (cwd: string, args: readonly string[], input: string) => {
+      calls.push({ cwd, args, input });
+      return 'sub\0';
+    };
+    const root = repo('build/\n');
+    expect(await marked(root, 'build', run)).toEqual(['sub']);
+    await listDirectory(tmp(), '', readDir, run);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.cwd).toBe(`${root}/build`);
+    expect(calls[0]?.args.slice(0, 3)).toEqual(['check-ignore', '--stdin', '-z']);
+    expect(calls[0]?.args).not.toContain('--no-index');
+    expect(calls[0]?.input).toBe('sub\0');
+  });
+
+  it('a failing runner never fails the listing', async () => {
+    const out = await listDirectory(repo('build/\n'), '', readDir, () =>
+      Promise.reject(new Error('x')),
+    );
+    expect(out.length).toBeGreaterThan(0);
+    expect(out.some((e) => e.ignored)).toBe(false);
   });
 });

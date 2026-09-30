@@ -1,12 +1,7 @@
 /**
- * Which names in one directory git ignores -- the only reader of .gitignore
- * in vam. ONE `git check-ignore --stdin -z` call per listing, never one per
- * entry. No `--no-index`, so a tracked file is never reported ignored.
- *
- * Entry names reach git only on stdin, NUL-separated; git itself runs through
- * `execFile` with an argv array, never a shell. Every failure (exit 1 =
- * nothing ignored, exit 128 = not a repository, git missing, timeout, output
- * over the buffer bound) yields an empty set and never fails the listing.
+ * Which names in one directory git ignores: ONE `git check-ignore --stdin -z`
+ * per listing, names on stdin only, no `--no-index` (a tracked file is never
+ * ignored). Any failure yields an empty set and never fails the listing.
  */
 
 import { execFile } from 'node:child_process';

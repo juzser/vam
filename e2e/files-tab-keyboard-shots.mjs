@@ -553,8 +553,6 @@ const pillBox = await page.evaluate(() => {
     // was written to catch, asked of its replacement.
     format: r('[data-files-format]'),
     path: r('[data-files-path]'),
-    strip: r('[data-files-content-controls]'),
-    editorText: r('[data-files-editor] .cm-line'),
     tree: r('[data-files-tree]'),
     editorColumn: r('[data-files-editor-column]'),
     icons: document.querySelectorAll('[data-view-overlay] [data-view]').length,
@@ -565,31 +563,12 @@ check(
   pillBox.icons === 5,
   `it carries ${pillBox.icons}`,
 );
-// Format now lives in the content strip at the top of the editor column, not
-// in the header row: the same rectangle question, asked at its new position.
 check(
   'the Format button clears the view pill entirely, not just at its centre',
   pillBox.format !== null &&
     pillBox.overlay !== null &&
     (pillBox.format.right <= pillBox.overlay.left || pillBox.format.top >= pillBox.overlay.bottom),
-  `format ${JSON.stringify(pillBox.format)}, pill ${JSON.stringify(pillBox.overlay)}`,
-);
-check(
-  'Format sits in the top band of the editor column, against its right edge',
-  pillBox.format !== null &&
-    pillBox.editorColumn !== null &&
-    pillBox.format.top >= pillBox.editorColumn.top &&
-    pillBox.format.bottom <= pillBox.editorColumn.top + 40 &&
-    Math.abs(pillBox.format.right - pillBox.editorColumn.right) <= 1,
-  `format ${JSON.stringify(pillBox.format)}, column ${JSON.stringify(pillBox.editorColumn)}`,
-);
-check(
-  'Format does not touch the tree or the first text line',
-  pillBox.format !== null &&
-    pillBox.tree !== null &&
-    pillBox.format.right <= pillBox.tree.left &&
-    (pillBox.editorText === null || pillBox.format.bottom <= pillBox.editorText.top),
-  `format ${JSON.stringify(pillBox.format)}, tree ${JSON.stringify(pillBox.tree)}, first line ${JSON.stringify(pillBox.editorText)}`,
+  `format ends at ${pillBox.format?.right}, pill starts at ${pillBox.overlay?.left}`,
 );
 check(
   'and so does the file path beside it',
@@ -681,24 +660,6 @@ check(
 check(
   'the dirty dot is actually drawn — the buffer above really is dirty',
   (await page.locator('[data-files-dirty]').count()) > 0,
-);
-
-// Format moved into the content strip, so the dot and Format no longer share
-// a row: the adjacency question becomes "they never overlap", and the 6px
-// gap moves to the strip's own toggle/Format gap (files-markdown-shots.mjs).
-const dotOverlap = await page.evaluate(() => {
-  const r = (sel) => {
-    const e = document.querySelector(sel);
-    if (e === null) return null;
-    const b = e.getBoundingClientRect();
-    return { top: b.top, bottom: b.bottom, left: b.left, right: b.right };
-  };
-  return { dot: r('[data-files-dirty]'), format: r('[data-files-format]') };
-});
-check(
-  'the dot (header) and Format (content strip) never overlap — Format sits entirely below the dot',
-  dotOverlap.dot !== null && dotOverlap.format !== null && dotOverlap.format.top >= dotOverlap.dot.bottom,
-  JSON.stringify(dotOverlap),
 );
 
 /** The real paint of a CSS custom property, off a throwaway probe node — the

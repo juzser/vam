@@ -1660,6 +1660,113 @@ export function FilesTab({
                 />
               </Note>
             )}
+            {/* Preview/Raw and Format render in the content strip (`data-files-content-controls`) at the
+                top of the editor column now; the two notes below are their design record, kept here. */}
+            {/* FORMAT, AND IT IS NEVER DISABLED. Every file type gets this
+                control, including the ones vam will not format: pressing it
+                on a `.ts` puts the reason on screen, by name, which is a
+                better answer than a greyed-out button that says nothing about
+                why. It is an ICON rather than a word because the row it is in
+                also holds the path, the dirty dot and the view pill's own
+                reservation, and at the 320px floor the path has to keep
+                something to truncate. */}
+            {/* RENDERED OR RAW, NEXT TO THE FORMATTER — the operator's own
+                placement: one toggle beside the formatter at the top. It
+                sits BEFORE Format rather than after, so the row reads as one
+                view control followed by the two that change the file.
+
+                DRAWN ONLY FOR A FILE THAT HAS A PREVIEW, which is the
+                opposite of the rule the Format button next to it follows,
+                and the difference is real. Format is never disabled because
+                pressing it teaches the operator something — "vam does not
+                format .ts files" is an answer. A preview toggle on a `.ts`
+                would have no second state to show, so a control that is
+                simply absent is the truer surface. The KEY still answers
+                from anywhere (`onEditorKeyDown`), and says why.
+
+                A TWO-SEGMENT CONTROL, NOT AN ICON-ONLY BUTTON — the operator
+                found the single toggle unreadably small and never noticed it
+                was there at all, which is the whole reason preview is now
+                the default rather than something to discover. Two labelled
+                buttons in one well, `bg-segment-on` marking the one in
+                force: the same shape `SettingsOverlay.tsx`'s own section
+                switcher wears (`bg-well` / `border-line-loud` / `p-[3px]`),
+                MINUS its `role="tablist"`/`role="tab"` pair — that shape
+                exists for genuine tab NAVIGATION with `aria-controls`
+                pointing at a mounted panel and roving arrow-key focus
+                (`SectionRail`'s own comment: "never `role=\"tab\"`, which
+                would be a third orphaned tablist"), and a two-way SWITCH is
+                not that: pressing either button acts immediately, each is
+                its own stop in the Tab order, and `aria-pressed` says which
+                one is on — the same vocabulary `PhoneShell.tsx`'s own
+                `ViewIcons`/`SessionTabStrip` segmented rows already use for
+                an identical "which of a few mutually exclusive states" job.
+
+                `data-files-preview` AND `data-files-preview-state` STAY ON
+                THE OUTER WELL, exactly where they sat on the single button
+                before: any guard that only reads the state attribute keeps
+                matching unchanged. Each segment carries its own
+                `data-files-preview-option` for a guard or a test that wants
+                to press ONE side directly rather than toggle.
+
+                THE WORDS THEMSELVES HIDE, AND THE PADDING TIGHTENS, BELOW
+                `@min-[380px]` -- MEASURED AGAINST THIS ROW, NOT THE VIEWPORT.
+                `reserveCorner` pads this row so its content never sits under
+                the floating view-icon pill (this file's own header, "THE
+                CORNER, RESERVED BY MEASUREMENT") -- and at vam's narrowest
+                legal pane the row's own usable width in front of that
+                padding is ~149px, measured in Chromium.
+
+                RECOMPUTED IN `e2e/files-markdown-shots.mjs` NOW THAT SAVE IS
+                GONE (its own DEBUG run, at a 320px pane and at 1100px):
+                Format's box is a fixed 24px everywhere (`h-6 w-6`, this
+                file's own comment on that button). The segmented control
+                measured 132px wide with both words showing, so two LABELLED
+                buttons plus Format plus the row's own gap comes to ~158px --
+                still over the ~149px budget by enough that the fold stays
+                load-bearing even with Save gone, just no longer by the wide
+                margin a 240px-vs-149px reading suggested. Icon-only, the
+                segmented control measured 37px, so the folded total is ~63px
+                -- comfortable room to spare, which is why the fold alone
+                (never a further shrink of Format) is enough. Both folds are
+                therefore container-scoped together --
+                `@min-[380px]:inline` on the words, `@min-[380px]:px-1.5`
+                widening the horizontal padding back out once there
+                is room to spend -- and `sm:`/`md:` are VIEWPORT breakpoints
+                that cannot see a pane narrowed by a SPLIT rather than by the
+                window itself (`SettingsOverlay.tsx`'s `SectionStrip` argues
+                the identical point for its own narrow form). `@container`
+                on `data-files-header` above is what makes a CONTAINER query
+                possible here at all. The icon and `aria-label` stay full
+                size and present either way -- what folds is only the second
+                thing the eye reads once it already has the first, and the
+                control is never fewer than two real, independently pressable
+                buttons at any width. */}
+            {/* AND ITS TOOLTIP IS A `Note`, NOT A `title`. The operator asked
+                for tooltips on this button and on Save; Save is a button no
+                longer (see the dirty indicator above, and its own comment
+                for where that explanation lives now). This one HAD a
+                `title`, which is precisely the shape `panels/Note.tsx` exists
+                to replace -- a `title` opens on hover and on nothing else, so
+                on a keyboard-first tool its explanation was unreadable to its
+                own primary user. `aria-label` stays: the note is the
+                EXPLANATION, and a screen reader still needs the NAME.
+
+                The scope is quoted from `FORMAT_OFFER` rather than retyped.
+                A button that is never disabled owes the operator the reason it
+                might refuse, and a hand-written list beside a button is the
+                copy that survives the formatter learning a file type.
+
+                `h-6 w-6`, FIXED, RATHER THAN PADDING AROUND THE ICON — the
+                same box `DetailPanel.tsx`'s own view-icon pill draws each of
+                its five buttons in (`vam-tap relative flex h-6 w-6 ...`),
+                which is what "consistent with vam's other toolbar icon
+                buttons" means concretely. It used to be `px-1.5 py-1` with no
+                fixed height, which is what let it and the preview toggle
+                beside it drift a few pixels apart — the operator's own
+                complaint, "Save, prettier and preview-mode buttons are not
+                the same size". `e2e/files-markdown-shots.mjs` now asserts the
+                two as equal-height RECTANGLES, not as matching class names. */}
           </>
         )}
       </div>
@@ -1753,86 +1860,6 @@ export function FilesTab({
               // The Preview/Raw fold below is a container query; this strip is now the nearest `@container`.
               className="@container flex flex-none items-center justify-end gap-1.5 pb-1"
             >
-              {/* FORMAT, AND IT IS NEVER DISABLED. Every file type gets this
-                control, including the ones vam will not format: pressing it
-                on a `.ts` puts the reason on screen, by name, which is a
-                better answer than a greyed-out button that says nothing about
-                why. It is an ICON rather than a word because the row it is in
-                also holds the path, the dirty dot and the view pill's own
-                reservation, and at the 320px floor the path has to keep
-                something to truncate. */}
-              {/* RENDERED OR RAW, NEXT TO THE FORMATTER — the operator's own
-                placement: one toggle beside the formatter at the top. It
-                sits BEFORE Format rather than after, so the row reads as one
-                view control followed by the two that change the file.
-
-                DRAWN ONLY FOR A FILE THAT HAS A PREVIEW, which is the
-                opposite of the rule the Format button next to it follows,
-                and the difference is real. Format is never disabled because
-                pressing it teaches the operator something — "vam does not
-                format .ts files" is an answer. A preview toggle on a `.ts`
-                would have no second state to show, so a control that is
-                simply absent is the truer surface. The KEY still answers
-                from anywhere (`onEditorKeyDown`), and says why.
-
-                A TWO-SEGMENT CONTROL, NOT AN ICON-ONLY BUTTON — the operator
-                found the single toggle unreadably small and never noticed it
-                was there at all, which is the whole reason preview is now
-                the default rather than something to discover. Two labelled
-                buttons in one well, `bg-segment-on` marking the one in
-                force: the same shape `SettingsOverlay.tsx`'s own section
-                switcher wears (`bg-well` / `border-line-loud` / `p-[3px]`),
-                MINUS its `role="tablist"`/`role="tab"` pair — that shape
-                exists for genuine tab NAVIGATION with `aria-controls`
-                pointing at a mounted panel and roving arrow-key focus
-                (`SectionRail`'s own comment: "never `role=\"tab\"`, which
-                would be a third orphaned tablist"), and a two-way SWITCH is
-                not that: pressing either button acts immediately, each is
-                its own stop in the Tab order, and `aria-pressed` says which
-                one is on — the same vocabulary `PhoneShell.tsx`'s own
-                `ViewIcons`/`SessionTabStrip` segmented rows already use for
-                an identical "which of a few mutually exclusive states" job.
-
-                `data-files-preview` AND `data-files-preview-state` STAY ON
-                THE OUTER WELL, exactly where they sat on the single button
-                before: any guard that only reads the state attribute keeps
-                matching unchanged. Each segment carries its own
-                `data-files-preview-option` for a guard or a test that wants
-                to press ONE side directly rather than toggle.
-
-                THE WORDS THEMSELVES HIDE, AND THE PADDING TIGHTENS, BELOW
-                `@min-[380px]` -- MEASURED AGAINST THIS ROW, NOT THE VIEWPORT.
-                `reserveCorner` pads this row so its content never sits under
-                the floating view-icon pill (this file's own header, "THE
-                CORNER, RESERVED BY MEASUREMENT") -- and at vam's narrowest
-                legal pane the row's own usable width in front of that
-                padding is ~149px, measured in Chromium.
-
-                RECOMPUTED IN `e2e/files-markdown-shots.mjs` NOW THAT SAVE IS
-                GONE (its own DEBUG run, at a 320px pane and at 1100px):
-                Format's box is a fixed 24px everywhere (`h-6 w-6`, this
-                file's own comment on that button). The segmented control
-                measured 132px wide with both words showing, so two LABELLED
-                buttons plus Format plus the row's own gap comes to ~158px --
-                still over the ~149px budget by enough that the fold stays
-                load-bearing even with Save gone, just no longer by the wide
-                margin a 240px-vs-149px reading suggested. Icon-only, the
-                segmented control measured 37px, so the folded total is ~63px
-                -- comfortable room to spare, which is why the fold alone
-                (never a further shrink of Format) is enough. Both folds are
-                therefore container-scoped together --
-                `@min-[380px]:inline` on the words, `@min-[380px]:px-1.5`
-                widening the horizontal padding back out once there
-                is room to spend -- and `sm:`/`md:` are VIEWPORT breakpoints
-                that cannot see a pane narrowed by a SPLIT rather than by the
-                window itself (`SettingsOverlay.tsx`'s `SectionStrip` argues
-                the identical point for its own narrow form). `@container`
-                on the content strip (`data-files-content-controls`) is what
-                makes a CONTAINER query possible here at all. The icon and `aria-label` stay full
-                size and present either way -- what folds is only the second
-                thing the eye reads once it already has the first, and the
-                control is never fewer than two real, independently pressable
-                buttons at any width. */}
               {canPreview && (
                 <Note
                   text={`Switch between the rendered document and the raw text (${chordSymbols('Mod-Shift-m')}). Rendered is read-only; your unsaved edits survive either way.`}
@@ -1840,13 +1867,7 @@ export function FilesTab({
                   <div
                     data-files-preview
                     data-files-preview-state={showingPreview ? 'preview' : 'raw'}
-                    // `h-6`, THE SAME FIXED BOX FORMAT NOW DRAWS, rather than a
-                    // height left to fall out of the buttons' own padding —
-                    // see Format's own comment above for the operator finding
-                    // this fixes. `items-stretch` (the flex default, stated
-                    // rather than assumed) is what lets each segment fill that
-                    // box via `h-full` below instead of a SECOND, independent
-                    // padding-derived height that could drift from the well's.
+                    // `h-6`: the same fixed box Format draws, so the two never drift apart.
                     className="flex h-6 flex-none items-stretch gap-px rounded-[7px] border border-line-loud bg-well p-px @min-[380px]:gap-0.5 @min-[380px]:p-[2px]"
                   >
                     <button
@@ -1882,31 +1903,6 @@ export function FilesTab({
                   </div>
                 </Note>
               )}
-              {/* AND ITS TOOLTIP IS A `Note`, NOT A `title`. The operator asked
-                for tooltips on this button and on Save; Save is a button no
-                longer (see the dirty indicator above, and its own comment
-                for where that explanation lives now). This one HAD a
-                `title`, which is precisely the shape `panels/Note.tsx` exists
-                to replace -- a `title` opens on hover and on nothing else, so
-                on a keyboard-first tool its explanation was unreadable to its
-                own primary user. `aria-label` stays: the note is the
-                EXPLANATION, and a screen reader still needs the NAME.
-
-                The scope is quoted from `FORMAT_OFFER` rather than retyped.
-                A button that is never disabled owes the operator the reason it
-                might refuse, and a hand-written list beside a button is the
-                copy that survives the formatter learning a file type.
-
-                `h-6 w-6`, FIXED, RATHER THAN PADDING AROUND THE ICON — the
-                same box `DetailPanel.tsx`'s own view-icon pill draws each of
-                its five buttons in (`vam-tap relative flex h-6 w-6 ...`),
-                which is what "consistent with vam's other toolbar icon
-                buttons" means concretely. It used to be `px-1.5 py-1` with no
-                fixed height, which is what let it and the preview toggle
-                beside it drift a few pixels apart — the operator's own
-                complaint, "Save, prettier and preview-mode buttons are not
-                the same size". `e2e/files-markdown-shots.mjs` now asserts the
-                two as equal-height RECTANGLES, not as matching class names. */}
               {activeBuffer?.kind === 'editable' && (
                 <Note
                   text={`Tidy this file's whitespace (${chordSymbols('Mod-Shift-f')}). ${FORMAT_OFFER} — anything else is refused by name, and ${chordSymbols('Mod-z')} puts back whatever it changed.`}
@@ -2612,7 +2608,10 @@ function Tree({
 
                     `e2e/files-tab-shots.mjs` measures the chevron's rectangle
                     against the row's at that floor. */}
-                <FileRowIcon path={row.path} isDirectory={row.isDirectory} open={open} />
+                {/* A muted row reads one grey: the glyph inherits the row's ink, not its family hue. */}
+                <span className={row.muted ? 'contents [&_svg]:text-inherit' : 'contents'}>
+                  <FileRowIcon path={row.path} isDirectory={row.isDirectory} open={open} />
+                </span>
                 <span data-files-row-name className="min-w-0 flex-1 truncate">
                   {row.name}
                 </span>
