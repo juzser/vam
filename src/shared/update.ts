@@ -143,16 +143,3 @@ export type UpdateStatus =
   | { readonly kind: 'downloading'; readonly version: string; readonly percent: number }
   | { readonly kind: 'installing'; readonly version: string }
   | { readonly kind: 'error'; readonly message: string; readonly code: UpdateErrorCode };
-
-/**
- * The notify-only updater's answer, kept only so `check.ts`, `ipc.ts`, the
- * notice and the settings panel keep compiling until the tasks that replace
- * them land. Nothing new should use it.
- */
-export type UpdateUnknownReason = 'network' | 'rate-limited' | 'malformed';
-
-export type LegacyUpdateStatus =
-  | { readonly kind: 'none' }
-  | { readonly kind: 'up-to-date' }
-  | { readonly kind: 'available'; readonly version: string; readonly url: string }
-  | { readonly kind: 'unknown'; readonly reason: UpdateUnknownReason };

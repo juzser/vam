@@ -2,13 +2,11 @@
  * The popover in the top-right corner that says a newer vam exists.
  *
  * It draws for exactly one outcome. `available` is the only status an
- * operator can do anything about; `none` -- which is what `juzser/vam`
- * answers today, having published no release -- draws nothing, and neither
- * does `up-to-date`. `unknown` draws nothing either: a failed update check is
- * not the operator's problem to act on, and a banner about it would be a
- * daily error message about a question nobody asked.
+ * operator can do anything about; every other status draws nothing here. It
+ * reads the status main already holds (`getStatus`) and follows the pushes
+ * (`onStatus`); the checking is main's scheduler's job, not this popover's.
  *
- * THE CLICK LEAVES VAM. `update.open()` reaches `shell.openExternal` in main,
+ * THE CLICK LEAVES VAM. `update.openNotes()` reaches `shell.openExternal` in main,
  * which is the operating system's browser; this component fetches no bytes,
  * writes no file and navigates this window nowhere -- the window would refuse
  * anyway, every off-origin navigation being denied in `src/main/index.ts`.
@@ -25,7 +23,7 @@
 
 import { useEffect, useState } from 'react';
 import type { UpdateApi } from '../../preload/api.js';
-import type { LegacyUpdateStatus as UpdateStatus } from '../../shared/update.js';
+import type { UpdateStatus } from '../../shared/update.js';
 
 export type UpdateNoticeProps = {
   /** Absent in the browser build, where there is no bridge and no check. */
@@ -41,16 +39,17 @@ export function UpdateNotice({ update }: UpdateNoticeProps) {
     if (update === undefined) return;
     let cancelled = false;
     update
-      .check()
+      .getStatus()
       .then((answer) => {
         if (!cancelled) setStatus(answer);
       })
-      // A bridge that rejects leaves the popover unmounted, which is the same
-      // silence `unknown` gets. Nothing about an update check is worth an
-      // error on screen.
+      // A bridge that rejects leaves the popover unmounted. Nothing about an
+      // update check is worth an error on screen.
       .catch(() => {});
+    const off = update.onStatus((answer) => setStatus(answer));
     return () => {
       cancelled = true;
+      off();
     };
   }, [update]);
 
@@ -82,12 +81,12 @@ export function UpdateNotice({ update }: UpdateNoticeProps) {
         release is yours to read and to fetch.
       </p>
       <span data-testid="update-url" className="select-text break-all text-meta text-ink-faint">
-        {status.url}
+        {status.notesUrl}
       </span>
       <button
         type="button"
         onClick={() => {
-          void update?.open().then((opened) => setOpenFailed(!opened));
+          void update?.openNotes().then((opened) => setOpenFailed(!opened));
         }}
         className="cursor-pointer rounded border border-line px-2 py-0.5 text-ink-dim text-control"
       >

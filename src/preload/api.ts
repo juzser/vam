@@ -75,7 +75,7 @@ import type {
   PaneView,
   SessionModel,
 } from '../shared/terminal.js';
-import type { LegacyUpdateStatus as UpdateStatus } from '../shared/update.js';
+import type { UpdateStatus } from '../shared/update.js';
 import type { UsageSnapshot } from '../shared/usage.js';
 import type {
   CreateWorktreeInput,
@@ -398,38 +398,51 @@ export function createStatsApi(ipc: InvokerLike): StatsApi {
 }
 
 /**
- * The bridge's update member: read the launch check's answer, and ask for the
- * release page to be opened. Neither takes an argument -- `open` in
- * particular cannot name a destination, so it is not a general "navigate
- * anywhere" capability handed to the least trusted process.
+ * The bridge's update member. Nothing here takes a URL, a path or a version:
+ * `openNotes` opens the release page main itself found, and `download`
+ * installs the release main itself checked, so neither is a general
+ * "navigate anywhere" or "run this" capability handed to the least trusted
+ * process.
  */
 export type UpdateApi = {
+  /** The status as it stands; asks GitHub nothing. */
+  getStatus(): Promise<UpdateStatus>;
+  /** A MANUAL check -- really goes out. Answers the resulting status. */
   check(): Promise<UpdateStatus>;
-  /**
-   * The same question, asked again because the operator pressed a button.
-   * Unlike `check`, this really goes out -- and its answer replaces the one
-   * `check` and `open` read.
-   */
-  recheck(): Promise<UpdateStatus>;
-  /** True when the operator's own browser was opened on the release page. */
-  open(): Promise<boolean>;
+  /** Download, verify, quit and install. Answers the status it reached. */
+  download(): Promise<UpdateStatus>;
+  /** "Later", or closing an error / up-to-date card. */
+  dismiss(): Promise<UpdateStatus>;
+  getAutoCheck(): Promise<boolean>;
+  setAutoCheck(enabled: boolean): Promise<boolean>;
+  /** True when the operator's own browser was opened on the release notes. */
+  openNotes(): Promise<boolean>;
+  /** Every status change main pushes. Returns the unsubscribe. */
+  onStatus(listener: (status: UpdateStatus) => void): () => void;
 };
 
 /**
- * Both forward straight through -- no `unwrap`, because these channels answer
- * bare values rather than an `IpcResult` (see `src/main/update/ipc.ts`).
- * `check` READS an answer main already has: the request went out once, at
- * launch, so calling this more often does not make vam contact GitHub more
- * often. `recheck` is the opposite and is the Settings button's own channel:
- * it really asks, and what it gets back becomes the answer `check` and `open`
- * give from then on. `open` asks for the release page in the operator's browser; it
- * downloads nothing.
+ * Every call forwards straight through -- no `unwrap`, because these channels
+ * answer bare values rather than an `IpcResult` (see `src/main/update/ipc.ts`).
+ * `onStatus` keeps the closure-identity rule `createMainErrorsApi.subscribe`
+ * keeps: the reference given to `on` is the one given to `removeListener`.
  */
-export function createUpdateApi(ipc: InvokerLike): UpdateApi {
+export function createUpdateApi(ipc: InvokerLike & ListenerLike): UpdateApi {
   return {
+    getStatus: () => ipc.invoke(CHANNELS.updateGetStatus) as Promise<UpdateStatus>,
     check: () => ipc.invoke(CHANNELS.updateCheck) as Promise<UpdateStatus>,
-    recheck: () => ipc.invoke(CHANNELS.updateRecheck) as Promise<UpdateStatus>,
-    open: () => ipc.invoke(CHANNELS.updateOpen) as Promise<boolean>,
+    download: () => ipc.invoke(CHANNELS.updateDownload) as Promise<UpdateStatus>,
+    dismiss: () => ipc.invoke(CHANNELS.updateDismiss) as Promise<UpdateStatus>,
+    getAutoCheck: () => ipc.invoke(CHANNELS.updateGetAutoCheck) as Promise<boolean>,
+    setAutoCheck: (enabled) => ipc.invoke(CHANNELS.updateSetAutoCheck, enabled) as Promise<boolean>,
+    openNotes: () => ipc.invoke(CHANNELS.updateOpen) as Promise<boolean>,
+    onStatus: (listener) => {
+      const wrapped = (_event: unknown, status: unknown) => listener(status as UpdateStatus);
+      ipc.on(CHANNELS.updateStatusChanged, wrapped);
+      return () => {
+        ipc.removeListener(CHANNELS.updateStatusChanged, wrapped);
+      };
+    },
   };
 }
 

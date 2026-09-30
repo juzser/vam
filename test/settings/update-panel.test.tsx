@@ -35,10 +35,11 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { UpdateApi } from '../../src/preload/api.js';
 import { EMPTY_PREFS } from '../../src/renderer/prefs/prefs.js';
 import { SettingsOverlay } from '../../src/renderer/settings/SettingsOverlay.js';
 import { UpdatePanel } from '../../src/renderer/settings/UpdatePanel.js';
-import type { LegacyUpdateStatus as UpdateStatus } from '../../src/shared/update.js';
+import type { UpdateStatus } from '../../src/shared/update.js';
 import { VERSION } from '../../src/shared/update.js';
 
 afterEach(cleanup);
@@ -48,14 +49,27 @@ const button = () => document.querySelector<HTMLButtonElement>('[data-update-che
 const outcome = () => document.querySelector('[data-update-outcome]')?.textContent ?? '';
 const release = () => document.querySelector<HTMLButtonElement>('[data-update-open]');
 
+const UP_TO_DATE: UpdateStatus = { kind: 'not-available', manual: true, reason: 'up-to-date' };
+
+/** Every member of the bridge, so the fake catches a subject reaching for another. */
+function fullApi(overrides: Partial<UpdateApi> = {}) {
+  return {
+    getStatus: vi.fn(async () => ({ kind: 'idle' }) as UpdateStatus),
+    check: vi.fn(async () => UP_TO_DATE),
+    download: vi.fn(async () => UP_TO_DATE),
+    dismiss: vi.fn(async () => UP_TO_DATE),
+    getAutoCheck: vi.fn(async () => true),
+    setAutoCheck: vi.fn(async (enabled: boolean) => enabled),
+    openNotes: vi.fn(async () => true),
+    onStatus: vi.fn((_listener: (status: UpdateStatus) => void) => () => {}),
+    ...overrides,
+  } satisfies UpdateApi;
+}
+
 /** A bridge that answers one status, and counts how often it was asked. */
 function fakeApi(answer: UpdateStatus | (() => Promise<UpdateStatus>)) {
-  const recheck = vi.fn(typeof answer === 'function' ? answer : async () => answer);
-  return {
-    check: vi.fn(async () => ({ kind: 'none' }) as UpdateStatus),
-    recheck,
-    open: vi.fn(async () => true),
-  };
+  const check = vi.fn(typeof answer === 'function' ? answer : async () => answer);
+  return fullApi({ check });
 }
 
 describe('the update section says which vam this is', () => {
@@ -65,7 +79,7 @@ describe('the update section says which vam this is', () => {
   });
 
   it('draws it in the Electron build too, from the same constant', () => {
-    render(<UpdatePanel api={fakeApi({ kind: 'up-to-date' })} />);
+    render(<UpdatePanel api={fakeApi(UP_TO_DATE)} />);
     expect(version()).toContain(VERSION);
   });
 });
@@ -88,20 +102,20 @@ describe('the check button', () => {
   });
 
   it('is drawn where the bridge is, and really asks when pressed', async () => {
-    const api = fakeApi({ kind: 'up-to-date' });
+    const api = fakeApi(UP_TO_DATE);
     render(<UpdatePanel api={api} />);
-    expect(api.recheck).not.toHaveBeenCalled();
+    expect(api.check).not.toHaveBeenCalled();
     fireEvent.click(button() as HTMLElement);
-    await waitFor(() => expect(api.recheck).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(api.check).toHaveBeenCalledTimes(1));
   });
 
   it('asks again on a second press, because that is what the operator meant', async () => {
-    const api = fakeApi({ kind: 'up-to-date' });
+    const api = fakeApi(UP_TO_DATE);
     render(<UpdatePanel api={api} />);
     fireEvent.click(button() as HTMLElement);
     await waitFor(() => expect(outcome()).not.toBe(''));
     fireEvent.click(button() as HTMLElement);
-    await waitFor(() => expect(api.recheck).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(api.check).toHaveBeenCalledTimes(2));
   });
 
   it('cannot be pressed twice into two requests at once', async () => {
@@ -120,27 +134,27 @@ describe('the check button', () => {
     await waitFor(() => expect(button()?.disabled).toBe(true));
     fireEvent.click(button() as HTMLElement);
     fireEvent.click(button() as HTMLElement);
-    expect(api.recheck).toHaveBeenCalledTimes(1);
-    release({ kind: 'up-to-date' });
+    expect(api.check).toHaveBeenCalledTimes(1);
+    release(UP_TO_DATE);
     await waitFor(() => expect(button()?.disabled).toBe(false));
   });
 });
 
 describe('every outcome is a sentence', () => {
   const cases: ReadonlyArray<readonly [UpdateStatus, RegExp]> = [
-    [{ kind: 'up-to-date' }, /newest|up to date|latest/i],
-    [{ kind: 'none' }, /no release/i],
-    [{ kind: 'unknown', reason: 'network' }, /reach|network|connect/i],
-    [{ kind: 'unknown', reason: 'rate-limited' }, /github|later|limit/i],
-    [{ kind: 'unknown', reason: 'malformed' }, /understand|answer/i],
+    [UP_TO_DATE, /newest|up to date|latest/i],
+    [{ kind: 'not-available', manual: true, reason: 'none' }, /no release/i],
+    [{ kind: 'error', code: 'network', message: 'x' }, /reach|network|connect/i],
+    [{ kind: 'error', code: 'rate-limited', message: 'x' }, /github|later|limit/i],
+    [{ kind: 'error', code: 'malformed', message: 'x' }, /understand|answer/i],
     [
-      { kind: 'available', version: '9.9.9', url: 'https://github.com/juzser/vam/releases' },
+      { kind: 'available', version: '9.9.9', notesUrl: 'https://github.com/juzser/vam/releases' },
       /9\.9\.9/,
     ],
   ];
 
   for (const [status, pattern] of cases) {
-    it(`says something specific for ${status.kind}/${'reason' in status ? status.reason : '-'}`, async () => {
+    it(`says something specific for ${status.kind}/${'reason' in status ? status.reason : 'code' in status ? status.code : '-'}`, async () => {
       const api = fakeApi(status);
       render(<UpdatePanel api={api} />);
       fireEvent.click(button() as HTMLElement);
@@ -155,18 +169,18 @@ describe('every outcome is a sentence', () => {
     const api = fakeApi({
       kind: 'available',
       version: '9.9.9',
-      url: 'https://github.com/juzser/vam/releases',
+      notesUrl: 'https://github.com/juzser/vam/releases',
     });
     render(<UpdatePanel api={api} />);
     expect(release(), 'nothing is offered before a check has answered').toBeNull();
     fireEvent.click(button() as HTMLElement);
     await waitFor(() => expect(release()).not.toBeNull());
     fireEvent.click(release() as HTMLElement);
-    await waitFor(() => expect(api.open).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(api.openNotes).toHaveBeenCalledTimes(1));
   });
 
   it('draws no release control for any other outcome', async () => {
-    const api = fakeApi({ kind: 'up-to-date' });
+    const api = fakeApi(UP_TO_DATE);
     render(<UpdatePanel api={api} />);
     fireEvent.click(button() as HTMLElement);
     await waitFor(() => expect(outcome()).not.toBe(''));
@@ -174,13 +188,11 @@ describe('every outcome is a sentence', () => {
   });
 
   it('survives a bridge that rejects, rather than leaving the button stuck', async () => {
-    const api = {
-      check: vi.fn(async () => ({ kind: 'none' }) as UpdateStatus),
-      recheck: vi.fn(async () => {
+    const api = fullApi({
+      check: vi.fn(async (): Promise<UpdateStatus> => {
         throw new Error('channel gone');
       }),
-      open: vi.fn(async () => false),
-    };
+    });
     render(<UpdatePanel api={api} />);
     fireEvent.click(button() as HTMLElement);
     await waitFor(() => expect(outcome()).not.toBe(''));

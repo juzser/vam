@@ -18,7 +18,7 @@
  * `checkForUpdate` never throws. Every failure is a value.
  */
 
-import { compareVersions, type LegacyUpdateStatus, parseVersion } from '../../shared/update.js';
+import { compareVersions, parseVersion } from '../../shared/update.js';
 import {
   fragmentName,
   type InstallKind,
@@ -262,33 +262,4 @@ export async function checkForUpdate(
       kind: file.kind,
     },
   };
-}
-
-/**
- * The notify-only answer `ipc.ts` still speaks, until Task 5 rewrites it. It
- * asks with `installKind: 'unsupported'`, which makes exactly the one release
- * request the old check made and no fragment fetch.
- */
-export async function checkForUpdateLegacy(
-  currentVersion: string,
-  deps: UpdateCheckDeps = DEFAULT_UPDATE_DEPS,
-): Promise<LegacyUpdateStatus> {
-  const arch: UpdateArch = process.arch === 'arm64' ? 'arm64' : 'x64';
-  const platform: UpdatePlatform =
-    process.platform === 'darwin' || process.platform === 'win32' ? process.platform : 'linux';
-  const result = await checkForUpdate(
-    currentVersion,
-    { platform, arch, installKind: 'unsupported' },
-    deps,
-  );
-  switch (result.kind) {
-    case 'available':
-      return { kind: 'available', version: result.version, url: result.notesUrl };
-    case 'none':
-      return { kind: 'none' };
-    case 'error':
-      return { kind: 'unknown', reason: result.code };
-    default:
-      return { kind: 'up-to-date' };
-  }
 }

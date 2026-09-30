@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   type CheckTarget,
   checkForUpdate,
-  checkForUpdateLegacy,
   LATEST_RELEASE_URL,
   type UpdateFetcher,
 } from '../../src/main/update/check.js';
@@ -281,27 +280,6 @@ describe('checkForUpdate: the manifest and asset', () => {
       version: '1.0.0',
       notesUrl: 'https://github.com/juzser/vam/releases/tag/v1.0.0',
       asset: null,
-    });
-    expect(follow).not.toHaveBeenCalled();
-  });
-});
-
-describe('checkForUpdateLegacy (until the IPC layer is rewritten)', () => {
-  it('maps to the notify-only shape with a single request', async () => {
-    const follow = vi.fn();
-    const deps = (api: UpdateFetcher) => ({ fetch: api, follow });
-    expect(await checkForUpdateLegacy('0.1.0', deps(respond(200, release())))).toEqual({
-      kind: 'available',
-      version: '1.0.0',
-      url: 'https://github.com/juzser/vam/releases/tag/v1.0.0',
-    });
-    expect(await checkForUpdateLegacy('1.0.0', deps(respond(200, release())))).toEqual({
-      kind: 'up-to-date',
-    });
-    expect(await checkForUpdateLegacy('1.0.0', deps(respond(404, {})))).toEqual({ kind: 'none' });
-    expect(await checkForUpdateLegacy('1.0.0', deps(respond(403, {})))).toEqual({
-      kind: 'unknown',
-      reason: 'rate-limited',
     });
     expect(follow).not.toHaveBeenCalled();
   });

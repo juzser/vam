@@ -1,83 +1,47 @@
 /**
- * The update channels. Like `../usage/ipc.ts` they answer BARE -- an
- * `UpdateStatus`, never an `IpcResult` -- because that type already carries
- * its own four-branch answer and there is no source to refuse anything in the
- * words of.
+ * The update channels: thin handlers over the controller (`./controller.ts`).
+ * Like `../usage/ipc.ts` they answer BARE -- an `UpdateStatus` or a boolean,
+ * never an `IpcResult` -- because the status type carries its own error
+ * branch.
  *
- * The click DOES NOT DOWNLOAD ANYTHING. `updateOpen` hands the release page
- * to `shell.openExternal`, which is the operating system's browser and not
- * this window -- vam still fetches no bytes and writes no file, the same
- * bargain `src/renderer/errors/report.ts` makes when it prepares an issue
- * rather than posting one. The URL opened is the one the launch check itself
- * found; the handler takes no argument, so the renderer cannot name a
- * destination.
+ * WHAT THE RENDERER CAN SAY is deliberately tiny: check, download, dismiss,
+ * open the notes, read or set the auto-check switch. None of them takes a URL,
+ * a path or a version; main decides what is fetched and installed. A press
+ * that arrives at the wrong moment (a second "Update" while one runs) is
+ * ignored by the controller and answered with the status as it stands.
  *
- * ONE CHECK, AT LAUNCH. `check()` is called here, while the handler is being
- * registered, and its promise is what every ask is answered from: there is no
- * timer, no interval and no second request for the life of the process. What
- * goes out is the single unauthenticated GET described in `./check.ts` --
- * no token, no query, and nothing about the operator's sessions, projects,
- * paths or machine.
- *
- * Nothing is awaited on this path. Registration is synchronous and the window
- * is created a few statements later in `../index.ts`, so a check that is slow
- * -- or hanging on a dead network -- delays nothing the operator can see. Its
- * failure is caught HERE rather than left to reject, because an update check
- * that could surface as a startup error would be worse than no update check.
- *
- * NO TIME-BASED THROTTLE. Launch is already the rate limit: one request per
- * start of the app. The only thing an interval would additionally stop is a
- * crash-restart loop, and it would cost the author of this repository the
- * ordinary case of cutting a release and restarting vam to see it. GitHub
- * allows 60 unauthenticated requests an hour per IP and `rate-limited` is
- * already a distinct, quiet outcome, so the loop's cost is visible and small.
+ * Status CHANGES are pushed on `updateStatusChanged` by the `broadcast` given
+ * to the controller in `../index.ts`, not from here: the controller's state
+ * moves on timers and downloads as well as on presses.
  */
 
-import type { LegacyUpdateStatus as UpdateStatus } from '../../shared/update.js';
+import type { UpdateStatus } from '../../shared/update.js';
 import { CHANNELS } from '../ipc/channels.js';
 import type { IpcMainLike } from '../ipc/handlers.js';
+import type { UpdateController } from './controller.js';
 
-export function registerUpdateIpc(
-  ipcMain: IpcMainLike,
-  check: () => Promise<UpdateStatus>,
-  openExternal: (url: string) => Promise<void> = async () => {},
-): void {
-  // `checkForUpdate` turns every ordinary failure into a value, so a rejection
-  // here is the case neither it nor this module anticipated. It is still not
-  // an error the operator must act on, and the surface stays silent for it.
-  const answer = (): Promise<UpdateStatus> =>
-    check().catch((): UpdateStatus => ({ kind: 'unknown', reason: 'network' }));
+export function registerUpdateIpc(ipcMain: IpcMainLike, controller: UpdateController): void {
+  // The controller turns every ordinary failure into a status, so a rejection
+  // is the case it did not anticipate. The renderer still gets an answer -- the
+  // status as it stands -- rather than a broken channel.
+  const answer = (act: () => Promise<UpdateStatus>): Promise<UpdateStatus> =>
+    act().catch(() => controller.getStatus());
 
-  // THE STORED ANSWER, AND THE ONE PLACE IT IS WRITTEN. `let` rather than
-  // `const` because the operator can ask again (`updateRecheck` below), and
-  // everything that reads the status -- the notice, and `updateOpen`'s refusal
-  // -- has to be reading what they are looking at rather than what launch
-  // found. One holder, replaced; never two answers in flight to compare.
-  let status: Promise<UpdateStatus> = answer();
-  ipcMain.handle(CHANNELS.updateCheck, () => status);
-
-  // ASKED AGAIN, BY A PERSON. Every argument this file makes against polling
-  // is about vam asking on its own initiative: no timer, no interval, launch
-  // as the rate limit. A button is not that. The bound here is the hand
-  // pressing it -- GitHub allows 60 unauthenticated requests an hour per IP,
-  // and `rate-limited` is already its own quiet outcome -- so there is no
-  // time-based throttle, for the same reason there is none above.
-  ipcMain.handle(CHANNELS.updateRecheck, () => {
-    status = answer();
-    return status;
+  ipcMain.handle(CHANNELS.updateGetStatus, () => controller.getStatus());
+  // Every press from the renderer is a person asking; only the scheduler in
+  // main makes automatic checks.
+  ipcMain.handle(CHANNELS.updateCheck, () => answer(() => controller.check({ manual: true })));
+  ipcMain.handle(CHANNELS.updateDownload, () => answer(() => controller.download()));
+  ipcMain.handle(CHANNELS.updateDismiss, () => answer(() => controller.dismiss()));
+  ipcMain.handle(CHANNELS.updateGetAutoCheck, () => controller.getAutoCheck());
+  ipcMain.handle(CHANNELS.updateSetAutoCheck, async (_event, ...args): Promise<boolean> => {
+    if (typeof args[0] === 'boolean') await controller.setAutoCheck(args[0]);
+    return controller.getAutoCheck();
   });
-
   ipcMain.handle(CHANNELS.updateOpen, async (): Promise<boolean> => {
-    const current = await status;
-    // Nothing to go to. A surface only offers the click for `available`, so
-    // this is a caller that got ahead of the answer rather than an error.
-    if (current.kind !== 'available') return false;
     try {
-      await openExternal(current.url);
-      return true;
+      return await controller.openNotes();
     } catch {
-      // No browser, or a shell that refused. The popover keeps showing the
-      // URL, which is still the whole answer.
       return false;
     }
   });

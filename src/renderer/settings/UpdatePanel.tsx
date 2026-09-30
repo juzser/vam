@@ -16,27 +16,21 @@
  * published nothing, GitHub is rate-limiting this address, the check never got
  * out -- and the operator who opened this section is owed the distinction.
  *
- * ── VAM STILL DOWNLOADS NOTHING ───────────────────────────────────────────
- * The button asks a question. What comes back is a version and a URL, and the
- * only thing the URL can do is open in the operating system's own browser, via
- * `shell.openExternal` in main, with the renderer naming no destination
- * (`CHANNELS.updateOpen` takes no argument). That is the same bargain
- * `errors/report.ts` makes with its prefilled issue link: vam prepares the
- * destination, the operator decides to go. Auto-install would be a lie on this
- * codebase besides -- `electron-builder.config.cjs` signs nothing.
+ * ── THE RENDERER NAMES NO DESTINATION ─────────────────────────────────────
+ * The release page opens in the operating system's own browser, via
+ * `shell.openExternal` in main, and `CHANNELS.updateOpen` takes no argument:
+ * main opens the URL its own check found. (Task 7 redesigns this panel around
+ * the download-and-install flow; this is the minimal form that compiles
+ * against the new bridge.)
  *
  * ── AND IT REALLY ASKS ────────────────────────────────────────────────────
- * `api.recheck()`, not `api.check()`. The latter answers from the one request
- * made at launch and never makes another, which is right for the notice and
- * wrong for a button: a control that reports a cached reply from whenever the
- * app was started is a control that lies about having checked. See
- * `src/main/update/ipc.ts` for why that is not the polling this repo argued
- * against -- the rate limit here is a hand on a button.
+ * `api.check()` is a MANUAL check: it always goes out, unlike the scheduler's
+ * automatic ones, so the button never reports a cached reply.
  */
 
 import { useState } from 'react';
 import type { UpdateApi } from '../../preload/api.js';
-import type { LegacyUpdateStatus as UpdateStatus } from '../../shared/update.js';
+import type { UpdateStatus } from '../../shared/update.js';
 import { VERSION } from '../../shared/update.js';
 import { t } from '../i18n/strings.js';
 
@@ -62,12 +56,10 @@ function sentenceFor(status: UpdateStatus): string {
   switch (status.kind) {
     case 'available':
       return t('settings.update.available', { version: status.version });
-    case 'up-to-date':
-      return t('settings.update.current');
-    case 'none':
-      return t('settings.update.none');
-    default:
-      switch (status.reason) {
+    case 'not-available':
+      return status.reason === 'none' ? t('settings.update.none') : t('settings.update.current');
+    case 'error':
+      switch (status.code) {
         case 'rate-limited':
           return t('settings.update.limited');
         case 'malformed':
@@ -75,6 +67,10 @@ function sentenceFor(status: UpdateStatus): string {
         default:
           return t('settings.update.offline');
       }
+    default:
+      // idle, checking, downloading, installing: the button is what asked, and
+      // the answer to it is one of the three kinds above.
+      return t('settings.update.current');
   }
 }
 
@@ -91,12 +87,12 @@ export function UpdatePanel({ api }: UpdatePanelProps) {
     if (api === undefined || asking) return;
     setAsking(true);
     try {
-      setStatus(await api.recheck());
+      setStatus(await api.check());
     } catch {
       // A bridge that rejects is a channel that is not there. It is still an
       // answer the operator asked for, so it gets the same sentence a failed
       // request gets rather than a stuck button.
-      setStatus({ kind: 'unknown', reason: 'network' });
+      setStatus({ kind: 'error', code: 'network', message: 'network' });
     } finally {
       setAsking(false);
     }
@@ -150,7 +146,7 @@ export function UpdatePanel({ api }: UpdatePanelProps) {
               type="button"
               data-update-open
               onClick={() => {
-                void api.open();
+                void api.openNotes();
               }}
               className={BUTTON}
             >

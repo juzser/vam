@@ -7,29 +7,34 @@
  *
  * The important assertions are negative. Nothing here fetches, nothing
  * navigates the window, nothing writes a file, and no test touches the
- * network -- `check` and `open` are stubs in every one of them.
+ * network -- `getStatus` and `openNotes` are stubs in every one of them.
  */
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { UpdateApi } from '../../src/preload/api.js';
 import { UpdateNotice } from '../../src/renderer/update/UpdateNotice.js';
-import type { LegacyUpdateStatus as UpdateStatus } from '../../src/shared/update.js';
+import type { UpdateStatus } from '../../src/shared/update.js';
 
 afterEach(cleanup);
 
 const RELEASE_URL = 'https://github.com/juzser/vam/releases/tag/v0.1.0';
-const AVAILABLE: UpdateStatus = { kind: 'available', version: '0.1.0', url: RELEASE_URL };
+const AVAILABLE: UpdateStatus = { kind: 'available', version: '0.1.0', notesUrl: RELEASE_URL };
 
 function api(status: UpdateStatus, opened = true) {
-  // `recheck` is the Settings button's channel and this notice never calls it;
-  // it is here because the bridge type carries it, and a fake that only has
-  // the members its subject happens to use is a fake that stops catching the
-  // day the subject reaches for another.
+  // Every member of the bridge type is here, because a fake that only has the
+  // members its subject happens to use is a fake that stops catching the day
+  // the subject reaches for another.
   return {
+    getStatus: vi.fn(async () => status),
     check: vi.fn(async () => status),
-    recheck: vi.fn(async () => status),
-    open: vi.fn(async () => opened),
-  };
+    download: vi.fn(async () => status),
+    dismiss: vi.fn(async () => status),
+    getAutoCheck: vi.fn(async () => true),
+    setAutoCheck: vi.fn(async (enabled: boolean) => enabled),
+    openNotes: vi.fn(async () => opened),
+    onStatus: vi.fn((_listener: (status: UpdateStatus) => void) => () => {}),
+  } satisfies UpdateApi;
 }
 
 /** Lets the mount effect's promise settle before anything is asserted. */
@@ -72,9 +77,9 @@ describe('UpdateNotice', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /release page/i }));
     await settle();
-    expect(update.open).toHaveBeenCalledTimes(1);
+    expect(update.openNotes).toHaveBeenCalledTimes(1);
     // No argument crosses: main opens the URL from its own launch check.
-    expect(update.open).toHaveBeenCalledWith();
+    expect(update.openNotes).toHaveBeenCalledWith();
     expect(fetchSpy).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
@@ -91,22 +96,24 @@ describe('UpdateNotice', () => {
   });
 
   it('says nothing when the repository has published no releases', async () => {
-    render(<UpdateNotice update={api({ kind: 'none' })} />);
+    render(<UpdateNotice update={api({ kind: 'not-available', manual: false, reason: 'none' })} />);
     await settle();
     expect(screen.queryByTestId('update-notice')).toBeNull();
   });
 
   it('says nothing when this build is current', async () => {
-    render(<UpdateNotice update={api({ kind: 'up-to-date' })} />);
+    render(
+      <UpdateNotice update={api({ kind: 'not-available', manual: false, reason: 'up-to-date' })} />,
+    );
     await settle();
     expect(screen.queryByTestId('update-notice')).toBeNull();
   });
 
   it('says nothing when the question could not be answered', async () => {
-    for (const reason of ['network', 'rate-limited', 'malformed'] as const) {
-      render(<UpdateNotice update={api({ kind: 'unknown', reason })} />);
+    for (const code of ['network', 'rate-limited', 'malformed'] as const) {
+      render(<UpdateNotice update={api({ kind: 'error', code, message: code })} />);
       await settle();
-      expect(screen.queryByTestId('update-notice'), reason).toBeNull();
+      expect(screen.queryByTestId('update-notice'), code).toBeNull();
       cleanup();
     }
   });
@@ -121,8 +128,9 @@ describe('UpdateNotice', () => {
     rerender(<UpdateNotice update={update} />);
     await settle();
     expect(screen.queryByTestId('update-notice')).toBeNull();
-    // Re-rendering must not ask again either: launch is the only trigger.
-    expect(update.check).toHaveBeenCalledTimes(1);
+    // Re-rendering must not ask again either, and the notice never checks.
+    expect(update.getStatus).toHaveBeenCalledTimes(1);
+    expect(update.check).not.toHaveBeenCalled();
   });
 
   it('draws nothing, and does not throw, where there is no bridge', async () => {
@@ -133,13 +141,10 @@ describe('UpdateNotice', () => {
 
   it('stays silent when the bridge itself rejects', async () => {
     const update = {
-      check: vi.fn(async (): Promise<UpdateStatus> => {
+      ...api(AVAILABLE),
+      getStatus: vi.fn(async (): Promise<UpdateStatus> => {
         throw new Error('no handler');
       }),
-      recheck: vi.fn(async (): Promise<UpdateStatus> => {
-        throw new Error('no handler');
-      }),
-      open: vi.fn(async () => false),
     };
     render(<UpdateNotice update={update} />);
     await settle();
