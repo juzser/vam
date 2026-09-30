@@ -1188,6 +1188,14 @@ if (Math.abs(painted.width - dragged[0]) > 4) {
 await page.screenshot({ path: `${outDir}/split-resize-ratio.png` });
 console.log(`${outDir}/split-resize-ratio.png`);
 
+// --- THE DIVIDER AT REST. A vivid `--vam-pane-divider` set on the root, the
+// pointer parked away from the handle: the 1px seam child must paint it.
+await page.mouse.move(2, 2);
+await page.evaluate(() => document.documentElement.style.setProperty('--vam-pane-divider', '#ff00aa'));
+await page.screenshot({ path: `${outDir}/pane-divider-at-rest.png` });
+console.log(`${outDir}/pane-divider-at-rest.png`);
+await page.evaluate(() => document.documentElement.style.removeProperty('--vam-pane-divider'));
+
 // --- NOTHING SURVIVES THE DRAG. An overlay held across a pointer-capture
 // gesture is the classic way this feature breaks the whole app: it outlives
 // its drag and silently eats every click. Proven by clicking, not by counting

@@ -181,7 +181,7 @@ export function SplitResizer(props: SplitResizerProps) {
     return true;
   }
 
-  const { dragging, handlers } = usePointerDrag<HTMLHRElement, Pair | null>({
+  const { dragging, handlers } = usePointerDrag<HTMLDivElement, Pair | null>({
     axis: row ? 'x' : 'y',
     onStart: (event) => measurePair(event.currentTarget, orientation),
     onMove: report,
@@ -270,14 +270,15 @@ export function SplitResizer(props: SplitResizerProps) {
   }
 
   return (
-    // A native <hr> already carries the `separator` role, which is what
-    // biome's a11y/useSemanticElements rule asks for in place of a bare
-    // `role="separator"` div — the same element `PaneResizer` settled on, and
-    // therefore the same preflight top border `RESIZE_HANDLE_RESET` removes.
+    // A focusable separator is the APG window-splitter pattern. It is a div
+    // and not an <hr> because the resting seam below must be a CHILD of the
+    // handle, and an <hr> is a void element.
     // THIS IS THE WIDE ONE: a horizontal divider spans the whole pane, so the
     // hairline the operator caught at the sidebar's four-pixel corner was
     // hundreds of pixels long here and had still gone unreported.
-    <hr
+    // biome-ignore lint/a11y/useSemanticElements: a void <hr> cannot host the seam child.
+    <div
+      role="separator"
       ref={ref}
       aria-orientation={row ? 'vertical' : 'horizontal'}
       // The reason travels with the NAME, the way `NewTabButton` wears its
@@ -306,6 +307,8 @@ export function SplitResizer(props: SplitResizerProps) {
         // a dozen other hovers and borders across the app, and a swatch on
         // that token would have repainted all of them for a setting that
         // only ever asked about a splitter.
+        // The 4px handle is the hit target; the colour at rest lives on the
+        // 1px seam child, so the setting paints between two panes at rest.
         reach.divisible
           ? dragging
             ? 'bg-pane-divider'
@@ -316,6 +319,17 @@ export function SplitResizer(props: SplitResizerProps) {
       onPointerDown={onPointerDown}
       onPointerMove={handlers.onPointerMove}
       onPointerUp={handlers.onPointerUp}
-    />
+    >
+      <span
+        data-pane-divider-seam
+        aria-hidden="true"
+        className={[
+          'pointer-events-none absolute bg-pane-divider',
+          row
+            ? 'top-0 bottom-0 left-1/2 w-px -translate-x-1/2'
+            : 'left-0 right-0 top-1/2 h-px -translate-y-1/2',
+        ].join(' ')}
+      />
+    </div>
   );
 }
