@@ -4491,8 +4491,7 @@ function modelSwitchNote(result: ModelSwitchResult, title: string, choice: strin
 
 /**
  * The phone keystroke strip -- the 20 `PaneKey` entries of `KEY_STRIP`
- * (its definition, `DetailPanel.tsx:4553`; every line number in this block
- * is at base 3fe3b5ec), reachable by tap: escape, tab,
+ * (the `KEY_STRIP` constant below), reachable by tap: escape, tab,
  * enter, back-tab, space, backspace, delete, up, down, left, right, then the
  * nine `ctrl-c`/`ctrl-d`/`ctrl-l`/`ctrl-z`/`ctrl-r`/`ctrl-a`/`ctrl-e`/
  * `ctrl-w`/`ctrl-u` chords.
@@ -4500,8 +4499,9 @@ function modelSwitchNote(result: ModelSwitchResult, title: string, choice: strin
  * for `space`/`tab` (both `text` keys rather than a kind of their own), for
  * `delete`, `up`, `down`, `left` and `right` (all five `nav` keys,
  * distinguished by `PaneKey.nav` the way `space` is distinguished by
- * `PaneKey.text`, entries at `:4611-4643`) and for the nine ctrl-<letter> ids
- * (all `control` keys carrying a `letter`, built at `:4649-4655`).
+ * `PaneKey.text`, the `nav` entries of `KEY_STRIP`) and for the nine
+ * ctrl-<letter> ids (all `control` keys carrying a `letter`, the
+ * `ctrl-${letter}` entries of `KEY_STRIP`).
  *
  * `tab` IS THE ADDITION OVER THIS STRIP'S OWN PRIOR SEVEN. There is no
  * dedicated `PaneKey` kind for a plain Tab, and there does not need to be
@@ -4518,9 +4518,10 @@ function modelSwitchNote(result: ModelSwitchResult, title: string, choice: strin
  * keys at all, and Claude Code's own option pickers -- `AskUserQuestion`, a
  * permission prompt, `/model`, `/config`, plan approval -- are walked with
  * exactly them, the same report the Terminal tab's own keyboard fix answers.
- * Left and Right joined them later (`:4634-4646`), so all four arrows are on
- * the strip. THEY ARE SERVED REMOTELY -- `paneKeyToRemoteKeyId`
- * (`shared/remote-key.ts:128`, its `nav` switch at `:139-146`) answers
+ * Left and Right joined them later (the left and right `nav` entries of
+ * `KEY_STRIP`), so all four arrows are on the strip. THEY ARE SERVED
+ * REMOTELY -- `paneKeyToRemoteKeyId` (`shared/remote-key.ts:128`, its `nav`
+ * switch at `shared/remote-key.ts:139-146`) answers
  * `arrow-up`, `arrow-down`, `arrow-left` and `arrow-right` (and `delete`), so
  * the render site's `hasLocalTerminalChannel` filter (which drops only keys
  * with no remote id) keeps all of them on a phone.
@@ -4552,8 +4553,9 @@ function modelSwitchNote(result: ModelSwitchResult, title: string, choice: strin
  * `Enter`, `Space`, `⌫`, `Del`, the four arrows, and `Ctrl+C` through
  * `Ctrl+U`. The glyphs among them are exactly `⌫ ↑ ↓ ← →`, the set
  * `LABEL_GLYPHS` (`phone-key-labels.tsx:60`) names. Every chip carries
- * `data-tap-pill` (`styles.css`) and the `STRIP_PILL` skin (`:4659-4661`,
- * applied to each `KEY_STRIP` chip at `:10424`), so no chip is a fixed
+ * `data-tap-pill` (`styles.css`) and the `STRIP_PILL` skin (the `STRIP_PILL`
+ * constant, applied to each `KEY_STRIP` chip in the render block under
+ * `{phone && canSendKeys && (`), so no chip is a fixed
  * square: each is an auto-width text pill that cannot spill into the next.
  */
 const KEY_STRIP: readonly {
@@ -10328,7 +10330,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
           {phone && canSendKeys && (
             /* THE ROW ITSELF SCROLLS, because the chips -- 24 text pills, 23
                with no terminal (Keyboard, Paste, the 20 `KEY_STRIP` keys
-               defined at `:4553`, Terminal only when there is one, then
+               defined as `KEY_STRIP`, Terminal only when there is one, then
                More; the ORDER list in
                `DetailPanel.keystroke-strip.test.tsx:496-521` pins it) -- do
                not fit 361px of clear width and never have: this row shipped

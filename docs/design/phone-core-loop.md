@@ -123,14 +123,14 @@ not a continuation of the out.**
 
 `KEY_STRIP` (`phone && canSendKeys`, i.e. drawn ONLY when no question is
 open — `canSendKeys = (canCycleMode || canSendKeysRemotely) &&
-(newestQuestion === null || !openQuestion)`, `DetailPanel.tsx:8613-8614`,
-rendered at `:10322`) holds 20 `PaneKey`s (`DetailPanel.tsx:4553`; line
-numbers here are at base 3fe3b5ec). The row sitting above the composer is
+(newestQuestion === null || !openQuestion)`, the `canSendKeys` constant in
+`DetailPanel.tsx`, rendered under the `{phone && canSendKeys && (` block) holds 20 `PaneKey`s
+(the `KEY_STRIP` constant). The row sitting above the composer is
 24 chips, 23 with no terminal: Keyboard, Paste, those 20 keys, Terminal
 (only when there is a terminal), then More (the `ORDER` list at
 `test/panels/DetailPanel.keystroke-strip.test.tsx:496-521` pins it). Every
-chip is an auto-width text pill (`STRIP_PILL`,
-`DetailPanel.tsx:4659-4661`, `h-[30px]` paint; the 44px hit is `.vam-phone
+chip is an auto-width text pill (the `STRIP_PILL`
+constant in `DetailPanel.tsx`, `h-[30px]` paint; the 44px hit is `.vam-phone
 .vam-tap`, `styles.css:2844-2846`); only `⌫ ↑ ↓ ← →` are glyph labels
 (`LABEL_GLYPHS`, `src/renderer/keyboard/phone-key-labels.tsx:60`), and the
 ` → agent` wording lives only in the sent/sending banner, never on a chip.
