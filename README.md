@@ -94,6 +94,12 @@ vam has no published releases yet. The release workflow drafts unsigned macOS, W
 Linux builds automatically from a tag — a maintainer still has to choose to publish one —
 so for now the only install is [building from source](#-build-from-source).
 
+Once a release is published, installed builds **update themselves**: vam checks the
+releases once a day (switch it off in **Settings → Update**), offers a newer version in the
+app, and installs it when you quit. On macOS keep vam in `/Applications`, not on the disk
+image or in Downloads — an app that has not been moved cannot replace itself. How it works,
+and what it does and does not protect against, is in [docs/signing.md](docs/signing.md#releases).
+
 ## 🛠 Build from source
 
 Requires Node.js 22 (`.nvmrc` pins it) and `tmux` on `PATH` — every session is a real tmux

@@ -51,9 +51,30 @@ module.exports = {
   npmRebuild: false,
   // Icons come from `buildResources` (build/icon.png), which electron-builder
   // converts per platform.
+  //
+  // ARTIFACT NAMES ARE A CONTRACT, so each target states its own. The
+  // self-updater's CI step (`scripts/update-manifest.cjs`) classifies files by
+  // name -- os, arch, and (for Windows) installer vs zip -- and the release
+  // notes point users at the same names. electron-builder's defaults do not
+  // hold that line: some contain spaces, and the arch is dropped for the
+  // default architecture. It drops it ONLY when the pattern is not
+  // user-specified (`platformPackager.expandArtifactNamePattern`:
+  // `isUserForced`), so an explicit pattern is also what keeps `${arch}` in
+  // every name.
+  //
+  // Lookup order there is target options -> platform options -> top level, so
+  // `mac.artifactName` covers dmg and zip; `nsis.artifactName` must be set
+  // separately or the NSIS installer would inherit `win.artifactName` and be
+  // indistinguishable from the zip. `${arch}` is the builder's own spelling per
+  // extension: `x64` almost everywhere, but `x86_64` for an AppImage
+  // (`builder-util/out/arch.js`), which the script maps back.
+  //
+  // There is deliberately NO `publish` block: the updater reads GitHub
+  // Releases itself and CI uploads the files; electron-builder must not try.
   linux: {
     target: ['AppImage'],
     category: 'Development',
+    artifactName: '${productName}-${version}-linux-${arch}.${ext}',
   },
   mac: {
     target: [
@@ -61,6 +82,7 @@ module.exports = {
       { target: 'zip', arch: ['arm64', 'x64'] },
     ],
     category: 'public.app-category.developer-tools',
+    artifactName: '${productName}-${version}-mac-${arch}.${ext}',
     // No certificate. Left unset, electron-builder signs with whatever
     // identity happens to be in the building machine's keychain, so the same
     // commit produces a different artifact on a different machine. There is
@@ -79,8 +101,11 @@ module.exports = {
   afterPack: require('./scripts/adhoc-sign-mac.cjs').afterPack,
   win: {
     target: ['nsis', 'zip'],
+    // Applies to the zip (nsis has its own below).
+    artifactName: '${productName}-${version}-win-${arch}.${ext}',
   },
   nsis: {
+    artifactName: '${productName}-${version}-win-${arch}-setup.${ext}',
     oneClick: false,
     allowToChangeInstallationDirectory: true,
   },

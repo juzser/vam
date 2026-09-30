@@ -1,128 +1,204 @@
 // @vitest-environment happy-dom
 
 /**
- * The popover: visible for one outcome, silent for the other three,
- * dismissible for good, and a click that LEAVES vam rather than downloading
- * anything.
+ * The update card: one state per updater status, prompt-then-download.
  *
- * The important assertions are negative. Nothing here fetches, nothing
- * navigates the window, nothing writes a file, and no test touches the
- * network -- `check` and `open` are stubs in every one of them.
+ * `available` asks (Update / Later / Release notes); only Update starts a
+ * download. Nothing here touches the network -- every bridge member is a stub.
  */
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { UpdateApi } from '../../src/preload/api.js';
 import { UpdateNotice } from '../../src/renderer/update/UpdateNotice.js';
 import type { UpdateStatus } from '../../src/shared/update.js';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
-const RELEASE_URL = 'https://github.com/juzser/vam/releases/tag/v0.1.0';
-const AVAILABLE: UpdateStatus = { kind: 'available', version: '0.1.0', url: RELEASE_URL };
+const RELEASE_URL = 'https://github.com/juzser/vam/releases/tag/v0.2.0';
+const AVAILABLE: UpdateStatus = { kind: 'available', version: '0.2.0', notesUrl: RELEASE_URL };
+const IDLE: UpdateStatus = { kind: 'idle' };
 
 function api(status: UpdateStatus, opened = true) {
-  // `recheck` is the Settings button's channel and this notice never calls it;
-  // it is here because the bridge type carries it, and a fake that only has
-  // the members its subject happens to use is a fake that stops catching the
-  // day the subject reaches for another.
-  return {
+  let push: (status: UpdateStatus) => void = () => {};
+  const bridge = {
+    getStatus: vi.fn(async () => status),
     check: vi.fn(async () => status),
-    recheck: vi.fn(async () => status),
-    open: vi.fn(async () => opened),
-  };
+    download: vi.fn(async () => status),
+    dismiss: vi.fn(async () => IDLE),
+    getAutoCheck: vi.fn(async () => true),
+    setAutoCheck: vi.fn(async (enabled: boolean) => enabled),
+    openNotes: vi.fn(async () => opened),
+    onStatus: vi.fn((listener: (status: UpdateStatus) => void) => {
+      push = listener;
+      return () => {};
+    }),
+  } satisfies UpdateApi;
+  return { bridge, push: (s: UpdateStatus) => act(() => push(s)) };
 }
 
-/** Lets the mount effect's promise settle before anything is asserted. */
 async function settle(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
 }
 
-describe('UpdateNotice', () => {
-  it('names the version, the destination, and what the click does', async () => {
-    const fetchSpy = vi.fn();
-    vi.stubGlobal('fetch', fetchSpy);
-    render(<UpdateNotice update={api(AVAILABLE)} />);
-    await settle();
+async function mount(status: UpdateStatus, opened = true) {
+  const a = api(status, opened);
+  render(<UpdateNotice update={a.bridge} />);
+  await settle();
+  return a;
+}
 
-    const notice = screen.getByTestId('update-notice');
-    expect(notice.textContent).toContain('0.1.0');
-    expect(screen.getByTestId('update-url').textContent).toBe(RELEASE_URL);
-    // It says the click leaves vam, and that vam installs nothing.
-    expect(notice.textContent).toMatch(/browser/i);
-    expect(notice.textContent).toMatch(/install/i);
-    expect(fetchSpy).not.toHaveBeenCalled();
-    vi.unstubAllGlobals();
+describe('UpdateNotice: available', () => {
+  it('names the version and offers Update / Later / Release notes', async () => {
+    await mount(AVAILABLE);
+    const card = screen.getByTestId('update-notice');
+    expect(card.textContent).toContain('v0.2.0 available');
+    expect(screen.getByRole('button', { name: /^update$/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^later$/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /release notes/i })).toBeTruthy();
   });
 
-  it('sits in the top-right corner, under any overlay rather than over it', async () => {
-    render(<UpdateNotice update={api(AVAILABLE)} />);
-    await settle();
-    const box = screen.getByTestId('update-notice').className;
-    expect(box).toContain('top-3');
-    expect(box).toContain('right-3');
-    expect(box).toContain('z-40');
+  it('says nothing about downloading nothing or opening a browser', async () => {
+    await mount(AVAILABLE);
+    const text = screen.getByTestId('update-notice').textContent ?? '';
+    expect(text).not.toMatch(/does not download|browser|release page/i);
   });
 
-  it('hands the click to the operating system, and downloads nothing itself', async () => {
-    const update = api(AVAILABLE);
-    const fetchSpy = vi.fn();
-    vi.stubGlobal('fetch', fetchSpy);
-    render(<UpdateNotice update={update} />);
-    await settle();
-
-    fireEvent.click(screen.getByRole('button', { name: /release page/i }));
-    await settle();
-    expect(update.open).toHaveBeenCalledTimes(1);
-    // No argument crosses: main opens the URL from its own launch check.
-    expect(update.open).toHaveBeenCalledWith();
-    expect(fetchSpy).not.toHaveBeenCalled();
-    vi.unstubAllGlobals();
+  it('keeps its top-right place, role and z-order', async () => {
+    await mount(AVAILABLE);
+    const card = screen.getByTestId('update-notice');
+    expect(card.getAttribute('role')).toBe('status');
+    expect(card.className).toContain('top-3');
+    expect(card.className).toContain('right-3');
+    expect(card.className).toContain('z-40');
   });
 
-  it('says so when the browser could not be opened, and still shows the URL', async () => {
-    const update = api(AVAILABLE, false);
-    render(<UpdateNotice update={update} />);
+  it('Update starts the download, and downloads nothing until then', async () => {
+    const { bridge } = await mount(AVAILABLE);
+    expect(bridge.download).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: /^update$/i }));
     await settle();
-    fireEvent.click(screen.getByRole('button', { name: /release page/i }));
-    await settle();
-
-    expect(screen.getByTestId('update-open-failed')).toBeTruthy();
-    expect(screen.getByTestId('update-url').textContent).toBe(RELEASE_URL);
+    expect(bridge.download).toHaveBeenCalledTimes(1);
   });
 
-  it('says nothing when the repository has published no releases', async () => {
-    render(<UpdateNotice update={api({ kind: 'none' })} />);
+  it('Later dismisses through main and the card goes away', async () => {
+    const { bridge } = await mount(AVAILABLE);
+    fireEvent.click(screen.getByRole('button', { name: /^later$/i }));
     await settle();
+    expect(bridge.dismiss).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId('update-notice')).toBeNull();
   });
 
-  it('says nothing when this build is current', async () => {
-    render(<UpdateNotice update={api({ kind: 'up-to-date' })} />);
+  it('Release notes hands the click to main with no argument', async () => {
+    const { bridge } = await mount(AVAILABLE);
+    fireEvent.click(screen.getByRole('button', { name: /release notes/i }));
     await settle();
+    expect(bridge.openNotes).toHaveBeenCalledWith();
+  });
+
+  it('shows the URL when the browser could not be opened', async () => {
+    await mount(AVAILABLE, false);
+    fireEvent.click(screen.getByRole('button', { name: /release notes/i }));
+    await settle();
+    expect(screen.getByTestId('update-open-failed').textContent).toBe(RELEASE_URL);
+  });
+
+  it('follows pushed statuses', async () => {
+    const { push } = await mount(IDLE);
     expect(screen.queryByTestId('update-notice')).toBeNull();
+    push(AVAILABLE);
+    expect(screen.getByTestId('update-notice').textContent).toContain('v0.2.0');
+  });
+});
+
+describe('UpdateNotice: downloading and installing', () => {
+  it('draws a progress bar with the percent, and nothing to click away', async () => {
+    await mount({ kind: 'downloading', version: '0.2.0', percent: 42 });
+    const bar = screen.getByRole('progressbar');
+    expect(bar.getAttribute('aria-valuenow')).toBe('42');
+    expect(screen.getByTestId('update-percent').textContent).toBe('42%');
+    expect(screen.queryByRole('button')).toBeNull();
   });
 
-  it('says nothing when the question could not be answered', async () => {
-    for (const reason of ['network', 'rate-limited', 'malformed'] as const) {
-      render(<UpdateNotice update={api({ kind: 'unknown', reason })} />);
-      await settle();
-      expect(screen.queryByTestId('update-notice'), reason).toBeNull();
-      cleanup();
-    }
+  it('clamps a wild percent into the bar', async () => {
+    await mount({ kind: 'downloading', version: '0.2.0', percent: 240 });
+    expect(screen.getByRole('progressbar').getAttribute('aria-valuenow')).toBe('100');
   });
 
-  it('is dismissible, and dismissal survives a re-render', async () => {
-    const update = api(AVAILABLE);
-    const { rerender } = render(<UpdateNotice update={update} />);
+  it('says it is restarting', async () => {
+    await mount({ kind: 'installing', version: '0.2.0' });
+    expect(screen.getByTestId('update-notice').textContent).toContain('Restarting to update…');
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+});
+
+describe('UpdateNotice: error', () => {
+  it('shows a sentence, never the raw code, with Retry that re-checks', async () => {
+    const { bridge } = await mount({ kind: 'error', code: 'network', message: 'ENOTFOUND' });
+    const text = screen.getByTestId('update-notice').textContent ?? '';
+    expect(text).toMatch(/could not be reached/i);
+    expect(text).not.toContain('ENOTFOUND');
+    fireEvent.click(screen.getByRole('button', { name: /retry/i }));
     await settle();
+    expect(bridge.check).toHaveBeenCalledTimes(1);
+    expect(bridge.download).not.toHaveBeenCalled();
+  });
+
+  it('Retry after a failed download downloads again', async () => {
+    const { bridge } = await mount({ kind: 'error', code: 'checksum', message: 'x' });
+    fireEvent.click(screen.getByRole('button', { name: /retry/i }));
+    await settle();
+    expect(bridge.download).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers no Retry where the operator has to act first', async () => {
+    await mount({ kind: 'error', code: 'translocated', message: 'x' });
+    expect(screen.queryByRole('button', { name: /retry/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /dismiss/i })).toBeTruthy();
+  });
+
+  it('can be dismissed', async () => {
+    const { bridge } = await mount({ kind: 'error', code: 'read-only', message: 'x' });
     fireEvent.click(screen.getByRole('button', { name: /dismiss/i }));
-    expect(screen.queryByTestId('update-notice')).toBeNull();
-
-    rerender(<UpdateNotice update={update} />);
     await settle();
+    expect(bridge.dismiss).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId('update-notice')).toBeNull();
-    // Re-rendering must not ask again either: launch is the only trigger.
-    expect(update.check).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('UpdateNotice: not-available and silence', () => {
+  it('says "vam is up to date" for a manual check, then hides itself', async () => {
+    vi.useFakeTimers();
+    const a = api({ kind: 'not-available', manual: true, reason: 'up-to-date' });
+    render(<UpdateNotice update={a.bridge} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByTestId('update-notice').textContent).toContain('vam is up to date');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(a.bridge.dismiss).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('update-notice')).toBeNull();
+  });
+
+  it('is silent for an automatic check that found nothing', async () => {
+    await mount({ kind: 'not-available', manual: false, reason: 'up-to-date' });
+    expect(screen.queryByTestId('update-notice')).toBeNull();
+  });
+
+  it('is silent for idle and checking', async () => {
+    await mount(IDLE);
+    expect(screen.queryByTestId('update-notice')).toBeNull();
+    cleanup();
+    await mount({ kind: 'checking', manual: true });
+    expect(screen.queryByTestId('update-notice')).toBeNull();
   });
 
   it('draws nothing, and does not throw, where there is no bridge', async () => {
@@ -132,16 +208,9 @@ describe('UpdateNotice', () => {
   });
 
   it('stays silent when the bridge itself rejects', async () => {
-    const update = {
-      check: vi.fn(async (): Promise<UpdateStatus> => {
-        throw new Error('no handler');
-      }),
-      recheck: vi.fn(async (): Promise<UpdateStatus> => {
-        throw new Error('no handler');
-      }),
-      open: vi.fn(async () => false),
-    };
-    render(<UpdateNotice update={update} />);
+    const a = api(AVAILABLE);
+    a.bridge.getStatus.mockRejectedValue(new Error('no handler'));
+    render(<UpdateNotice update={a.bridge} />);
     await settle();
     expect(screen.queryByTestId('update-notice')).toBeNull();
   });

@@ -1,29 +1,15 @@
 /**
- * SETTINGS -> UPDATE, STUCK AND SETTLED -- the visible half of the bug this
- * fix closes.
+ * SETTINGS -> UPDATE, STUCK AND SETTLED, in the browser harness.
  *
- * `main/update/check.ts`'s `checkForUpdate` used to make one outbound `fetch`
- * with no timeout at all. A connection that neither refuses nor answers (a
- * captive portal, a firewall that drops packets instead of resetting the
- * socket, a dead VPN tunnel) left that request unsettled forever, and
- * `UpdatePanel.tsx`'s "check for updates" button -- disabled for exactly the
- * length of the request, on purpose, per `main/update/ipc.ts`'s own reasoning
- * for having no separate throttle -- stayed disabled and reading "checking…"
- * with no calm sentence ever arriving. `AbortSignal.timeout(UPDATE_CHECK_TIMEOUT_MS)`
- * bounds it at 10s, after which the SAME "unknown"/"network" outcome every
- * other network failure already gets (`sentenceFor`, `UpdatePanel.tsx`)
- * arrives instead of nothing.
+ * This browser build has no `window.api` (no preload), so the bridge is stubbed
+ * the way `settings-panels-shots.mjs` stubs `window.api.adhdSkill`. The stub
+ * carries every member of `UpdateApi` (`getStatus`, `check`, `download`,
+ * `dismiss`, `getAutoCheck`, `setAutoCheck`, `openNotes`, `onStatus`).
  *
- * This browser build has no `window.api` at all (no preload here), so the
- * two states are drawn by stubbing the bridge exactly the way
- * `settings-panels-shots.mjs` already stubs `window.api.adhdSkill` for its
- * own screenshots: `recheck()` that never resolves for BEFORE, and one that
- * resolves to the bounded timeout's own answer for AFTER. The bound itself is
- * proven for real over the real network in `test/update/check.test.ts`
- * (an injected fetcher, a fake `AbortSignal`) and `test/electron/
- * settings-update.test.ts` (the real Electron shell, the real preload, the
- * real GitHub round trip); this file's job is only the paint two operators
- * would have seen and now see instead.
+ * Two states are drawn: a `check` that never settles (the button is busy and
+ * the status line reads "checking…") and a `check` that settles into the calm
+ * network sentence, with the "automatically check for updates" switch present
+ * in both. The real bridge is exercised by `test/electron/settings-update.test.ts`.
  *
  * Run by hand, or by `e2e/run-web-guards.mjs`:
  *   node e2e/settings-update-shots.mjs http://localhost:5520 docs/ui
@@ -58,19 +44,23 @@ async function screenshotBothThemes(page, slug) {
   }
 }
 
-console.log('=== the Update card, stuck (a connection that neither refuses nor answers)');
+console.log('=== the Update section, stuck (a check that never answers)');
 {
   const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
   page.on('pageerror', (err) => console.error('PAGE ERROR:', err));
-  // A promise that never settles -- the exact defect `UPDATE_CHECK_TIMEOUT_MS`
-  // exists to close, reproduced here at the bridge rather than the network.
+  // A check that never settles, reproduced at the bridge rather than the network.
   await page.addInitScript(() => {
     globalThis.window.api = {
       ...(globalThis.window.api ?? {}),
       update: {
-        check: async () => ({ kind: 'none' }),
-        recheck: () => new Promise(() => {}),
-        open: async () => true,
+        getStatus: async () => ({ kind: 'idle' }),
+        check: () => new Promise(() => {}),
+        download: async () => ({ kind: 'idle' }),
+        dismiss: async () => ({ kind: 'idle' }),
+        getAutoCheck: async () => true,
+        setAutoCheck: async (enabled) => enabled,
+        openNotes: async () => true,
+        onStatus: () => () => {},
       },
     };
   });
@@ -87,8 +77,10 @@ console.log('=== the Update card, stuck (a connection that neither refuses nor a
 
   const busy = await page.locator('[data-update-check]').getAttribute('aria-busy');
   check('the button is busy -- the click registered', busy === 'true');
-  const outcomeCount = await page.locator('[data-update-outcome]').count();
-  check('no outcome sentence has arrived -- nothing to show yet, on purpose', outcomeCount === 0);
+  const pending = await page.locator('[data-update-outcome]').textContent();
+  check('the status line says it is checking', /checking/i.test(pending ?? ''), pending ?? '(none)');
+  const switchCount = await page.locator('[data-switch="auto-update"]').count();
+  check('the automatic-check switch is drawn', switchCount === 1);
 
   await screenshotBothThemes(page, 'before');
   await page.close();
@@ -100,16 +92,20 @@ console.log(
 {
   const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
   page.on('pageerror', (err) => console.error('PAGE ERROR:', err));
-  // Resolves immediately, to the exact status the real bound now guarantees
-  // a black-holed connection eventually reaches (`{ kind: 'unknown', reason:
-  // 'network' }`, `sentenceFor`'s "GitHub could not be reached…").
+  // Resolves at once to a network error, whose sentence is "GitHub could not
+  // be reached…".
   await page.addInitScript(() => {
     globalThis.window.api = {
       ...(globalThis.window.api ?? {}),
       update: {
-        check: async () => ({ kind: 'none' }),
-        recheck: async () => ({ kind: 'unknown', reason: 'network' }),
-        open: async () => true,
+        getStatus: async () => ({ kind: 'idle' }),
+        check: async () => ({ kind: 'error', code: 'network', message: 'network' }),
+        download: async () => ({ kind: 'idle' }),
+        dismiss: async () => ({ kind: 'idle' }),
+        getAutoCheck: async () => true,
+        setAutoCheck: async (enabled) => enabled,
+        openNotes: async () => true,
+        onStatus: () => () => {},
       },
     };
   });
@@ -120,7 +116,11 @@ console.log(
   await page.locator('[data-settings-nav-item="update"]').click();
   await page.waitForSelector('[data-update-check]', { timeout: 5_000 });
   await page.locator('[data-update-check]').click();
-  await page.waitForSelector('[data-update-outcome]', { timeout: 5_000 });
+  await page.waitForFunction(
+    () => /reach/i.test(document.querySelector('[data-update-outcome]')?.textContent ?? ''),
+    undefined,
+    { timeout: 5_000 },
+  );
 
   const outcomeText = await page.locator('[data-update-outcome]').textContent();
   check(
@@ -137,7 +137,7 @@ console.log(
 
 await browser.close();
 console.log(
-  '\nsettings -> update: a stuck request now settles into the same calm sentence every other network failure already gets.',
+  '\nsettings -> update: checked.',
 );
 
 if (failures.length > 0) {

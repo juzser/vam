@@ -75,20 +75,56 @@ function reloadItem(): MenuItemConstructorOptions {
   return { role: 'reload', label: 'Reload', accelerator: 'CommandOrControl+R' };
 }
 
+export interface MenuActions {
+  onCheckForUpdates: () => void;
+}
+
+/** The ellipsis is the platform convention for an item that opens something. */
+function checkForUpdatesItem(actions: MenuActions): MenuItemConstructorOptions {
+  return { label: 'Check for Updates…', click: () => actions.onCheckForUpdates() };
+}
+
+/**
+ * The macOS app menu, by hand: Electron's `appMenu` role cannot take an extra
+ * item between About and Services. Quit is here, exactly once.
+ */
+function macAppMenu(actions: MenuActions): MenuItemConstructorOptions {
+  return {
+    label: 'vam',
+    submenu: [
+      { role: 'about' },
+      { type: 'separator' },
+      checkForUpdatesItem(actions),
+      { type: 'separator' },
+      { role: 'services' },
+      { type: 'separator' },
+      { role: 'hide' },
+      { role: 'hideOthers' },
+      { role: 'unhide' },
+      { type: 'separator' },
+      { role: 'quit' },
+    ],
+  };
+}
+
 /** The template as a value, so the non-darwin branch is reachable in a test. */
-export function buildMenuTemplate(platform: NodeJS.Platform): MenuItemConstructorOptions[] {
+export function buildMenuTemplate(
+  platform: NodeJS.Platform,
+  actions: MenuActions,
+): MenuItemConstructorOptions[] {
   const isMac = platform === 'darwin';
   return [
-    // macOS: About/Services/Hide/Quit. Elsewhere `fileMenu`, which is where
+    // macOS: the hand-built app menu. Elsewhere `fileMenu`, which is where
     // Quit lives -- the only way out once the default menu is gone.
-    isMac ? { role: 'appMenu' } : { role: 'fileMenu' },
+    isMac ? macAppMenu(actions) : { role: 'fileMenu' },
     { role: 'editMenu' },
     { label: 'View', submenu: [reloadItem()] },
     { label: 'Window', role: 'window', submenu: windowSubmenu(isMac) },
+    ...(isMac ? [] : [{ label: 'Help', submenu: [checkForUpdatesItem(actions)] }]),
   ];
 }
 
 /** Install it. Called once, at `app.whenReady`, before the window exists. */
-export function applyApplicationMenu(): void {
-  Menu.setApplicationMenu(Menu.buildFromTemplate(buildMenuTemplate(process.platform)));
+export function applyApplicationMenu(actions: MenuActions): void {
+  Menu.setApplicationMenu(Menu.buildFromTemplate(buildMenuTemplate(process.platform, actions)));
 }

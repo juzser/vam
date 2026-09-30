@@ -763,6 +763,21 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * slack the coordinator asked for rather than the ~0.1% the prior paragraph
  * used. The next PR to land here should still expect to remeasure rather
  * than assume either number still has room.
+ *
+ * A FOURTEENTH, SMALL GROWTH: THE SELF-UPDATER. The update card itself is
+ * NOT eager -- `UpdateNotice` loads behind its own `React.lazy` boundary --
+ * but the card's and Settings -> Update's new catalogue strings
+ * (`update.*`) land in `i18n/strings.ts`'s one exported object literal,
+ * which ships whole in the entry, the ninth paragraph's mechanism again.
+ * Measured, `electron-vite build --mode production` (this machine's
+ * `darwin` zlib), this branch against `main`'s tip (`3fe3b5ec`, the commit
+ * it is rebased on): entry 726,872 B -> 727,087 B (+215 B); gzip
+ * 218,114 B -> 218,289 B (+175 B). `main` itself already sat only 36 B
+ * under the gzip budget, so any eager byte tipped it.
+ * `ENTRY_GZIP_BUDGET_BYTES` moves 218,150 -> 218,700: the measured figure
+ * (218,289 B) plus ~411 B (~0.2%) of the slack the thirteenth paragraph
+ * showed a different machine's zlib can eat. `ENTRY_BUDGET_BYTES` is NOT
+ * moved: 727,087 B still clears 728,700 by 1,613 B.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -774,7 +789,7 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
 const ENTRY_BUDGET_BYTES = 728_700;
-const ENTRY_GZIP_BUDGET_BYTES = 218_150;
+const ENTRY_GZIP_BUDGET_BYTES = 218_700;
 
 // The one string this repo's markdown stack ships that nothing else in the
 // dependency graph or vam's own source does: `gfmTable`, the extension name

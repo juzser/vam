@@ -14,7 +14,10 @@
  * `localStorage` on whichever device is looking -- so a theme chosen on the
  * phone changes the phone, not the machine the sessions are on, and a
  * keyboard shortcut edited there binds keys for a device with no keyboard.
- * Update reaches `window.api.update`, which the browser build does not have.
+ * Update reaches `window.api.update` (auto-check preference, check now,
+ * download and install), which the browser build does not have -- a phone
+ * must never offer to update, or to switch off the updating of, a desktop it
+ * is only remote-controlling.
  * A control that looks like it configures vam and configures a copy of vam
  * nobody is watching is worse than an absent one.
  *
@@ -132,6 +135,10 @@ describe('the settings overlay at phone width', () => {
       }
       // A nav with one destination is a control that cannot do anything.
       expect(document.querySelector('[data-settings-nav]')).toBeNull();
+      // The updater's controls in particular: nothing here can act on them.
+      expect(document.querySelector('[data-update-check]')).toBeNull();
+      expect(document.querySelector('[data-switch="auto-update"]')).toBeNull();
+      expect(document.querySelector('[data-update-install]')).toBeNull();
     } finally {
       restore();
     }

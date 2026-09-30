@@ -181,12 +181,6 @@ export const CHANNELS = {
    */
   issueOpen: 'vam:issue:open',
   /**
-   * The update check. Answers bare too -- an `UpdateStatus`, which carries
-   * its own four branches (`src/shared/update.ts`). It is the only channel
-   * that reaches a host outside this machine, and it does so unauthenticated,
-   * with no query and no body; see `src/main/update/check.ts`.
-   */
-  /**
    * "Open one of the two links the Remote panel draws."
    *
    * THE RENDERER NAMES A KEY, NEVER A URL, and that is the whole design:
@@ -278,27 +272,35 @@ export const CHANNELS = {
    * operator's pull requests.
    */
   prsAction: 'vam:prs:action',
-  updateCheck: 'vam:update:check',
   /**
-   * The same question, asked AGAIN, because a person pressed a button.
+   * THE UPDATER (`src/main/update/`). All of these answer BARE -- an
+   * `UpdateStatus` or a boolean, never an `IpcResult` -- because the status
+   * type already carries its own error branch, and there is no source to
+   * refuse anything in the words of.
    *
-   * `updateCheck` answers from the one check made at launch and never makes
-   * another -- which is right for a notice that reads it on mount and wrong
-   * for the Settings row the operator asked for, where a cached reply from
-   * whenever the app was started is a button that lies about having checked.
-   * This one really goes out, and its answer REPLACES the stored one, so that
-   * `updateOpen` can act on what the operator is looking at.
+   * None takes a URL, a path or a version from the renderer: main decides what
+   * is fetched (the release it found itself, from an allowlisted host) and what
+   * is installed. The renderer only presses buttons.
    *
-   * The rate limit is a hand: GitHub allows 60 unauthenticated requests an
-   * hour per IP, and `rate-limited` is already a quiet outcome of its own.
+   * `updateGetStatus` reads the current status without asking GitHub anything.
    */
-  updateRecheck: 'vam:update:recheck',
+  updateGetStatus: 'vam:update:get-status',
+  /** A MANUAL check: a person pressed "Check for updates". Really goes out. */
+  updateCheck: 'vam:update:check',
+  /** "Update": download, verify, then quit and install. Answers the status. */
+  updateDownload: 'vam:update:download',
+  /** "Later" on an available release, or closing an error / up-to-date card. */
+  updateDismiss: 'vam:update:dismiss',
+  /** Main -> renderer push: every change of the updater's status. */
+  updateStatusChanged: 'vam:update:status',
+  updateGetAutoCheck: 'vam:update:get-auto-check',
+  updateSetAutoCheck: 'vam:update:set-auto-check',
   /**
-   * "Take me to the release." Answers a bare boolean -- did the operator's
-   * browser open -- and takes NO argument: the URL opened is the one main's
-   * own launch check found, never one the renderer supplies. That is what
-   * keeps this from being a general "open any URL" capability in a window
-   * whose whole navigation policy is deny-by-default.
+   * "Release notes." Answers a bare boolean -- did the operator's browser
+   * open -- and takes NO argument: the URL opened is the one main's own check
+   * found, never one the renderer supplies. That is what keeps this from being
+   * a general "open any URL" capability in a window whose whole navigation
+   * policy is deny-by-default.
    */
   updateOpen: 'vam:update:open',
   /**

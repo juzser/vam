@@ -1,40 +1,21 @@
 // @vitest-environment happy-dom
 
 /**
- * THE UPDATE SECTION: which vam this is, and a way to ask whether it is the
- * newest one.
+ * THE UPDATE SECTION: which vam this is, whether it checks by itself, and a
+ * way to ask now.
  *
- * Operator: "add an update section in settings, show the version and a check
- * for updates button."
- *
- * ── WHAT WAS ALREADY THERE, AND WHY IT WAS NOT ENOUGH ─────────────────────
- * vam has checked for updates since before this: one unauthenticated GET at
- * launch, and a popover in the top-right corner that draws for exactly one
- * outcome -- `available`. Every other answer is silence, deliberately, because
- * a banner about a failed update check is a daily error message about a
- * question nobody asked.
- *
- * That leaves an operator with no way to ASK. Silence covers "you are on the
- * newest release", "the repository has published none", "GitHub is
- * rate-limiting this IP" and "the check never ran", and those are four
- * different things. A section the operator opens on purpose is where all four
- * can be said, because they are answering a question that was just asked.
- *
- * ── THE THREE RULES THIS SURFACE KEEPS ────────────────────────────────────
+ * ── THE RULES THIS SURFACE KEEPS ──────────────────────────────────────────
  *  1. THE VERSION IS ALWAYS THERE, in both builds. It needs no bridge, no
- *     network and no permission, and it is the one fact an operator filing a
- *     bug needs to read off the screen.
- *  2. THE BUTTON IS DRAWN ONLY WHERE IT CAN ACT -- this file's rule for the
- *     directory picker, the attach input and, since the deny-all policy was
- *     traced, the microphone. The browser build has no preload bridge, so
- *     there is no channel to check over and no button.
- *  3. EVERY OUTCOME IS A SENTENCE, never a silence and never a code. The
- *     operator pressed a button; a button that can answer nothing is worse
- *     than one that is not there.
+ *     network and no permission.
+ *  2. CONTROLS ARE DRAWN ONLY WHERE THEY CAN ACT. The browser build (and so
+ *     the phone) has no preload bridge: no switch, no button, and a sentence
+ *     saying why.
+ *  3. EVERY STATUS IS A SENTENCE, never a silence and never a code.
  */
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { UpdateApi } from '../../src/preload/api.js';
 import { EMPTY_PREFS } from '../../src/renderer/prefs/prefs.js';
 import { SettingsOverlay } from '../../src/renderer/settings/SettingsOverlay.js';
 import { UpdatePanel } from '../../src/renderer/settings/UpdatePanel.js';
@@ -46,145 +27,196 @@ afterEach(cleanup);
 const version = () => document.querySelector('[data-update-version]')?.textContent ?? '';
 const button = () => document.querySelector<HTMLButtonElement>('[data-update-check]');
 const outcome = () => document.querySelector('[data-update-outcome]')?.textContent ?? '';
-const release = () => document.querySelector<HTMLButtonElement>('[data-update-open]');
+const install = () => document.querySelector<HTMLButtonElement>('[data-update-install]');
+const notes = () => document.querySelector<HTMLButtonElement>('[data-update-open]');
+const autoSwitch = () => document.querySelector<HTMLButtonElement>('[data-switch="auto-update"]');
 
-/** A bridge that answers one status, and counts how often it was asked. */
-function fakeApi(answer: UpdateStatus | (() => Promise<UpdateStatus>)) {
-  const recheck = vi.fn(typeof answer === 'function' ? answer : async () => answer);
-  return {
-    check: vi.fn(async () => ({ kind: 'none' }) as UpdateStatus),
-    recheck,
-    open: vi.fn(async () => true),
-  };
+const IDLE: UpdateStatus = { kind: 'idle' };
+const UP_TO_DATE: UpdateStatus = { kind: 'not-available', manual: true, reason: 'up-to-date' };
+const AVAILABLE: UpdateStatus = {
+  kind: 'available',
+  version: '9.9.9',
+  notesUrl: 'https://github.com/juzser/vam/releases',
+};
+
+/** Every member of the bridge, so the fake catches a subject reaching for another. */
+function fullApi(overrides: Partial<UpdateApi> = {}) {
+  let push: (status: UpdateStatus) => void = () => {};
+  const bridge = {
+    getStatus: vi.fn(async () => IDLE),
+    check: vi.fn(async () => UP_TO_DATE),
+    download: vi.fn(
+      async () => ({ kind: 'downloading', version: '9.9.9', percent: 0 }) as UpdateStatus,
+    ),
+    dismiss: vi.fn(async () => IDLE),
+    getAutoCheck: vi.fn(async () => true),
+    setAutoCheck: vi.fn(async (enabled: boolean) => enabled),
+    openNotes: vi.fn(async () => true),
+    onStatus: vi.fn((listener: (status: UpdateStatus) => void) => {
+      push = listener;
+      return () => {};
+    }),
+    ...overrides,
+  } satisfies UpdateApi;
+  return { bridge, push: (s: UpdateStatus) => act(() => push(s)) };
+}
+
+/** A bridge whose check answers one status. */
+function checkApi(answer: UpdateStatus | (() => Promise<UpdateStatus>)) {
+  return fullApi({ check: vi.fn(typeof answer === 'function' ? answer : async () => answer) });
+}
+
+async function mount(api: UpdateApi) {
+  render(<UpdatePanel api={api} />);
+  // The mount effects read the stored status and preference.
+  await waitFor(() => expect(autoSwitch()).not.toBeNull());
 }
 
 describe('the update section says which vam this is', () => {
-  it('draws the version with no bridge, no network and no permission', () => {
+  it('draws the version with no bridge', () => {
     render(<UpdatePanel api={undefined} />);
     expect(version()).toContain(VERSION);
   });
 
-  it('draws it in the Electron build too, from the same constant', () => {
-    render(<UpdatePanel api={fakeApi({ kind: 'up-to-date' })} />);
+  it('draws it in the Electron build too', async () => {
+    await mount(fullApi().bridge);
     expect(version()).toContain(VERSION);
   });
 });
 
-describe('the check button', () => {
-  it('is not drawn in a browser, which has no channel to check over', () => {
-    // ABSENT, NOT DISABLED. The rule this file keeps everywhere: a control
-    // that cannot act is not drawn dimmed, it is not drawn. The version stays,
-    // because that half needs nothing.
+describe('without a bridge (browser tab, paired phone)', () => {
+  it('draws no button and no switch, and says why', () => {
     render(<UpdatePanel api={undefined} />);
     expect(button()).toBeNull();
-    expect(version()).toContain(VERSION);
-  });
-
-  it('says why, rather than leaving a gap where a control was', () => {
-    // A missing button with no explanation reads as a broken screen. This is
-    // the phone, and the phone cannot reach GitHub through vam.
-    render(<UpdatePanel api={undefined} />);
+    expect(autoSwitch()).toBeNull();
     expect(outcome().toLowerCase()).toMatch(/desktop|app/);
   });
+});
 
-  it('is drawn where the bridge is, and really asks when pressed', async () => {
-    const api = fakeApi({ kind: 'up-to-date' });
-    render(<UpdatePanel api={api} />);
-    expect(api.recheck).not.toHaveBeenCalled();
-    fireEvent.click(button() as HTMLElement);
-    await waitFor(() => expect(api.recheck).toHaveBeenCalledTimes(1));
+describe('the automatic-check switch', () => {
+  it('reads the stored preference', async () => {
+    const off = fullApi({ getAutoCheck: vi.fn(async () => false) });
+    await mount(off.bridge);
+    await waitFor(() => expect(autoSwitch()?.getAttribute('aria-checked')).toBe('false'));
+    cleanup();
+    const on = fullApi();
+    await mount(on.bridge);
+    await waitFor(() => expect(autoSwitch()?.getAttribute('aria-checked')).toBe('true'));
   });
 
-  it('asks again on a second press, because that is what the operator meant', async () => {
-    const api = fakeApi({ kind: 'up-to-date' });
-    render(<UpdatePanel api={api} />);
+  it('is named for what it controls', async () => {
+    await mount(fullApi().bridge);
+    expect(autoSwitch()?.getAttribute('aria-label')).toMatch(/automatically check for updates/i);
+  });
+
+  it('stores the flip through main and shows what main answered', async () => {
+    const { bridge } = fullApi();
+    await mount(bridge);
+    await waitFor(() => expect(autoSwitch()?.getAttribute('aria-checked')).toBe('true'));
+    fireEvent.click(autoSwitch() as HTMLElement);
+    await waitFor(() => expect(bridge.setAutoCheck).toHaveBeenCalledWith(false));
+    await waitFor(() => expect(autoSwitch()?.getAttribute('aria-checked')).toBe('false'));
+  });
+});
+
+describe('Check now', () => {
+  it('really asks when pressed, and not before', async () => {
+    const { bridge } = checkApi(UP_TO_DATE);
+    await mount(bridge);
+    expect(bridge.check).not.toHaveBeenCalled();
     fireEvent.click(button() as HTMLElement);
-    await waitFor(() => expect(outcome()).not.toBe(''));
-    fireEvent.click(button() as HTMLElement);
-    await waitFor(() => expect(api.recheck).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(bridge.check).toHaveBeenCalledTimes(1));
   });
 
   it('cannot be pressed twice into two requests at once', async () => {
-    // A mashed button is the one way this becomes a rate-limit problem. It is
-    // held closed for the length of the request and no longer: there is no
-    // time-based throttle here, for the reason `main/update/ipc.ts` gives.
     let release: (status: UpdateStatus) => void = () => {};
-    const api = fakeApi(
+    const { bridge } = checkApi(
       () =>
         new Promise<UpdateStatus>((resolve) => {
           release = resolve;
         }),
     );
-    render(<UpdatePanel api={api} />);
+    await mount(bridge);
     fireEvent.click(button() as HTMLElement);
     await waitFor(() => expect(button()?.disabled).toBe(true));
+    expect(button()?.getAttribute('aria-busy')).toBe('true');
     fireEvent.click(button() as HTMLElement);
-    fireEvent.click(button() as HTMLElement);
-    expect(api.recheck).toHaveBeenCalledTimes(1);
-    release({ kind: 'up-to-date' });
+    expect(bridge.check).toHaveBeenCalledTimes(1);
+    await act(async () => release(UP_TO_DATE));
     await waitFor(() => expect(button()?.disabled).toBe(false));
+  });
+
+  it('survives a bridge that rejects, rather than leaving the button stuck', async () => {
+    const { bridge } = checkApi(async () => {
+      throw new Error('channel gone');
+    });
+    await mount(bridge);
+    fireEvent.click(button() as HTMLElement);
+    await waitFor(() => expect(outcome()).toMatch(/reached/i));
+    expect(button()?.disabled).toBe(false);
   });
 });
 
-describe('every outcome is a sentence', () => {
+describe('the status line is a sentence for every status', () => {
   const cases: ReadonlyArray<readonly [UpdateStatus, RegExp]> = [
-    [{ kind: 'up-to-date' }, /newest|up to date|latest/i],
-    [{ kind: 'none' }, /no release/i],
-    [{ kind: 'unknown', reason: 'network' }, /reach|network|connect/i],
-    [{ kind: 'unknown', reason: 'rate-limited' }, /github|later|limit/i],
-    [{ kind: 'unknown', reason: 'malformed' }, /understand|answer/i],
-    [
-      { kind: 'available', version: '9.9.9', url: 'https://github.com/juzser/vam/releases' },
-      /9\.9\.9/,
-    ],
+    [IDLE, /check now/i],
+    [{ kind: 'checking', manual: false }, /checking/i],
+    [UP_TO_DATE, /newest/i],
+    [{ kind: 'not-available', manual: true, reason: 'none' }, /no release/i],
+    [{ kind: 'not-available', manual: true, reason: 'incomplete' }, /still being published/i],
+    [AVAILABLE, /9\.9\.9/],
+    [{ kind: 'downloading', version: '9.9.9', percent: 37 }, /37%/],
+    [{ kind: 'installing', version: '9.9.9' }, /restarting/i],
+    [{ kind: 'error', code: 'network', message: 'x' }, /reached/i],
+    [{ kind: 'error', code: 'rate-limited', message: 'x' }, /rate-limiting/i],
+    [{ kind: 'error', code: 'checksum', message: 'x' }, /checksum/i],
   ];
 
   for (const [status, pattern] of cases) {
-    it(`says something specific for ${status.kind}/${'reason' in status ? status.reason : '-'}`, async () => {
-      const api = fakeApi(status);
-      render(<UpdatePanel api={api} />);
-      fireEvent.click(button() as HTMLElement);
+    it(`says something specific for ${status.kind}`, async () => {
+      const { bridge } = fullApi({ getStatus: vi.fn(async () => status) });
+      await mount(bridge);
       await waitFor(() => expect(outcome()).toMatch(pattern));
-      // NEVER A RAW CODE. `rate-limited` on screen is a developer's word for
-      // a state an operator has to act on by waiting.
+      // NEVER A RAW CODE.
       expect(outcome()).not.toMatch(/^[a-z-]+$/);
     });
   }
 
-  it('offers the release page only when there is one, and vam opens nothing itself', async () => {
-    const api = fakeApi({
-      kind: 'available',
-      version: '9.9.9',
-      url: 'https://github.com/juzser/vam/releases',
+  it('follows statuses main pushes', async () => {
+    const { bridge, push } = fullApi();
+    await mount(bridge);
+    push({ kind: 'downloading', version: '9.9.9', percent: 80 });
+    expect(outcome()).toMatch(/80%/);
+  });
+});
+
+describe('what the operator can press when a release is available', () => {
+  it('offers Update, which starts the download, and Release notes', async () => {
+    const { bridge } = fullApi({ getStatus: vi.fn(async () => AVAILABLE) });
+    await mount(bridge);
+    await waitFor(() => expect(install()).not.toBeNull());
+    fireEvent.click(notes() as HTMLElement);
+    await waitFor(() => expect(bridge.openNotes).toHaveBeenCalledWith());
+    fireEvent.click(install() as HTMLElement);
+    await waitFor(() => expect(bridge.download).toHaveBeenCalledTimes(1));
+  });
+
+  it('offers neither for any other status', async () => {
+    const { bridge } = fullApi({ getStatus: vi.fn(async () => UP_TO_DATE) });
+    await mount(bridge);
+    await waitFor(() => expect(outcome()).toMatch(/newest/i));
+    expect(install()).toBeNull();
+    expect(notes()).toBeNull();
+  });
+
+  it('holds Check now while a download is under way', async () => {
+    const { bridge } = fullApi({
+      getStatus: vi.fn(
+        async () => ({ kind: 'downloading', version: '9.9.9', percent: 5 }) as UpdateStatus,
+      ),
     });
-    render(<UpdatePanel api={api} />);
-    expect(release(), 'nothing is offered before a check has answered').toBeNull();
-    fireEvent.click(button() as HTMLElement);
-    await waitFor(() => expect(release()).not.toBeNull());
-    fireEvent.click(release() as HTMLElement);
-    await waitFor(() => expect(api.open).toHaveBeenCalledTimes(1));
-  });
-
-  it('draws no release control for any other outcome', async () => {
-    const api = fakeApi({ kind: 'up-to-date' });
-    render(<UpdatePanel api={api} />);
-    fireEvent.click(button() as HTMLElement);
-    await waitFor(() => expect(outcome()).not.toBe(''));
-    expect(release()).toBeNull();
-  });
-
-  it('survives a bridge that rejects, rather than leaving the button stuck', async () => {
-    const api = {
-      check: vi.fn(async () => ({ kind: 'none' }) as UpdateStatus),
-      recheck: vi.fn(async () => {
-        throw new Error('channel gone');
-      }),
-      open: vi.fn(async () => false),
-    };
-    render(<UpdatePanel api={api} />);
-    fireEvent.click(button() as HTMLElement);
-    await waitFor(() => expect(outcome()).not.toBe(''));
-    expect(button()?.disabled).toBe(false);
+    await mount(bridge);
+    await waitFor(() => expect(button()?.disabled).toBe(true));
   });
 });
 
@@ -194,9 +226,10 @@ describe('the section is reachable from the dialog it belongs to', () => {
       <SettingsOverlay prefs={EMPTY_PREFS} theme="dark" onChange={() => {}} onClose={() => {}} />,
     );
     // NOT `getByRole('button', { name: 'Update' })`: the card's own header is
-    // a button with the same accessible name now, so the query is ambiguous.
+    // a button with the same accessible name, so the query is ambiguous.
     const navItem = document.querySelector('[data-settings-nav-item="update"]') as HTMLElement;
     fireEvent.click(navItem);
     expect(version()).toContain(VERSION);
+    expect(screen.queryByText(/downloads nothing/i)).toBeNull();
   });
 });

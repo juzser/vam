@@ -20,6 +20,7 @@ import {
   dialog,
   ipcMain,
   Notification,
+  powerMonitor,
   powerSaveBlocker,
   session,
   shell,
@@ -49,6 +50,7 @@ import { registerGitlabIntegrationIpc } from './integrations/gitlab-ipc.js';
 import { readGitlabAuthPane, startGitlabAuthPane } from './integrations/gitlab-pane.js';
 import { createGlabAuthRun, readGitlabAuthStatus } from './integrations/gitlab-status.js';
 import { registerGithubIntegrationIpc } from './integrations/ipc.js';
+import { CHANNELS } from './ipc/channels.js';
 import { registerSourceIpc } from './ipc/handlers.js';
 import { registerIssueIpc } from './issue/ipc.js';
 import { LAUNCH_FIXTURE_PROJECTS } from './launch-fixture.js';
@@ -91,8 +93,8 @@ import { createNodeEventSource } from './stream/event-source.js';
 import { registerStreamIpc } from './stream/register.js';
 import { registerTerminalIpc } from './terminal/ipc.js';
 import { registerTerminalStreamIpc } from './terminal/stream-ipc.js';
-import { checkForUpdate } from './update/check.js';
 import { registerUpdateIpc } from './update/ipc.js';
+import { createUpdater, type Updater } from './update/setup.js';
 import { readCodexUsage } from './usage/codex-reader.js';
 import { registerCodexUsageIpc, registerUsageIpc } from './usage/ipc.js';
 import { readUsage } from './usage/reader.js';
@@ -345,6 +347,15 @@ function registerContentSecurityPolicy(): void {
  * own call site) -- a quit before then has nothing to dispose of, which
  * `?.dispose()` already says without a second check.
  */
+/**
+ * The updater (`./update/setup.ts`), set once `whenReady` has built it. The
+ * lifecycle hooks at the bottom of this file and `createWindow` reach it
+ * through here; each treats null as "not up yet".
+ */
+let updater: Updater | null = null;
+/** The scheduler starts once per run, on the FIRST window shown. */
+let updateSchedulerArmed = false;
+
 let terminalTmuxRunner: ReturnType<typeof createControlTmuxRunner> | null = null;
 
 /**
@@ -438,6 +449,12 @@ function createWindow(): void {
 
   window.once('ready-to-show', () => {
     window.show();
+    // Only a packaged build checks on its own, and not before the first
+    // window is up plus a breath, so the check never competes with startup.
+    if (app.isPackaged && !updateSchedulerArmed) {
+      updateSchedulerArmed = true;
+      setTimeout(() => updater?.scheduler.start(), 5_000);
+    }
   });
 
   // The window is gone, so the unsaved text it was holding is gone with it --
@@ -793,7 +810,17 @@ void app.whenReady().then(async () => {
   // Cmd+0/Cmd+Plus/Cmd+- for page zoom and Cmd+W for Close Window, and a
   // native menu is matched before the page sees the keydown -- so those keys
   // are the renderer's only once this runs. See `./menu.js`.
-  applyApplicationMenu();
+  applyApplicationMenu({
+    onCheckForUpdates: () => {
+      const [window] = BrowserWindow.getAllWindows();
+      if (window) {
+        if (window.isMinimized()) window.restore();
+        window.show();
+        window.focus();
+      }
+      void updater?.controller.check({ manual: true });
+    },
+  });
   // Registered before the window is created, so the renderer's first call can
   // never race an unregistered channel.
   registerSourceIpc(ipcMain, DESKTOP_SOURCES);
@@ -831,20 +858,30 @@ void app.whenReady().then(async () => {
       forceRefresh,
     }),
   );
-  // Contacts github.com ONCE, here, as vam starts: one unauthenticated GET
-  // carrying no token, no query and nothing about this machine's sessions,
-  // projects or paths. Nothing is awaited -- the window is created below
-  // while the check is still in flight -- and there is no timer, so this is
-  // the only request of the session. It downloads and installs nothing; the
-  // second channel opens the release page in the operator's own browser.
-  // See `./update/check.ts`.
-  registerUpdateIpc(
-    ipcMain,
-    () => checkForUpdate(app.getVersion()),
-    async (url) => {
-      await shell.openExternal(url);
+  // The self-updater. It contacts github.com only from the scheduler (a
+  // packaged build, 5 s after the first window, then about daily) or when the
+  // operator presses "Check now"; one unauthenticated GET, no token, nothing
+  // about this machine's sessions. `updates/` is swept at EVERY startup. See
+  // `./update/setup.ts`.
+  updater = await createUpdater({
+    currentVersion: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch,
+    env: process.env,
+    execPath: process.execPath,
+    pid: process.pid,
+    userData: app.getPath('userData'),
+    quit: () => app.quit(),
+    broadcast: (status) => {
+      for (const open of BrowserWindow.getAllWindows()) {
+        if (!open.isDestroyed()) open.webContents.send(CHANNELS.updateStatusChanged, status);
+      }
     },
-  );
+    openExternal: (url) => shell.openExternal(url),
+  });
+  registerUpdateIpc(ipcMain, updater.controller);
+  // A laptop that slept through the daily slot checks on wake.
+  powerMonitor.on('resume', () => updater?.scheduler.onResume());
   // Electron's clipboard, not the page's: the permission policy above denies
   // `clipboard-sanitized-write`, so a renderer-side write is refused in the
   // packaged app. See `./clipboard/ipc.ts`.
@@ -1094,6 +1131,9 @@ void app.whenReady().then(async () => {
  */
 app.on('before-quit', (event) => {
   quitGuard.beforeQuit(event);
+  // Told whether the guard vetoed: a vetoed quit cancels a pending install.
+  updater?.controller.onBeforeQuit(event.defaultPrevented);
+  if (!event.defaultPrevented) updater?.scheduler.stop();
   // Best-effort only, and never awaited: the veto above is what may still
   // stop the quit, and a persistent tmux client left running one more
   // instant is an idle process, not a correctness problem. A tab reopened
@@ -1112,6 +1152,17 @@ app.on('before-quit', (event) => {
   // the moment it actually exits, the same hygiene `dispose()` gives every
   // other resource on this line.
   keepAwakeController.dispose();
+});
+
+// The quit is real by now. When an update is staged, hold it open until the
+// installer has been launched, then quit again (the pending handle is cleared,
+// so the second pass falls straight through).
+app.on('will-quit', (event) => {
+  const launching = updater?.controller.onWillQuit();
+  if (launching) {
+    event.preventDefault();
+    void launching.then(() => app.quit());
+  }
 });
 
 app.on('window-all-closed', () => {

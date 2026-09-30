@@ -1,6 +1,6 @@
 /**
  * Settings -> Update, under the REAL Electron shell: opens the dialog,
- * navigates to the Update card, presses "check for updates", and reports
+ * navigates to the Update card (without pressing Check now, so no network), and reports
  * whatever the page actually did -- console errors, an uncaught page error,
  * a tripped `ErrorBoundary`, or a render-process crash -- none of which a
  * `jsdom` unit test or the browser e2e harness can see (the browser build has
@@ -110,20 +110,15 @@ async function main() {
     "document.querySelector('[data-update-version]')?.textContent ?? null",
   );
 
-  await run(`document.querySelector('[data-update-check]')?.click(); undefined`);
-  // The real GitHub endpoint answers in well under a second on an ordinary
-  // connection; `UPDATE_CHECK_TIMEOUT_MS` bounds the unbounded case at 10s
-  // (`main/update/check.ts`), so 12s covers a genuine reply and the bounded
-  // one both, without this probe waiting the full worst case every run.
-  await run(`(async () => {
-    const deadline = Date.now() + 12000;
-    while (Date.now() < deadline) {
-      const el = document.querySelector('[data-update-outcome]');
-      if (el && el.textContent) return;
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-  })()`);
-
+  // NO NETWORK. "Check now" is deliberately NOT pressed: an unpackaged run
+  // never starts the scheduler (`main/index.ts` arms it only when
+  // `app.isPackaged`), so nothing in this probe contacts github.com. What is
+  // proven over the real preload bridge is the READ half -- `getStatus` and
+  // `getAutoCheck` answered, and the panel drew from them without a page error.
+  await waitForSelector(run, '[data-switch="auto-update"]');
+  const autoCheckChecked = await run(
+    "document.querySelector('[data-switch=\"auto-update\"]')?.getAttribute('aria-checked') ?? null",
+  );
   const outcomeText = await run(
     "document.querySelector('[data-update-outcome]')?.textContent ?? null",
   );
@@ -131,6 +126,9 @@ async function main() {
     const btn = document.querySelector('[data-update-check]');
     return btn ? { disabled: btn.disabled, ariaBusy: btn.getAttribute('aria-busy'), text: btn.textContent } : null;
   })()`);
+  const updateCardText = await run(
+    "document.querySelector('[data-testid=\"update-notice\"]')?.textContent ?? null",
+  );
   const renderFailureText = await run(
     "document.querySelector('[data-testid=\"render-failure\"]')?.textContent ?? null",
   );
@@ -138,6 +136,8 @@ async function main() {
 
   const result = {
     versionText,
+    autoCheckChecked,
+    updateCardText,
     outcomeText,
     checkButtonState,
     renderFailureText,
