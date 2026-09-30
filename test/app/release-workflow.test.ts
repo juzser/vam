@@ -25,6 +25,19 @@ describe('release.yml', () => {
     }
   });
 
+  it('fails early when the tag differs from package.json version, on every runner', () => {
+    const step = WORKFLOW.indexOf('name: check tag matches package.json');
+    expect(step).toBeGreaterThan(-1);
+    expect(step).toBeLessThan(WORKFLOW.indexOf('- run: pnpm install'));
+    const block = WORKFLOW.slice(step, WORKFLOW.indexOf('- run: pnpm install'));
+    expect(block).toContain('shell: bash');
+    expect(block).toContain('${TAG#v}');
+    expect(block).toContain('package.json');
+    expect(block).toContain('exit 1');
+    // The tag reaches the script through env, not string interpolation.
+    expect(block).toContain('TAG: ${{ needs.create.outputs.tag }}');
+  });
+
   it('uploads the fragments', () => {
     expect(WORKFLOW).toContain('dist-app/vam-update-*.json');
   });
