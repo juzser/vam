@@ -20,22 +20,28 @@
  * overlay that drops focus on the body leaves a keyboard-first app with no
  * cursor at all.
  *
- * ── THE SHAPE, WHICH THE OPERATOR ASKED FOR IN ONE SENTENCE ───────────────
+ * ── THE SHAPE: TWO COLUMNS OF WHOLE SECTIONS, LABEL LEFT, KEY RIGHT ───────
  *
- * Translated: "the shortcut table when you press `?` needs a search box,
- * clearer section separation, and a one-column layout with the label on one
- * side and the shortcut on the other."
+ * The operator once asked for "a one-column layout with the label on one side
+ * and the shortcut on the other", and that is what this sheet was: one column
+ * reads down the CAPTIONS, the question an operator actually has ("how do I
+ * …"). It grew to a hundred rows, though, and a single 620px column made the
+ * sheet a scroll of two screens with most of the width empty. So the choice is
+ * reversed, and only the SECTIONS are laid side by side — never the rows of
+ * one: a row is still a caption on the left and its key on the right, and it
+ * keeps the whole width of its column, which the half-page rows need because
+ * they disclose a second keystroke in prose.
  *
- * ONE COLUMN, LABEL LEFT, KEY RIGHT. It was two columns of `chip label` pairs,
- * which put a key in the middle of the sheet and made a caption the thing that
- * had to fit around it. One column reads down the CAPTIONS, which is the
- * question an operator actually has ("how do I …"), and it gives a caption the
- * whole width — which the half-page rows need, because they disclose a second
- * keystroke in prose and a narrow column is what would tempt a truncation.
+ * FROM `lg` UP (a 1024px viewport), the sections flow in CSS columns in the
+ * registry's own order and the browser balances them; each section refuses to
+ * split across the break, so a heading never lands alone under a column. Below
+ * `lg` the default single column applies, which is also what zoom reflow needs.
+ * No list of sections lives here: the grouping is `keysheet.ts`'s, so the
+ * sheet and the bindings cannot drift.
  *
  * SECTIONS THAT READ AS SECTIONS: a rule above each heading and real space
- * around it, rather than two columns of headings at whatever height the
- * previous group happened to end.
+ * around it, rather than headings at whatever height the previous group
+ * happened to end.
  *
  * ── THE SEARCH BOX HOLDS THE KEYBOARD, AND WHAT FOLLOWS FROM THAT ─────────
  *
@@ -126,7 +132,7 @@ export function KeySheet({ onClose }: KeySheetProps) {
           screen while a hundred rows scroll under it. It was one scrolling
           block, which would have carried the search box away on the first
           wheel. */}
-      <div className="relative flex max-h-[80vh] w-[min(620px,92vw)] flex-col overflow-hidden rounded-md border border-line bg-panel">
+      <div className="relative flex max-h-[85vh] w-[min(1040px,94vw)] flex-col overflow-hidden rounded-md border border-line bg-panel">
         <div className="flex flex-none items-baseline gap-2 border-line border-b px-4 py-3">
           <h2 className="font-semibold text-heading text-ink">keyboard</h2>
           <span className="text-ink-faint text-meta">
@@ -157,7 +163,10 @@ export function KeySheet({ onClose }: KeySheetProps) {
             className="w-full bg-transparent text-body text-ink outline-none placeholder:text-ink-faint"
           />
         </div>
-        <div data-key-sheet-groups className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        <div
+          data-key-sheet-groups
+          className="min-h-0 flex-1 overflow-y-auto px-4 py-3 lg:columns-2 lg:gap-x-8"
+        >
           {groups.length === 0 ? (
             // NOT A BLANK SHEET. A list that empties under a keystroke reads
             // as a broken surface; this names what was searched for, says how
@@ -166,7 +175,7 @@ export function KeySheet({ onClose }: KeySheetProps) {
             <p
               data-key-sheet-empty
               role="status"
-              className="vam-sentence py-6 text-center text-control text-ink-dim"
+              className="vam-sentence py-6 text-center text-control text-ink-dim lg:[column-span:all]"
             >
               no key matches “{query}” — clear the box to see all {total}
             </p>
@@ -177,7 +186,7 @@ export function KeySheet({ onClose }: KeySheetProps) {
               // before the first thing on the sheet.
               <section
                 key={group.group}
-                className="mt-4 border-line border-t pt-3 first:mt-0 first:border-0 first:pt-0"
+                className="mt-4 break-inside-avoid border-line border-t pt-3 first:mt-0 first:border-0 first:pt-0"
               >
                 <h3
                   data-key-sheet-group={group.group}
