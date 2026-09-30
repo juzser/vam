@@ -91,7 +91,7 @@ import { createNodeEventSource } from './stream/event-source.js';
 import { registerStreamIpc } from './stream/register.js';
 import { registerTerminalIpc } from './terminal/ipc.js';
 import { registerTerminalStreamIpc } from './terminal/stream-ipc.js';
-import { checkForUpdate } from './update/check.js';
+import { checkForUpdateLegacy } from './update/check.js';
 import { registerUpdateIpc } from './update/ipc.js';
 import { readCodexUsage } from './usage/codex-reader.js';
 import { registerCodexUsageIpc, registerUsageIpc } from './usage/ipc.js';
@@ -840,7 +840,7 @@ void app.whenReady().then(async () => {
   // See `./update/check.ts`.
   registerUpdateIpc(
     ipcMain,
-    () => checkForUpdate(app.getVersion()),
+    () => checkForUpdateLegacy(app.getVersion()),
     async (url) => {
       await shell.openExternal(url);
     },
