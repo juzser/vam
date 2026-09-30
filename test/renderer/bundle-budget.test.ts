@@ -790,11 +790,15 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  *
  *     integration 70278b8c            entry 728,231 B  (218,640 B gzip)
  *     integration + phone terminal    entry 728,731 B  (218,716 B gzip)
+ *     integration + phone terminal
+ *       + the four held heads         entry 729,147 B  (218,875 B gzip)
  *
  * Wave 1's 8 renderer tasks grew the entry by a mean of 181.4 B raw and
  * 53.5 B gzip each. Sixteen renderer tasks remain that can grow it, so the
  * projection is 16 x 181.4 = +2,902 B raw and 16 x 53.5 = +856 B gzip on top
- * of the combined figure: 732,049 B / 219,731 B (an estimate from the wave-1
+ * of the 729,147 B / 218,875 B base (integration + phone terminal + the four
+ * held heads, planner-measured; the 728,731 B / 218,716 B line above is
+ * integration + phone terminal alone): 732,049 B / 219,731 B (an estimate from the wave-1
  * mean, not a measurement), plus ~0.2% slack for another machine's zlib, the
  * thirteenth paragraph's lesson. `ENTRY_BUDGET_BYTES` moves 728,700 ->
  * 733,600 and `ENTRY_GZIP_BUDGET_BYTES` moves 218,700 -> 220,200. This is an
