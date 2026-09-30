@@ -26,10 +26,34 @@
  * Run by hand, or by `e2e/run-web-guards.mjs`:
  *   node e2e/transcript-column-shots.mjs http://localhost:5522 docs/ui
  */
+import { spawnSync } from 'node:child_process';
 import { chromium } from 'playwright-core';
 
 const origin = process.argv[2] ?? 'http://localhost:5522';
 const outDir = process.argv[3] ?? 'docs/ui';
+
+/**
+ * EVERY CHECK AND EVERY SHOT RUNS IN BOTH THEMES. The script is one long
+ * top-level flow, so the theme loop is the process itself: without
+ * `VAM_E2E_THEME` it re-runs itself once per theme and fails if either run
+ * does; with it, it is a single-theme run whose pages all seed that theme
+ * through `localStorage` (as phone-question-shots.mjs does) and whose
+ * screenshot names carry it.
+ */
+const THEMES = ['light', 'dark'];
+const theme = process.env.VAM_E2E_THEME;
+if (theme === undefined) {
+  let failed = false;
+  for (const t of THEMES) {
+    console.log(`=== theme: ${t} ===`);
+    const r = spawnSync(process.execPath, process.argv.slice(1), {
+      stdio: 'inherit',
+      env: { ...process.env, VAM_E2E_THEME: t },
+    });
+    if (r.status !== 0) failed = true;
+  }
+  process.exit(failed ? 1 : 0);
+}
 
 /** The demo session's turns, oldest first — the order the column must draw. */
 const OLDEST_INPUT = "What's the factory's status right now?";
@@ -40,6 +64,16 @@ const DEMO_TURNS = 7;
 const MAX_DECISIONS = 3276;
 
 const browser = await chromium.launch();
+const newPageOrig = browser.newPage.bind(browser);
+browser.newPage = async (opts) => {
+  const p = await newPageOrig(opts);
+  await p.addInitScript((t) => {
+    if (window.localStorage.getItem('vam.prefs.v1') === null) {
+      window.localStorage.setItem('vam.prefs.v1', JSON.stringify({ theme: t }));
+    }
+  }, theme);
+  return p;
+};
 const page = await browser.newPage({ viewport: { width: 1100, height: 620 } });
 page.on('pageerror', (err) => console.error('PAGE ERROR:', err));
 page.on('console', (msg) => {
@@ -314,8 +348,8 @@ const moreText = ((await more.innerText()) ?? '').toLowerCase();
 console.log(`  no-pager note: ${JSON.stringify(await more.innerText())}`);
 // THE FIFTH ANSWER, ON FILE. Nothing else in this repo can produce a picture
 // of it: the state is unreachable from any source vam assembles.
-await page.screenshot({ path: `${outDir}/transcript-column-no-pager.png` });
-console.log(`${outDir}/transcript-column-no-pager.png`);
+await page.screenshot({ path: `${outDir}/transcript-column-no-pager-${theme}.png` });
+console.log(`${outDir}/transcript-column-no-pager-${theme}.png`);
 check(
   'in words, not only in an attribute',
   /cannot read further back/.test(moreText),
@@ -648,20 +682,20 @@ await column.evaluate((el) => {
   el.scrollTop = el.scrollHeight;
 });
 await page.waitForTimeout(200);
-await page.screenshot({ path: `${outDir}/transcript-column-bottom.png` });
-console.log(`${outDir}/transcript-column-bottom.png`);
+await page.screenshot({ path: `${outDir}/transcript-column-bottom-${theme}.png` });
+console.log(`${outDir}/transcript-column-bottom-${theme}.png`);
 await column.evaluate((el) => {
   el.scrollTop = Math.round(el.scrollHeight * 0.35);
 });
 await page.waitForTimeout(200);
-await page.screenshot({ path: `${outDir}/transcript-column-scrolled.png` });
-console.log(`${outDir}/transcript-column-scrolled.png`);
+await page.screenshot({ path: `${outDir}/transcript-column-scrolled-${theme}.png` });
+console.log(`${outDir}/transcript-column-scrolled-${theme}.png`);
 await column.evaluate((el) => {
   el.scrollTop = 0;
 });
 await page.waitForTimeout(200);
-await page.screenshot({ path: `${outDir}/transcript-column-top.png` });
-console.log(`${outDir}/transcript-column-top.png`);
+await page.screenshot({ path: `${outDir}/transcript-column-top-${theme}.png` });
+console.log(`${outDir}/transcript-column-top-${theme}.png`);
 
 // ------------------------------------- 8. A JUMP MOVES, AND HIDES NOTHING
 //
@@ -809,8 +843,8 @@ check(
     : volumeState === 'more-read' && /\d/.test(volumeText),
   `${mounted} of ${MAX_DECISIONS} mounted, boundary says ${volumeState}`,
 );
-await volume.screenshot({ path: `${outDir}/transcript-column-volume.png` });
-console.log(`${outDir}/transcript-column-volume.png`);
+await volume.screenshot({ path: `${outDir}/transcript-column-volume-${theme}.png` });
+console.log(`${outDir}/transcript-column-volume-${theme}.png`);
 
 // --------------------------------------------------- 11. READING FURTHER BACK
 //
@@ -1007,8 +1041,8 @@ const sawRefusal = await settles(
 check('a read that could not be made settles into a state of its own', sawRefusal);
 const refused = await columnState();
 console.log(`  refusal: ${refused.start}/${refused.more} — ${JSON.stringify(refused.moreText)}`);
-await back.screenshot({ path: `${outDir}/transcript-column-unavailable.png` });
-console.log(`${outDir}/transcript-column-unavailable.png`);
+await back.screenshot({ path: `${outDir}/transcript-column-unavailable-${theme}.png` });
+console.log(`${outDir}/transcript-column-unavailable-${theme}.png`);
 check(
   'a read that failed is drawn as a failure, not as an ending',
   refused.more === 'unavailable' && refused.start === 'read-limit',
@@ -1061,8 +1095,8 @@ const inFlight = await back.evaluate(() => ({
   said: document.querySelector('[data-column-more]')?.textContent?.trim() ?? '',
 }));
 console.log(`  in flight: ${JSON.stringify(inFlight)}`);
-await back.screenshot({ path: `${outDir}/transcript-column-reading.png` });
-console.log(`${outDir}/transcript-column-reading.png`);
+await back.screenshot({ path: `${outDir}/transcript-column-reading-${theme}.png` });
+console.log(`${outDir}/transcript-column-reading-${theme}.png`);
 check(
   'while a read is in flight the column says so',
   inFlight.more === 'reading' && /reading/i.test(inFlight.said),
@@ -1222,10 +1256,10 @@ await back.evaluate(() => {
   col.scrollTop = 0;
 });
 await back.waitForTimeout(200);
-await back.screenshot({ path: `${outDir}/transcript-column-session-start.png` });
-console.log(`${outDir}/transcript-column-session-start.png`);
-await back.screenshot({ path: `${outDir}/transcript-column-read-back.png` });
-console.log(`${outDir}/transcript-column-read-back.png`);
+await back.screenshot({ path: `${outDir}/transcript-column-session-start-${theme}.png` });
+console.log(`${outDir}/transcript-column-session-start-${theme}.png`);
+await back.screenshot({ path: `${outDir}/transcript-column-read-back-${theme}.png` });
+console.log(`${outDir}/transcript-column-read-back-${theme}.png`);
 
 // ------------------------------------------------- 12. CONCISE MODE, COLLAPSED
 //
@@ -1280,7 +1314,9 @@ async function conciseIn(mode, viewport = { width: 1100, height: 620 }, panes = 
       // browser, and seeding the new boolean here would make the migration
       // untested at the only place it can be seen working.
       JSON.stringify(
-        panes === undefined ? { turnProgress: mode } : { turnProgress: mode, panes },
+        panes === undefined
+          ? { turnProgress: mode, theme }
+          : { turnProgress: mode, panes, theme },
       ),
     ],
   );
@@ -1381,8 +1417,8 @@ check(
   JSON.stringify(collapsed.texts),
 );
 await toOldest(foldedPage);
-await foldedPage.screenshot({ path: `${outDir}/concise-collapsed.png` });
-console.log(`${outDir}/concise-collapsed.png`);
+await foldedPage.screenshot({ path: `${outDir}/concise-collapsed-${theme}.png` });
+console.log(`${outDir}/concise-collapsed-${theme}.png`);
 
 // --- 12.2 IT IS A FOLD, NOT A CLASS NAME. The same session at the same
 // viewport, launched in the other mode: the column has to be TALLER. jsdom
@@ -1406,8 +1442,8 @@ check(
 // line there and the line's presence is not a verdict.
 check('shown draws no unreadable-failures caveat at all', shown.caveat === null, String(shown.caveat));
 await toOldest(openPage);
-await openPage.screenshot({ path: `${outDir}/concise-shown.png` });
-console.log(`${outDir}/concise-shown.png`);
+await openPage.screenshot({ path: `${outDir}/concise-shown-${theme}.png` });
+console.log(`${outDir}/concise-shown-${theme}.png`);
 await openPage.close();
 
 // --- 12.3 TWO DIFFERENT UNKNOWNS, ON SCREEN. Collapsed, the ABSENCE of a line
@@ -1465,8 +1501,8 @@ check(
     cannotLook.caveatBox.top >= cannotLook.countBox.bottom - 0.5,
   `count ${cannotLook.countBox?.height}px tall, caveat top ${cannotLook.caveatBox?.top} vs count bottom ${cannotLook.countBox?.bottom}`,
 );
-await narrow.screenshot({ path: `${outDir}/concise-unreadable-failures.png` });
-console.log(`${outDir}/concise-unreadable-failures.png`);
+await narrow.screenshot({ path: `${outDir}/concise-unreadable-failures-${theme}.png` });
+console.log(`${outDir}/concise-unreadable-failures-${theme}.png`);
 await narrow.close();
 
 await openSession(foldedPage, 'crosscheck-2');
@@ -1522,8 +1558,8 @@ check(
 // meant to show.
 await foldedPage.locator('[data-focus-view-note]').scrollIntoViewIfNeeded();
 await foldedPage.waitForTimeout(150);
-await foldedPage.screenshot({ path: `${outDir}/concise-settings-row.png` });
-console.log(`${outDir}/concise-settings-row.png`);
+await foldedPage.screenshot({ path: `${outDir}/concise-settings-row-${theme}.png` });
+console.log(`${outDir}/concise-settings-row-${theme}.png`);
 await foldedPage.locator('[data-switch="focus-view"]').click();
 // Escape rather than the backdrop button: the backdrop is `inset-0` UNDER the
 // panel, so a click at its centre lands on the panel instead, and Escape is
