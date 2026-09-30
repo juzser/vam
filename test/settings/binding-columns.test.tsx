@@ -77,6 +77,8 @@ describe('the columns of a shortcut row', () => {
       // The label leads, and it is not a key slot.
       expect(cells[0]?.querySelector('[data-binding-slot]')).toBeNull();
       expect((cells[0]?.textContent ?? '').length).toBeGreaterThan(0);
+      // A reserved row has a fixed key and no slot to rebind (keyboard-labels).
+      if (line.querySelector('[data-binding-label^="reserved:"]')) continue;
       // Then the slots, in slot order.
       for (const slot of [0, 1]) {
         const cell = cells[slot + 1] as HTMLElement;
@@ -265,10 +267,7 @@ describe('the columns of a shortcut row', () => {
       expect(expected.length).toBeGreaterThan(0);
       expect(
         drawn.map((line) =>
-          line
-            .querySelector('[data-binding-slot]')
-            ?.getAttribute('data-binding-slot')
-            ?.replace(/:\d+$/, ''),
+          line.querySelector('[data-binding-label]')?.getAttribute('data-binding-label'),
         ),
         mode,
       ).toEqual(expected.map((line) => line.id));

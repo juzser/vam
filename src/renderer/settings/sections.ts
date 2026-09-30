@@ -280,6 +280,7 @@ const MODE_HINTS: Readonly<Record<CursorMode, string>> = {
 
 export function shortcutSections(groups: readonly BindingGroup[]): readonly ShortcutSection[] {
   const rows = groups.flatMap((group) => group.rows);
+  const reserved = groups.flatMap((group) => group.reserved ?? []);
   const modeSections = CURSOR_MODES.map((mode) => ({
     id: mode,
     title: MODE_TITLES[mode],
@@ -288,7 +289,10 @@ export function shortcutSections(groups: readonly BindingGroup[]): readonly Shor
     // says what the key does here rather than what it does somewhere.
     rows: rows
       .filter((row) => row.byMode !== null)
-      .map((row) => ({ ...row, label: row.byMode?.[mode] ?? row.label })),
+      .map((row) => ({ ...row, label: row.byMode?.[mode] ?? row.label }))
+      // Reserved rows carry their own label for the mode they belong to, and
+      // come after the ordinary rows.
+      .concat(reserved.filter((row) => row.reservedMode === mode)),
   }));
   const groupSections = groups.map((group) => ({
     id: group.group,
