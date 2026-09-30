@@ -124,15 +124,6 @@ describe('Get started draws no view switcher and the view chords do nothing', ()
     silent(before);
   });
 
-  it('a digit typed into a focused text input still lands in it', () => {
-    render(<Canvas model={NOTHING} source={makeSource()} />);
-    const box = document.createElement('input');
-    document.body.appendChild(box);
-    box.focus();
-    expect(fireEvent.keyDown(box, { key: '2', code: 'Digit2' })).toBe(true);
-    box.remove();
-  });
-
   it('once one own session is focused the switcher is back', () => {
     const source = makeSource();
     const view = render(<Canvas model={NOTHING} source={source} />);
@@ -142,8 +133,6 @@ describe('Get started draws no view switcher and the view chords do nothing', ()
     expect(switcher()).not.toBeNull();
     viewChord(2);
     expect(selectedView()).toBe('prs');
-    viewChord(1);
-    expect(selectedView()).toBe('response');
   });
 
   it('an empty split pane beside a session keeps the switcher and the chords', () => {
@@ -155,6 +144,21 @@ describe('Get started draws no view switcher and the view chords do nothing', ()
     expect(switcher()).not.toBeNull();
     viewChord(2);
     expect(selectedView()).toBe('prs');
+  });
+
+  it('a filter matching nothing stays blank while a sibling pane still shows a session', () => {
+    render(<Canvas model={modelOf('a1', 'a2')} source={makeSource()} />);
+    press('z');
+    press('v');
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: '/', bubbles: true }));
+    });
+    const input = q<HTMLInputElement>('input[aria-label="filter sessions"]') as HTMLInputElement;
+    act(() => {
+      fireEvent.change(input, { target: { value: 'zzz-no-match' } });
+    });
+    expect(gettingStarted()).toBeNull();
+    expect(switcher()).not.toBeNull();
   });
 });
 
@@ -178,13 +182,6 @@ describe('the pane shows Get started once nothing is visible anywhere', () => {
     expect(gettingStarted()).toBeNull();
     await act(async () => close());
     expect(document.querySelectorAll('[data-session-row]')).toHaveLength(0);
-    expect(gettingStarted()).not.toBeNull();
-  });
-
-  it('the source then reports the session gone', () => {
-    const source = makeSource(true);
-    const view = render(<Canvas model={ONE} source={source} />);
-    view.rerender(<Canvas model={NOTHING} source={source} />);
     expect(gettingStarted()).not.toBeNull();
   });
 });

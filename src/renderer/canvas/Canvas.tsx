@@ -6278,10 +6278,12 @@ function CanvasInner({
           ? source.status === 'loading'
           : false;
 
-  // Get started is on: first load answered, no session visible anywhere. Gates
-  // `gettingStarted`, the view switcher and `pickView`. `hasOwnSession` is not
-  // a term: a closed vam session stays in the unfiltered model (blank pane).
-  const gettingStartedOn = entries.length === 0 && !sidebarLoading;
+  // Get started: first load answered, no session visible anywhere (no filtered
+  // entry, no pane drawing one). Gates the screen, the switcher and `pickView`.
+  const gettingStartedOn =
+    entries.length === 0 &&
+    !sidebarLoading &&
+    !leaves(panes).some((leaf) => leaf.sessionId !== null && entriesById.has(leaf.sessionId));
 
   /**
    * Every `KeyAction` the grammar can produce, run — the ONE place a
@@ -6584,7 +6586,6 @@ function CanvasInner({
           // means this route cannot become the one that disagrees if that ever
           // changes. `tabs.ts` is where a view's presence is decided; this is
           // a caller reporting which shell it is, not deciding anything.
-          // No switcher on Get started: its chords are silent no-ops.
           if (gettingStartedOn) return;
           const drawn = visibleTabs(terminalTab, filesTab, phone);
           const view = tabForDigit(drawn, action.digit);
@@ -8255,15 +8256,7 @@ function CanvasInner({
               paneFocused={isFocused}
               drafts={draftsBySession}
               pending={pending}
-              // See `emptyText`'s own comment: "pick one from the sidebar" is
-              // only true while the sidebar has a row to pick. `entries` and
-              // `hasOwnSession` are the SAME two facts `gettingStarted`'s own
-              // condition reads a few hundred lines below -- the operator's
-              // own finding, reading the first screenshot, was this line
-              // contradicting that screen's "no sessions yet" 40px below it;
-              // `hasOwnSession` is what keeps it from making the SAME claim
-              // early, before the first load answers, or over a session vam
-              // started that is merely dismissed or filtered out of view.
+              // Same facts as `gettingStartedOn`, plus `hasOwnSession` (see `emptyText`).
               emptyText={
                 entries.length === 0 && !hasOwnSession && !sidebarLoading
                   ? 'no sessions yet'
