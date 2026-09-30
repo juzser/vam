@@ -1,6 +1,7 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -102,6 +103,12 @@ describe('macInstallScript', () => {
     expect(script.startsWith('#!/bin/sh\n')).toBe(true);
   });
 
+  it('checks for a process still running from the bundle before moving it', () => {
+    const script = macInstallScript(base);
+    expect(script).toContain("pgrep' -f");
+    expect(script.indexOf("pgrep' -f")).toBeLessThan(script.indexOf('mv "$APP" "$BAK"'));
+  });
+
   it.skipIf(!posix)('is valid sh (sh -n), also with hostile paths', () => {
     const file = join(dir, 'a.sh');
     writeFileSync(file, macInstallScript(base));
@@ -134,7 +141,10 @@ describe.skipIf(!posix)('macInstallScript run against fake bundles', () => {
     chmodSync(p, 0o755);
     return p;
   }
-  function run(opts: Partial<Parameters<typeof macInstallScript>[0]> = {}) {
+  function run(
+    opts: Partial<Parameters<typeof macInstallScript>[0]> = {},
+    env: Record<string, string> = {},
+  ) {
     // A spawned-and-exited child is a pid that is certainly not alive.
     const dead = spawnSync('/usr/bin/true').pid;
     const script = macInstallScript({
@@ -150,7 +160,7 @@ describe.skipIf(!posix)('macInstallScript run against fake bundles', () => {
     });
     const file = join(dir, 'install.sh');
     writeFileSync(file, script, { mode: 0o700 });
-    return spawnSync('/bin/sh', [file], { encoding: 'utf8' });
+    return spawnSync('/bin/sh', [file], { encoding: 'utf8', env: { ...process.env, ...env } });
   }
   const read = (p: string) => readFileSync(p, 'utf8');
 
@@ -190,6 +200,45 @@ describe.skipIf(!posix)('macInstallScript run against fake bundles', () => {
     expect(existsSync(backup)).toBe(false);
     expect(read(calls)).toContain(`open ${app}`);
     expect(read(log)).toMatch(/rolled back/i);
+  });
+
+  it('does not open anything when the restore itself fails, and says where the old app is', () => {
+    rmSync(newApp, { recursive: true });
+    // A `mv` that works for the first two calls (aside, in) and fails the third (restore).
+    const counter = join(dir, 'mv-count');
+    const stubMv = join(bin, 'mv');
+    writeFileSync(
+      stubMv,
+      `#!/bin/sh\nn=$(cat ${shellQuote(counter)} 2>/dev/null || echo 0)\nn=$((n + 1))\necho $n > ${shellQuote(counter)}\n[ "$n" -ge 3 ] && exit 1\nexec /bin/mv "$@"\n`,
+    );
+    chmodSync(stubMv, 0o755);
+    const r = run({}, { PATH: `${bin}:${process.env.PATH}` });
+    expect(r.status).not.toBe(0);
+    expect(read(calls)).not.toContain('open');
+    expect(read(log)).toContain(`the previous app is at ${backup}`);
+    expect(existsSync(join(backup, 'Contents', 'v'))).toBe(true);
+  });
+
+  it('only removes the half-moved app when it exists', () => {
+    expect(macInstallScript(base)).toMatch(/if \[ -e "\$APP" \]; then\n\s+rm -rf "\$APP"/);
+  });
+
+  it('aborts untouched, without deleting staging, while a process still runs from the bundle', () => {
+    const exe = join(app, 'Contents', 'MacOS', 'vamx');
+    mkdirSync(dirname(exe), { recursive: true });
+    copyFileSync('/bin/sleep', exe);
+    const live = spawn(exe, ['30'], { stdio: 'ignore' });
+    try {
+      const r = run();
+      expect(r.status).not.toBe(0);
+      expect(read(join(app, 'Contents', 'v'))).toBe('old');
+      expect(existsSync(newApp)).toBe(true);
+      expect(existsSync(staging)).toBe(true);
+      expect(read(calls)).toBe('');
+      expect(read(log)).toMatch(/still running/i);
+    } finally {
+      live.kill();
+    }
   });
 
   it('leaves the old app untouched when it cannot be moved aside', () => {

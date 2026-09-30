@@ -71,20 +71,27 @@ export type MacScriptInput = {
   /** Give up (touching nothing) if the app is still alive after this long. */
   readonly waitSeconds?: number;
   /** Command paths; absolute by default so PATH cannot redirect them. */
-  readonly commands?: { readonly open: string; readonly xattr: string };
+  readonly commands?: {
+    readonly open: string;
+    readonly xattr: string;
+    readonly pgrep?: string;
+  };
 };
 
 /**
  * The swap, as `/bin/sh` text:
- *  1. wait for the pid to exit (timeout -> abort, nothing touched);
+ *  1. wait for the pid to exit (timeout -> abort, nothing touched), then make
+ *     sure nothing still runs from the bundle (abort, nothing touched);
  *  2. move the old app aside (fails -> nothing changed, relaunch old);
- *  3. move the new app in (fails -> remove the partial, restore old, relaunch old);
+ *  3. move the new app in (fails -> remove the partial, restore old, relaunch old;
+ *     if the restore fails too, say where the old app is and open nothing);
  *  4. clear quarantine attributes, delete backup and staging, open the new app.
  */
 export function macInstallScript(input: MacScriptInput): string {
   const q = shellQuote;
   const open = q(input.commands?.open ?? '/usr/bin/open');
   const xattr = q(input.commands?.xattr ?? '/usr/bin/xattr');
+  const pgrep = q(input.commands?.pgrep ?? '/usr/bin/pgrep');
   const limit = Math.max(1, Math.round((input.waitSeconds ?? 120) * 2));
   return `#!/bin/sh
 PID=${Number(input.pid)}
@@ -105,6 +112,12 @@ while kill -0 "$PID" 2>/dev/null; do
   fi
   sleep 0.5
 done
+# Escape the path for pgrep's regex.
+PAT=$(printf '%s' "$APP/Contents/MacOS/" | sed 's#[][\\\\.*^$(){}?+|]#\\\\&#g')
+if ${pgrep} -f "$PAT" >/dev/null 2>&1; then
+  log "update: the app is still running from $APP; nothing changed"
+  exit 1
+fi
 rm -rf "$BAK"
 if ! mv "$APP" "$BAK"; then
   log "update: could not move the old app aside; nothing changed"
@@ -113,8 +126,13 @@ if ! mv "$APP" "$BAK"; then
 fi
 if ! mv "$NEW" "$APP"; then
   log "update: could not move the new app in; rolled back"
-  rm -rf "$APP"
-  mv "$BAK" "$APP"
+  if [ -e "$APP" ]; then
+    rm -rf "$APP"
+  fi
+  if ! mv "$BAK" "$APP"; then
+    log "update: restore failed; the previous app is at $BAK"
+    exit 1
+  fi
   ${open} "$APP"
   exit 1
 fi
