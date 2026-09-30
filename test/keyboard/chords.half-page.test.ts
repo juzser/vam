@@ -209,8 +209,8 @@ describe('the generated key sheet names both, and names the scope', () => {
     // would be the half-right kind the `hjkl` audit was about.
     const insert = rowFor('Mod-d', 'insert');
     expect(insert, 'no Insert sheet row for Mod-d').toBeDefined();
-    expect(insert?.label).not.toMatch(/half a screen/i);
-    expect(insert?.label).toMatch(/typ/i);
+    expect(insert?.label).not.toMatch(/nothing here/i);
+    expect(insert?.label).toMatch(/does not scroll/i);
   });
 });
 

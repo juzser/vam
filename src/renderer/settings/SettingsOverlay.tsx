@@ -2117,6 +2117,36 @@ function BindingLine({
 }) {
   const slots = Array.from({ length: MAX_BINDINGS }, (_, slot) => slot);
   const armed = capturing?.id === row.id && capturing.scope === scope;
+  if (row.reserved === true) {
+    // A fixed key: the grammar answers it ahead of every table, so it has no
+    // slot to rebind, no capture box and no reset. Same grid as an ordinary
+    // row so the label and key columns stay aligned.
+    const key = row.keys[0] ?? '';
+    return (
+      <li className="grid grid-cols-[1fr_minmax(112px,max-content)_minmax(112px,max-content)] items-center gap-x-[10px] py-[3px]">
+        <span className="flex min-w-0 items-center gap-2">
+          <span
+            data-binding-label={row.id}
+            title={row.label}
+            className="vam-sentence truncate text-body text-ink"
+          >
+            {row.label}
+          </span>
+        </span>
+        <span
+          role="img"
+          title="fixed — cannot be rebound"
+          aria-label={`${chordSymbols(key)}, ${row.label} — fixed, cannot be rebound`}
+          className={`${SLOT_BOX} cursor-default border-ink-faint bg-transparent text-ink-dim`}
+        >
+          <kbd data-settings-keys className="border-none bg-transparent">
+            <ChordGlyphs chord={key} />
+          </kbd>
+        </span>
+        <span aria-hidden="true" />
+      </li>
+    );
+  }
   return (
     // Three columns, in the order the row is read: what the action is, then its
     // first key, then its second. The label takes the one flexible track and
