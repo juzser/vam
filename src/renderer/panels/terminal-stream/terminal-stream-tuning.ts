@@ -60,3 +60,14 @@ export const TERMINAL_STREAM_SCROLLBACK = 5000;
  */
 export const TERMINAL_STREAM_HIGH_WATER_MARK = 2 * 1024 * 1024;
 export const TERMINAL_STREAM_LOW_WATER_MARK = TERMINAL_STREAM_HIGH_WATER_MARK / 4;
+
+/**
+ * WHEEL SPEED, both renderers (operator round 8, EC-69): one wheel notch
+ * moves 3 lines, matching macOS Terminal and iTerm, and Alt-held moves 5x
+ * that. xterm's own defaults are 1 line and 5 (its `scrollSensitivity` /
+ * `fastScrollSensitivity` options); `TerminalTab.tsx`'s `wheelNotches`
+ * multiplies its tick count by `TERMINAL_WHEEL_LINES_PER_NOTCH` too, so the
+ * two screens scroll at the same pace. No setting: one named constant.
+ */
+export const TERMINAL_WHEEL_LINES_PER_NOTCH = 3;
+export const TERMINAL_FAST_SCROLL_FACTOR = 5;

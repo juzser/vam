@@ -40,10 +40,12 @@ class FakeTerminal {
   open(container: HTMLElement) {
     container.appendChild(this.textarea);
   }
-  write(_text: string, callback?: () => void) {
+  write(text: string, callback?: () => void) {
+    this.writes.push(text);
     callback?.();
   }
   reset() {}
+  writes: string[] = [];
   onData() {}
   attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean) {
     this.customKeyEventHandler = handler;
@@ -218,8 +220,8 @@ describe('finding cbd56848: a cancelled/superseded open closes what it opened', 
       expect(close).toHaveBeenCalledWith('s-old');
       expect(close).not.toHaveBeenCalledWith('s-new');
 
-      // Attached to the surviving stream -- the status rule shows its name.
-      expect(document.querySelector('[data-terminal-stream-badge]')?.textContent).toBe('vam-new');
+      // Attached to the surviving stream -- the frame carries its seed.
+      expect(lastTerm?.writes.at(-1)).toBe('seed-new');
     } finally {
       visibility.mockRestore();
     }
@@ -275,7 +277,7 @@ describe('finding cbd56848: a cancelled/superseded open closes what it opened', 
         await Promise.resolve();
         await Promise.resolve();
       });
-      expect(document.querySelector('[data-terminal-stream-badge]')?.textContent).toBe('vam-b');
+      expect(lastTerm?.writes.at(-1)).toBe('seed-b');
       expect(close).toHaveBeenCalledTimes(1);
       expect(close).not.toHaveBeenCalledWith('s-b');
 
@@ -331,7 +333,7 @@ describe('finding cbd56848: a cancelled/superseded open closes what it opened', 
         await Promise.resolve();
       });
       expect(close).not.toHaveBeenCalled();
-      expect(document.querySelector('[data-terminal-stream-badge]')?.textContent).toBe('vam-b');
+      expect(lastTerm?.writes.at(-1)).toBe('seed-b');
 
       // The FIRST (superseded) open resolves ok late.
       await act(async () => {
@@ -369,7 +371,7 @@ describe('finding cbd56848: a cancelled/superseded open closes what it opened', 
         await Promise.resolve();
         await Promise.resolve();
       });
-      expect(document.querySelector('[data-terminal-stream-badge]')?.textContent).toBe('vam-a');
+      expect(lastTerm?.writes.at(-1)).toBe('seed-a');
       expect(close).not.toHaveBeenCalled();
 
       // A duplicate 'visible', with no 'hidden' before it, arrives once the
@@ -382,7 +384,7 @@ describe('finding cbd56848: a cancelled/superseded open closes what it opened', 
 
       expect(close).toHaveBeenCalledTimes(1);
       expect(close).toHaveBeenCalledWith('s-a');
-      expect(document.querySelector('[data-terminal-stream-badge]')?.textContent).toBe('vam-b');
+      expect(lastTerm?.writes.at(-1)).toBe('seed-b');
 
       unmount();
       expect(close).toHaveBeenCalledTimes(2);

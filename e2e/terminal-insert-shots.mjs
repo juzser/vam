@@ -232,7 +232,7 @@ const state = () =>
       onInput: active !== null && active.hasAttribute?.('data-terminal-input') === true,
       inPane: pane !== null && active !== null && pane.contains(active),
       pane: pane !== null,
-      badge: document.querySelector('[data-terminal-badge]')?.textContent ?? null,
+      badge: pane?.getAttribute('aria-label') ?? null,
       status: document.querySelector('[data-status]')?.textContent ?? null,
       sent: globalThis.window.__sent.map((key) => key.kind),
     };

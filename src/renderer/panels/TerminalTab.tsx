@@ -89,6 +89,7 @@ import { composedStrokes } from './terminal-compose.js';
 import { placeCursor } from './terminal-cursor.js';
 import { preparePastedText } from './terminal-paste.js';
 import { fitPane, sameSize } from './terminal-size.js';
+import { TERMINAL_WHEEL_LINES_PER_NOTCH } from './terminal-stream/terminal-stream-tuning.js';
 
 /**
  * How often the open tab re-reads the pane.
@@ -701,18 +702,22 @@ export function paneShape(mode: PaneReadMode): 'screen' | 'window' {
  * dropped or rounded up: a slow drag of a few pixels per frame would
  * otherwise either never scroll or scroll a row per frame. Page units are
  * read as a page of rows. The sign is kept; the caller reads it as the
- * direction and takes the size.
+ * direction and takes the size. Every notch is worth
+ * `TERMINAL_WHEEL_LINES_PER_NOTCH` (3) ticks, so a wheel scrolls at the pace
+ * of macOS Terminal; the carry stays in whole-row pixels, below one row.
  */
 export function wheelNotches(
   carry: number,
   delta: { readonly deltaY: number; readonly deltaMode: number },
   row: { readonly px: number; readonly perPage: number },
 ): { readonly ticks: number; readonly carry: number } {
-  if (delta.deltaMode === 1) return { ticks: Math.trunc(delta.deltaY), carry };
+  if (delta.deltaMode === 1) {
+    return { ticks: Math.trunc(delta.deltaY) * TERMINAL_WHEEL_LINES_PER_NOTCH, carry };
+  }
   const px = delta.deltaMode === 2 ? delta.deltaY * row.perPage * row.px : delta.deltaY;
   const total = carry + px;
-  const ticks = Math.trunc(total / row.px);
-  return { ticks, carry: total - ticks * row.px };
+  const rows = Math.trunc(total / row.px);
+  return { ticks: rows * TERMINAL_WHEEL_LINES_PER_NOTCH, carry: total - rows * row.px };
 }
 
 /**
@@ -1278,15 +1283,6 @@ export function TerminalTab({
     if (atBottom(drawnHeight.current, pane, row)) scrollPane(pane, 'bottom', row);
     drawnHeight.current = pane.scrollHeight;
   }, [lines, fontSize]);
-
-  /**
-   * Whether the pane has the keyboard -- ANYWHERE INSIDE IT, which since the
-   * hidden box below is no longer the same question as whether this element is
-   * `document.activeElement`. It draws exactly one thing -- the hint naming
-   * the way out -- and it draws it only then, because Escape and Tab are both
-   * ways to leave and neither means anything to draw a hint about otherwise.
-   */
-  const [hasFocus, setHasFocus] = useState(false);
 
   /**
    * THE BOX AN INPUT METHOD CAN ACTUALLY COMPOSE INTO, and the reason this
@@ -2233,7 +2229,6 @@ export function TerminalTab({
             takeKeyboard();
           },
           onFocus: (event: FocusEvent<HTMLElement>) => {
-            setHasFocus(true);
             // Only focus that landed on the PANE is forwarded; focus that landed
             // on the box is already where it belongs.
             if (event.target !== paneRef.current || pointerDown.current) return;
@@ -2248,14 +2243,6 @@ export function TerminalTab({
              * anything can be typed into it.
              */
             queueMicrotask(takeKeyboard);
-          },
-          onBlur: (event: FocusEvent<HTMLElement>) => {
-            // Focus moving between the pane and its own hidden box is not the
-            // operator leaving: without this the corner hint would blink off
-            // and on at every forward, and `hasFocus` would be false while the
-            // keys were still going to this session.
-            if (paneRef.current?.contains(event.relatedTarget) === true) return;
-            setHasFocus(false);
           },
           'aria-label': `terminal of ${view.name}: typing goes to this session, press Esc or Tab to leave`,
           /* A REGION, SPELLED AS A ROLE. This was a `<section>` with an
@@ -2486,108 +2473,37 @@ export function TerminalTab({
             // biome-ignore lint/suspicious/noArrayIndexKey: a screen line's identity is its position
             <Fragment key={index}>
               {spans.map((span, position) => (
-                <span
-                  // biome-ignore lint/suspicious/noArrayIndexKey: as above -- a run's identity is where it sits on the line
-                  key={position}
-                  /* The cursor's own cell, and the ONLY span that carries this
+                // biome-ignore lint/suspicious/noArrayIndexKey: as above -- a run's identity is where it sits on the line
+                <Fragment key={position}>
+                  <span
+                    /* The cursor's own cell, and the ONLY span that carries this
                      -- `placeCursor` splits the run it fell inside so that the
                      mark is exactly one cell wide (`terminal-cursor.ts`). */
-                  data-terminal-cursor={span.cursor ? '' : undefined}
-                  className={span.cursor ? CURSOR_CLASSES : spanClasses(span)}
-                >
-                  {span.text}
-                </span>
+                    data-terminal-cursor={span.cursor ? '' : undefined}
+                    className={span.cursor ? CURSOR_CLASSES : spanClasses(span)}
+                  >
+                    {span.text}
+                  </span>
+                  {span.cursor && composing !== '' && (
+                    /* WHAT THE INPUT METHOD IS BUILDING, drawn where a native
+                     terminal draws it: inline at the caret, because the
+                     screen here is a capture of a pane the syllable has not
+                     reached yet. Underlined as the conventional "not yet
+                     committed" cue; it vanishes on compositionend. */
+                    <span
+                      data-terminal-composing
+                      className="bg-panel text-ink underline decoration-ink-quiet"
+                    >
+                      {composing}
+                    </span>
+                  )}
+                </Fragment>
               ))}
               {index < lines.length - 1 ? '\n' : null}
             </Fragment>
           ))}
         </pre>
       </OverlayScroll>
-      {/* THE RULE UNDER THE SCREEN: what this terminal is, on one line that
-          does not sit on top of it.
-
-          WHAT WAS WRONG WITH THE BADGE IT REPLACES. The session's name floated
-          bottom-right OVER the content, dimmed and `pointer-events-none`,
-          defended as costing no row. It cost no row and it covered the one
-          corner a terminal is read at last -- and it was drawn in the faintest
-          ink vam has, over whatever the agent had just printed there. A rule
-          under the screen costs exactly one row and is legible; the row is the
-          price of the name being readable, and it is the row every terminal
-          multiplexer already spends on a status line.
-
-          THE NAME SITS AT THE RIGHT END. It is what an operator reads when they
-          have lost track of which pane this is, so it stays out of the way. The
-          branch is not drawn here: Claude Code's own statusLine carries it.
-
-          WHAT IS DELIBERATELY NOT ON IT. No model name and no context
-          percentage: vam's model has neither (`domain/model.ts`), and a status
-          line that invents one is worse than one that is shorter than
-          somebody else's. No token budget either -- `CanvasBudget` exists, but
-          it is the FACTORY's spend summed across every epic and it reaches
-          only the browser shell, which has no terminal bridge at all; drawn
-          here it would be a number about something else, under one session's
-          screen, in a shell where it can never actually appear.
-
-          ONE ROW, AND ONLY WHERE THERE IS A SCREEN. Every other `PaneView`
-          draws a sentence and no pane, and a rule under a sentence would be
-          chrome for a terminal that is not there. */}
-      <div
-        data-terminal-status
-        className="flex flex-none items-center gap-2 border-line border-t pt-1 font-mono text-meta text-ink-faint"
-      >
-        {/* The gap. A spacer rather than `justify-between`, so that the name
-            keeps its own right edge whether or not anything is drawn on the
-            left. */}
-        <span className="flex-1" />
-        {/* WHOSE TERMINAL THIS IS.
-
-            THE NAME WAS INVISIBLE ONCE AND THAT WAS A DEFECT OF MINE. When the
-            two lines above the pane came off, the session's name went into the
-            pane's `aria-label` -- real for a screen reader and nothing at all
-            for the person looking at the screen. The operator asked for the
-            CHROME back off the top, not for the identity to go with it, and
-            then reported exactly that: switching to this tab, they could not
-            see which session they were looking at.
-
-            It is the tmux session's name rather than the row's title because
-            that is the fact this tab alone can tell them: the panel above
-            already names the session, and a project vam started twice has two
-            panes that only this name tells apart -- it is also what they would
-            read in `tmux ls`.
-
-            `aria-hidden` still, and the truncation kept. The pane's own
-            accessible name already carries the session, so reading this aloud
-            would say it twice; and a tmux session name is unbounded while this
-            rule is one line. */}
-        <span
-          data-terminal-badge
-          aria-hidden="true"
-          className="max-w-[60%] flex-none truncate text-ink-quiet"
-        >
-          {/* WHAT THE INPUT METHOD IS BUILDING, because the box it is building
-              it in cannot be seen. A native terminal draws the in-flight
-              candidate under the cursor; vam's screen is a one-second capture
-              of a pane the syllable has not reached yet, so there is nothing
-              there to draw it on. Without this line the operator types
-              `tieengs` and watches an unchanged screen until the syllable
-              commits, which is the same "the keys do nothing" the bug itself
-              looked like. It rides the name because it is the transient fact --
-              the name is still there when it goes -- and it comes FIRST for
-              the same reason. */}
-          {composing !== '' && (
-            <span data-terminal-composing className="text-ink">
-              {composing}
-              {' · '}
-            </span>
-          )}
-          {view.name}
-          {hasFocus && (
-            <span data-terminal-exit-hint className="text-ink-quiet">
-              {' · Esc or Tab leaves'}
-            </span>
-          )}
-        </span>
-      </div>
     </div>
   );
 }

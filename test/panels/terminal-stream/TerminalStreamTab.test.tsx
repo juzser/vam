@@ -698,48 +698,6 @@ describe('frame parity with TerminalTab.tsx (docs/design/terminal-streaming.md)'
     // reads as the same surface either way the setting is flipped.
     expect(lastTerm?.options.cursorBlink).toBe(false);
   });
-
-  it('draws a status rule under the pane with the resolved tmux session name and no branch, even when a caller still hands it one', async () => {
-    withBridge({
-      open: async () => ({ ok: true, streamId: 'stream-1', seed: 'hi', name: 'vam-atlas-a1b2c3' }),
-    });
-    // The cast keeps the removed prop out of the type while proving an old
-    // caller still draws nothing for it.
-    render(
-      <TerminalStreamTab projectId="p1" rowId="s1" {...({ branch: 'work/atlas-fit' } as object)} />,
-    );
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(q('[data-terminal-stream-branch]')).toBeNull();
-    expect(q('[data-terminal-stream-status] svg.lucide-git-branch')).toBeNull();
-    expect(q('[data-terminal-stream-status]')?.textContent).not.toContain('work/atlas-fit');
-    expect(q('[data-terminal-stream-badge]')?.textContent).toBe('vam-atlas-a1b2c3');
-  });
-
-  it('draws no name until the stream has actually opened -- no invented identity', async () => {
-    let resolveOpen:
-      | ((value: { ok: true; streamId: string; seed: string; name: string }) => void)
-      | undefined;
-    withBridge({
-      open: () =>
-        new Promise((resolve) => {
-          resolveOpen = resolve;
-        }),
-    });
-    render(<TerminalStreamTab projectId="p1" rowId="s1" />);
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(q('[data-terminal-stream-badge]')).toBeNull();
-    await act(async () => {
-      resolveOpen?.({ ok: true, streamId: 'stream-1', seed: 'hi', name: 'vam-atlas-a1b2c3' });
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(q('[data-terminal-stream-badge]')?.textContent).toBe('vam-atlas-a1b2c3');
-  });
 });
 
 describe('renderer-side backpressure (coordinator follow-up: bytes handed to xterm vs. parsed)', () => {

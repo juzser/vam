@@ -26,7 +26,8 @@
 
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cellUnder, TerminalTab } from '../../src/renderer/panels/TerminalTab.js';
+import { cellUnder, TerminalTab, wheelNotches } from '../../src/renderer/panels/TerminalTab.js';
+import { TERMINAL_WHEEL_LINES_PER_NOTCH } from '../../src/renderer/panels/terminal-stream/terminal-stream-tuning.js';
 import type { PaneKey, PaneSendResult, PaneView } from '../../src/shared/terminal.js';
 
 const ATLAS = 'claude-code:atlas-11111111';
@@ -102,10 +103,10 @@ describe('a wheel over a pane whose program asked for the mouse', () => {
     const unclaimed = notch(el, -3);
     await settle();
     expect(unclaimed).toBe(false);
-    expect(wheels(send)).toEqual([{ kind: 'wheel', direction: 'up', ticks: 3, column: 1, row: 1 }]);
+    expect(wheels(send)).toEqual([{ kind: 'wheel', direction: 'up', ticks: 9, column: 1, row: 1 }]);
     notch(el, 2);
     await settle();
-    expect(wheels(send).at(-1)).toMatchObject({ direction: 'down', ticks: 2 });
+    expect(wheels(send).at(-1)).toMatchObject({ direction: 'down', ticks: 6 });
   });
 
   it('names the cell under the pointer, in the screen the program drew', () => {
@@ -145,10 +146,10 @@ describe('a wheel over a pane whose program asked for the mouse', () => {
     if (ruler === null) throw new Error('no ruler');
     ruler.getBoundingClientRect = () =>
       ({ width: 56, height: 15, left: 0, top: 0, right: 56, bottom: 15 }) as DOMRect;
-    // 20px of a 15px row: one notch, 5px carried.
+    // 20px of a 15px row: one row (3 ticks), 5px carried.
     fireEvent.wheel(el, { deltaY: -20, deltaMode: 0 });
     await settle();
-    expect(wheels(send).at(-1)).toMatchObject({ direction: 'up', ticks: 1 });
+    expect(wheels(send).at(-1)).toMatchObject({ direction: 'up', ticks: 3 });
     // 10px more makes 15: the carried remainder is what turns this into a notch.
     fireEvent.wheel(el, { deltaY: -10, deltaMode: 0 });
     await settle();
@@ -157,6 +158,31 @@ describe('a wheel over a pane whose program asked for the mouse', () => {
     fireEvent.wheel(el, { deltaY: -4, deltaMode: 0 });
     await settle();
     expect(wheels(send)).toHaveLength(2);
+  });
+
+  it('turns one line-mode notch into TERMINAL_WHEEL_LINES_PER_NOTCH ticks', () => {
+    const row = { px: 15, perPage: 30 };
+    expect(wheelNotches(0, { deltaY: 1, deltaMode: 1 }, row).ticks).toBe(
+      TERMINAL_WHEEL_LINES_PER_NOTCH,
+    );
+    expect(TERMINAL_WHEEL_LINES_PER_NOTCH).toBe(3);
+  });
+
+  it('turns one row of pixels into the same ticks, keeping the carry under a row', () => {
+    const row = { px: 15, perPage: 30 };
+    const one = wheelNotches(0, { deltaY: 15, deltaMode: 0 }, row);
+    expect(one.ticks).toBe(TERMINAL_WHEEL_LINES_PER_NOTCH);
+    expect(one.carry).toBe(0);
+    const part = wheelNotches(0, { deltaY: 20, deltaMode: 0 }, row);
+    expect(part.ticks).toBe(TERMINAL_WHEEL_LINES_PER_NOTCH);
+    expect(part.carry).toBeLessThan(row.px);
+  });
+
+  it('still clamps one event to the bridge cap after the multiply', async () => {
+    const { send } = await mount(ok(true));
+    notch(pane(), -20);
+    await settle();
+    expect(wheels(send)[0]).toMatchObject({ direction: 'up', ticks: 40 });
   });
 
   it('never sends more notches in one key than the bridge admits', async () => {
