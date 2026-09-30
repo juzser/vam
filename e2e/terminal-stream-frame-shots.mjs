@@ -43,7 +43,7 @@
  *   - the RESOLVED colour of the RED/GRN/BLU markers: the sixteen-ANSI claim,
  *     falsified directly rather than trusted because both read the same
  *     scheme store.
- *   - the status rule: the session name, same text.
+ *   - no status strip and no visible session name under either screen (EC-21).
  *   - the cursor: a steady block on both -- `TerminalTab.tsx` never blinks
  *     (its own header explains why) and `TerminalStreamTab.tsx` is
  *     configured to match it (`cursorBlink: false` at construction).
