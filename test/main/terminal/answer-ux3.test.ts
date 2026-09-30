@@ -9,7 +9,7 @@
  */
 import { afterAll, describe, expect, it } from 'vitest';
 import type { TmuxRun, TmuxRunResult } from '../../../src/main/sources/tmux/spawn.js';
-import { answerQuestion } from '../../../src/main/terminal/answer.js';
+import { answerQuestion, readPicker } from '../../../src/main/terminal/answer.js';
 import type { AnswerRequest, AnswerResult, AnswerStep } from '../../../src/shared/answer.js';
 import { COLOUR_ON, FRUIT_ASKED } from './answer-live-screens.js';
 import {
@@ -249,5 +249,23 @@ describe('EC-3b-label: a label is joined to its continuation row on width eviden
     const { t, run } = wrapped('Rewrite as a general principle,');
     expect(await run()).toEqual({ kind: 'unmatched', label: 'Rewrite as a general principle,' });
     expect(t.keys()).toEqual([]);
+  });
+
+  it('with no rule row there is no width to join by, so the full label is not found', async () => {
+    const bare = SYNTHETIC_WRAPPED_LABEL.split('\n')
+      .filter((line) => !/^─+$/.test(line))
+      .join('\n');
+    const { t, run } = wrapped(SYNTHETIC_WRAPPED_LABEL_FULL, [bare]);
+    expect(await run()).toEqual({ kind: 'unmatched', label: SYNTHETIC_WRAPPED_LABEL_FULL });
+    expect(t.keys()).toEqual([]);
+  });
+
+  it('reads the wrapped label as one row and leaves the descriptions unjoined', () => {
+    const picked = readPicker(SYNTHETIC_WRAPPED_LABEL);
+    expect(picked?.rows.map((row) => row.label)).toEqual([
+      'Reject',
+      SYNTHETIC_WRAPPED_LABEL_FULL,
+      'Type something.',
+    ]);
   });
 });
