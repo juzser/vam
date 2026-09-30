@@ -36,7 +36,7 @@
  *      expansion -- so at a phone width it collapsed to nothing at all. The
  *      message wraps on its own line now.
  *
- * And `Open in browser` is the route to github.com that never existed: main
+ * And `Create issue` is the route to github.com that never existed: main
  * owns `shell.openExternal` and takes a TITLE and a BODY, never a URL, so the
  * policy that denies this renderer every off-origin navigation is kept exactly
  * as written. It opens the prefilled FORM; submitting is still the operator's
@@ -96,7 +96,10 @@ export function ErrorLogPanel({ onClose }: ErrorLogPanelProps) {
     setNote(
       (await openIssue(composed.title, composed.body))
         ? 'the prefilled form is open in your browser — read it, then submit'
-        : 'no browser opened — the URL is below',
+        : // NO URL ON SCREEN to point at here: the button's build hides it.
+          copied === true
+          ? 'no browser opened — the prefilled URL is on your clipboard'
+          : 'no browser opened',
     );
   }
 
@@ -217,8 +220,12 @@ export function ErrorLogPanel({ onClose }: ErrorLogPanelProps) {
           <div className="mt-3 rounded border border-line bg-raised p-2">
             <p className="mb-1 text-ink-dim text-control">
               {copied === true
-                ? 'the prefilled issue URL is on your clipboard — read this, then open it'
-                : 'the clipboard refused — open it below, or select the URL and copy it'}
+                ? openIssue !== undefined
+                  ? 'the prefilled issue URL is on your clipboard — read this, then create the issue'
+                  : 'the prefilled issue URL is on your clipboard — read this, then open it'
+                : openIssue !== undefined
+                  ? 'the clipboard refused — create the issue below'
+                  : 'the clipboard refused — select the URL below and copy it'}
             </p>
             <pre
               data-testid="report-preview"
@@ -226,7 +233,13 @@ export function ErrorLogPanel({ onClose }: ErrorLogPanelProps) {
             >
               {report.body}
             </pre>
-            <p className="mt-1 break-all font-mono text-meta text-ink-faint">{report.url}</p>
+            {/* THE URL ONLY WHERE NOTHING CAN OPEN IT. With the button there
+                it is a line of noise under the preview (the operator asked for
+                it gone); the browser build has no button, and there the
+                selectable URL is the one route left. */}
+            {openIssue === undefined && (
+              <p className="mt-1 break-all font-mono text-meta text-ink-faint">{report.url}</p>
+            )}
             {/* THE ROUTE TO GITHUB, and the reason it is a button rather than
                 an anchor: this renderer may not navigate off-origin at all
                 (`src/main/csp.ts`), so an `<a href>` would be a dead control.
@@ -235,14 +248,14 @@ export function ErrorLogPanel({ onClose }: ErrorLogPanelProps) {
 
                 ABSENT, NOT DISABLED, in the browser build: there is no bridge
                 there, and a control that cannot act must not be drawn. The URL
-                above is selectable, which is the browser build's answer. */}
+                drawn there instead is selectable, which is that build's answer. */}
             {openIssue !== undefined && (
               <button
                 type="button"
                 onClick={() => void openReport(report)}
                 className="mt-2 cursor-pointer rounded border border-line px-2 py-0.5 text-control text-ink-dim hover:text-ink"
               >
-                Open in browser
+                Create issue
               </button>
             )}
           </div>
