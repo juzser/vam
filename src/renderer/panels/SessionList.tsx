@@ -3487,24 +3487,16 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
             <span className="flex-1" />
           </>
         )}
-        {/* The layer above: a group of the projects vam already knows, named
-            "project" because that is the operator's word for it (see the
-            vocabulary table in `domain/model.ts`). LEFT of the directory
-            picker, untouched and unmoved. Both are the same 26px square.
-
-            THE ACCESSIBLE NAME STAYS QUALIFIED; renaming it would ripple into
-            `screen.getByLabelText` in the canvas's own new-session tests, well
-            past the two controls the operator actually looked at. So the
-            TOOLTIP -- what a sighted or keyboard-focused person reads -- does
-            the disambiguating instead: "a group of repos" says plainly this
-            button makes the OUTER layer, not the same thing as the button
-            beside it. */}
+        {/* Group = the outer layer above projects (the operator's word for it
+            is in the vocabulary table in `domain/model.ts`). LEFT of the
+            directory picker, untouched and unmoved. Both are the same 26px
+            square. */}
         {onCreateGroup !== undefined && (
-          <ShortcutTip label="New project (a group of repos)">
+          <ShortcutTip label="New group">
             <button
               type="button"
               data-new-group
-              aria-label="new project (a group of repos)"
+              aria-label="new group"
               onClick={() => {
                 setGroupDraftName('');
                 setGroupDraft({ kind: 'new' });
@@ -3534,17 +3526,10 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
             </button>
           </ShortcutTip>
         )}
-        {/* Choose a directory, start a session in it — the only thing this
-            button does; a project is derived from the cwd of a live session,
-            so there is nothing to create and nothing to store. THE TOOLTIP
-            NAMES THE ACTION, NOT "project": the accessible name stays "new
-            project" (see the button above), but the words a person reads on
-            focus never repeat the word the group button just used for
-            something else. */}
-        <ShortcutTip
-          label={newSessionDecline ?? 'Choose a directory and start a session in it'}
-          action={NEW_PROJECT_ACTION}
-        >
+        {/* Project = the directory picker: choose a directory and start a
+            session in it; a project is derived from the cwd of a live
+            session, so there is nothing to create or store. */}
+        <ShortcutTip label={newSessionDecline ?? 'New project'} action={NEW_PROJECT_ACTION}>
           <button
             type="button"
             data-new-project

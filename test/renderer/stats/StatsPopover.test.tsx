@@ -63,6 +63,17 @@ describe('StatsPopover', () => {
     expect(panel.getAttribute('aria-label') ?? '').not.toMatch(/usage/i);
   });
 
+  it('titles the header "Usage" before Details, and has no refresh control', async () => {
+    await open();
+    const panel = screen.getByRole('dialog');
+    const title = screen.getByRole('heading', { name: 'Usage' });
+    const details = screen.getByRole('button', { name: 'Details' });
+    expect(panel.contains(title)).toBe(true);
+    expect(title.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(title.parentElement?.className).toContain('justify-between');
+    expect(screen.queryByRole('button', { name: /refresh/i })).toBeNull();
+  });
+
   it('Details calls onStats once and closes the popover', async () => {
     const { onStats } = await open();
     fireEvent.click(screen.getByRole('button', { name: 'Details' }));
