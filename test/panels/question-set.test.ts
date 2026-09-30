@@ -57,6 +57,17 @@ describe('the set the card draws', () => {
     expect(set.map((one) => one.id)).toEqual(['b:0', 'b:1']);
   });
 
+  it('follows the last question even when that call is fully cancelled', () => {
+    const cancelled = { ...q('b:0', 'no'), cancelled: true as const };
+    const set = newestSet([q('a:0'), cancelled]);
+    expect(set.map((one) => one.id)).toEqual(['b:0']);
+  });
+
+  it('keeps the newest call whole when an older call is interleaved with it', () => {
+    const set = newestSet([q('a:0'), q('b:0'), q('a:1', 'x'), q('b:1')]);
+    expect(set.map((one) => one.id)).toEqual(['b:0', 'b:1']);
+  });
+
   it('is empty for a session that has asked nothing', () => {
     expect(newestSet([])).toEqual([]);
   });

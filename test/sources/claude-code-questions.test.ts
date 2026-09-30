@@ -88,6 +88,48 @@ describe('AskUserQuestion, as the transcript records it', () => {
     expect(explicitFalse).not.toHaveProperty('cancelled');
   });
 
+  it('marks every question of a rejected multi-question call', () => {
+    const rejected: Json = {
+      type: 'user',
+      message: {
+        content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'no', is_error: true }],
+      },
+    };
+    const { questions } = facts(jsonl(ask('toolu_1', [PROVIDERS, PROVIDERS]), rejected));
+    expect(questions).toHaveLength(2);
+    expect(questions.map((one) => one.cancelled)).toEqual([true, true]);
+  });
+
+  it('marks only the occurrence the is_error result closed when an id is reused', () => {
+    const rejected: Json = {
+      type: 'user',
+      message: {
+        content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'no', is_error: true }],
+      },
+    };
+    const { questions } = facts(
+      jsonl(ask('toolu_1', [PROVIDERS]), rejected, ask('toolu_1', [PROVIDERS])),
+    );
+    expect(questions).toHaveLength(2);
+    expect(questions[0]?.cancelled).toBe(true);
+    expect(questions[1]).not.toHaveProperty('cancelled');
+    expect(questions[1]?.answer).toBeNull();
+  });
+
+  it('reads only a literal true as is_error, and an unreadable errored result still closes', () => {
+    const closing = (isError: unknown, content: unknown): Json => ({
+      type: 'user',
+      message: {
+        content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content, is_error: isError }],
+      },
+    });
+    const stringy = facts(jsonl(ask('toolu_1', [PROVIDERS]), closing('true', 'x'))).questions[0];
+    const unreadable = facts(jsonl(ask('toolu_1', [PROVIDERS]), closing(true, 42))).questions[0];
+    expect(stringy).not.toHaveProperty('cancelled');
+    expect(unreadable?.cancelled).toBe(true);
+    expect(unreadable?.answer).not.toBeNull();
+  });
+
   it('does not close a question because SOME other tool_result arrived', () => {
     const tail = jsonl(ask('toolu_1', [PROVIDERS]), answer('toolu_9', 'unrelated'));
     expect(facts(tail).questions[0]?.answer).toBeNull();
