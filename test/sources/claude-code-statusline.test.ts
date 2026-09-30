@@ -15,10 +15,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
-const holder = vi.hoisted(() => ({ dir: '' }));
-vi.mock('electron', () => ({
-  default: { app: { getPath: () => holder.dir } },
-}));
+// Assigning `dir` hands it to the status-line module, as `main/index.ts` does at startup.
+const holder = {
+  current: '',
+  get dir(): string {
+    return this.current;
+  },
+  set dir(dir: string) {
+    this.current = dir;
+    setStatusLineUserDataDir(dir);
+  },
+};
 vi.mock('../../src/main/sources/tmux/spawn.js', async (importOriginal) => {
   const real = await importOriginal<typeof import('../../src/main/sources/tmux/spawn.js')>();
   return {
@@ -35,6 +42,7 @@ import { CLAUDE_CODE_SOURCE } from '../../src/main/sources/claude-code/source.js
 import {
   formatStatusLine,
   installStatusLine,
+  setStatusLineUserDataDir,
   startTextWithStatusLine,
   withStatusLineSettings,
 } from '../../src/main/sources/claude-code/statusline.js';

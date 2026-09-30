@@ -79,6 +79,7 @@ import { createPrActionRunner, runPrActionViaCli } from './sources/claude-code/p
 import { prRepoOverride } from './sources/claude-code/pr-repos.js';
 import { projectIdOf } from './sources/claude-code/project-id.js';
 import { CLAUDE_CODE_SOURCE } from './sources/claude-code/source.js';
+import { setStatusLineUserDataDir } from './sources/claude-code/statusline.js';
 import { defaultCodexSource } from './sources/codex/source.js';
 import { combineSources } from './sources/combine.js';
 import type { MainSource } from './sources/source.js';
@@ -125,6 +126,9 @@ const userDataOverride = resolveUserDataOverride(process.env);
 if (userDataOverride !== undefined) {
   app.setPath('userData', userDataOverride);
 }
+// Handed over here, after the override, so the status-line install lands in the
+// same profile; `statusline.ts` itself imports no electron.
+setStatusLineUserDataDir(app.getPath('userData'));
 
 /**
  * Serves `test/electron/launch.test.ts` only, selected by `VAM_FIXTURE_SOURCE`

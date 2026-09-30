@@ -904,7 +904,7 @@ export function TerminalStreamTab(props: {
          own `view` starts `null` for the identical reason. */}
       <div
         data-terminal-stream-status
-        className="flex flex-none items-center gap-2 border-line border-t pt-1 font-mono text-meta text-ink-faint"
+        className="flex min-h-[21px] flex-none items-center gap-2 border-line border-t pt-1 font-mono text-meta text-ink-faint"
       >
         <span className="flex-1" />
         {name !== null && (

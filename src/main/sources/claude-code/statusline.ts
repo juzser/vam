@@ -21,14 +21,14 @@
  * single-quote escaped by `shellQuote`.
  *
  * The install is LAZY and memoised: the first `withStatusLineSettings` call
- * asks Electron for `userData` and writes the files, so `main/index.ts` is
- * not involved. Where Electron is not there to ask (a unit test without a
- * mock), the argv comes back unchanged: a status line is never worth a launch.
+ * writes the files under the `userData` directory `main/index.ts` handed over
+ * with `setStatusLineUserDataDir` (this module imports no `electron`, so it
+ * bundles for Node-only harnesses). Until that is called the argv comes back
+ * unchanged: a status line is never worth a launch.
  */
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import electron from 'electron';
 import { resolveProvider } from '../../../shared/providers.js';
 
 export interface StatusLineInput {
@@ -140,12 +140,15 @@ export function installStatusLine(userDataDir: string): string {
 
 const installed = new Map<string, string>();
 
+let userDataDir: string | null = null;
+
+/** Called once by `main/index.ts` at startup. `null` (the default) disables the install. */
+export function setStatusLineUserDataDir(dir: string | null): void {
+  userDataDir = dir;
+}
+
 function userDataDirOrNull(): string | null {
-  try {
-    return electron.app.getPath('userData');
-  } catch {
-    return null;
-  }
+  return userDataDir;
 }
 
 /**
@@ -154,17 +157,17 @@ function userDataDirOrNull(): string | null {
  */
 export function withStatusLineSettings(
   argv: readonly string[],
-  userDataDir: string | null = userDataDirOrNull(),
+  dir: string | null = userDataDirOrNull(),
 ): readonly string[] {
-  if (userDataDir === null) return argv;
-  let settings = installed.get(userDataDir);
+  if (dir === null) return argv;
+  let settings = installed.get(dir);
   if (settings === undefined) {
     try {
-      settings = installStatusLine(userDataDir);
+      settings = installStatusLine(dir);
     } catch {
       return argv;
     }
-    installed.set(userDataDir, settings);
+    installed.set(dir, settings);
   }
   return [...argv, '--settings', shellQuote(settings)];
 }

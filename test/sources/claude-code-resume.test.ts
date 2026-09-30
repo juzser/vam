@@ -21,16 +21,26 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-const holder = vi.hoisted(() => ({ dir: '' }));
-vi.mock('electron', () => ({ default: { app: { getPath: () => holder.dir } } }));
+// Assigning `dir` hands it to the status-line module, as `main/index.ts` does at startup.
+const holder = {
+  current: '',
+  get dir(): string {
+    return this.current;
+  },
+  set dir(dir: string) {
+    this.current = dir;
+    setStatusLineUserDataDir(dir);
+  },
+};
 
 import type { LiveAgent } from '../../src/main/sources/claude-code/agents.js';
 import {
   claudeResumeCommand,
   resumeClaudeSession,
 } from '../../src/main/sources/claude-code/resume.js';
+import { setStatusLineUserDataDir } from '../../src/main/sources/claude-code/statusline.js';
 import { loginShellCommand } from '../../src/main/sources/tmux/shell.js';
 import type { TmuxRun } from '../../src/main/sources/tmux/spawn.js';
 
