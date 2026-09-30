@@ -31,6 +31,7 @@ import type {
 } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import {
+  chordSymbols,
   EMPTY_CHORD,
   isReserved,
   NO_BINDINGS,
@@ -69,6 +70,7 @@ import {
 import type { AgentWork } from '../../src/shared/agent-work.js';
 import { PROVIDERS } from '../../src/shared/providers.js';
 import type { PaneSendResult, PaneView } from '../../src/shared/terminal.js';
+import { onBothPlatformsAsync } from '../support/platform.js';
 import { makePullRequest } from '../support/pull-request.js';
 
 /** `attachIntoDraft` for the cases a test knows will be accepted. */
@@ -1415,6 +1417,24 @@ describe('the mode control is drawn only where a mode can actually be chosen', (
     // back which mode resulted, so the delivery is the only true claim here.
     expect(said?.textContent).not.toContain('mode is');
     expect(said?.textContent).toContain('does not read the mode back');
+  });
+
+  it('paints the chord through ChordGlyphs, the look the Settings shortcuts use', async () => {
+    withBridge(async () => 'sent');
+    await onBothPlatformsAsync(async (mac) => {
+      draw();
+      await press(true);
+      const said = q<HTMLElement>('[data-mode-cycle]');
+      // WORDS UNCHANGED: a screen reader and the tooltip get the same sentence.
+      expect(said?.textContent).toBe(
+        `${chordSymbols('Shift-Tab', mac)} sent — vam does not read the mode back`,
+      );
+      expect(said?.getAttribute('title')).toBe(said?.textContent);
+      // PAINTED: on a Mac the ⇧ is a glyph in the body sans, not Geist Mono's
+      // thin one; off a Mac nothing is a glyph, so nothing is wrapped.
+      expect((said?.querySelectorAll('span.font-sans').length ?? 0) > 0).toBe(mac);
+      cleanup();
+    });
   });
 
   it('does not queue a second press into the agent while one is out', async () => {

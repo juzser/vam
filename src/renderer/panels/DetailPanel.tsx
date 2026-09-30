@@ -4367,7 +4367,32 @@ type CycleNote = {
   /** `busy` while the keys are out, then one of the two answers. */
   readonly kind: 'busy' | 'sent' | 'refused';
   readonly text: string;
+  /**
+   * The chord `text` opens with, when it opens with one. The caption paints
+   * that prefix through `ChordGlyphs` -- the same glyphs the Settings
+   * shortcuts use -- rather than as a plain `chordSymbols` string in the
+   * caption's Geist Mono, whose ⇧ is noticeably thinner.
+   */
+  readonly chord?: string;
 };
+
+/**
+ * THE CAPTION'S WORDS, WITH ITS OPENING CHORD PAINTED. `.textContent` stays
+ * `note.text` character for character (`ChordGlyphs` owes that to
+ * `chordSymbols`), so the tooltip and a screen reader read what they always
+ * did. A note whose text does not open with its chord -- a refusal -- is
+ * drawn as plain words.
+ */
+function CycleCaption({ note }: { readonly note: CycleNote }) {
+  const said = note.chord === undefined ? '' : chordSymbols(note.chord);
+  if (note.chord === undefined || said === '' || !note.text.startsWith(said)) return note.text;
+  return (
+    <>
+      <ChordGlyphs chord={note.chord} />
+      {note.text.slice(said.length)}
+    </>
+  );
+}
 
 function cycleWording(result: PaneSendResult): string | null {
   switch (result) {
@@ -6998,6 +7023,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
     strokes: readonly PaneKey[],
     sentText: string,
     busyText: string,
+    chord?: string,
   ) => {
     if (entry === null) return;
     if (cycleNote?.kind === 'busy') return;
@@ -7026,7 +7052,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
       return;
     }
     // BEFORE THE AWAIT: one to three tmux spawns follow, at ten seconds each.
-    setCycleNote({ kind: 'busy', text: busyText });
+    setCycleNote({ kind: 'busy', text: busyText, chord });
     const mine = cycleAbout;
     let landed: PaneSendResult = 'sent';
     let typed = 0;
@@ -7057,12 +7083,14 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
         ? `${refusal} — what was typed is sitting in the pane unsent`
         : refusal;
     setCycleNote(
-      sitting === null ? { kind: 'sent', text: sentText } : { kind: 'refused', text: sitting },
+      sitting === null
+        ? { kind: 'sent', text: sentText, chord }
+        : { kind: 'refused', text: sitting },
     );
   };
   /** The one-stroke case: the chord, the strip's keys, the composer's Escape. */
-  const pressPaneKey = (key: PaneKey, sentText: string, busyText: string) =>
-    typePaneStrokes([key], sentText, busyText);
+  const pressPaneKey = (key: PaneKey, sentText: string, busyText: string, chord?: string) =>
+    typePaneStrokes([key], sentText, busyText, chord);
   /**
    * Press the session's own Shift-Tab, OVER THE ONE CHANNEL THAT ALREADY
    * TYPES INTO A PANE: `terminal.send` resolves the pane in main and refuses
@@ -7084,6 +7112,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
       { kind: 'back-tab' },
       `${chordSymbols('Shift-Tab')} sent — vam does not read the mode back`,
       `${chordSymbols('Shift-Tab')} · sending…`,
+      'Shift-Tab',
     );
   /** One keystroke-strip button's press, over the shared bridge above. */
   const sendKey = (item: (typeof KEY_STRIP)[number]) =>
@@ -12212,7 +12241,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                   */
                   title={cycleNote.text}
                 >
-                  {cycleNote.text}
+                  <CycleCaption note={cycleNote} />
                 </span>
               )}
               {/* PHONE: hidden, not merely unstyled. The merged row has one
@@ -12366,7 +12395,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                 ].join(' ')}
                 title={cycleNote.text}
               >
-                {cycleNote.text}
+                <CycleCaption note={cycleNote} />
               </span>
             )}
             {/* THE KEY ROW IS GONE, AND THIS IS THE END OF A SEQUENCE RATHER
