@@ -83,6 +83,32 @@ export const MULTI_REVIEW = REVIEW.replace('Which colour do you prefer?', MULTI_
 
 export { COLOUR_ON };
 
+/**
+ * Case 5, an option label that wraps: SYNTHETIC. This is hand-built, NOT a
+ * capture -- no recorded screen shows a wrapped label (operator decision
+ * #164). It derives from `LESSON_ASKED` in `lesson-screens.ts` (a real
+ * 40-column capture from Claude Code 2.1.282) and the recorded screens in
+ * `answer-live-screens.ts`, and follows the wrap rules those show: the pane is
+ * 40 columns (the rule row), an option row's text starts at column 5 (`❯ 1. `
+ * or `  2. `), text wraps at a word boundary, the first row keeps its trailing
+ * space, and the rest continues on the next row indented 5 columns, the same
+ * indent as a description row. The label below is 44 characters against the 35
+ * left after the prefix, so it wraps.
+ */
+export const SYNTHETIC_WRAPPED_LABEL_Q = 'Which way should the lesson go?';
+export const SYNTHETIC_WRAPPED_LABEL_FULL = 'Rewrite as a general principle, then approve';
+export const SYNTHETIC_WRAPPED_LABEL = picker(
+  '←  ☐ Lesson  ✔ Submit  →',
+  [SYNTHETIC_WRAPPED_LABEL_Q],
+  [
+    '❯ 1. Reject',
+    '     The warning is out of date.',
+    '  2. Rewrite as a general principle, ',
+    '     then approve',
+    '     Keeps the lesson, in new words.',
+  ],
+);
+
 /** Question three of the set: FRUIT_ASKED's shape, its own tab lit. */
 export const SIZE_Q = 'Which size do you prefer?';
 export const SIZE = picker(

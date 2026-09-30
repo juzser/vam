@@ -75,6 +75,27 @@ export type Picker = { readonly rows: readonly PickerRow[]; readonly cursor: num
 
 const ROW = /^\s*│?\s*(❯)?\s+(\d+)\.\s+(?:\[(.)\]\s+)?(\S.*?)\s*│?\s*$/;
 
+/** The pane's width: the length of the rule row the CLI draws edge to edge, if any. */
+const paneWidth = (lines: readonly string[]): number | undefined =>
+  lines.find((line) => /^─+$/.test(line.trim()))?.trim().length;
+
+/**
+ * The rest of a label the pane wrapped, or `null` when `next` is not one.
+ *
+ * A continuation row is indented like a description row, so the indent cannot
+ * tell them apart. The width does: the CLI wraps at a word boundary, so a
+ * label's row is followed by its own continuation only when the first word of
+ * that next row would not have fit on this one. A short label followed by a
+ * description fails that test, and with no rule row there is no width to
+ * prove anything by. Only whitespace is ever added between the two rows.
+ */
+const continuation = (line: string, next: string, width: number | undefined): string | null => {
+  if (width === undefined || !/^ {5}\S/.test(next) || ROW.test(next)) return null;
+  const rest = next.trim();
+  const word = rest.split(/\s+/)[0] ?? '';
+  return line.trimEnd().length + 1 + word.length > width ? rest : null;
+};
+
 /**
  * The picker on a captured screen, or `null` when what is there is not one.
  *
@@ -103,9 +124,14 @@ const ROW = /^\s*│?\s*(❯)?\s+(\d+)\.\s+(?:\[(.)\]\s+)?(\S.*?)\s*│?\s*$/;
  * which list it is about to answer.
  */
 export function readPicker(text: string): Picker | null {
-  const parsed = plain(text)
-    .split('\n')
-    .map((line) => ROW.exec(line));
+  const lines = plain(text).split('\n');
+  const width = paneWidth(lines);
+  const parsed = lines.map((line, at) => {
+    const row = ROW.exec(line);
+    const more = row === null ? null : continuation(line, lines[at + 1] ?? '', width);
+    if (row !== null && more !== null) row[4] = `${row[4] ?? ''} ${more}`;
+    return row;
+  });
   const cursors = parsed.flatMap((row, at) => (row?.[1] === undefined ? [] : [at]));
   const [head] = cursors;
   if (head === undefined || cursors.length !== 1) return null;

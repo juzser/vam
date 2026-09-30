@@ -11,7 +11,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import type { TmuxRun, TmuxRunResult } from '../../../src/main/sources/tmux/spawn.js';
 import { answerQuestion } from '../../../src/main/terminal/answer.js';
 import type { AnswerRequest, AnswerResult, AnswerStep } from '../../../src/shared/answer.js';
-import { COLOUR_ON } from './answer-live-screens.js';
+import { COLOUR_ON, FRUIT_ASKED } from './answer-live-screens.js';
 import {
   cursorOn,
   DESCRIBED,
@@ -25,6 +25,9 @@ import {
   SIZE_Q,
   STEP2_OF_3,
   STEP2_Q,
+  SYNTHETIC_WRAPPED_LABEL,
+  SYNTHETIC_WRAPPED_LABEL_FULL,
+  SYNTHETIC_WRAPPED_LABEL_Q,
   WRAPPED,
   WRAPPED_KEPT,
   WRAPPED_Q,
@@ -137,6 +140,16 @@ describe('EC-3a: a well-formed answer is delivered, case by case', () => {
     expect(keys).toEqual([['Down'], ['Down'], ['Enter']]);
   });
 
+  it('SYNTHETIC: option label wrapped over two rows (hand-built, not a capture)', async () => {
+    const { result, keys } = await drive(
+      'SYNTHETIC wrapped label',
+      [...visits(SYNTHETIC_WRAPPED_LABEL, 2), RESOLVED],
+      one(SYNTHETIC_WRAPPED_LABEL_Q, [SYNTHETIC_WRAPPED_LABEL_FULL]),
+    );
+    expect(result.kind).toBe('sent');
+    expect(keys).toEqual([['Down'], ['Enter']]);
+  });
+
   it('multiSelect set', async () => {
     const { result, keys } = await drive(
       'multiSelect',
@@ -206,5 +219,35 @@ describe('EC-3b: a screen that fails verification receives no key past the last 
       committed: ['Cobalt'],
     });
     expect(t.keys()).toEqual([['Down'], ['Enter'], ['Down'], ['Down']]);
+  });
+});
+
+describe('EC-3b-label: a label is joined to its continuation row on width evidence only', () => {
+  const wrapped = (label: string, screens = [SYNTHETIC_WRAPPED_LABEL]) => {
+    const t = recorder(screens);
+    return { t, run: () => answerQuestion(t.run, ID, one(SYNTHETIC_WRAPPED_LABEL_Q, [label])) };
+  };
+
+  it('a short label plus the first line of its description is not a label', async () => {
+    const t = recorder([FRUIT_ASKED]);
+    const label = 'Cobalt Listed as requested, though it is not actually a fruit.';
+    const result = await answerQuestion(t.run, ID, one(STEP2_Q, [label]));
+    expect(result).toEqual({ kind: 'unmatched', label });
+    expect(t.keys()).toEqual([]);
+  });
+
+  it('a wrapped label whose continuation differs from the request is not that label', async () => {
+    const { t, run } = wrapped('Rewrite as a general principle, then reject');
+    expect(await run()).toEqual({
+      kind: 'unmatched',
+      label: 'Rewrite as a general principle, then reject',
+    });
+    expect(t.keys()).toEqual([]);
+  });
+
+  it('the first row of a wrapped label alone is not that label', async () => {
+    const { t, run } = wrapped('Rewrite as a general principle,');
+    expect(await run()).toEqual({ kind: 'unmatched', label: 'Rewrite as a general principle,' });
+    expect(t.keys()).toEqual([]);
   });
 });
