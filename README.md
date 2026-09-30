@@ -72,7 +72,57 @@ with a QR, and the phone drives the same live sessions, with a quick-key strip f
 keys a touch screen lacks.
 
 </td>
-<td><img src="docs/assets/readme/phone-session.png" alt="A question card in the transcript on a 390px phone" width="220" /></td>
+<td>
+<img src="docs/assets/readme/phone-pairing.png" alt="Settings → Remote: the phone-access address and pairing QR" /><br/>
+<img src="docs/assets/readme/phone-session.png" alt="The same question card, inline in the transcript on a 390px phone" width="220" />
+</td>
+</tr>
+<tr>
+<td width="42%" valign="middle">
+
+### Settings — one full-window overlay
+
+`,` opens Settings as its own full-window screen, not a modal over the app — **Interface**
+(theme, palette templates, zoom), **Stats & Usage**, **Terminal**, **Window & Sidebar**,
+**Agents**, **Skills**, **Behaviour**, **Notifications**, **Integrations**, **Remote**,
+**Keyboard**, and **Update**, each its own section behind one sidebar.
+
+</td>
+<td><img src="docs/assets/readme/settings-overlay.png" alt="The Settings overlay: a full-window screen with every section listed in its own sidebar, Interface open" /></td>
+</tr>
+<tr>
+<td width="42%" valign="middle">
+
+### Integrations — GitHub and GitLab
+
+Connect a GitHub account with the `gh` CLI, or a GitLab account with `glab` — vam stores no
+token of its own, it shells out to whichever CLI you're already signed into, and shows pull
+requests for the project's linked repo.
+
+</td>
+<td><img src="docs/assets/readme/integrations.png" alt="Integrations: GitHub and GitLab cards, both connected via gh and glab" /></td>
+</tr>
+<tr>
+<td width="42%" valign="middle">
+
+### Keyboard — Insert mode, shortcuts, a conflict indicator
+
+**Select** mode moves with `hjkl` and vim-style prefix chords (`gg`, `yy`, `zs`/`zv`…); `i`
+drops you into **Insert**, where the same keys type into the prompt or answer a question
+instead, and `Escape` leaves Insert and hands the keyboard straight back rather than
+reaching the session's own pane. `Mod-.` is the dedicated way to send Escape into the
+focused session's pane instead — interrupt it, drive Claude Code's own Esc-Esc rewind,
+dismiss its menus, or leave vim — and it works whether that session is running, waiting, or
+idle. `?` opens a searchable sheet generated from the same key tables that back every
+binding, and in **Settings → Keyboard**, a chord two actions claim is flagged with a red
+dot and a tooltip naming the other action — on both the row that kept the chord and the row
+that lost it.
+
+</td>
+<td>
+<img src="docs/assets/readme/keyboard-settings.png" alt="Settings → Keyboard: a contested chord's red conflict dot, its tooltip open (Also bound to: close this session), and the Mod-. interrupt binding" /><br/>
+<img src="docs/assets/readme/keyboard-today.png" alt="The searchable shortcuts sheet, generated from vam's own key tables, Select and Insert side by side" />
+</td>
 </tr>
 </table>
 
@@ -118,8 +168,8 @@ against the key tables.
 | `j` `k` | Select: walk the session list |
 | `h` `l` | Select: cycle the focused project's open tabs |
 | `i` | Enter Insert — type into the prompt, or answer a question |
-| `Escape` | Leave Insert, back to Select; in the streaming terminal, Esc returns to Select mode too |
-| `Mod-.` | Send a literal Escape into the focused session's pane |
+| `Escape` | Leave Insert, back to Select — never into the session's pane; in the streaming terminal, Esc returns to Select mode too |
+| `Mod-.` | Send Escape to the focused session's pane — interrupt, running or not |
 | `Mod-Enter` | Start the session on a fresh pane, as the Start button does |
 | `o` / `Mod-n` | Start a session in the focused project |
 | `x` / `Mod-w` | Close the focused session |

@@ -115,6 +115,39 @@ export const MAX_RECONNECT_BACKOFF_MS = RECONNECT_BACKOFF_MS * 8;
  */
 export const PAUSE_AFTER_SECONDS = 1;
 
+/**
+ * The ceiling on bytes held in this file's own stdin FIFO (`#write`'s per-
+ * connection state) while a `send-keys`/control-mode line is waiting for a
+ * blocked `stdin.write` to drain -- a review finding (S3-minor): before this,
+ * `#write` discarded the boolean `stdin.write` returns, so a control client
+ * that stopped reading (a wedged or crashed real tmux, distinct from an
+ * ordinary exit/error, which the child's own events already cover) let
+ * this file buffer an unbounded backlog in Node's own process memory.
+ *
+ * Sized well above `stream-ipc.ts`'s own `MAX_STREAM_WRITE_BYTES` (4,000,000
+ * bytes of paste text) so ONE legal write never trips this bound on its own:
+ * `write()` hex-encodes every byte to two hex digits plus a joining space
+ * (`hexBytes`, `control-protocol.ts`), roughly TRIPLING the byte count, so a
+ * maximal legal paste produces a `send-keys -H ...` line of roughly 12MB.
+ * 16MiB leaves comfortable headroom over that without ever approaching a
+ * backlog large enough to matter as its own memory problem -- this bound
+ * exists to catch a stalled consumer accumulating MANY such lines, not to
+ * pare down the very first one.
+ */
+export const MAX_PENDING_STDIN_BYTES = 16 * 1024 * 1024;
+
+/**
+ * `ControlChildProcess['stdin']` only promises `write` -- Node's real
+ * `Writable` stdin also emits `'drain'` once its internal buffer empties
+ * again, which is how this file learns it is safe to flush what `#write`
+ * held back, but a test double is not required to offer it. Feature-detected
+ * at every use site (`typeof stdin.once === 'function'`), never assumed --
+ * see `#armDrain`.
+ */
+type DrainCapableStdin = ControlChildProcess['stdin'] & {
+  readonly once?: (event: 'drain', listener: () => void) => void;
+};
+
 /** What `onDown` hands its listeners -- a transient drop this file is still
  * trying to recover from, or a permanent give-up and why. */
 export type StreamDownEvent =
@@ -203,6 +236,21 @@ export class StreamClient {
    * against the defensive bare-`%continue`/`%unpause` branch below double-
    * reseeding while that round-trip is already in flight. */
   #resuming = false;
+  /** `true` between a `stdin.write` returning `false` and the matching
+   * `'drain'` -- every later line joins `#stdinHeld` instead of reaching
+   * stdin directly. Reset on `#wire` (a fresh connection is never blocked)
+   * and on `#handleDown` (nothing this connection's own state describes
+   * survives its close). */
+  #stdinBlocked = false;
+  /** FIFO of lines held while `#stdinBlocked`, in the exact order `#write`
+   * was called for them -- flushed one `stdin.write` at a time by
+   * `#flushStdin` once `'drain'` fires. */
+  #stdinHeld: string[] = [];
+  /** The FIFO's own byte total (`Buffer.byteLength(line + '\n')` per entry)
+   * -- rises when a line joins `#stdinHeld`, falls when `#flushStdin` takes
+   * one off (whichever way that write itself lands). A line written
+   * directly, with nothing held and not blocked, never touches this. */
+  #stdinHeldBytes = 0;
 
   constructor(options: StreamClientOptions) {
     this.#binary = options.binary ?? 'tmux';
@@ -341,6 +389,9 @@ export class StreamClient {
     this.#seeded = false;
     this.#paused = false;
     this.#resuming = false;
+    this.#stdinBlocked = false;
+    this.#stdinHeld = [];
+    this.#stdinHeldBytes = 0;
     child.stdout.on('data', (chunk) => {
       if (this.#child === child) this.#onData(this.#decoder.write(chunk as Buffer));
     });
@@ -404,13 +455,117 @@ export class StreamClient {
     await this.#send(`refresh-client -f pause-after=${PAUSE_AFTER_SECONDS}`);
   }
 
+  /**
+   * Every stdin write in this class funnels through here (`write`, `#send`,
+   * `#sendChain`) -- the one place that owns the blocked/held/byte-count
+   * bookkeeping, so it is never split across callers who could disagree
+   * (a review finding: honour `stdin.write`'s own boolean and `'drain'`
+   * rather than discarding both, as this used to).
+   *
+   * A line is written AT ONCE only when nothing is already held and this
+   * connection is not currently blocked -- otherwise it joins `#stdinHeld`
+   * (`#holdLine`), preserving strict FIFO order across every kind of line
+   * (`write()`'s keystrokes, `#send`'s and `#sendChain`'s commands alike).
+   */
   #write(line: string): void {
+    const child = this.#child;
+    if (child === null) return;
+    if (!this.#stdinBlocked && this.#stdinHeld.length === 0) {
+      this.#writeLine(child, line);
+      return;
+    }
+    this.#holdLine(child, line);
+  }
+
+  /** The lone `stdin.write` call site besides the flush loop below --
+   * reads the boolean this class used to discard and arms `'drain'` the
+   * instant it comes back `false`. */
+  #writeLine(child: ControlChildProcess, line: string): void {
+    let ok = true;
     try {
-      this.#child?.stdin.write(`${line}\n`);
+      ok = child.stdin.write(`${line}\n`);
     } catch {
       // Best-effort: a write failure here is a dead connection, which
       // `#handleDown` (via the child's own 'error'/'exit') already covers.
+      return;
     }
+    if (!ok) {
+      this.#stdinBlocked = true;
+      this.#armDrain(child);
+    }
+  }
+
+  /** Joins `#stdinHeld`'s tail, unless doing so would push the FIFO's own
+   * byte total past `MAX_PENDING_STDIN_BYTES` -- the bound. AT the bound,
+   * this line (and everything already held) is discarded, never partially
+   * kept: `#tripStdinBound` covers why CLOSE is the only safe answer here. */
+  #holdLine(child: ControlChildProcess, line: string): void {
+    const bytes = Buffer.byteLength(`${line}\n`);
+    if (this.#stdinHeldBytes + bytes > MAX_PENDING_STDIN_BYTES) {
+      this.#tripStdinBound(child);
+      return;
+    }
+    this.#stdinHeld.push(line);
+    this.#stdinHeldBytes += bytes;
+  }
+
+  /** Registers `'drain'` for THIS blocked episode, once -- feature-detected,
+   * since a test double's fake stdin need not offer it (module header). A
+   * stdin lacking it simply never flushes what it holds; nothing else in
+   * this class assumes `'drain'` exists. Guarded on `this.#child === child`
+   * so a listener from an episode on an already-replaced connection can
+   * never flush onto the wrong (or a killed) child's stdin. */
+  #armDrain(child: ControlChildProcess): void {
+    const stdin = child.stdin as DrainCapableStdin;
+    if (typeof stdin.once !== 'function') return;
+    stdin.once('drain', () => {
+      if (this.#child !== child) return;
+      this.#flushStdin(child);
+    });
+  }
+
+  /** Flushes `#stdinHeld` from the front, one `stdin.write` at a time, until
+   * either the FIFO empties (blocked clears, in this same synchronous step)
+   * or a write comes back `false` again (blocked stays set; that write
+   * starts the NEXT episode and re-arms `'drain'`). */
+  #flushStdin(child: ControlChildProcess): void {
+    while (this.#stdinHeld.length > 0) {
+      const line = this.#stdinHeld.shift();
+      if (line === undefined) break;
+      this.#stdinHeldBytes -= Buffer.byteLength(`${line}\n`);
+      let ok = true;
+      try {
+        ok = child.stdin.write(`${line}\n`);
+      } catch {
+        // Best-effort, same posture as `#writeLine`: a dead connection is
+        // `#handleDown`'s own job, via the child's 'error'/'exit'.
+        return;
+      }
+      if (!ok) {
+        this.#armDrain(child);
+        return;
+      }
+    }
+    this.#stdinBlocked = false;
+  }
+
+  /**
+   * THE BOUND: holding one more line would exceed `MAX_PENDING_STDIN_BYTES`
+   * -- a control client that stopped reading, not a momentary blip. Answered
+   * with CLOSE, in one synchronous step (no `await`/callback between any of
+   * these): discard every held (and the tripping) line, reset this
+   * connection's own stdin bookkeeping, kill the child exactly once, then
+   * run the SAME reconnect path a real exit/error already takes
+   * (`#handleDown`) -- which also flushes `#blockQueue` with `{ok:false,
+   * body:''}` for every pending reply, keystroke placeholders included, so
+   * nothing here is left to reject.
+   */
+  #tripStdinBound(child: ControlChildProcess): void {
+    this.#stdinHeld = [];
+    this.#stdinHeldBytes = 0;
+    this.#stdinBlocked = false;
+    child.kill();
+    this.#handleDown();
   }
 
   /** One command, awaiting its `%begin`/`%end`/`%error` block in order -- a
@@ -650,6 +805,9 @@ export class StreamClient {
 
   #handleDown(): void {
     this.#child = null;
+    this.#stdinBlocked = false;
+    this.#stdinHeld = [];
+    this.#stdinHeldBytes = 0;
     for (const pending of this.#blockQueue.splice(0)) pending.resolve({ ok: false, body: '' });
     if (this.#disposed || this.#givenUp) return;
     // THE CAP (a review finding: this loop was unbounded). Checked BEFORE
