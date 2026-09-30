@@ -34,6 +34,7 @@ export function registerUpdateIpc(ipcMain: IpcMainLike, controller: UpdateContro
   ipcMain.handle(CHANNELS.updateDownload, () => answer(() => controller.download()));
   ipcMain.handle(CHANNELS.updateDismiss, () => answer(() => controller.dismiss()));
   ipcMain.handle(CHANNELS.updateGetAutoCheck, () => controller.getAutoCheck());
+  ipcMain.handle(CHANNELS.updateGetLastCheck, () => controller.getLastCheckAt());
   ipcMain.handle(CHANNELS.updateSetAutoCheck, async (_event, ...args): Promise<boolean> => {
     if (typeof args[0] === 'boolean') await controller.setAutoCheck(args[0]);
     return controller.getAutoCheck();

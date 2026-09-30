@@ -41,6 +41,7 @@ function fakeController(status: UpdateStatus = AVAILABLE) {
       autoCheck = b;
     }),
     getAutoCheck: vi.fn(() => autoCheck),
+    getLastCheckAt: vi.fn((): number | null => 1_700_000_000_000),
     openNotes: vi.fn(async () => true),
   };
   return { controller: controller as unknown as UpdateController, spies: controller };
@@ -58,6 +59,7 @@ describe('registerUpdateIpc', () => {
         CHANNELS.updateDismiss,
         CHANNELS.updateGetAutoCheck,
         CHANNELS.updateSetAutoCheck,
+        CHANNELS.updateGetLastCheck,
         CHANNELS.updateOpen,
       ].sort(),
     );
@@ -99,6 +101,12 @@ describe('registerUpdateIpc', () => {
     registerUpdateIpc(ipcMain, controller);
     expect(await ipcMain.invoke(CHANNELS.updateCheck)).toEqual(AVAILABLE);
     expect(await ipcMain.invoke(CHANNELS.updateDownload)).toEqual(AVAILABLE);
+  });
+
+  it('getLastCheck answers the stored time of the last check', async () => {
+    const ipcMain = fakeIpcMain();
+    registerUpdateIpc(ipcMain, fakeController().controller);
+    expect(await ipcMain.invoke(CHANNELS.updateGetLastCheck)).toBe(1_700_000_000_000);
   });
 
   it('auto-check round-trips a boolean and refuses anything else', async () => {

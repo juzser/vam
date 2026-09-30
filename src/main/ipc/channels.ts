@@ -295,6 +295,8 @@ export const CHANNELS = {
   updateStatusChanged: 'vam:update:status',
   updateGetAutoCheck: 'vam:update:get-auto-check',
   updateSetAutoCheck: 'vam:update:set-auto-check',
+  /** When the last check went out (epoch ms, manual or automatic), or null. */
+  updateGetLastCheck: 'vam:update:get-last-check',
   /**
    * "Release notes." Answers a bare boolean -- did the operator's browser
    * open -- and takes NO argument: the URL opened is the one main's own check
