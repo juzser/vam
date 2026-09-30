@@ -230,3 +230,91 @@ describe('a view the operator picks wins over vam’s choice', () => {
     expect(selectedView()).toBe('terminal');
   });
 });
+
+const PANE = 'vam-alpha-aa11bb';
+const unstarted = (): Session =>
+  session(`pane:${PANE}`, {
+    status: 'unstarted',
+    source: 'claude-code',
+    vamControlled: true,
+    pane: PANE,
+  });
+
+describe('a started row and its hand-over keep the Response view', () => {
+  it('(iii) an unstarted row started through onStart lands on Response after hand-over', async () => {
+    const { source } = sourceWith();
+    const view = render(<Canvas model={modelWith(session('a1'), unstarted())} source={source} />);
+    await click(
+      [...document.querySelectorAll('[data-tab-select]')].find((e) =>
+        (e.textContent ?? '').includes(PANE),
+      ) ?? null,
+    );
+    viewChord(1);
+    expect(selectedView()).toBe('response');
+    await click(document.querySelector('[data-start-session-button]'));
+    await act(async () => {
+      view.rerender(
+        <Canvas
+          model={modelWith(session('a1'), session('a2', { source: 'claude-code', pane: PANE }))}
+          source={source}
+        />,
+      );
+    });
+    await click(
+      [...document.querySelectorAll('[data-tab-select]')].find((e) => e.textContent === 'a2') ??
+        null,
+    );
+    expect(activeTab()).toBe('a2');
+    expect(selectedView()).toBe('response');
+  });
+
+  it('(iv) the successor id inherits the new row’s Response record (renameTab path)', async () => {
+    const { source } = sourceWith();
+    const view = render(<Canvas model={modelWith(session('a1'))} source={source} />);
+    await click(document.querySelector('[data-tab-new]'));
+    await act(async () => {
+      view.rerender(<Canvas model={modelWith(session('a1'), unstarted())} source={source} />);
+    });
+    expect(activeTab()).toContain(PANE);
+    expect(selectedView()).toBe('response');
+    await act(async () => {
+      view.rerender(
+        <Canvas
+          model={modelWith(session('a1'), session('a2', { source: 'claude-code', pane: PANE }))}
+          source={source}
+        />,
+      );
+    });
+    await click(
+      [...document.querySelectorAll('[data-tab-select]')].find((e) => e.textContent === 'a2') ??
+        null,
+    );
+    expect(activeTab()).toBe('a2');
+    expect(selectedView()).toBe('response');
+  });
+
+  it('(iv) an operator pick on the new row travels to the successor id', async () => {
+    const { source } = sourceWith();
+    const view = render(<Canvas model={modelWith(session('a1'))} source={source} />);
+    await click(document.querySelector('[data-tab-new]'));
+    await act(async () => {
+      view.rerender(<Canvas model={modelWith(session('a1'), unstarted())} source={source} />);
+    });
+    viewChord(3);
+    expect(selectedView()).toBe('terminal');
+    await act(async () => {
+      view.rerender(
+        <Canvas
+          model={modelWith(session('a1'), session('a2', { source: 'claude-code', pane: PANE }))}
+          source={source}
+        />,
+      );
+    });
+    await click(
+      [...document.querySelectorAll('[data-tab-select]')].find((e) => e.textContent === 'a2') ??
+        null,
+    );
+    expect(activeTab()).toBe('a2');
+    expect(selectedView()).toBe('terminal');
+  });
+});
