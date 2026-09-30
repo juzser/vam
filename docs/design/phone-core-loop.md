@@ -122,19 +122,25 @@ not a continuation of the out.**
 ### Keystroke strip
 
 `KEY_STRIP` (`phone && canSendKeys`, i.e. drawn ONLY when no question is
-open — `canSendKeys = canCycleMode && (newestQuestion === null ||
-!openQuestion)`) is a row of 7 chip buttons (`Esc`, up/down arrows, and
-vam's real `PaneKey`s) sitting above the composer, each `h-[30px]`
-paint / 44px hit, one (`Esc → agent`) an auto-width pill rather than a
-square because the glyph text overflowed a 30px square (documented in the
-component's own comment). It is a **separate control surface from the
-question card**: the strip drives raw terminal keys for a session that has
-no structured question open (arrow-key TUI menus, `y/n` prompts the
-`AskUserQuestion` reader cannot parse); the card drives structured
-`AskUserQuestion` calls. They are mutually exclusive by construction
-(`canSendKeys` is false exactly when the card is open) and never compete
-for space — that part of today's design is already correct and this spec
-keeps it.
+open — `canSendKeys = (canCycleMode || canSendKeysRemotely) &&
+(newestQuestion === null || !openQuestion)`, `DetailPanel.tsx:8613-8614`,
+rendered at `:10322`) holds 20 `PaneKey`s (`DetailPanel.tsx:4553`; line
+numbers here are at base 3fe3b5ec). The row sitting above the composer is
+24 chips, 23 with no terminal: Keyboard, Paste, those 20 keys, Terminal
+(only when there is a terminal), then More (the `ORDER` list at
+`test/panels/DetailPanel.keystroke-strip.test.tsx:496-521` pins it). Every
+chip is an auto-width text pill (`STRIP_PILL`,
+`DetailPanel.tsx:4659-4661`, `h-[30px]` paint; the 44px hit is `.vam-phone
+.vam-tap`, `styles.css:2844-2846`); only `⌫ ↑ ↓ ← →` are glyph labels
+(`LABEL_GLYPHS`, `src/renderer/keyboard/phone-key-labels.tsx:60`), and the
+` → agent` wording lives only in the sent/sending banner, never on a chip.
+It is a **separate control surface from the question card**: the strip
+drives raw terminal keys for a session that has no structured question
+open (arrow-key TUI menus, `y/n` prompts the `AskUserQuestion` reader
+cannot parse); the card drives structured `AskUserQuestion` calls. They
+are mutually exclusive by construction (`canSendKeys` is false exactly
+when the card is open) and never compete for space — that part of today's
+design is already correct and this spec keeps it.
 
 ### Tap targets
 
@@ -160,7 +166,7 @@ in `PhoneShell.tsx`) is sound and is reused rather than reinvented below.
 | "Chat about this" synthetic row | **KEEP** | Already the correct escape hatch to free text; stays as the last inline row. |
 | Submit button + "N of M marked" progress line | **KEEP, but see composer §3** | Multi-select still needs an explicit commit step; the wording ("Enter submits") is desktop-flavoured and should read "tap Submit" on phone — copy nit, not a redesign. |
 | Refusal / outcome / disclosure sentences (`data-question-refusal/outcome/note`) | **SIMPLIFY** | Keep the FACTS (nothing sent, sent-but-unconfirmed, wrong-question) — they are load-bearing per `answer.ts`'s own contract — but the sentence is currently ~2 lines of `text-meta` prose always shown; on phone show it once, folded, not repeated at full length per re-render. |
-| Keystroke strip (`KEY_STRIP`, 7 chips) | **KEEP** | Already gated correctly, already off-screen whenever a question is open; not part of this brief's cut list. |
+| Keystroke strip (`KEY_STRIP`, 20 keys) | **KEEP** | Already gated correctly, already off-screen whenever a question is open; not part of this brief's cut list. |
 | Composer: text field | **KEEP** | Core to "reply". |
 | Composer: attach (image) | **SIMPLIFY → collapse behind a single "+" affordance** | One binary decision (attach or not) does not need a permanently visible 44px icon competing with 4 others on a 390px row; fold it under a "+" that also reaches emoji/dictation, OR keep as-is if the coder finds fewer than 3 of the 5 composer icons are used in telemetry — **flagged as a decision for the planner**, not decided here (no usage data available to this pass). |
 | Composer: model/mode picker pill | **CUT from the composer row on phone** | A full-width-adjacent pill spelling the word "model" is desktop-scoped decision-making (which model runs the NEXT turn) that competes for the one row the reply itself needs; move it into the session's overflow/settings, reachable but not resident. This is the single biggest, safest space return in the composer band. |
