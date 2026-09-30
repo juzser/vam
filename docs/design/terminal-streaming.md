@@ -143,7 +143,7 @@ smoothing over: the poll path's `echo` read mode is a narrow, already-tuned
 fast path (`ECHO_MS` throttling, screen-only capture, no reconciliation of
 program output outside the keystroke's own echo), while the stream path pays
 a full `xterm.js` render on every `%output` chunk plus `ControlFramer`'s
-reply-flag filtering and a `StringDecoder` pass this connection did not need
+reply-flag filtering and a per-pane UTF-8 decoder pass this connection did not need
 to skip. The stream path's real win is PROGRAM OUTPUT, not the keystroke
 echo — exactly what the prototype table above already found, and the shipped
 numbers confirm it at the same order of magnitude: print-to-paint p50
@@ -244,6 +244,12 @@ three are fixed in the prototype with failing-test-first coverage
    writes -- this matters more here than it does for `capture-pane` polling,
    because a continuous `%output` stream hits far more arbitrary chunk
    boundaries, and the operator's own reports are typed in Vietnamese.
+   Follow-up: tmux can also end one `%output` LINE in the middle of a
+   character and finish it on the next line (bytes >= 0x80 are not escaped),
+   which a decoder placed before the framer turns into U+FFFD halves. The
+   client now reads stdout as latin1 bytes and reassembles UTF-8 per pane with
+   one streaming `TextDecoder` (`client.ts:694`), fresh on every connect,
+   reconnect and pause reseed, skipping the orphan tail of a dropped character.
 
 A fourth, lower-severity fix: `%output` for the viewed pane that arrives
 BEFORE `capture-pane`'s own reply describes activity already folded into the
@@ -509,7 +515,7 @@ what actually landed on `vam/terminal-stream`.
 10. **Reconnect**, ported from `ControlClient`'s shape but never re-running a
     `write()`. DONE -- `StreamClient#handleDown`/`#reconnect` uses the same
     `RECONNECT_BACKOFF_MS` shape, wires a fresh `ControlFramer`/
-    `StringDecoder` and always reseeds rather than attempting to resume
+    fresh per-pane UTF-8 decoder (`client.ts:694`) and always reseeds rather than attempting to resume
     mid-stream; `write()` stays fire-and-forget with nothing tracked past the
     moment it is sent, so nothing is ever resubmitted on reconnect, exactly
     the Risks section's own constraint.
