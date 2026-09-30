@@ -4515,13 +4515,18 @@ function modelSwitchNote(result: ModelSwitchResult, title: string, choice: strin
 }
 
 /**
- * The phone keystroke strip -- eight `PaneKey` shapes reachable by tap:
- * Escape, Tab, Enter, Shift-Tab, Space, Backspace, with vam's own two-key
- * addition (Up/Down, below) trailing after rather than breaking that order.
+ * The phone keystroke strip -- the 20 `PaneKey` entries of `KEY_STRIP`
+ * (the `KEY_STRIP` constant below), reachable by tap: escape, tab,
+ * enter, back-tab, space, backspace, delete, up, down, left, right, then the
+ * nine `ctrl-c`/`ctrl-d`/`ctrl-l`/`ctrl-z`/`ctrl-r`/`ctrl-a`/`ctrl-e`/
+ * `ctrl-w`/`ctrl-u` chords.
  * `id` is the strip's own attribute name, distinct from `PaneKey['kind']`
- * only for `space`/`tab` (both `text` keys rather than a kind of their own)
- * and for `up`/`down` (both `nav`, distinguished by `PaneKey.nav` the way
- * `space` is distinguished by `PaneKey.text`).
+ * for `space`/`tab` (both `text` keys rather than a kind of their own), for
+ * `delete`, `up`, `down`, `left` and `right` (all five `nav` keys,
+ * distinguished by `PaneKey.nav` the way `space` is distinguished by
+ * `PaneKey.text`, the `nav` entries of `KEY_STRIP`) and for the nine
+ * ctrl-<letter> ids (all `control` keys carrying a `letter`, the
+ * `ctrl-${letter}` entries of `KEY_STRIP`).
  *
  * `tab` IS THE ADDITION OVER THIS STRIP'S OWN PRIOR SEVEN. There is no
  * dedicated `PaneKey` kind for a plain Tab, and there does not need to be
@@ -4538,12 +4543,13 @@ function modelSwitchNote(result: ModelSwitchResult, title: string, choice: strin
  * keys at all, and Claude Code's own option pickers -- `AskUserQuestion`, a
  * permission prompt, `/model`, `/config`, plan approval -- are walked with
  * exactly them, the same report the Terminal tab's own keyboard fix answers.
- * Left/Right are not here: nothing on this strip is a line of text to move a
- * caret through, and every picker this strip exists for walks its rows with
- * Up/Down alone. THEY ARE SERVED REMOTELY -- `paneKeyToRemoteKeyId`
- * (`shared/remote-key.ts`) answers `arrow-up`/`arrow-down` for them, so the
- * render site's `hasLocalTerminalChannel` filter (which drops only keys with
- * no remote id) keeps both on a phone.
+ * Left and Right joined them later (the left and right `nav` entries of
+ * `KEY_STRIP`), so all four arrows are on the strip. THEY ARE SERVED
+ * REMOTELY -- `paneKeyToRemoteKeyId` (`shared/remote-key.ts:128`, its `nav`
+ * switch at `shared/remote-key.ts:139-146`) answers
+ * `arrow-up`, `arrow-down`, `arrow-left` and `arrow-right` (and `delete`), so
+ * the render site's `hasLocalTerminalChannel` filter (which drops only keys
+ * with no remote id) keeps all of them on a phone.
  *
  * Escape and Enter carry a visible caption naming a different destination
  * than their textarea siblings already claim (`Esc → sidebar`, the send
@@ -4561,19 +4567,21 @@ function modelSwitchNote(result: ModelSwitchResult, title: string, choice: strin
  * `stripCaption` below (the sent/sending banner text, which nobody asked to
  * change) -- but they are gone from the BUTTON's own caption now:
  *
- * `label` IS A NEW FIELD, PLAIN AND HARD-CODED, because `chordSymbols` is
+ * `label` IS PLAIN AND PLATFORM-FREE, because `chordSymbols` is
  * PLATFORM-READ (`applePlatform()`, `chords.ts`'s own comment) and this strip
  * is not: it ships to whatever phone reads a Tailscale URL, so the same
  * button painted `⎋ → agent` on an iPhone and `Esc → agent` on an Android
- * one, and the operator's report ("the quick buttons row" -- read together
- * with the follow-up that named the wording directly) asked for ONE short,
- * plain caption regardless of which glyph table the visiting phone happens
- * to read: `Esc`, `Tab`, `⇧Tab`, `↵`, `Space`, `⌫`, `↑`, `↓`. Four of the
- * eight are still glyphs (`↵ ⌫ ↑ ↓`) -- a single recognisable pictogram reads
- * faster than a word in a 30px chip and none of the four has the "which
- * platform" problem the removed `chordSymbols` call did, being nobody's menu
- * shortcut. `data-tap-pill` (`styles.css`) is what lets the word-labelled
- * four opt out of the fixed 30px square without spilling into the next chip.
+ * one, and the operator's report asked for ONE short, plain caption
+ * regardless of which glyph table the visiting phone happens to read. Every
+ * label is read from `PHONE_KEY_LABELS`
+ * (`keyboard/phone-key-labels.tsx:26-47`): `Esc`, `Tab`, `Shift+Tab`,
+ * `Enter`, `Space`, `⌫`, `Del`, the four arrows, and `Ctrl+C` through
+ * `Ctrl+U`. The glyphs among them are exactly `⌫ ↑ ↓ ← →`, the set
+ * `LABEL_GLYPHS` (`phone-key-labels.tsx:60`) names. Every chip carries
+ * `data-tap-pill` (`styles.css`) and the `STRIP_PILL` skin (the `STRIP_PILL`
+ * constant, applied to each `KEY_STRIP` chip in the render block under
+ * `{phone && canSendKeys && (`), so no chip is a fixed
+ * square: each is an auto-width text pill that cannot spill into the next.
  */
 const KEY_STRIP: readonly {
   readonly id: string;
@@ -10349,11 +10357,14 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
               would put the strip there the moment `canSendKeys` held, which
               nothing asked for. */}
           {phone && canSendKeys && (
-            /* THE ROW ITSELF SCROLLS, because seven chips -- two of them
-               "Esc → agent"/"⏎ → agent" pills, not glyphs -- do not fit 361px
-               of clear width and never have: this row shipped with NOWHERE
-               for the overflow to go, `flex-none` on every chip and no wrap,
-               no scroll and no cap. Measured before this fix, at 390px: 408px
+            /* THE ROW ITSELF SCROLLS, because the chips -- 24 text pills, 23
+               with no terminal (Keyboard, Paste, the 20 `KEY_STRIP` keys
+               defined as `KEY_STRIP`, Terminal only when there is one, then
+               More; the ORDER list in
+               `DetailPanel.keystroke-strip.test.tsx:496-521` pins it) -- do
+               not fit 361px of clear width and never have: this row shipped
+               with NOWHERE for the overflow to go, `flex-none` on every chip
+               and no wrap, no scroll and no cap. Measured before this fix, at 390px: 408px
                of chips in a 361px box, `overflow-x: visible` on the nav, the
                last chip's paint spilling past the screen edge with no way to
                reach it -- the operator's own report, translated: "the quick
@@ -10378,7 +10389,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
               // `gap-1` (4px), not `gap-1.5` (6px): the operator's own
               // follow-up ("reduce the spacing between the quick buttons
               // above the prompt input"), the same tightening
-              // `data-prompt-tools` gets below -- more of the eight keys fit
+              // `data-prompt-tools` gets below -- more of the chips fit
               // before the row's own edge, so fewer live behind the "»"
               // overflow at 360px.
               className="vam-no-scrollbar flex flex-none items-center gap-1 overflow-x-auto overscroll-x-contain"
@@ -10388,7 +10399,8 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                   is always drawn and toggles the composer's own focus
                   (`inputRef.current` focus/blur -- the same release the
                   composer's Escape/`Mod-[` handler uses), so a device with
-                  no keyboard up can raise one. Only Backspace keeps a glyph.
+                  no keyboard up can raise one. Only `⌫ ↑ ↓ ← →` are glyph labels
+                  (`LABEL_GLYPHS`, `phone-key-labels.tsx:60`).
                   The pill skin is `data-tap-pill` (`styles.css`). */}
               <button
                 type="button"

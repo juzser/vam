@@ -32,8 +32,9 @@
  * ONE NARROW EXCEPTION TO "no terminal surface", `/api/send-key`
  * (`send-key.ts`): the phone's keystroke strip has no `window.api.terminal
  * .send` to press (that bridge exists only in the Electron shell), so this
- * route sends ONE key from a FIXED SIX-KEY ALLOWLIST -- Escape, Tab, Enter,
- * Shift-Tab, Space, Backspace, never free text -- into a session's own tmux
+ * route sends ONE key from a FIXED ALLOWLIST, `REMOTE_KEY_IDS`
+ * (`src/shared/remote-key.ts:23`) -- named keys, arrows and Ctrl chords,
+ * never free text -- into a session's own tmux
  * pane, resolved the same confined way `recordPrompt` resolves one (exact
  * `=name` tmux targets, never a client-supplied pane name). Same auth and
  * same pairing as every other write route here -- and, like them, no
@@ -51,6 +52,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { basename, resolve } from 'node:path';
 import type { SourceCapabilities } from '../../renderer/sources/port.js';
 import type { SourceDescriptor } from '../../shared/preload-api.js';
+import { REMOTE_KEY_IDS } from '../../shared/remote-key.js';
 import type { SourceError } from '../ipc/channels.js';
 import { isDirectoryPath, isOptionalText, isPromptText, isText } from '../ipc/validators.js';
 import { projectIdOf } from '../sources/claude-code/project-id.js';
@@ -497,7 +499,8 @@ export const UNSERVED: Partial<Record<keyof SourceCapabilities | 'files', string
     'the remote endpoint does not expose the full terminal surface: read, resize, ' +
     'answer and sending arbitrary text each type into a running agent and need ' +
     'their own rate limit and decision. `/api/send-key` is the one narrow ' +
-    'exception -- a single key, from a fixed six-key allowlist, the same channel ' +
+    'exception -- a single key, from a fixed ' +
+    `${REMOTE_KEY_IDS.length}-key allowlist, the same channel ` +
     'the phone keystroke strip presses over (`send-key.ts`, `shared/remote-key.ts`)',
   files:
     'the remote endpoint carries no file-read, file-write, file-listing or ' +
@@ -830,13 +833,13 @@ function routesFor(options: RemoteServerOptions): Map<string, { method: string; 
       /**
        * THE PHONE'S ROUTE INTO A RUNNING AGENT, ONE ALLOWLISTED KEY AT A TIME
        * -- see `send-key.ts`'s own header for the whole argument (root cause,
-       * resolution, and why an arrow-free six-key allowlist is the entire
-       * surface). Registered here, under the SAME `allowWrites` gate every
-       * other write is, with the SAME auth and pairing `write()` already gives
-       * `/api/record-prompt` -- and, like it, no per-request rate limit (none
-       * of the write routes has one) -- nothing about this route is a
-       * new decision at the transport layer, only a new, narrow ACT at the
-       * source layer.
+       * resolution, and why the fixed `REMOTE_KEY_IDS` allowlist,
+       * `src/shared/remote-key.ts:23`, is the entire surface). Registered here,
+       * under the SAME `allowWrites` gate every other write is, with the SAME
+       * auth and pairing `write()` already gives `/api/record-prompt` -- and,
+       * like it, no per-request rate limit (none of the write routes has one)
+       * -- nothing about this route is a new decision at the transport layer,
+       * only a new, narrow ACT at the source layer.
        *
        * `call` DOES NOT DISPATCH THROUGH `s.*`, unlike every write above it --
        * there is no `MainSource` member for this, deliberately: the write

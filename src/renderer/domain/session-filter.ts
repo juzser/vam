@@ -99,17 +99,22 @@ export type SessionFilters = {
    * has an opinion about this one already, the operator's stated ask, not a
    * status nobody has weighed in on yet.
    *
-   * `hide`-SHAPED LIKE EVERY FIELD IN THIS TYPE, though the popover's own
-   * label for it reads "Show external worktrees" -- the operator's own
-   * words, the other way round. Naming the STORED field the same direction
-   * as its five neighbours is what keeps this file (and `prefs.ts`'s parser)
-   * one convention rather than two.
+   * `hide`-SHAPED, as are all fields of this type except `onlyPrompted`,
+   * though the popover's own label for it reads "Show external
+   * worktrees" -- the operator's own words, the other way round. Naming the
+   * STORED field the same direction as its six hide-shaped neighbours is what
+   * keeps this file (and `prefs.ts`'s parser) one convention rather than
+   * two.
    */
   readonly hideExternalWorktrees: boolean;
   /**
-   * The whole per-project Worktrees section, not drawn at all. ON by default.
-   * `hide`-shaped like every field here, though the filter menu's own label
-   * reads "Show worktrees" -- the operator's own words, the other way round.
+   * The per-project Worktrees section, hidden. ON by default
+   * (`DEFAULT_SESSION_FILTERS.hideWorktrees`). One exception: an open create request still draws the create form alone,
+   * without the external group, heading, note or rows
+   * (`SessionList.tsx:5250`, `formOnly={originFilters.hideWorktrees}`).
+   * `hide`-shaped, though the filter menu's own label reads "Show worktrees"
+   * (`SessionList.tsx:4014`) -- the operator's own words, the other way
+   * round.
    */
   readonly hideWorktrees: boolean;
 };

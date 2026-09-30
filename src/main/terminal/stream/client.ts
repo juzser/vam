@@ -51,7 +51,6 @@
  * one check at that single entry point covers the whole class.
  */
 
-import { StringDecoder } from 'node:string_decoder';
 import { CURSOR_FORMAT } from '../../sources/tmux/argv.js';
 import {
   CONTROL_TIMEOUT_MS,
@@ -184,6 +183,15 @@ type PendingBlock = {
   readonly chain?: object;
 };
 
+/** A UTF-8 character has at most three continuation bytes. */
+const MAX_ORPHAN_TAIL = 3;
+
+/** A block body, decoded from UTF-8 once (the framer hands back bytes as a
+ * latin1 string). `Buffer#toString` keeps a leading U+FEFF. */
+function bodyText(body: string): string {
+  return Buffer.from(body, 'latin1').toString('utf8');
+}
+
 /**
  * One connection, attached to the session's window, for as long as the
  * operator has that Terminal view's streaming mode open.
@@ -196,7 +204,16 @@ export class StreamClient {
 
   #child: ControlChildProcess | null = null;
   #framer = new ControlFramer();
-  #decoder = new StringDecoder('utf8');
+  /** Reassembles UTF-8 per pane, over the latin1 byte strings the framer
+   * hands back. tmux can end one %output line inside a character and finish
+   * it on the next, so this must outlive a single line. `ignoreBOM: true`
+   * keeps a leading U+FEFF, as the pre-latin1 decoder did. Replaced by
+   * `#resetPaneDecoder`. */
+  #paneDecoder = new TextDecoder('utf-8', { ignoreBOM: true });
+  /** Continuation bytes (0x80-0xBF) the fresh decoder may still discard at
+   * the start of its input: the orphan tail of a character whose lead bytes
+   * the gate dropped. 0 once the run ended. */
+  #orphanBudget = MAX_ORPHAN_TAIL;
   #paneId: string | null = null;
   #blockQueue: PendingBlock[] = [];
   #dataListeners = new Set<(chunk: string) => void>();
@@ -385,7 +402,7 @@ export class StreamClient {
   #wire(child: ControlChildProcess): void {
     this.#child = child;
     this.#framer = new ControlFramer();
-    this.#decoder = new StringDecoder('utf8');
+    this.#resetPaneDecoder();
     this.#seeded = false;
     this.#paused = false;
     this.#resuming = false;
@@ -393,7 +410,11 @@ export class StreamClient {
     this.#stdinHeld = [];
     this.#stdinHeldBytes = 0;
     child.stdout.on('data', (chunk) => {
-      if (this.#child === child) this.#onData(this.#decoder.write(chunk as Buffer));
+      if (this.#child !== child) return;
+      // Raw bytes, one char per byte: a string chunk (test fakes) is taken as
+      // its UTF-8 bytes. UTF-8 is reassembled later, per pane and per block.
+      const raw = typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : (chunk as Buffer);
+      this.#onData(raw.toString('latin1'));
     });
     const onDown = () => {
       if (this.#child === child) this.#handleDown();
@@ -666,6 +687,33 @@ export class StreamClient {
     }
   }
 
+  /** Start a fresh pane decoder: nothing held before a reconnect, or before
+   * the reseed after a pause (output dropped meanwhile), may leak into later
+   * output, and the orphan-tail skip applies again at the new boundary. */
+  #resetPaneDecoder(): void {
+    this.#paneDecoder = new TextDecoder('utf-8', { ignoreBOM: true });
+    this.#orphanBudget = MAX_ORPHAN_TAIL;
+  }
+
+  /** Decode pane output bytes (a latin1 string). While the orphan budget
+   * lasts, a leading run of continuation bytes is discarded: it is the tail
+   * of a character whose lead the gate dropped, which the seed already
+   * draws whole. A boundary rule, not a filter: the first other byte ends it. */
+  #decodePane(data: string): string {
+    const raw = Buffer.from(data, 'latin1');
+    let start = 0;
+    while (this.#orphanBudget > 0 && start < raw.length) {
+      const byte = raw[start] as number;
+      if (byte < 0x80 || byte > 0xbf) {
+        this.#orphanBudget = 0;
+        break;
+      }
+      start += 1;
+      this.#orphanBudget -= 1;
+    }
+    return this.#paneDecoder.decode(raw.subarray(start), { stream: true });
+  }
+
   #onData(chunk: string): void {
     for (const event of this.#framer.feedEvents(chunk)) {
       this.#handleEvent(event);
@@ -682,7 +730,8 @@ export class StreamClient {
       if (!event.reply) return;
       const pending = this.#blockQueue.shift();
       if (pending === undefined) return;
-      pending.resolve({ ok: event.ok, body: event.body });
+      const body = bodyText(event.body);
+      pending.resolve({ ok: event.ok, body });
       if (event.ok || pending.chain === undefined) return;
       // A CHAIN-ABORTING %error (a review finding on PR 505, real-tmux
       // MEASURED -- see `#sendChain`'s own header): tmux never runs, or
@@ -696,14 +745,16 @@ export class StreamClient {
       let sibling = this.#blockQueue[0];
       while (sibling !== undefined && sibling.chain === pending.chain) {
         this.#blockQueue.shift();
-        sibling.resolve({ ok: false, body: event.body });
+        sibling.resolve({ ok: false, body });
         sibling = this.#blockQueue[0];
       }
       return;
     }
     if (event.kind === 'output') {
       if (event.paneId !== this.#paneId || !this.#seeded || this.#paused) return;
-      for (const listener of this.#dataListeners) listener(event.data);
+      const text = this.#decodePane(event.data);
+      if (text === '') return;
+      for (const listener of this.#dataListeners) listener(text);
       return;
     }
     // 'other' -- %session-changed, %exit, %window-add, %layout-change, ...
@@ -778,6 +829,7 @@ export class StreamClient {
   #finishResume(): void {
     if (!this.#paused) return;
     this.#paused = false;
+    this.#resetPaneDecoder();
     // RESEED rather than trust nothing was missed while paused -- `%output`
     // that arrived during the pause was dropped above (see the module
     // header), so a fresh `capture-pane` is the only way to know the
@@ -847,7 +899,7 @@ export class StreamClient {
   }
 
   /**
-   * Reconnect with a FRESH `ControlFramer` and `StringDecoder` (`#wire`),
+   * Reconnect with a FRESH `ControlFramer` and per-pane UTF-8 decoder (`#wire`),
    * then reseed -- never attempts to resume mid-stream, and never re-sends a
    * `write()` that was in flight when the connection dropped: `write()` is
    * fire-and-forget and this file tracks nothing past the moment it wrote
