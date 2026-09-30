@@ -28,6 +28,7 @@ import type { UpdateStatus } from '../../shared/update.js';
 import { VERSION } from '../../shared/update.js';
 import { t } from '../i18n/strings.js';
 import { errorSentence } from '../update/sentences.js';
+import { SettingsRow } from './primitives.js';
 import { Switch } from './Switch.js';
 
 const FOCUS_RING =
@@ -149,22 +150,31 @@ export function UpdatePanel({ api }: UpdatePanelProps) {
         </p>
       ) : (
         <>
+          {/* A ROW LIKE EVERY OTHER SWITCH IN SETTINGS: the switch's own
+              `label` is only its accessible name, so without the row's
+              heading a sighted operator sees "on" and nothing saying what
+              is on. */}
           {autoCheck !== null && (
-            <Switch
-              name="auto-update"
+            <SettingsRow
               label={t('settings.update.auto.label')}
-              checked={autoCheck}
-              on={t('settings.update.auto.on')}
-              off={t('settings.update.auto.off')}
-              onChange={(next) => {
-                setAutoCheck(next);
-                api
-                  .setAutoCheck(next)
-                  // Main answers what it stored, which is what is shown.
-                  .then(setAutoCheck)
-                  .catch(() => setAutoCheck(!next));
-              }}
-            />
+              hint={t('settings.update.auto.hint')}
+            >
+              <Switch
+                name="auto-update"
+                label={t('settings.update.auto.label')}
+                checked={autoCheck}
+                on={t('settings.update.auto.on')}
+                off={t('settings.update.auto.off')}
+                onChange={(next) => {
+                  setAutoCheck(next);
+                  api
+                    .setAutoCheck(next)
+                    // Main answers what it stored, which is what is shown.
+                    .then(setAutoCheck)
+                    .catch(() => setAutoCheck(!next));
+                }}
+              />
+            </SettingsRow>
           )}
           <button
             type="button"
