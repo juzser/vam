@@ -10331,9 +10331,9 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                defined at `:4553`, Terminal only when there is one, then
                More; the ORDER list in
                `DetailPanel.keystroke-strip.test.tsx:496-521` pins it) -- do
-               not fit 361px of clear width and never have: this row shipped with NOWHERE
-               for the overflow to go, `flex-none` on every chip and no wrap,
-               no scroll and no cap. Measured before this fix, at 390px: 408px
+               not fit 361px of clear width and never have: this row shipped
+               with NOWHERE for the overflow to go, `flex-none` on every chip
+               and no wrap, no scroll and no cap. Measured before this fix, at 390px: 408px
                of chips in a 361px box, `overflow-x: visible` on the nav, the
                last chip's paint spilling past the screen edge with no way to
                reach it -- the operator's own report, translated: "the quick

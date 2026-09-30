@@ -124,21 +124,20 @@ not a continuation of the out.**
 `KEY_STRIP` (`phone && canSendKeys`, i.e. drawn ONLY when no question is
 open — `canSendKeys = (canCycleMode || canSendKeysRemotely) &&
 (newestQuestion === null || !openQuestion)`, `DetailPanel.tsx:8613-8614`,
-rendered at `:10322`) holds 20 `PaneKey`s (`DetailPanel.tsx:4553`; line numbers here are at
-base 3fe3b5ec). The row
-sitting above the composer is 24 chips, 23 with no terminal: Keyboard,
-Paste, those 20 keys, Terminal (only when there is a terminal), then More
-(the `ORDER` list at `test/panels/DetailPanel.keystroke-strip.test.tsx:496-521`
-pins it). Every chip is an auto-width text pill (`STRIP_PILL`,
-`DetailPanel.tsx:4659-4661`, `h-[30px]` paint; the 44px hit is
-`.vam-phone .vam-tap`, `styles.css:2844-2846`); only `⌫ ↑ ↓ ← →` are glyph
-labels (`LABEL_GLYPHS`, `src/renderer/keyboard/phone-key-labels.tsx:60`), and
-the ` → agent` wording lives only in the sent/sending banner, never on a
-chip. It is a **separate control surface from the
-question card**: the strip drives raw terminal keys for a session that has
-no structured question open (arrow-key TUI menus, `y/n` prompts the
-`AskUserQuestion` reader cannot parse); the card drives structured
-`AskUserQuestion` calls. They are mutually exclusive by construction
+rendered at `:10322`) holds 20 `PaneKey`s (`DetailPanel.tsx:4553`; line
+numbers here are at base 3fe3b5ec). The row sitting above the composer is
+24 chips, 23 with no terminal: Keyboard, Paste, those 20 keys, Terminal
+(only when there is a terminal), then More (the `ORDER` list at
+`test/panels/DetailPanel.keystroke-strip.test.tsx:496-521` pins it). Every
+chip is an auto-width text pill (`STRIP_PILL`, `DetailPanel.tsx:4659-4661`,
+`h-[30px]` paint; the 44px hit is `.vam-phone .vam-tap`,
+`styles.css:2844-2846`); only `⌫ ↑ ↓ ← →` are glyph labels (`LABEL_GLYPHS`,
+`src/renderer/keyboard/phone-key-labels.tsx:60`), and the ` → agent`
+wording lives only in the sent/sending banner, never on a chip. It is a
+**separate control surface from the question card**: the strip drives raw
+terminal keys for a session that has no structured question open
+(arrow-key TUI menus, `y/n` prompts the `AskUserQuestion` reader cannot
+parse); the card drives structured `AskUserQuestion` calls. They are mutually exclusive by construction
 (`canSendKeys` is false exactly when the card is open) and never compete
 for space — that part of today's design is already correct and this spec
 keeps it.
