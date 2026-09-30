@@ -208,7 +208,7 @@ export function KeySheet({ onClose }: KeySheetProps) {
             </p>
           ) : (
             [groups.slice(0, cut), groups.slice(cut)].map((column, c) => (
-              <div key={c} className="contents lg:block">
+              <div key={c === 0 ? 'left' : 'right'} className="contents lg:block">
                 {column.map((group, i) => {
                   const top = c === 0 && i === 0;
                   const colTop = c === 1 && i === 0;
