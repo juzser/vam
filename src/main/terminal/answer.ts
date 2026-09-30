@@ -103,11 +103,6 @@ const ROW = /^\s*│?\s*(❯)?\s+(\d+)\.\s+(?:\[(.)\]\s+)?(\S.*?)\s*│?\s*$/;
  * which list it is about to answer.
  */
 export function readPicker(text: string): Picker | null {
-  return pick(text)?.picker ?? null;
-}
-
-/** `readPicker`, plus the line each row was read from (for `see`'s label check). */
-function pick(text: string): { picker: Picker; at: readonly number[] } | null {
   const parsed = plain(text)
     .split('\n')
     .map((line) => ROW.exec(line));
@@ -115,34 +110,31 @@ function pick(text: string): { picker: Picker; at: readonly number[] } | null {
   const [head] = cursors;
   if (head === undefined || cursors.length !== 1) return null;
   /** Every run of rows numbered from one, in the order they are drawn. */
-  const runs: { at: number; row: RegExpExecArray }[][] = [];
+  const runs: RegExpExecArray[][] = [];
   let holdsCursor = false;
-  let found: { at: number; row: RegExpExecArray }[] | null = null;
+  let found: RegExpExecArray[] | null = null;
   for (const [at, row] of parsed.entries()) {
     if (row === null) continue;
     const run = runs.at(-1);
     if (run !== undefined && row[2] === String(run.length + 1)) {
-      run.push({ at, row });
+      run.push(row);
     } else if (row[2] === '1') {
       if (holdsCursor) found = runs.at(-1) ?? null;
       holdsCursor = false;
-      runs.push([{ at, row }]);
+      runs.push([row]);
     } else {
       continue;
     }
     if (at === head) holdsCursor = true;
   }
-  const run = found ?? (holdsCursor ? (runs.at(-1) ?? null) : null);
-  if (run === null) return null;
+  const picker = found ?? (holdsCursor ? (runs.at(-1) ?? null) : null);
+  if (picker === null) return null;
   return {
-    at: run.map((entry) => entry.at),
-    picker: {
-      cursor: run.findIndex((entry) => entry.row[1] !== undefined),
-      rows: run.map(({ row }) => ({
-        label: row[4] ?? '',
-        checked: row[3] === undefined ? null : row[3].trim() !== '',
-      })),
-    },
+    cursor: picker.findIndex((row) => row[1] !== undefined),
+    rows: picker.map((row) => ({
+      label: row[4] ?? '',
+      checked: row[3] === undefined ? null : row[3].trim() !== '',
+    })),
   };
 }
 
@@ -213,35 +205,6 @@ export async function readSessionPrompt(
 
 /** A string with all whitespace removed, for comparing text the pane may have folded. */
 const squash = (text: string): string => text.replace(/\s+/g, '');
-
-/**
- * A label the pane FOLDED over two rows reads as its first row only, and the
- * rows under it are indistinguishable from a description. So a row is given
- * the operator's label when that label is exactly the row's label plus whole
- * rows below it (whitespace aside) -- never a prefix of one, and never a label
- * the step did not ask for. Everything downstream then compares as before.
- */
-function widenLabels(
-  lines: readonly string[],
-  found: { picker: Picker; at: readonly number[] },
-  step: AnswerStep,
-): Picker {
-  const wanted = new Map(step.labels.map((label) => [squash(label), label]));
-  const rows = found.picker.rows.map((row, index) => {
-    if (wanted.has(squash(row.label))) return row;
-    let joined = squash(row.label);
-    const end = found.at[index + 1] ?? lines.length;
-    for (let at = (found.at[index] ?? 0) + 1; at < end; at += 1) {
-      const line = lines[at] ?? '';
-      if (line.trim() === '' || !/^\s/.test(line)) break;
-      joined += squash(line);
-      const label = wanted.get(joined);
-      if (label !== undefined) return { ...row, label };
-    }
-    return row;
-  });
-  return { cursor: found.picker.cursor, rows };
-}
 
 const cursorLabel = (picker: Picker): string => picker.rows[picker.cursor]?.label ?? '';
 const shape = (picker: Picker): string => picker.rows.map((row) => row.label).join(' ');
@@ -348,9 +311,8 @@ async function deliver(run: TmuxRun, name: string, request: AnswerRequest): Prom
     if (!squash(above).includes(squash(step.question))) {
       return { kind: 'wrong-question', question: step.question };
     }
-    const found = pick(text);
-    if (found === null) return { kind: 'no-picker' };
-    const picker = widenLabels(lines, found, step);
+    const picker = readPicker(text);
+    if (picker === null) return { kind: 'no-picker' };
     // THE REVIEW IS NOT A QUESTION, and it names every question of the set
     // above its own rows -- so the rule above does not catch it. Walked as if
     // it were question two, it is a real picker on a real screen offering

@@ -64,15 +64,6 @@ export const WRAPPED_KEPT = WRAPPED.replace('for the\n', 'for the \n');
 /** Case 4, an option with a description: COLOUR_ASKED itself interleaves them. */
 export const DESCRIBED = COLOUR_ASKED;
 
-/** Case 5, an option label that wraps: label row folds onto an indented row. */
-export const LONG_LABEL = 'Rewrite the whole module from scratch';
-export const LABEL_WRAPPED = picker(
-  '←  ☐ Plan  ✔ Submit  →',
-  ['How should we proceed?'],
-  ['❯ 1. Rewrite the whole module', '     from scratch', '  2. Leave it alone'],
-);
-export const LABEL_Q = 'How should we proceed?';
-
 /** Case 6, multiSelect: FRUIT_ASKED's shape with the boxes a multi picker draws. */
 export const MULTI_Q = 'Which fruits do you like?';
 export const multi = (row: number, ticked: readonly number[]): string =>
