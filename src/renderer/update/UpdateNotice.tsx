@@ -25,7 +25,7 @@
 
 import { useEffect, useState } from 'react';
 import type { UpdateApi } from '../../preload/api.js';
-import type { UpdateStatus } from '../../shared/update.js';
+import type { LegacyUpdateStatus as UpdateStatus } from '../../shared/update.js';
 
 export type UpdateNoticeProps = {
   /** Absent in the browser build, where there is no bridge and no check. */

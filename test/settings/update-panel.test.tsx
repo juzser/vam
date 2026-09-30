@@ -38,7 +38,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EMPTY_PREFS } from '../../src/renderer/prefs/prefs.js';
 import { SettingsOverlay } from '../../src/renderer/settings/SettingsOverlay.js';
 import { UpdatePanel } from '../../src/renderer/settings/UpdatePanel.js';
-import type { UpdateStatus } from '../../src/shared/update.js';
+import type { LegacyUpdateStatus as UpdateStatus } from '../../src/shared/update.js';
 import { VERSION } from '../../src/shared/update.js';
 
 afterEach(cleanup);

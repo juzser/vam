@@ -36,7 +36,7 @@
 
 import { useState } from 'react';
 import type { UpdateApi } from '../../preload/api.js';
-import type { UpdateStatus } from '../../shared/update.js';
+import type { LegacyUpdateStatus as UpdateStatus } from '../../shared/update.js';
 import { VERSION } from '../../shared/update.js';
 import { t } from '../i18n/strings.js';
 

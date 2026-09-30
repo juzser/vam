@@ -33,7 +33,7 @@
  * already a distinct, quiet outcome, so the loop's cost is visible and small.
  */
 
-import type { UpdateStatus } from '../../shared/update.js';
+import type { LegacyUpdateStatus as UpdateStatus } from '../../shared/update.js';
 import { CHANNELS } from '../ipc/channels.js';
 import type { IpcMainLike } from '../ipc/handlers.js';
 

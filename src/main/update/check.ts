@@ -18,7 +18,11 @@
  * `checkForUpdate` never throws. Every failure is a value.
  */
 
-import { compareVersions, parseVersion, type UpdateStatus } from '../../shared/update.js';
+import {
+  compareVersions,
+  parseVersion,
+  type LegacyUpdateStatus as UpdateStatus,
+} from '../../shared/update.js';
 
 /** The public repository. A constant: no interpolation, no caller input. */
 export const LATEST_RELEASE_URL = 'https://api.github.com/repos/juzser/vam/releases/latest';
@@ -153,6 +157,9 @@ export async function checkForUpdate(
   // dev build whose version is not a version -- means nothing can be shown to
   // be newer, so nothing is offered.
   if (latest === null || current === null) return { kind: 'up-to-date' };
+  // `parseVersion` now understands prereleases; an unflagged prerelease tag is
+  // still never offered (until Task 3 rewrites this check).
+  if (latest.pre.length > 0) return { kind: 'up-to-date' };
   if (compareVersions(latest, current) <= 0) return { kind: 'up-to-date' };
 
   const url = releaseUrl(release.html_url);

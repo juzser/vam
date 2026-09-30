@@ -13,7 +13,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { UpdateNotice } from '../../src/renderer/update/UpdateNotice.js';
-import type { UpdateStatus } from '../../src/shared/update.js';
+import type { LegacyUpdateStatus as UpdateStatus } from '../../src/shared/update.js';
 
 afterEach(cleanup);
 

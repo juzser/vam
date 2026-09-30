@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { CHANNELS } from '../../src/main/ipc/channels.js';
 import { registerUpdateIpc } from '../../src/main/update/ipc.js';
 import { createUpdateApi } from '../../src/preload/api.js';
-import type { UpdateStatus } from '../../src/shared/update.js';
+import type { LegacyUpdateStatus as UpdateStatus } from '../../src/shared/update.js';
 
 function fakeIpcMain() {
   const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();

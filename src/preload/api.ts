@@ -75,7 +75,7 @@ import type {
   PaneView,
   SessionModel,
 } from '../shared/terminal.js';
-import type { UpdateStatus } from '../shared/update.js';
+import type { LegacyUpdateStatus as UpdateStatus } from '../shared/update.js';
 import type { UsageSnapshot } from '../shared/usage.js';
 import type {
   CreateWorktreeInput,
