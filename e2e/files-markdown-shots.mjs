@@ -223,6 +223,7 @@ await page.addInitScript(() => {
     ['/work/demo/README.md', { content: README, rev: 0 }],
     ['/work/demo/CODE.md', { content: CODE, rev: 0 }],
     ['/work/demo/.env', { content: '# service\nPORT=8787\n', rev: 0 }],
+    ['/work/demo/settings.ini', { content: 'port = 8787\n', rev: 0 }],
     ['/work/demo/package.json', { content: '{\n  "name": "atlas"\n}\n', rev: 0 }],
     ['/work/demo/Makefile', { content: 'build:\n\techo build\n', rev: 0 }],
     ['/work/demo/assets/logo.svg', { content: '<svg />\n', rev: 0 }],
@@ -383,7 +384,7 @@ check(
 check(
   'and the families are the ones the classifier named',
   glyphs.find((g) => g.path === '/work/demo/README.md')?.shape === 'doc' &&
-    glyphs.find((g) => g.path === '/work/demo/.env')?.shape === 'config' &&
+    glyphs.find((g) => g.path === '/work/demo/settings.ini')?.shape === 'config' &&
     glyphs.find((g) => g.path === '/work/demo/package.json')?.shape === 'json' &&
     glyphs.find((g) => g.path === '/work/demo/Makefile')?.shape === 'plain' &&
     glyphs.find((g) => g.path === '/work/demo/src')?.shape === 'directory',
@@ -394,7 +395,7 @@ const grey = glyphs.find((g) => g.path === '/work/demo/Makefile')?.colour;
 check(
   'the four hued families are really painted, and none of them is the grey',
   grey !== null &&
-    ['/work/demo/README.md', '/work/demo/.env', '/work/demo/package.json', '/work/demo/src'].every(
+    ['/work/demo/README.md', '/work/demo/settings.ini', '/work/demo/package.json', '/work/demo/src'].every(
       (path) => {
         const found = glyphs.find((g) => g.path === path);
         return found !== undefined && found.colour !== null && found.colour !== grey;
@@ -405,7 +406,7 @@ check(
 check(
   'and they are four DISTINCT colours — one token pointed at another is a swatch that lies',
   new Set(
-    ['/work/demo/README.md', '/work/demo/.env', '/work/demo/package.json', '/work/demo/src'].map(
+    ['/work/demo/README.md', '/work/demo/settings.ini', '/work/demo/package.json', '/work/demo/src'].map(
       (path) => glyphs.find((g) => g.path === path)?.colour,
     ),
   ).size === 4,
