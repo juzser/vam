@@ -150,7 +150,18 @@ for (const theme of ['light', 'dark']) {
   // bottom edge, with no trailing spacer and no fade painting over it.
   await page.evaluate(() => {
     const column = document.querySelector('[data-phone-shell] [data-detail-column]');
-    if (column !== null) column.scrollTop = column.scrollHeight;
+    if (column === null) return;
+    // The fixture transcript is shorter than the phone column, so it never
+    // overflows and "the column's end" would be free space, not the scroll
+    // end. Pad the content (a filler child before the card) so the column
+    // really scrolls; the sticky card's inset is what is being measured.
+    if (column.scrollHeight <= column.clientHeight) {
+      const filler = document.createElement('div');
+      filler.setAttribute('aria-hidden', 'true');
+      filler.style.height = `${column.clientHeight * 2}px`;
+      column.insertBefore(filler, column.firstElementChild?.nextSibling ?? null);
+    }
+    column.scrollTop = column.scrollHeight;
   });
   await page.waitForTimeout(150);
   const edge = await page.evaluate(() => {
