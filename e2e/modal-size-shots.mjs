@@ -59,6 +59,9 @@ async function openViaGear(page) {
 
 async function openViaStatsIcon(page) {
   await page.locator('button[aria-label="stats"]').first().click();
+  // The stats icon opens the stats popover; its Details button opens Settings.
+  await page.waitForSelector('[data-stats-popover]', { timeout: 5_000 });
+  await page.getByRole('button', { name: 'Details' }).click();
   await page.waitForSelector('[data-settings-overlay]', { timeout: 5_000 });
   // Landed on the "stats" section specifically, not merely on Settings --
   // `data-settings-panel="stats"` is the `SettingsCard` wrapper's own hook,

@@ -153,6 +153,8 @@ async function openPopoverOn(viewport, shotName) {
 
   await toggle.click();
   await page.waitForSelector('[data-usage-panel]');
+  // The panel body is a lazy chunk: wait for the last provider before reading the list.
+  await page.waitForSelector('[data-usage-provider="codex"]');
   await page.waitForTimeout(150);
 
   // THE PROPERTY, NOT A PROXY: the panel's own painted rectangle must sit
@@ -192,7 +194,7 @@ async function openPopoverOn(viewport, shotName) {
 }
 
 await openPopoverOn({ width: 1280, height: 800 }, 'usage-popover-desktop');
-await openPopoverOn({ width: 390, height: 844 }, 'usage-popover-phone');
+// No phone pass: the phone usage icon was removed on purpose (vam-ux-1 task-13).
 
 await browser.close();
 
