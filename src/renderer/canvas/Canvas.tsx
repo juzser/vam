@@ -1020,11 +1020,12 @@ function TabStripRow({
  * -- something is happening -- and `aria-live` is what says it to a reader who
  * cannot see it start.
  *
- * IT DOES NOT SAY HOW LONG. vam has nothing to wait on and no measured
- * distribution to promise against: `tmux new-session -d` returns immediately
- * and the agent registers on its own schedule. A progress bar would be an
- * invented number, and "a few seconds" would be a guess the operator could
- * catch vam getting wrong.
+ * IT DOES NOT SAY HOW LONG. vam has no measured distribution to promise
+ * against: `tmux new-session -d` returns immediately and the agent registers
+ * on its own schedule. A progress bar would be an invented number, and "a few
+ * seconds" would be a guess the operator could catch vam getting wrong. The
+ * wait is still bounded (`START_PANE_WAIT_TIMEOUT_MS`, `beginStarting`), but
+ * silently: the indicator just goes away.
  */
 function StartingSession({ projectName }: { readonly projectName: string }) {
   return (
@@ -2166,8 +2167,9 @@ function CanvasInner({
    * THE WAIT HAS TWO PARTS AND VAM ONLY EVER HINTED AT THE SECOND.
    * `tmux new-session -d` returns as soon as the session EXISTS, and the agent
    * inside registers where vam can see it later, on its own schedule. So this
-   * outlives the write: it is cleared by a row ARRIVING, not by a promise
-   * resolving.
+   * outlives the write: it is cleared by an OWN row ARRIVING (a foreign row
+   * never ends it), not by a promise resolving; failing that, `beginStarting`'s
+   * timer ends it at `START_PANE_WAIT_TIMEOUT_MS`.
    *
    * STATE, NOT A REF, because it is drawn. And deliberately NOT a `Session` in
    * the model: a placeholder inside `allEntries` would become a tab of a pane,
@@ -2194,6 +2196,38 @@ function CanvasInner({
      *  against that moment rather than against whatever is there on arrival. */
     readonly known: ReadonlySet<string>;
   } | null>(null);
+  /**
+   * THE BOUND ON THAT WAIT, one timer per create, started where the create
+   * calls this instead of `setStarting` -- before the write, because the bound
+   * is on the visible wait and must also end a write that never settles (the
+   * catch paths run only on a rejection). At `START_PANE_WAIT_TIMEOUT_MS` it
+   * clears `starting` silently (no new copy) and disarms `pendingNewTab`, each
+   * only while it still holds THIS create's record: `pendingAction` refuses a
+   * second create only while the first write is in flight, so create #2 can
+   * replace both records inside create #1's window. `pendingNewTab` is matched
+   * by its `known` set, which is unique per create. Returns whether the
+   * deadline has passed, so a slow write never arms the pane afterwards. An
+   * own row arriving after the bound opens on `viewSeed`.
+   */
+  const startingTimers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  const beginStarting = useCallback((record: NonNullable<typeof starting>) => {
+    let expired = false;
+    setStarting(record);
+    const handle = setTimeout(() => {
+      expired = true;
+      startingTimers.current.delete(handle);
+      setStarting((current) => (current === record ? null : current));
+      if (pendingNewTab.current?.known === record.known) pendingNewTab.current = null;
+    }, START_PANE_WAIT_TIMEOUT_MS);
+    startingTimers.current.add(handle);
+    return () => expired;
+  }, []);
+  useEffect(() => {
+    const timers = startingTimers.current;
+    return () => {
+      for (const handle of timers) clearTimeout(handle);
+    };
+  }, []);
   /**
    * Two derived values, mirrored into refs during render, so
    * `setFocusedSessionId` below can read them and still be the
@@ -2824,8 +2858,8 @@ function CanvasInner({
    * PAST THIS, NOTHING IS WORTH WAITING FOR SILENTLY -- the operator's own
    * bound (`START_PANE_WAIT_TIMEOUT_MS` above), and `StartingSession`'s
    * neighbour rather than its twin: that indicator (new session, a pane that
-   * does not exist yet) deliberately names no duration because vam has
-   * nothing to measure against; THIS wait is for a pane the operator can
+   * does not exist yet) shares the bound but ends silently and names no
+   * duration, because vam has nothing to measure against; THIS wait is for a pane the operator can
    * already see and can already reach by hand (the Terminal view), so a
    * bound that hands them that door is honest where a bare "still waiting"
    * forever would not be.
@@ -3893,10 +3927,11 @@ function CanvasInner({
    * there are sessions in vam, don't show the getting-started screen
    * prematurely."
    *
-   * Read by the getting-started screen's own trigger below, the tab strip's
-   * "no sessions yet" caption, and `SessionList`'s two mirrors of the same
-   * screen (its own empty-list line, and the phone's copy of this one) --
-   * one fact, so the four surfaces can never contradict each other about it.
+   * Read by the tab strip's "no sessions yet" caption and `SessionList`'s two
+   * mirrors of the getting-started screen (its own empty-list line, and the
+   * phone's copy of it). The desktop screen's own trigger is `gettingStartedOn`,
+   * which does not read this: it follows what the panes and the filtered
+   * entries show.
    *
    * CASE (b) FROM PR 467 SURVIVES UNCHANGED: every entry foreign (`isForeign`
    * true for all of them, or the set is simply empty) still reads `false`
@@ -4334,7 +4369,9 @@ function CanvasInner({
     if (pendingTab === null) {
       return;
     }
-    const arrived = allEntries.find((entry) => !pendingTab.known.has(entry.session.id));
+    const arrived = allEntries.find(
+      (entry) => !pendingTab.known.has(entry.session.id) && !isForeign(entry.session),
+    );
     if (arrived === undefined) {
       return;
     }
@@ -5957,7 +5994,7 @@ function CanvasInner({
       // THE WAIT BECOMES VISIBLE HERE, before the write is even issued --
       // "immediately" in the operator's request is this line. `paneId` is the
       // pane the `+` was pressed in; `o` has none and means the focused one.
-      setStarting({
+      const expired = beginStarting({
         projectId,
         projectName,
         paneId: paneId ?? focusedPaneIdRef.current,
@@ -5969,7 +6006,7 @@ function CanvasInner({
       setStatus(`starting a new session in ${projectName}…`);
       try {
         await route.write.createSession?.(projectId, projectName);
-        if (paneId !== undefined) {
+        if (paneId !== undefined && !expired()) {
           pendingNewTab.current = { paneId, known };
         }
         // The write resolves when the SESSION exists, not when the agent
@@ -5992,7 +6029,7 @@ function CanvasInner({
         setPendingAction(null);
       }
     },
-    [source, pendingAction, setStatus],
+    [source, pendingAction, setStatus, beginStarting],
   );
 
   /**
@@ -6000,13 +6037,25 @@ function CanvasInner({
    *
    * Its own effect rather than a branch of `pendingNewTab`'s: that one is
    * armed only for the pane `+` and only after the write, so the keyboard path
-   * would have had an indicator nothing could clear. Any entry the operator
-   * had not already seen ends the wait; vam cannot know which id the CLI
-   * chose, and the set was captured before the write for exactly that reason.
+   * would have had an indicator nothing could clear. Any own (not `isForeign`)
+   * entry the operator had not already seen ends the wait; vam cannot know
+   * which id the CLI chose, and the set was captured before the write for
+   * exactly that reason. A foreign row is another tool's: it neither ends the
+   * wait nor gets vam's Response record.
    */
   useEffect(() => {
     if (starting === null) return;
-    if (allEntries.some((entry) => !starting.known.has(entry.session.id))) {
+    const arrived = allEntries.filter(
+      (entry) => !starting.known.has(entry.session.id) && !isForeign(entry.session),
+    );
+    if (arrived.length > 0) {
+      // A session vam just created opens on Response, not `viewSeed`, unless
+      // the operator already picked a view. `prefs.detailTab` is not written.
+      setViewBySession((current) => {
+        const next = { ...current };
+        for (const entry of arrived) next[entry.session.id] ??= 'Response';
+        return next;
+      });
       setStarting(null);
     }
   }, [allEntries, starting]);
@@ -6078,7 +6127,12 @@ function CanvasInner({
       // captures it there: "which row is new" has to be measured against what
       // existed when the operator picked the directory.
       const known = new Set(entriesByIdRef.current.keys());
-      setStarting({ projectId: null, projectName: name, paneId: focusedPaneIdRef.current, known });
+      beginStarting({
+        projectId: null,
+        projectName: name,
+        paneId: focusedPaneIdRef.current,
+        known,
+      });
       // The first half of one sentence, exactly as `createSession` says it:
       // "starting…" here, "started … it may take a moment to appear" below.
       setStatus(`starting a new session in ${name}…`);
@@ -6101,7 +6155,7 @@ function CanvasInner({
       // turns a clear one into an apparent hang.
       setPendingAction(null);
     }
-  }, [source, pendingAction, setStatus]);
+  }, [source, pendingAction, setStatus, beginStarting]);
 
   /** The caption both `+` controls wear: the refusal, or nothing to say. */
   const newSessionDecline = useMemo(() => {
@@ -6259,6 +6313,23 @@ function CanvasInner({
     },
     [entries, focusedEntry, focusSession, setStatus],
   );
+
+  // Still waiting for the FIRST answer, on whichever transport.
+  const sidebarLoading =
+    source.kind === 'connecting'
+      ? source.error === undefined || source.error === null
+      : source.kind === 'session'
+        ? source.loading === true
+        : source.kind === 'live'
+          ? source.status === 'loading'
+          : false;
+
+  // Get started: first load answered, no session visible anywhere (no filtered
+  // entry, no pane drawing one). Gates the screen, the switcher and `pickView`.
+  const gettingStartedOn =
+    entries.length === 0 &&
+    !sidebarLoading &&
+    !leaves(panes).some((leaf) => leaf.sessionId !== null && entriesById.has(leaf.sessionId));
 
   /**
    * Every `KeyAction` the grammar can produce, run — the ONE place a
@@ -6561,6 +6632,7 @@ function CanvasInner({
           // means this route cannot become the one that disagrees if that ever
           // changes. `tabs.ts` is where a view's presence is decided; this is
           // a caller reporting which shell it is, not deciding anything.
+          if (gettingStartedOn) return;
           const drawn = visibleTabs(terminalTab, filesTab, phone);
           const view = tabForDigit(drawn, action.digit);
           if (view === undefined) {
@@ -7102,6 +7174,7 @@ function CanvasInner({
       projectTabIds,
       sessionIds,
       entries,
+      gettingStartedOn,
       matches,
       query,
       copyAllCommands,
@@ -7621,18 +7694,6 @@ function CanvasInner({
    * so there is one assembly of each panel’s props and not a second one that
    * could drift from it.
    */
-  // Still asking for the FIRST answer, on whichever transport this canvas has:
-  // 'connecting' and 'session' carry it from `useSourceModel`, 'live' has its
-  // own `status`, 'demo' never loads.
-  const sidebarLoading =
-    source.kind === 'connecting'
-      ? source.error === undefined || source.error === null
-      : source.kind === 'session'
-        ? source.loading === true
-        : source.kind === 'live'
-          ? source.status === 'loading'
-          : false;
-
   /**
    * Whether THIS BUILD can open a native directory picker at all --
    * `window.api?.dialog?.chooseDirectory`, the same bridge `newProject` and
@@ -7998,19 +8059,17 @@ function CanvasInner({
         // (`entries`, the same filtered set the sidebar and the tab strip
         // already agree is "what's visible right now" -- unchanged from
         // before: a sibling pane or another project with something visible
-        // still counts), AND the app truly owns none, `entries.length === 0`
-        // alone -- `hasOwnSession`'s own header explains why a session vam
-        // started that is merely hidden by dismiss/filters must not reach
-        // this screen. NOR BEFORE THE FIRST LOAD HAS ANSWERED: `sidebarLoading`
+        // still counts), i.e. `gettingStartedOn`: the filtered `entries` are
+        // empty and no pane draws a live entry. NOR BEFORE THE FIRST LOAD HAS ANSWERED: `sidebarLoading`
         // reads `EMPTY: CanvasModel` the exact same shape as a genuinely
         // empty workspace, and without this guard the screen flashed on at
         // every launch before `useSourceModel`'s first answer landed. Unlike
         // `onStartSession`/`onResumeInPane` above, whose absence follows
         // THIS pane's own `entry`, this is an APP-WIDE fact -- a pane can
         // hold nothing while a sibling pane, or another project, still has a
-        // real session, and only the truly-empty state gets this screen.
+        // visible session, and only that empty state gets this screen.
         gettingStarted:
-          entry !== null || entries.length > 0 || hasOwnSession || sidebarLoading
+          entry !== null || !gettingStartedOn
             ? undefined
             : {
                 onNewProject: () => void newProject(),
@@ -8056,7 +8115,7 @@ function CanvasInner({
         // (operator instruction) — the SAME fact `viewNote` above is gated
         // on, which is the point: a pane that cannot consume an `Alt+<digit>`
         // should not be showing the row that names one.
-        paneFocused: isFocused,
+        paneFocused: isFocused && !gettingStartedOn,
         // THIS SESSION'S VIEW, not this pane's and not the app's. `undefined`
         // for a pane showing no session at all -- there is no per-session fact
         // to name, so the panel falls back to owning its own, seeded the same
@@ -8065,7 +8124,13 @@ function CanvasInner({
         // `sendFailureBySession`. `null` for a pane showing no session: there
         // is nothing that could have failed in it.
         sendFailure: sessionId === null ? null : (sendFailureBySession[sessionId] ?? null),
-        tab: sessionId === null ? undefined : (viewBySession[sessionId] ?? viewSeed),
+        // Get started only draws on Response: force it over the seeded view.
+        tab:
+          sessionId === null
+            ? gettingStartedOn
+              ? 'Response'
+              : undefined
+            : (viewBySession[sessionId] ?? viewSeed),
         initialTab: viewSeed,
         onTabChange: (next) => {
           // Re-narrowed rather than cast. `onTabChange` is typed `string`
@@ -8134,14 +8199,12 @@ function CanvasInner({
       resumeInPane,
       setViewFor,
       mode,
-      entries,
       newProject,
       newSessionDecline,
       hasDirectoryPicker,
       foreignHiddenCount,
       onSidebarOriginFilters,
-      hasOwnSession,
-      sidebarLoading,
+      gettingStartedOn,
       pendingAction,
       clearStartingPane,
     ],
@@ -8239,15 +8302,7 @@ function CanvasInner({
               paneFocused={isFocused}
               drafts={draftsBySession}
               pending={pending}
-              // See `emptyText`'s own comment: "pick one from the sidebar" is
-              // only true while the sidebar has a row to pick. `entries` and
-              // `hasOwnSession` are the SAME two facts `gettingStarted`'s own
-              // condition reads a few hundred lines below -- the operator's
-              // own finding, reading the first screenshot, was this line
-              // contradicting that screen's "no sessions yet" 40px below it;
-              // `hasOwnSession` is what keeps it from making the SAME claim
-              // early, before the first load answers, or over a session vam
-              // started that is merely dismissed or filtered out of view.
+              // Same facts as `gettingStartedOn`, plus `hasOwnSession` (see `emptyText`).
               emptyText={
                 entries.length === 0 && !hasOwnSession && !sidebarLoading
                   ? 'no sessions yet'
