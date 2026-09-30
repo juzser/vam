@@ -67,8 +67,8 @@ const settle = async () => {
   });
 };
 
-async function open(sent: PaneSendResult = 'sent') {
-  const read = vi.fn(async () => ok());
+async function open(sent: PaneSendResult = 'sent', view0: PaneView = ok()) {
+  const read = vi.fn(async () => view0);
   const send = vi.fn(async (_project: string, _key: PaneKey, _row?: string) => sent);
   const view = render(
     <TerminalTab projectId={ATLAS} rowId={ATLAS} read={read} resize={undefined} send={send} />,
@@ -300,15 +300,35 @@ describe('the composed syllable is what reaches the agent', () => {
 
 describe('the pane says what is being composed, because the box that holds it is invisible', () => {
   it('draws the in-flight candidate while it is being typed', async () => {
-    await open();
+    await open('sent', {
+      kind: 'ok',
+      name: 'vam-atlas-a1b2c3',
+      text: 'the screen',
+      cursor: { kind: 'at', column: 3, row: 0 },
+    });
     const box = input() as HTMLTextAreaElement;
     composition(box, 'compositionstart', '');
     composition(box, 'compositionupdate', 'tieeng');
     await settle();
     // Without this the operator types into a hole: the box is hidden, the
     // agent has not been sent anything yet, and the screen is a snapshot of
-    // a pane where nothing has happened.
-    expect(q('[data-terminal-composing]')?.textContent).toContain('tieeng');
+    // a pane where nothing has happened. It is drawn inline at the caret,
+    // inside the pane, right after the cursor cell.
+    const composing = q<HTMLElement>('[data-terminal-composing]');
+    expect(composing?.textContent).toContain('tieeng');
+    expect(composing?.closest('[data-terminal-pane]')).not.toBeNull();
+    const cursor = q<HTMLElement>('[data-terminal-cursor]');
+    expect(cursor).not.toBeNull();
+    expect(cursor?.nextElementSibling).toBe(composing);
+  });
+
+  it('draws nothing extra when no span carries the cursor', async () => {
+    await open();
+    const box = input() as HTMLTextAreaElement;
+    composition(box, 'compositionstart', '');
+    composition(box, 'compositionupdate', 'tieeng');
+    await settle();
+    expect(q('[data-terminal-composing]')).toBeNull();
   });
 
   it('takes it away again once the syllable has been sent', async () => {
@@ -486,16 +506,5 @@ describe('the hidden box does not take the pane’s place', () => {
     // sits before the box in document order, so Shift+Tab out of the box
     // would land on it and be handed straight back -- a focus trap.
     expect(pane()?.tabIndex).toBe(-1);
-  });
-
-  it('still says the pane has focus while the hidden box holds it', async () => {
-    // The corner hint is the only thing on screen that says where the keys
-    // are going. Focus moved one element deeper; the claim must not.
-    await open();
-    await enter();
-    expect(q('[data-terminal-exit-hint]')).not.toBeNull();
-    (input() as HTMLTextAreaElement).blur();
-    await settle();
-    expect(q('[data-terminal-exit-hint]')).toBeNull();
   });
 });

@@ -337,8 +337,6 @@ for (const size of SIZES) {
       return {
         pane: rect('[data-terminal-pane]'),
         thumb: rect('[data-overlay-thumb]'),
-        status: rect('[data-terminal-status]'),
-        name: rect('[data-terminal-badge]'),
       };
     });
     check(
@@ -347,37 +345,23 @@ for (const size of SIZES) {
       JSON.stringify(boxes.thumb),
     );
 
-    // ── THE RULE, AS RECTANGLES ────────────────────────────────────────────
-    // The old badge floated over the pane's bottom-right corner, which every
-    // DOM assertion in the unit suite was happy with. Only layout can tell.
-    check(
-      'the session name is BELOW the screen, not painted over its last line',
-      boxes.name !== null && boxes.name.top >= boxes.pane.bottom - 1,
-      `name ${JSON.stringify(boxes.name)} vs pane bottom ${boxes.pane.bottom}`,
-    );
-    check(
-      'and the rule is one line under a pane that still fills the tab',
-      boxes.status.height > 8 && boxes.status.height < 40,
-      `the rule is ${boxes.status?.height}px tall`,
-    );
-    const text = await page.evaluate(() => ({
-      name: document.querySelector('[data-terminal-badge]')?.textContent ?? null,
+    // ── NO RULE UNDER THE SCREEN (EC-21) ───────────────────────────────────
+    // The status strip is gone; the session name lives only in the pane's
+    // accessible name.
+    const gone = await page.evaluate(() => ({
+      strip: document.querySelector('[data-terminal-status]') !== null,
+      badge: document.querySelector('[data-terminal-badge]') !== null,
+      label: document.querySelector('[data-terminal-pane]')?.getAttribute('aria-label') ?? '',
     }));
     check(
-      'and so is the tmux session name, which is what tells two panes apart',
-      (text.name ?? '').includes('vam-atlas-fit'),
-      `the rule says ${JSON.stringify(text.name)}`,
-    );
-    // AND NOTHING IT HAS NO SOURCE FOR. vam's model carries no model name and
-    // no per-session context percentage, and a status line that invents one is
-    // worse than a short one.
-    const invented = await page.evaluate(
-      () => document.querySelector('[data-terminal-status]')?.textContent ?? '',
+      'no status strip and no visible session name under the screen',
+      !gone.strip && !gone.badge,
+      JSON.stringify(gone),
     );
     check(
-      'and no model name, context percentage or token budget it has no source for',
-      !/opus|sonnet|haiku|gpt|%|tokens?\b/i.test(invented),
-      `the rule says ${JSON.stringify(invented)}`,
+      'the session name is still in the pane accessible name',
+      gone.label.includes('vam-atlas-fit'),
+      JSON.stringify(gone.label),
     );
   }
 
