@@ -1,20 +1,15 @@
 /**
  * Settings -> Update, under the real Electron shell: the one guard proving
  * the section survives its own real launch (real bridge, real preload, real
- * `checkForUpdate` GET) rather than only the mocked bridge `test/settings/
- * update-panel.test.tsx` drives and the mocked network `test/update/
- * check.test.ts` drives -- neither of those two can see a page error, a
- * tripped `ErrorBoundary`, or a genuinely dead renderer, because neither of
- * them runs Electron at all.
+ * `getStatus` / `getAutoCheck` reads) rather than only the mocked bridge
+ * `test/settings/update-panel.test.tsx` drives -- a unit test cannot see a
+ * page error, a tripped `ErrorBoundary`, or a genuinely dead renderer,
+ * because it does not run Electron at all.
  *
- * THE BUG THIS GUARDS: `checkForUpdate` had no timeout on its one outbound
- * `fetch`, so a connection that neither refuses nor answers (a captive
- * portal, a firewall dropping packets instead of resetting the socket) left
- * `UpdatePanel.tsx`'s button disabled and reading "checking…" forever --
- * `test/update/check.test.ts`'s own new case pins that at the unit level,
- * with an injected fetcher; this file is the same claim at the level an
- * operator actually meets it, over the real preload bridge and the real
- * network this machine has.
+ * NO NETWORK. An unpackaged run never starts the update scheduler and the
+ * probe never presses "check now", so nothing here contacts github.com; the
+ * checking, verifying and installing are proven with injected fakes in
+ * `test/update/`.
  */
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -40,6 +35,8 @@ const probePath = path.join('test', 'electron', 'settings-update-probe.cjs');
 
 interface Result {
   readonly versionText: string | null;
+  readonly autoCheckChecked: string | null;
+  readonly updateCardText: string | null;
   readonly outcomeText: string | null;
   readonly checkButtonState: { disabled: boolean; ariaBusy: string | null; text: string } | null;
   readonly renderFailureText: string | null;
@@ -210,7 +207,7 @@ describe('Settings -> Update, under the real shell', () => {
   // internal waits (a 30s cold-start window, several 5s selector waits, up to
   // a 12s check-outcome wait) can stack past that default on a machine
   // already busy running other work, measured directly rather than assumed.
-  it('opens, reaches the Update card, checks for an update, and never crashes', async () => {
+  it('opens, reaches the Update card, draws its switch and status, and never crashes', async () => {
     const remotePort = await freePort();
     const run = await runProbe(userDataDir, remotePort, tmuxTmpdir);
     expect(`${run.code} ${run.stderr}`).toBe(`0 ${run.stderr}`);
@@ -236,20 +233,22 @@ describe('Settings -> Update, under the real shell', () => {
     // NEVER A DEVTOOLS CONSOLE ERROR from this run either.
     expect(result.consoleErrors).toEqual([]);
 
-    // THE CHECK SETTLED -- a real GitHub round trip, or the bounded timeout
-    // if this runner has none, but never left reading "checking…" forever
-    // (the defect `UPDATE_CHECK_TIMEOUT_MS` exists to close).
-    expect(
-      result.outcomeText,
-      `the check never settled within the probe's own wait -- button state: ${JSON.stringify(result.checkButtonState)}`,
-    ).not.toBeNull();
-    expect(result.checkButtonState?.disabled).toBe(false);
-    expect(result.checkButtonState?.ariaBusy).toBe('false');
+    // THE AUTO-CHECK SWITCH IS DRAWN FROM THE REAL PREFERENCE -- `getAutoCheck`
+    // answered over the real preload bridge, true or false, never absent.
+    expect(['true', 'false']).toContain(result.autoCheckChecked);
 
-    // A SENTENCE, NEVER A RAW CODE OR A STACK.
+    // THE STATUS LINE IS A SENTENCE, NEVER A RAW CODE OR A STACK. Nothing has
+    // asked GitHub (no scheduler unpackaged, and this probe never presses
+    // "check now"), so it is the idle sentence.
+    expect(result.outcomeText).not.toBeNull();
     expect(result.outcomeText).not.toMatch(/^[a-z-]+$/);
     expect(result.outcomeText?.toLowerCase()).not.toContain('error:');
     expect(result.outcomeText).not.toMatch(/\bat\s+\S+:\d+:\d+/);
+    expect(result.checkButtonState?.disabled).toBe(false);
+    expect(result.checkButtonState?.ariaBusy).toBe('false');
+
+    // NO UPDATE CARD IN THE CORNER: an idle updater draws nothing there.
+    expect(result.updateCardText).toBeNull();
 
     // THE TMUX ISOLATION, PROVEN AT RUNTIME -- see `launch.test.ts`'s
     // identical assertion for the full rationale. This probe is killed with

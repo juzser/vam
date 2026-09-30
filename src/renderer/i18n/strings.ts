@@ -497,26 +497,57 @@ const EN = {
   // somebody walked into. `rate-limited` and `malformed` are developer words
   // for states a person acts on by waiting and by doing nothing; neither
   // reaches the screen.
-  'settings.update.hint': 'which vam this is, and whether a newer one has been released',
-  'settings.update.check': 'check for updates',
+  'settings.update.hint': 'which vam this is, and whether a newer one is out',
+  'settings.update.check': 'check now',
   'settings.update.checking': 'checking…',
+  'settings.update.auto.label': 'automatically check for updates',
+  'settings.update.auto.on': 'on',
+  'settings.update.auto.off': 'off',
+  'settings.update.idle': 'press check now to look for a newer release',
   'settings.update.current': 'this is the newest release',
   'settings.update.none': 'no releases have been published yet',
+  'settings.update.incomplete':
+    'a new release is still being published; try again in a little while',
   // NOT STARTING WITH THE PRODUCT NAME, and that is a constraint the panel's
   // structural capitalisation puts on this catalogue: `vam` is lower case
   // everywhere, and a paragraph beginning with it paints `Vam`. The strings
   // drawn without `data-verbatim` therefore begin with something whose case
   // is nobody's decision.
   'settings.update.available': 'a newer vam is out — {version}',
-  'settings.update.open': 'open the release page',
-  'settings.update.offline': 'GitHub could not be reached — check the connection and try again',
-  'settings.update.limited': 'GitHub is rate-limiting this address; try again in a few minutes',
-  'settings.update.malformed': 'GitHub answered something vam could not read as a release',
+  'settings.update.downloading': 'downloading {version} — {percent}%',
+  'settings.update.installing': 'restarting to update…',
+  'settings.update.install': 'update',
+  'settings.update.notes': 'release notes',
   // The browser build has no preload bridge, so there is no channel to check
   // over. Absent rather than dimmed, with the reason said out loud: a missing
   // control and no explanation reads as a broken screen.
   'settings.update.browser':
-    'vam checks for updates from the desktop app. This is a browser tab, which has no way to ask.',
+    'vam updates from the desktop app. This is a browser tab, which has no way to ask.',
+
+  // ── The update card (top-right) and the error sentences both surfaces share.
+  'update.card.label': 'update',
+  'update.card.available': 'vam v{version} available',
+  'update.card.update': 'update',
+  'update.card.later': 'later',
+  'update.card.notes': 'release notes',
+  'update.card.retry': 'retry',
+  'update.card.dismiss': 'dismiss update notice',
+  'update.card.downloading': 'downloading vam v{version}',
+  'update.card.installing': 'Restarting to update…',
+  'update.card.upToDate': 'vam is up to date',
+  'update.error.network': 'GitHub could not be reached — check the connection and try again',
+  'update.error.rate-limited': 'GitHub is rate-limiting this address; try again in a few minutes',
+  'update.error.malformed': 'GitHub answered something vam could not read as a release',
+  'update.error.checksum': 'the download did not match its checksum, so it was discarded',
+  'update.error.too-large': 'the download was larger than expected, so it was discarded',
+  'update.error.unsupported-install':
+    'this copy of vam cannot update itself; install the new release by hand',
+  'update.error.translocated':
+    'move vam to the Applications folder and open it from there, then update',
+  'update.error.read-only': 'vam is on a read-only volume and cannot replace itself',
+  'update.error.not-writable': 'vam is in a folder this account cannot write to',
+  'update.error.quit-cancelled': 'the update was cancelled because vam did not quit',
+  'update.error.install-failed': 'the update could not be installed',
 
   // ── Integrations ─────────────────────────────────────────────────────────
   // Operator: "add an Integrations section in Settings, to connect a GitHub
