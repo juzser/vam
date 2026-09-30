@@ -31,6 +31,8 @@ const install = () => document.querySelector<HTMLButtonElement>('[data-update-in
 const notes = () => document.querySelector<HTMLButtonElement>('[data-update-open]');
 const autoSwitch = () => document.querySelector<HTMLButtonElement>('[data-switch="auto-update"]');
 
+const lastCheck = () => document.querySelector<HTMLElement>('[data-update-last-check]');
+
 const IDLE: UpdateStatus = { kind: 'idle' };
 const UP_TO_DATE: UpdateStatus = { kind: 'not-available', manual: true, reason: 'up-to-date' };
 const AVAILABLE: UpdateStatus = {
@@ -50,6 +52,7 @@ function fullApi(overrides: Partial<UpdateApi> = {}) {
     ),
     dismiss: vi.fn(async () => IDLE),
     getAutoCheck: vi.fn(async () => true),
+    getLastCheck: vi.fn(async (): Promise<number | null> => null),
     setAutoCheck: vi.fn(async (enabled: boolean) => enabled),
     openNotes: vi.fn(async () => true),
     onStatus: vi.fn((listener: (status: UpdateStatus) => void) => {
@@ -243,5 +246,50 @@ describe('the section is reachable from the dialog it belongs to', () => {
     fireEvent.click(navItem);
     expect(version()).toContain(VERSION);
     expect(screen.queryByText(/downloads nothing/i)).toBeNull();
+  });
+});
+
+describe('the last-check line', () => {
+  it('says never checked when main has no time', async () => {
+    await mount(fullApi().bridge);
+    await waitFor(() => expect(lastCheck()?.textContent).toBe('never checked'));
+  });
+
+  it('says how long ago, with the absolute time as its title', async () => {
+    const at = Date.now() - 5 * 60_000;
+    await mount(fullApi({ getLastCheck: vi.fn(async () => at) }).bridge);
+    await waitFor(() => expect(lastCheck()?.textContent).toBe('last checked 5 minutes ago'));
+    expect(lastCheck()?.getAttribute('title')).toBe(new Date(at).toLocaleString());
+  });
+
+  it('says just now inside the first minute', async () => {
+    await mount(fullApi({ getLastCheck: vi.fn(async () => Date.now() - 5_000) }).bridge);
+    await waitFor(() => expect(lastCheck()?.textContent).toBe('last checked just now'));
+  });
+
+  it('is re-read when a check finishes, not while one is running', async () => {
+    let stored: number | null = null;
+    const { bridge, push } = fullApi({ getLastCheck: vi.fn(async () => stored) });
+    await mount(bridge);
+    await waitFor(() => expect(bridge.getLastCheck).toHaveBeenCalledTimes(1));
+    stored = Date.now();
+    push({ kind: 'checking', manual: true });
+    expect(bridge.getLastCheck).toHaveBeenCalledTimes(1);
+    push(UP_TO_DATE);
+    await waitFor(() => expect(lastCheck()?.textContent).toBe('last checked just now'));
+  });
+
+  it('is re-read after check now answers', async () => {
+    let stored: number | null = null;
+    const { bridge } = fullApi({ getLastCheck: vi.fn(async () => stored) });
+    await mount(bridge);
+    stored = Date.now();
+    fireEvent.click(button() as HTMLElement);
+    await waitFor(() => expect(lastCheck()?.textContent).toBe('last checked just now'));
+  });
+
+  it('is absent with no bridge', () => {
+    render(<UpdatePanel api={undefined} />);
+    expect(lastCheck()).toBeNull();
   });
 });

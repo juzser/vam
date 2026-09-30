@@ -32,6 +32,7 @@ describe('createUpdateApi', () => {
     expect(await api.dismiss()).toBe('answer');
     expect(await api.getAutoCheck()).toBe('answer');
     expect(await api.setAutoCheck(false)).toBe('answer');
+    expect(await api.getLastCheck()).toBe('answer');
     expect(await api.openNotes()).toBe('answer');
     expect(ipc.invoke.mock.calls).toEqual([
       [CHANNELS.updateGetStatus],
@@ -40,6 +41,7 @@ describe('createUpdateApi', () => {
       [CHANNELS.updateDismiss],
       [CHANNELS.updateGetAutoCheck],
       [CHANNELS.updateSetAutoCheck, false],
+      [CHANNELS.updateGetLastCheck],
       [CHANNELS.updateOpen],
     ]);
   });

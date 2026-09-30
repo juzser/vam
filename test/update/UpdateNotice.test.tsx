@@ -31,6 +31,7 @@ function api(status: UpdateStatus, opened = true) {
     download: vi.fn(async () => status),
     dismiss: vi.fn(async () => IDLE),
     getAutoCheck: vi.fn(async () => true),
+    getLastCheck: vi.fn(async (): Promise<number | null> => null),
     setAutoCheck: vi.fn(async (enabled: boolean) => enabled),
     openNotes: vi.fn(async () => opened),
     onStatus: vi.fn((listener: (status: UpdateStatus) => void) => {

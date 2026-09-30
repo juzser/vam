@@ -415,6 +415,8 @@ export type UpdateApi = {
   dismiss(): Promise<UpdateStatus>;
   getAutoCheck(): Promise<boolean>;
   setAutoCheck(enabled: boolean): Promise<boolean>;
+  /** Epoch ms of the last check attempt, manual or automatic; null if never. */
+  getLastCheck(): Promise<number | null>;
   /** True when the operator's own browser was opened on the release notes. */
   openNotes(): Promise<boolean>;
   /** Every status change main pushes. Returns the unsubscribe. */
@@ -435,6 +437,7 @@ export function createUpdateApi(ipc: InvokerLike & ListenerLike): UpdateApi {
     dismiss: () => ipc.invoke(CHANNELS.updateDismiss) as Promise<UpdateStatus>,
     getAutoCheck: () => ipc.invoke(CHANNELS.updateGetAutoCheck) as Promise<boolean>,
     setAutoCheck: (enabled) => ipc.invoke(CHANNELS.updateSetAutoCheck, enabled) as Promise<boolean>,
+    getLastCheck: () => ipc.invoke(CHANNELS.updateGetLastCheck) as Promise<number | null>,
     openNotes: () => ipc.invoke(CHANNELS.updateOpen) as Promise<boolean>,
     onStatus: (listener) => {
       const wrapped = (_event: unknown, status: unknown) => listener(status as UpdateStatus);

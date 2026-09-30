@@ -76,6 +76,22 @@ function sentenceFor(status: UpdateStatus): string {
   }
 }
 
+const RELATIVE = new Intl.RelativeTimeFormat('en', { numeric: 'always' });
+
+/** How long ago the last check was, in the coarsest unit that is not zero.
+ *  Under a minute is "just now" rather than a count of seconds that would
+ *  have to tick. */
+function lastCheckSentence(at: number | null, now: number): string {
+  if (at === null) return t('settings.update.lastCheck.never');
+  const minutes = Math.floor(Math.max(0, now - at) / 60_000);
+  let when: string;
+  if (minutes < 1) when = t('settings.update.lastCheck.now');
+  else if (minutes < 60) when = RELATIVE.format(-minutes, 'minute');
+  else if (minutes < 60 * 24) when = RELATIVE.format(-Math.floor(minutes / 60), 'hour');
+  else when = RELATIVE.format(-Math.floor(minutes / (60 * 24)), 'day');
+  return t('settings.update.lastCheck', { when });
+}
+
 export type UpdatePanelProps = {
   /** Absent in the browser build, which has no preload and no bridge. */
   readonly api: UpdateApi | undefined;
@@ -85,6 +101,15 @@ export function UpdatePanel({ api }: UpdatePanelProps) {
   const [status, setStatus] = useState<UpdateStatus>({ kind: 'idle' });
   const [autoCheck, setAutoCheck] = useState<boolean | null>(null);
   const [asking, setAsking] = useState(false);
+  // Epoch ms of main's last check, `undefined` until the first read answers.
+  const [lastCheck, setLastCheck] = useState<number | null | undefined>(undefined);
+  // Only there so the relative wording moves on while the panel is open.
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     if (api === undefined) return;
@@ -101,7 +126,19 @@ export function UpdatePanel({ api }: UpdatePanelProps) {
         if (!cancelled) setAutoCheck(answer);
       })
       .catch(() => {});
-    const off = api.onStatus((answer) => setStatus(answer));
+    const readLastCheck = (): void => {
+      api
+        .getLastCheck()
+        .then((answer) => {
+          if (!cancelled) setLastCheck(answer);
+        })
+        .catch(() => {});
+    };
+    readLastCheck();
+    const off = api.onStatus((answer) => {
+      setStatus(answer);
+      if (answer.kind !== 'checking') readLastCheck();
+    });
     return () => {
       cancelled = true;
       off();
@@ -112,7 +149,17 @@ export function UpdatePanel({ api }: UpdatePanelProps) {
     if (api === undefined || asking) return;
     setAsking(true);
     try {
-      setStatus(await api.check());
+      const answer = await api.check();
+      setStatus(answer);
+      // Main stamps the time when a check goes out, so it is asked again
+      // whenever one has finished (here, and in `onStatus` above): an answer
+      // whose kind is not `checking`.
+      if (answer.kind !== 'checking') {
+        api
+          .getLastCheck()
+          .then(setLastCheck)
+          .catch(() => {});
+      }
     } catch {
       // A bridge that rejects is a channel that is not there. It is still an
       // answer the operator asked for, so it gets the same sentence a failed
@@ -175,6 +222,15 @@ export function UpdatePanel({ api }: UpdatePanelProps) {
                 }}
               />
             </SettingsRow>
+          )}
+          {lastCheck !== undefined && (
+            <p
+              data-update-last-check
+              title={lastCheck === null ? undefined : new Date(lastCheck).toLocaleString()}
+              className="m-0 text-control text-ink-dim"
+            >
+              {lastCheckSentence(lastCheck, now)}
+            </p>
           )}
           <button
             type="button"
