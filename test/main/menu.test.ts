@@ -12,7 +12,10 @@
 import { describe, expect, it } from 'vitest';
 import { buildMenuTemplate } from '../../src/main/menu.js';
 
-type Node = { role?: string; submenu?: readonly Node[] };
+type Node = { role?: string; label?: string; click?: () => void; submenu?: readonly Node[] };
+
+const flatten = (nodes: readonly Node[]): Node[] =>
+  nodes.flatMap((node) => [node, ...flatten(node.submenu ?? [])]);
 
 const roles = (nodes: readonly Node[]): string[] =>
   nodes.flatMap((node) => [
@@ -21,7 +24,7 @@ const roles = (nodes: readonly Node[]): string[] =>
   ]);
 
 const rolesOn = (platform: NodeJS.Platform): string[] =>
-  roles(buildMenuTemplate(platform) as readonly Node[]);
+  roles(buildMenuTemplate(platform, { onCheckForUpdates: () => {} }) as readonly Node[]);
 
 describe('buildMenuTemplate', () => {
   it.each(['darwin', 'win32', 'linux'] as const)(
@@ -46,7 +49,7 @@ describe('buildMenuTemplate', () => {
   it('gives a non-macOS build a way to quit, which the app menu would not', () => {
     // `appMenu` does not exist off macOS; `fileMenu` is where Quit lives there.
     expect(rolesOn('win32')).toContain('fileMenu');
-    expect(rolesOn('darwin')).toContain('appMenu');
+    expect(rolesOn('darwin')).toContain('quit');
   });
 
   it('omits the macOS-only window items off macOS', () => {
@@ -83,9 +86,54 @@ describe('buildMenuTemplate', () => {
     type Item = { accelerator?: string; role?: string; submenu?: readonly Item[] };
     const flat = (nodes: readonly Item[]): Item[] =>
       nodes.flatMap((node) => [node, ...flat(node.submenu ?? [])]);
-    const reload = flat(buildMenuTemplate('darwin') as readonly Item[]).find(
-      (item) => item.role === 'reload',
-    );
+    const reload = flat(
+      buildMenuTemplate('darwin', { onCheckForUpdates: () => {} }) as readonly Item[],
+    ).find((item) => item.role === 'reload');
     expect(reload?.accelerator).toBe('CommandOrControl+R');
+  });
+
+  it.each(['darwin', 'win32', 'linux'] as const)(
+    'has exactly one Check for Updates item wired to the callback, on %s',
+    (platform) => {
+      let calls = 0;
+      const tpl = buildMenuTemplate(platform, { onCheckForUpdates: () => calls++ }) as Node[];
+      const items = flatten(tpl).filter((n) => n.label === 'Check for Updates…');
+      expect(items).toHaveLength(1);
+      items[0]?.click?.();
+      expect(calls).toBe(1);
+    },
+  );
+
+  it.each(['darwin', 'win32', 'linux'] as const)('offers quit exactly once on %s', (platform) => {
+    const found = rolesOn(platform);
+    // darwin: the hand-built `quit`; elsewhere `fileMenu` carries it (and must
+    // not be joined by a second one, nor by the stock `appMenu`).
+    const quitters = found.filter((r) => r === 'quit' || r === 'fileMenu');
+    expect(quitters).toEqual([platform === 'darwin' ? 'quit' : 'fileMenu']);
+    expect(found).not.toContain('appMenu');
+  });
+
+  it('hand-builds the macOS app menu in the planned order', () => {
+    const tpl = buildMenuTemplate('darwin', { onCheckForUpdates: () => {} }) as Node[];
+    const app = tpl[0]?.submenu ?? [];
+    expect(app.map((n) => n.role ?? n.label ?? 'separator')).toEqual([
+      'about',
+      'separator',
+      'Check for Updates…',
+      'separator',
+      'services',
+      'separator',
+      'hide',
+      'hideOthers',
+      'unhide',
+      'separator',
+      'quit',
+    ]);
+  });
+
+  it('puts the item under a Help menu off macOS', () => {
+    const tpl = buildMenuTemplate('win32', { onCheckForUpdates: () => {} }) as Node[];
+    const help = tpl.find((n) => n.label === 'Help');
+    expect(help?.submenu?.some((n) => n.label === 'Check for Updates…')).toBe(true);
   });
 });

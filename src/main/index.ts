@@ -810,7 +810,17 @@ void app.whenReady().then(async () => {
   // Cmd+0/Cmd+Plus/Cmd+- for page zoom and Cmd+W for Close Window, and a
   // native menu is matched before the page sees the keydown -- so those keys
   // are the renderer's only once this runs. See `./menu.js`.
-  applyApplicationMenu();
+  applyApplicationMenu({
+    onCheckForUpdates: () => {
+      const [window] = BrowserWindow.getAllWindows();
+      if (window) {
+        if (window.isMinimized()) window.restore();
+        window.show();
+        window.focus();
+      }
+      void updater?.controller.check({ manual: true });
+    },
+  });
   // Registered before the window is created, so the renderer's first call can
   // never race an unregistered channel.
   registerSourceIpc(ipcMain, DESKTOP_SOURCES);
