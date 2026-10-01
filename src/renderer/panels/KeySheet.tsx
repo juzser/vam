@@ -161,7 +161,7 @@ export function KeySheet({ onClose }: KeySheetProps) {
           wheel. */}
       <div className="relative flex max-h-[85vh] w-[min(1040px,94vw)] flex-col overflow-hidden rounded-md border border-line bg-panel">
         <div className="flex flex-none items-baseline gap-2 border-line border-b px-4 py-3">
-          <h2 className="font-semibold text-heading text-ink">keyboard</h2>
+          <h2 className="font-semibold text-heading text-ink">Keyboard</h2>
           <span className="text-ink-faint text-meta">
             every binding there is — generated from the key tables
           </span>
@@ -186,7 +186,7 @@ export function KeySheet({ onClose }: KeySheetProps) {
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             aria-label="search the shortcuts"
-            placeholder="search by what it does, or by the key…"
+            placeholder="Search by what it does, or by the key…"
             className="w-full bg-transparent text-body text-ink outline-none placeholder:text-ink-faint"
           />
         </div>

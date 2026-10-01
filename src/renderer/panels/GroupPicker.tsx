@@ -86,7 +86,7 @@ export function GroupPicker({
         className="relative z-10 flex max-h-[380px] w-[280px] flex-col overflow-hidden rounded-[var(--radius-lg)] border border-line bg-panel shadow-[var(--shadow-node)]"
       >
         <div className="flex items-center gap-2 border-line border-b px-3 py-2">
-          <span className="text-meta text-ink-faint">move</span>
+          <span className="text-meta text-ink-faint">Move</span>
           <span className="truncate font-mono font-semibold text-body text-ink">{projectName}</span>
         </div>
         <ul className="flex flex-col gap-0.5 overflow-y-auto p-1">
@@ -131,7 +131,7 @@ export function GroupPicker({
             <input
               data-group-picker-draft
               value={draftName}
-              placeholder="folder name"
+              placeholder="Folder name"
               aria-label="new folder name"
               ref={(node) => {
                 if (node !== null && document.activeElement !== node) {

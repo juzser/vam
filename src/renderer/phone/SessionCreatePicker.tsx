@@ -104,7 +104,7 @@ export function SessionCreatePicker({ choices, onPick, onClose }: SessionCreateP
         className="relative z-10 flex max-h-[380px] w-[340px] flex-col overflow-hidden rounded-[var(--radius-lg)] border border-line bg-panel shadow-[var(--shadow-node)]"
       >
         <div className="flex items-center gap-2 border-line border-b px-3 py-2">
-          <span className="text-meta text-ink-faint">new session in</span>
+          <span className="text-meta text-ink-faint">New session in</span>
         </div>
         {choices.length === 0 ? (
           // Unreachable from the FAB today -- `PhoneShell.tsx` only draws the
