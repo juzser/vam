@@ -2547,17 +2547,19 @@ describe('the toolbar — no Save button, and the tooltips on what remains', () 
   /**
    * `Tooltip.Trigger asChild` ADDS NO ELEMENT -- `ShortcutTip`'s own header
    * states that as an invariant it depends on and does not enforce, and the
-   * header row these controls sit in is a flex row whose spacing a wrapper
-   * would change. So each must still be a DIRECT child of that row.
+   * rows these controls sit in are flex rows whose spacing a wrapper would
+   * change. So the dirty indicator must be a DIRECT child of the header row and
+   * Format a DIRECT child of the content-controls strip.
    */
-  it('wraps neither Format nor the dirty indicator in an extra element — the header row is a flex row', async () => {
+  it('wraps neither Format nor the dirty indicator in an extra element — both rows are flex rows', async () => {
     const editor = await openFile('/work/atlas/.env', 'A=1\n');
     await act(async () => {
       fireEvent.change(editor, { target: { value: 'A=2' } });
     });
     const children = [...(q('[data-files-header]')?.children ?? [])];
     expect(children.some((el) => el.hasAttribute('data-files-dirty'))).toBe(true);
-    expect(children.some((el) => el.hasAttribute('data-files-format'))).toBe(true);
+    const stripChildren = [...(q('[data-files-content-controls]')?.children ?? [])];
+    expect(stripChildren.some((el) => el.hasAttribute('data-files-format'))).toBe(true);
   });
 });
 

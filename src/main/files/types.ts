@@ -64,6 +64,8 @@ export type FileListResult = {
 export type FileDirEntry = {
   readonly name: string;
   readonly kind: 'file' | 'dir';
+  /** Set only when git ignores this entry (`git-ignored.ts`); never set by vam's own rules. */
+  readonly ignored?: true;
 };
 
 /** What `CHANNELS.filesList` answers with when given a `dir`: one level only. */

@@ -1543,8 +1543,9 @@ export function FilesTab({
           while `elementFromPoint` at the button's CENTRE still returned the
           button, so a click-based check passed the whole way through. Save
           is gone now -- an indicator replaced it, on the operator's own
-          instruction -- and Format trails the row in its place, protected by
-          the identical reservation. `minHeight` is what keeps the TREE out
+          instruction. Preview/Raw and Format no longer trail this row: they sit
+          in the content strip (`data-files-content-controls`) at the top of the
+          editor column, below this row's reserved height. `minHeight` is what keeps the TREE out
           from under it: the tree is at the right-hand edge by definition, so
           no horizontal padding can move it, and its clearance is this row's
           height. Both are asserted as RECTANGLES, not clicks, in
@@ -1635,8 +1636,8 @@ export function FilesTab({
                 container-query gap contributes (`data-files-header`'s
                 `gap-0.5 @min-[380px]:gap-1.5`, above). The operator's other
                 half of the same report: "a gap from the prettier button".
-                For a `.env` (no preview toggle, so Format trails the dot
-                directly) at the narrowest legal pane the row gap alone is
+                For a `.env` (no preview toggle, so the path label
+                and the dot are all this row holds) at the narrowest legal pane the row gap alone is
                 `gap-0.5` — 2px, measured, and easy to read as touching next
                 to a 24px bordered button. `1.5` is `gap-1.5`'s OWN unit —
                 the widest this row's gap ever is — spelled as a margin so
@@ -1659,6 +1660,8 @@ export function FilesTab({
                 />
               </Note>
             )}
+            {/* Preview/Raw and Format render in the content strip (`data-files-content-controls`) at the
+                top of the editor column now; the two notes below are their design record, kept here. */}
             {/* FORMAT, AND IT IS NEVER DISABLED. Every file type gets this
                 control, including the ones vam will not format: pressing it
                 on a `.ts` puts the reason on screen, by name, which is a
@@ -1739,55 +1742,6 @@ export function FilesTab({
                 thing the eye reads once it already has the first, and the
                 control is never fewer than two real, independently pressable
                 buttons at any width. */}
-            {canPreview && (
-              <Note
-                text={`Switch between the rendered document and the raw text (${chordSymbols('Mod-Shift-m')}). Rendered is read-only; your unsaved edits survive either way.`}
-              >
-                <div
-                  data-files-preview
-                  data-files-preview-state={showingPreview ? 'preview' : 'raw'}
-                  // `h-6`, THE SAME FIXED BOX FORMAT NOW DRAWS, rather than a
-                  // height left to fall out of the buttons' own padding —
-                  // see Format's own comment above for the operator finding
-                  // this fixes. `items-stretch` (the flex default, stated
-                  // rather than assumed) is what lets each segment fill that
-                  // box via `h-full` below instead of a SECOND, independent
-                  // padding-derived height that could drift from the well's.
-                  className="flex h-6 flex-none items-stretch gap-px rounded-[7px] border border-line-loud bg-well p-px @min-[380px]:gap-0.5 @min-[380px]:p-[2px]"
-                >
-                  <button
-                    type="button"
-                    data-files-preview-option="preview"
-                    aria-pressed={showingPreview}
-                    onClick={() => setPreviewMode(true)}
-                    aria-label="preview this markdown"
-                    className={`vam-tap flex h-full flex-none cursor-pointer items-center gap-1 rounded-[5px] px-0.5 text-control @min-[380px]:px-1.5 ${
-                      showingPreview
-                        ? 'bg-segment-on font-medium text-ink'
-                        : 'text-ink-dim hover:text-ink'
-                    }`}
-                  >
-                    <Eye size={12} strokeWidth={1.8} />
-                    <span className="hidden @min-[380px]:inline">Preview</span>
-                  </button>
-                  <button
-                    type="button"
-                    data-files-preview-option="raw"
-                    aria-pressed={!showingPreview}
-                    onClick={() => setPreviewMode(false)}
-                    aria-label="show the raw markdown"
-                    className={`vam-tap flex h-full flex-none cursor-pointer items-center gap-1 rounded-[5px] px-0.5 text-control @min-[380px]:px-1.5 ${
-                      !showingPreview
-                        ? 'bg-segment-on font-medium text-ink'
-                        : 'text-ink-dim hover:text-ink'
-                    }`}
-                  >
-                    <Code size={12} strokeWidth={1.8} />
-                    <span className="hidden @min-[380px]:inline">Raw</span>
-                  </button>
-                </div>
-              </Note>
-            )}
             {/* AND ITS TOOLTIP IS A `Note`, NOT A `title`. The operator asked
                 for tooltips on this button and on Save; Save is a button no
                 longer (see the dirty indicator above, and its own comment
@@ -1813,21 +1767,6 @@ export function FilesTab({
                 complaint, "Save, prettier and preview-mode buttons are not
                 the same size". `e2e/files-markdown-shots.mjs` now asserts the
                 two as equal-height RECTANGLES, not as matching class names. */}
-            {activeBuffer?.kind === 'editable' && (
-              <Note
-                text={`Tidy this file's whitespace (${chordSymbols('Mod-Shift-f')}). ${FORMAT_OFFER} — anything else is refused by name, and ${chordSymbols('Mod-z')} puts back whatever it changed.`}
-              >
-                <button
-                  type="button"
-                  data-files-format
-                  onClick={formatActive}
-                  aria-label="format this file"
-                  className="vam-tap flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded-[6px] border border-line text-ink-dim hover:border-line-strong hover:text-ink"
-                >
-                  <AlignLeft size={12} strokeWidth={1.8} />
-                </button>
-              </Note>
-            )}
           </>
         )}
       </div>
@@ -1915,6 +1854,72 @@ export function FilesTab({
           through a `ResizeObserver` — see the block that owns `columnsRef`. */}
       <div ref={setColumnsEl} className="flex min-h-0 flex-1 gap-1.5">
         <div data-files-editor-column className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {activePath !== null && (canPreview || activeBuffer?.kind === 'editable') && (
+            <div
+              data-files-content-controls
+              // The Preview/Raw fold below is a container query; this strip is now the nearest `@container`.
+              className="@container flex flex-none items-center justify-end gap-1.5 pb-1"
+            >
+              {canPreview && (
+                <Note
+                  text={`Switch between the rendered document and the raw text (${chordSymbols('Mod-Shift-m')}). Rendered is read-only; your unsaved edits survive either way.`}
+                >
+                  <div
+                    data-files-preview
+                    data-files-preview-state={showingPreview ? 'preview' : 'raw'}
+                    // `h-6`: the same fixed box Format draws, so the two never drift apart.
+                    className="flex h-6 flex-none items-stretch gap-px rounded-[7px] border border-line-loud bg-well p-px @min-[380px]:gap-0.5 @min-[380px]:p-[2px]"
+                  >
+                    <button
+                      type="button"
+                      data-files-preview-option="preview"
+                      aria-pressed={showingPreview}
+                      onClick={() => setPreviewMode(true)}
+                      aria-label="preview this markdown"
+                      className={`vam-tap flex h-full flex-none cursor-pointer items-center gap-1 rounded-[5px] px-0.5 text-control @min-[380px]:px-1.5 ${
+                        showingPreview
+                          ? 'bg-segment-on font-medium text-ink'
+                          : 'text-ink-dim hover:text-ink'
+                      }`}
+                    >
+                      <Eye size={12} strokeWidth={1.8} />
+                      <span className="hidden @min-[380px]:inline">Preview</span>
+                    </button>
+                    <button
+                      type="button"
+                      data-files-preview-option="raw"
+                      aria-pressed={!showingPreview}
+                      onClick={() => setPreviewMode(false)}
+                      aria-label="show the raw markdown"
+                      className={`vam-tap flex h-full flex-none cursor-pointer items-center gap-1 rounded-[5px] px-0.5 text-control @min-[380px]:px-1.5 ${
+                        !showingPreview
+                          ? 'bg-segment-on font-medium text-ink'
+                          : 'text-ink-dim hover:text-ink'
+                      }`}
+                    >
+                      <Code size={12} strokeWidth={1.8} />
+                      <span className="hidden @min-[380px]:inline">Raw</span>
+                    </button>
+                  </div>
+                </Note>
+              )}
+              {activeBuffer?.kind === 'editable' && (
+                <Note
+                  text={`Tidy this file's whitespace (${chordSymbols('Mod-Shift-f')}). ${FORMAT_OFFER} — anything else is refused by name, and ${chordSymbols('Mod-z')} puts back whatever it changed.`}
+                >
+                  <button
+                    type="button"
+                    data-files-format
+                    onClick={formatActive}
+                    aria-label="format this file"
+                    className="vam-tap flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded-[6px] border border-line text-ink-dim hover:border-line-strong hover:text-ink"
+                  >
+                    <AlignLeft size={12} strokeWidth={1.8} />
+                  </button>
+                </Note>
+              )}
+            </div>
+          )}
           {activePath === null && (
             <p className="text-control text-ink-faint">
               Nothing to edit yet. Walk the tree with <code>j</code>/<code>k</code>, step in and out
@@ -2559,6 +2564,7 @@ function Tree({
                 {...(row.loading ? { 'data-files-row-loading': '', 'aria-busy': true } : {})}
                 {...(isCursor ? { 'data-files-cursor': '' } : {})}
                 {...(row.path === activePath ? { 'data-files-row-active': '' } : {})}
+                {...(row.muted ? { 'data-files-row-muted': '' } : {})}
                 aria-expanded={row.isDirectory ? open : undefined}
                 aria-selected={row.path === activePath}
                 // The DEPTH, said to a screen reader -- 1-based, as ARIA wants
@@ -2574,8 +2580,14 @@ function Tree({
                 style={{ paddingLeft: 6 + row.depth * 10 }}
                 className={[
                   'flex w-full cursor-pointer items-center gap-1 rounded-[6px] py-0.5 pr-1 text-left font-mono text-control outline-none',
-                  row.path === activePath ? 'text-ink' : 'text-ink-dim',
-                  isCursor ? 'bg-line-strong text-ink' : 'hover:bg-raised hover:text-ink',
+                  // One ink per row: active reads full ink, a muted row
+                  // reads `ink-faint` (never `ghost`), the rest `ink-dim`.
+                  row.path === activePath || isCursor
+                    ? 'text-ink'
+                    : row.muted
+                      ? 'text-ink-faint'
+                      : 'text-ink-dim',
+                  isCursor ? 'bg-line-strong' : 'hover:bg-raised hover:text-ink',
                 ].join(' ')}
               >
                 {/* ONE GLYPH BEFORE THE NAME, AND A CHEVRON AT THE RIGHT EDGE.
@@ -2596,7 +2608,10 @@ function Tree({
 
                     `e2e/files-tab-shots.mjs` measures the chevron's rectangle
                     against the row's at that floor. */}
-                <FileRowIcon path={row.path} isDirectory={row.isDirectory} open={open} />
+                {/* A muted row reads one grey: the glyph inherits the row's ink, not its family hue. */}
+                <span className={row.muted ? 'contents [&_svg]:text-inherit' : 'contents'}>
+                  <FileRowIcon path={row.path} isDirectory={row.isDirectory} open={open} />
+                </span>
                 <span data-files-row-name className="min-w-0 flex-1 truncate">
                   {row.name}
                 </span>
