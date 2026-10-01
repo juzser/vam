@@ -403,14 +403,12 @@ const EN = {
   'settings.behaviour.adhd.copyHint': 'prefer your own terminal?',
   'settings.behaviour.adhd.copy': 'Copy install command',
   'settings.behaviour.adhd.copied': 'Copied',
-  // THE ATTRIBUTION. The proper noun leads (a separate, `data-verbatim`
-  // button, `creditLink` below), this continues it -- never opens with the
-  // repo slug itself, which is why this one does not need the
-  // capitalize-first-letter guard the button's own exemption already
-  // covers. `{sha}` is `ADHD_SKILL_PINNED_SHA` sliced to seven characters,
-  // filled by `AdhdSkillCard.tsx` -- never hand-copied here, where it would
-  // drift from the constant that actually pins the bundle.
-  'settings.behaviour.adhd.credit': 'pinned to {sha}, unmodified.',
+  // THE STAR COUNT'S ACCESSIBLE NAME (the row title's `[data-skill-stars]`).
+  // The catalogue has no plural rules, so a count of exactly one has its own
+  // key, picked in `AdhdSkillCard.tsx`. `{count}` arrives already formatted.
+  'settings.behaviour.adhd.starsLabel': '{count} stars on GitHub',
+  'settings.behaviour.adhd.starsLabelOne': '{count} star on GitHub',
+  // THE REPO LINK. The proper noun, a `data-verbatim` button.
   'settings.behaviour.adhd.creditLink': 'ayghri/i-have-adhd (MIT)',
   'settings.behaviour.adhd.coverageTitle': 'Agent coverage',
   'settings.behaviour.adhd.coverageHint': 'install above, then re-check',

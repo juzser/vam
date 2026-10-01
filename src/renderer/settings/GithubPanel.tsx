@@ -64,7 +64,7 @@ const FOCUS_RING =
 const BUTTON = `vam-tap flex h-[28px] w-fit cursor-pointer items-center rounded border border-line px-3 text-control text-ink-dim capitalize hover:border-line-strong hover:text-ink disabled:cursor-default disabled:opacity-60 ${FOCUS_RING}`;
 
 // GitHub's own mark, path data copied verbatim from Simple Icons (CC0 1.0): https://github.com/simple-icons/simple-icons/blob/16.32.0/icons/github.svg
-function GithubMark({ size = 16 }: { readonly size?: number }) {
+export function GithubMark({ size = 16 }: { readonly size?: number }) {
   return (
     <svg
       data-github-mark

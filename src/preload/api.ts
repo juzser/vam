@@ -461,6 +461,9 @@ export type AdhdSkillApi = {
   status(): Promise<AdhdSkillStatus>;
   install(force?: boolean): Promise<AdhdSkillActionResult>;
   remove(): Promise<AdhdSkillActionResult>;
+  /** The source repo's star count, or `null` while unknown (offline, rate
+   *  limited, malformed): main caches and never throws. Takes no argument. */
+  stars(): Promise<{ readonly stars: number } | null>;
 };
 
 export function createAdhdSkillApi(ipc: InvokerLike): AdhdSkillApi {
@@ -469,6 +472,7 @@ export function createAdhdSkillApi(ipc: InvokerLike): AdhdSkillApi {
     install: (force = false) =>
       ipc.invoke(CHANNELS.adhdSkillInstall, force) as Promise<AdhdSkillActionResult>,
     remove: () => ipc.invoke(CHANNELS.adhdSkillRemove) as Promise<AdhdSkillActionResult>,
+    stars: () => ipc.invoke(CHANNELS.adhdSkillStars) as Promise<{ readonly stars: number } | null>,
   };
 }
 

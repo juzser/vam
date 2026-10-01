@@ -173,13 +173,14 @@ const BUDGET: readonly (readonly [string, number, number])[] = [
   ['notifications', 5, 90],
   // NEW (settings-views restructure, item D): the ADHD skill card's own
   // prose, moved off Agents into its own section -- the section's own hint,
-  // the card's title-adjacent hint, the credit line, the copy-command hint
-  // and the coverage hint. Measured 5 paragraphs, 27 words, with the bridge
+  // the card's title-adjacent hint, the copy-command hint and the coverage
+  // hint (the credit line, 'pinned to ...', is gone: the repo link and stars
+  // sit in the title row now). Measured 4 paragraphs, 23 words, with the bridge
   // stubbed (see `SKILLS_BRIDGE_STUB` below) -- unlike every other row in
   // this table, Skills does not draw AT ALL without one (`isDesktopOnlySection`,
   // item D's own "hide it where window.api is absent"), so measuring it
   // bridge-less would be measuring nothing.
-  ['skills', 5, 45],
+  ['skills', 4, 45],
 ];
 
 /** The one bridge call `AdhdSkillCard` reads on mount -- just enough for the
