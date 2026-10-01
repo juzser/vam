@@ -424,4 +424,30 @@ describe('a match outside the newest fifty overall', () => {
     const sent = argvs[0] ?? [];
     for (const word of ['--author', '@me', '--state', 'merged']) expect(sent).toContain(word);
   });
+
+  it('keeps hostile raw input off the argv: the IPC handler value falls back to the default', async () => {
+    const hostile: unknown[] = [
+      { state: '--head x', author: '--repo evil/x', sort: 'created --web' },
+      { state: 7, author: null, sort: ['created'] },
+      '--web',
+      null,
+    ];
+    for (const raw of hostile) {
+      const argvs: string[][] = [];
+      const run = (
+        _binary: string,
+        argv: readonly string[],
+        _options: unknown,
+        done: (failure: null, stdout: string, stderr: string) => void,
+      ) => {
+        argvs.push([...argv]);
+        done(null, '[]', '');
+      };
+      const read = createPullRequestReader(readPullRequestsViaCli('gh', () => true, run));
+      setPrFilters(raw);
+      await read({ cwd: '/w/atlas', branch: 'topic/a' });
+      setPrFilters(DEFAULT_PR_FILTERS);
+      expect(argvs).toEqual([prListArgv(DEFAULT_PR_FILTERS)]);
+    }
+  });
 });
