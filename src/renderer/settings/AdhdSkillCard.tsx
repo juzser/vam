@@ -26,13 +26,14 @@
  * says why the rest is missing rather than leaving a silent gap.
  */
 
-import { Brain, Copy, RefreshCw, Terminal, Trash2 } from 'lucide-react';
+import { Brain, Copy, RefreshCw, Star, Terminal, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import type { AdhdSkillApi } from '../../preload/api.js';
 import {
   ADHD_SKILL_AGENT_LABEL,
   ADHD_SKILL_AGENTS,
-  ADHD_SKILL_PINNED_SHA,
+  ADHD_SKILL_LICENSE,
+  ADHD_SKILL_SOURCE_REPO,
   ADHD_SKILL_SOURCE_URL,
   type AdhdSkillAgent,
   type AdhdSkillState,
@@ -43,6 +44,7 @@ import {
 import { t } from '../i18n/strings.js';
 import { type Prefs, setConciseOutput } from '../prefs/prefs.js';
 import { SourceMark } from '../sources/provider-marks.js';
+import { GithubMark } from './GithubPanel.js';
 
 const FOCUS_RING =
   'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink';
@@ -73,7 +75,7 @@ const QUIET_BUTTON = `vam-tap flex h-[28px] w-fit cursor-pointer items-center ga
  *  proper name rather than a setting: the credit link. Paired with
  *  `data-verbatim`, the same word this codebase already uses for "somebody
  *  chose these letters" (`UpdatePanel.tsx`'s version line). */
-const VERBATIM_BUTTON = `vam-tap flex h-[28px] w-fit cursor-pointer items-center gap-1.5 rounded px-2 text-ink-faint text-meta hover:text-ink-dim disabled:cursor-default disabled:opacity-60 ${FOCUS_RING}`;
+const VERBATIM_BUTTON = `vam-tap flex min-w-0 w-fit cursor-pointer items-center gap-1.5 rounded px-2 text-ink-faint text-meta hover:text-ink-dim disabled:cursor-default disabled:opacity-60 ${FOCUS_RING}`;
 
 /** The bridge, where there is one. A browser tab has no preload, which is
  *  what decides whether this card draws any button at all -- the same
@@ -176,9 +178,26 @@ export type AdhdSkillCardProps = {
   readonly onChange: (next: Prefs) => void;
   /** Absent in the browser build, which has no preload and no bridge. */
   readonly api: AdhdSkillApi | undefined;
+  /** The row's repo facts. Absent from the props, it is the ADHD skill's own
+   *  repo; passed as `undefined`, the row has no repo and draws neither the
+   *  link nor the stars. */
+  readonly repo?: SkillRepo | undefined;
 };
 
-export function AdhdSkillCard({ prefs, onChange, api }: AdhdSkillCardProps) {
+/** What the row needs of a skill's source repo. */
+export type SkillRepo = { readonly slug: string; readonly url: string };
+
+const ADHD_SKILL_REPO: SkillRepo = {
+  slug: `${ADHD_SKILL_SOURCE_REPO} (${ADHD_SKILL_LICENSE})`,
+  url: ADHD_SKILL_SOURCE_URL,
+};
+
+const STAR_COUNT_FORMAT = new Intl.NumberFormat('en-US');
+
+export function AdhdSkillCard(props: AdhdSkillCardProps) {
+  const { prefs, onChange, api } = props;
+  const repo = 'repo' in props ? props.repo : ADHD_SKILL_REPO;
+  const [stars, setStars] = useState<number | null>(null);
   const [status, setStatus] = useState<AdhdSkillStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -199,6 +218,22 @@ export function AdhdSkillCard({ prefs, onChange, api }: AdhdSkillCardProps) {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  /** Asked once, when the row mounts. `null`, a rejection or a bridge with no
+   *  such method all leave the count ABSENT -- never 0, never a spinner. */
+  useEffect(() => {
+    if (api === undefined || repo === undefined || typeof api.stars !== 'function') return;
+    let live = true;
+    api
+      .stars()
+      .then((answer) => {
+        if (live && answer !== null) setStars(answer.stars);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [api, repo]);
 
   /** Clears the ONE-TIME migration flag. Never sets it back to `true` -- there
    *  is no row left that could. */
@@ -268,7 +303,7 @@ export function AdhdSkillCard({ prefs, onChange, api }: AdhdSkillCardProps) {
         | { api?: { link?: { open: (url: string) => Promise<unknown> } } }
         | undefined
     )?.api?.link?.open;
-    void open?.(ADHD_SKILL_SOURCE_URL);
+    if (repo !== undefined) void open?.(repo.url);
   }
 
   const showMigration = prefs.conciseOutput === true;
@@ -304,43 +339,45 @@ export function AdhdSkillCard({ prefs, onChange, api }: AdhdSkillCardProps) {
               <h4 className="m-0 font-medium text-body text-ink capitalize">
                 {t('settings.behaviour.adhd.title')}
               </h4>
-              {/* ABSENT, NOT DIMMED, WHILE THE FIRST READ IS IN FLIGHT -- the
-                  same rule `UpdatePanel.tsx` keeps for its own bridge-less
-                  state. There is no fourth pill for "checking": the read is
-                  one IPC round trip to a local disk, over before a blank
-                  pill could be noticed. */}
-              {api !== undefined && status !== null && (
-                <span className="ml-auto">
-                  <StatusPill state={status.overall} />
-                </span>
+              {/* THE REPO LINK, BESIDE THE TITLE, led by GitHub's own mark.
+                  A row with no repo draws neither it nor the stars. */}
+              {repo !== undefined && (
+                <button
+                  type="button"
+                  data-skill-repo-link
+                  data-verbatim
+                  onClick={onCreditClick}
+                  className={VERBATIM_BUTTON}
+                >
+                  <GithubMark size={14} />
+                  <span className="min-w-0 truncate">{repo.slug}</span>
+                </button>
               )}
+              {/* THE RIGHT-HAND GROUP: the star count, then the status pill.
+                  Both are ABSENT, NOT DIMMED, until their read lands --
+                  `UpdatePanel.tsx`'s own rule for its bridge-less state. No
+                  star count is ever drawn as 0 and there is no spinner. */}
+              <span className="ml-auto flex items-center gap-2">
+                {repo !== undefined && stars !== null && (
+                  <span
+                    data-skill-stars
+                    role="img"
+                    aria-label={t('settings.behaviour.adhd.starsLabel', {
+                      count: STAR_COUNT_FORMAT.format(stars),
+                    })}
+                    className="inline-flex items-center gap-1 font-mono text-ink-dim text-meta"
+                  >
+                    <Star size={12} strokeWidth={1.8} aria-hidden="true" />
+                    {STAR_COUNT_FORMAT.format(stars)}
+                  </span>
+                )}
+                {api !== undefined && status !== null && <StatusPill state={status.overall} />}
+              </span>
             </div>
-            <p className="vam-sentence m-0 max-w-[52ch] text-control text-ink-dim">
+            <p className="vam-sentence m-0 line-clamp-2 max-w-[52ch] text-control text-ink-dim">
               {t('settings.behaviour.adhd.hint')}
             </p>
           </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          {/* THE LINK LEADS, THE FACTS FOLLOW -- one flowing line rather
-              than the two disconnected sentences an earlier draft of this
-              card read as ("Pinned, unmodified. ayghri/i-have-adhd (MIT)").
-              Reads left to right: "ayghri/i-have-adhd (MIT) pinned to
-              839872f, unmodified." `text-meta`, GettingStarted.tsx's own
-              attribution-line size, on both nodes -- a credit is a caption,
-              not a setting's own prose. */}
-          <button
-            type="button"
-            data-adhd-skill-credit
-            data-verbatim
-            onClick={onCreditClick}
-            className={VERBATIM_BUTTON}
-          >
-            {t('settings.behaviour.adhd.creditLink')}
-          </button>
-          <p className="m-0 max-w-[40ch] text-ink-faint text-meta">
-            {t('settings.behaviour.adhd.credit', { sha: ADHD_SKILL_PINNED_SHA.slice(0, 7) })}
-          </p>
         </div>
 
         {showMigration && (

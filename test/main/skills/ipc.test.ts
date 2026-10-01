@@ -10,14 +10,21 @@
  * path.
  */
 
+import { readdirSync, readFileSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, expectTypeOf, it } from 'vitest';
 import { CHANNELS } from '../../../src/main/ipc/channels.js';
 import type { AdhdSkillDeps } from '../../../src/main/skills/adhd-skill.js';
 import { registerAdhdSkillIpc } from '../../../src/main/skills/ipc.js';
+import {
+  createRepoStatsReader,
+  type RepoStatsFetcher,
+} from '../../../src/main/skills/repo-stats.js';
 import type { AdhdSkillActionResult, AdhdSkillStatus } from '../../../src/shared/adhd-skill.js';
+import { ADHD_SKILL_SOURCE_REPO } from '../../../src/shared/adhd-skill.js';
+import type { PreloadSourceApi } from '../../../src/shared/preload-api.js';
 
 type Handler = (event: unknown, ...args: unknown[]) => unknown;
 
@@ -35,7 +42,7 @@ afterEach(async () => {
   }
 });
 
-async function harness() {
+async function harness(fetch?: RepoStatsFetcher) {
   const homeDir = await tempDir('vam-adhd-ipc-home-');
   const bundledDir = await tempDir('vam-adhd-ipc-bundle-');
   await writeFile(join(bundledDir, 'SKILL.md'), '---\nname: i-have-adhd\n---\nrules\n');
@@ -45,17 +52,76 @@ async function harness() {
   registerAdhdSkillIpc(
     { handle: (channel, listener) => void handlers.set(channel, listener) },
     deps,
+    fetch === undefined ? undefined : createRepoStatsReader({ fetch, now: () => 0, timeoutMs: 50 }),
   );
   return { handlers, homeDir, bundledDir };
 }
 
 describe('registerAdhdSkillIpc', () => {
-  it('registers exactly the three channels', async () => {
+  it('registers exactly the four channels', async () => {
     const { handlers } = await harness();
     expect([...handlers.keys()].sort()).toEqual(
-      [CHANNELS.adhdSkillStatus, CHANNELS.adhdSkillInstall, CHANNELS.adhdSkillRemove].sort(),
+      [
+        CHANNELS.adhdSkillStatus,
+        CHANNELS.adhdSkillInstall,
+        CHANNELS.adhdSkillRemove,
+        CHANNELS.adhdSkillStars,
+      ].sort(),
     );
   });
+
+  it('the stars channel is desktop-only: no remote route, not a PreloadSourceApi member', () => {
+    expect(CHANNELS.adhdSkillStars).toBe('vam:skills:adhd-stars');
+    const dir = new URL('../../../src/main/remote/', import.meta.url);
+    for (const name of readdirSync(dir)) {
+      if (!name.endsWith('.ts')) continue;
+      expect(readFileSync(new URL(name, dir), 'utf8')).not.toContain(CHANNELS.adhdSkillStars);
+    }
+    expectTypeOf<PreloadSourceApi>().not.toHaveProperty('adhdSkillStars');
+    expectTypeOf<PreloadSourceApi>().not.toHaveProperty('stars');
+  });
+
+  it('stars ignores every renderer argument and makes only the one fixed request', async () => {
+    const urls: string[] = [];
+    const { handlers } = await harness(async (url) => {
+      urls.push(url);
+      return { status: 200, ok: true, json: async () => ({ stargazers_count: 9 }) };
+    });
+    const answer = await handlers.get(CHANNELS.adhdSkillStars)?.({}, 'evil/repo', {
+      repo: 'x/y',
+      url: 'https://example.com',
+    });
+    expect(answer).toEqual({ stars: 9 });
+    expect(urls).toEqual([`https://api.github.com/repos/${ADHD_SKILL_SOURCE_REPO}`]);
+  });
+
+  const broken: [string, RepoStatsFetcher][] = [
+    [
+      'throws synchronously',
+      () => {
+        throw new Error('boom');
+      },
+    ],
+    ['rejects', async () => Promise.reject(new Error('offline'))],
+    [
+      'returns a non-JSON body',
+      async () => ({
+        status: 200,
+        ok: true,
+        json: async () => {
+          throw new SyntaxError('not json');
+        },
+      }),
+    ],
+  ];
+  for (const [name, fetch] of broken) {
+    it(`stars resolves null, never rejects, when the fetcher ${name}`, async () => {
+      const { handlers } = await harness(fetch);
+      await expect(
+        handlers.get(CHANNELS.adhdSkillStars)?.({}, 'evil/repo', { repo: 'x/y' }),
+      ).resolves.toBeNull();
+    });
+  }
 
   it('status answers bare, with no argument read at all', async () => {
     const { handlers } = await harness();

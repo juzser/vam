@@ -767,6 +767,14 @@ export const CHANNELS = {
   adhdSkillInstall: 'vam:skills:adhd-install',
   adhdSkillRemove: 'vam:skills:adhd-remove',
   /**
+   * THE SKILL ROW'S STAR COUNT, beside the three above: one anonymous GitHub
+   * read in main (`src/main/skills/repo-stats.ts`), cached, answering
+   * `{ stars }` or `null`, never rejecting. Takes NO argument -- the repo is
+   * `ADHD_SKILL_SOURCE_REPO`, nothing a renderer sends reaches the request.
+   * Desktop-only like its neighbours: no route on `remote/server.ts`'s table.
+   */
+  adhdSkillStars: 'vam:skills:adhd-stars',
+  /**
    * THE STATS & USAGE SCREEN'S ONE CHANNEL. Answers bare (a `StatsResult`,
    * never an `IpcResult`), like `usageGet` — a scan failure is not a
    * `SourceError`, there is no source and no session to refuse anything on

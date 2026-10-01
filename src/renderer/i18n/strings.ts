@@ -410,7 +410,7 @@ const EN = {
   // covers. `{sha}` is `ADHD_SKILL_PINNED_SHA` sliced to seven characters,
   // filled by `AdhdSkillCard.tsx` -- never hand-copied here, where it would
   // drift from the constant that actually pins the bundle.
-  'settings.behaviour.adhd.credit': 'pinned to {sha}, unmodified.',
+  'settings.behaviour.adhd.starsLabel': '{count} stars on GitHub',
   'settings.behaviour.adhd.creditLink': 'ayghri/i-have-adhd (MIT)',
   'settings.behaviour.adhd.coverageTitle': 'Agent coverage',
   'settings.behaviour.adhd.coverageHint': 'install above, then re-check',

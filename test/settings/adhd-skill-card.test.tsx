@@ -61,6 +61,7 @@ function fakeApi(initial: AdhdSkillStatus): AdhdSkillApi & {
   let removeCalls = 0;
   return {
     status: async () => current,
+    stars: async () => null,
     install: async (force?: boolean) => {
       installCalls.push(force);
       const result: AdhdSkillActionResult = { status: current, agents: [] };

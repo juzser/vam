@@ -1,5 +1,5 @@
 /**
- * The ADHD skill card's three channels: read status, install, remove.
+ * The ADHD skill card's four channels: read status, install, remove, stars.
  *
  * NOTHING HERE TRUSTS ITS ARGUMENTS, the same rule `ipc/handlers.ts` states
  * for the source channels -- except there is almost nothing to trust. Status
@@ -19,6 +19,7 @@ import {
   readAdhdSkillStatus,
   removeAdhdSkill,
 } from './adhd-skill.js';
+import { createRepoStatsReader, type RepoStats } from './repo-stats.js';
 
 /** The slice of `ipcMain` this module uses, matching `ipc/handlers.ts`'s own
  *  `IpcMainLike` so this file is testable without `electron`. */
@@ -26,7 +27,11 @@ export type IpcMainLike = {
   handle(channel: string, listener: (event: unknown, ...args: unknown[]) => unknown): void;
 };
 
-export function registerAdhdSkillIpc(ipcMain: IpcMainLike, deps: AdhdSkillDeps): void {
+export function registerAdhdSkillIpc(
+  ipcMain: IpcMainLike,
+  deps: AdhdSkillDeps,
+  readStars: () => Promise<RepoStats | null> = createRepoStatsReader(),
+): void {
   ipcMain.handle(CHANNELS.adhdSkillStatus, async (): Promise<AdhdSkillStatus> => {
     return readAdhdSkillStatus(deps);
   });
@@ -41,5 +46,15 @@ export function registerAdhdSkillIpc(ipcMain: IpcMainLike, deps: AdhdSkillDeps):
 
   ipcMain.handle(CHANNELS.adhdSkillRemove, async (): Promise<AdhdSkillActionResult> => {
     return removeAdhdSkill(deps);
+  });
+
+  // Reads no argument; `readStars` already answers `null` rather than throw,
+  // and the catch is the belt over those braces.
+  ipcMain.handle(CHANNELS.adhdSkillStars, async (): Promise<RepoStats | null> => {
+    try {
+      return await readStars();
+    } catch {
+      return null;
+    }
   });
 }
