@@ -323,11 +323,7 @@ export function SplitResizer(props: SplitResizerProps) {
       <span
         data-pane-divider-seam
         aria-hidden="true"
-        className={
-          row
-            ? 'absolute inset-y-0 left-1/2 w-px bg-pane-divider'
-            : 'absolute inset-x-0 top-1/2 h-px bg-pane-divider'
-        }
+        className={`pointer-events-none absolute inset-0 m-auto bg-pane-divider ${row ? 'w-px' : 'h-px'}`}
       />
     </div>
   );
