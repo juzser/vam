@@ -100,8 +100,8 @@ describe('Response view: OutLink', () => {
 describe('Files preview: FilesLink, for a markdown file at docs/guide.md', () => {
   it('tries the markdown file’s own directory first; a sibling opens on that try', async () => {
     const value = actions(vi.fn(ok));
-    drawFiles('[roadmap](docs/roadmap.md) [sib](roadmap.md)', value, 'docs');
-    await userEvent.click(control('roadmap'));
+    drawFiles('[deep](docs/roadmap.md) [sib](roadmap.md)', value, 'docs');
+    await userEvent.click(control('deep'));
     await userEvent.click(control('sib'));
     expect(value.openFileRef.mock.calls).toEqual([
       ['docs/docs/roadmap.md:1'],
