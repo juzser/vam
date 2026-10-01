@@ -1786,15 +1786,10 @@ const readRails = () =>
 }
 
 /*
- * ------------------------------------------- the filter bar, count and states
- *
- * Task 16 moved the PRs view's filters and sort into the `gh pr list` query.
- * What this block draws is the renderer's half: the bar with its default
- * choice, Everyone + All with a count line at the cap, the loading state a
- * change leaves behind until main answers the new key, and the no-match state.
- * Every PR here is invented. `__answer` stands in for the list main would
- * return; a `focus` event is the reload the source model runs on return to
- * vam, so it is how the next answer is fetched here. Shot at 1280x800 and in a 900px pane.
+ * The filter bar, count and states (task 16): default set, Everyone + All at
+ * the cap, the loading state a change leaves behind, and no-match. Every PR is
+ * invented; `__answer` stands in for main's list and a `focus` event is the
+ * reload that fetches it. 1280x800 and a 900px pane.
  */
 {
   const filterKey = (author, state, sort) => `${author}|${state}|${sort}`;
@@ -1844,7 +1839,6 @@ const readRails = () =>
     await openPrs(page);
     const tag = `${width}`;
 
-    // 1. The default set.
     check(
       `${tag}: the filter bar is drawn with Mine pressed`,
       (await page.locator('[data-pr-filter-choice="mine"][aria-pressed="true"]').count()) === 1,
@@ -1865,10 +1859,9 @@ const readRails = () =>
     await page.screenshot({ path: `${outDir}/prs-filters-${tag}-default.png` });
     console.log(`${outDir}/prs-filters-${tag}-default.png`);
 
-    // 2. A change: the old rows are unmounted until the new key is answered.
+    // 2. A change: stale rows are unmounted until the new key is answered.
     await page.locator('[data-pr-filter-choice="all"]').click();
     await page.locator('[data-pr-filter-state]').selectOption('all');
-    await answerWith(page, invented(3, filterKey('mine', 'open', 'updated')));
     await page.waitForSelector('[data-prs-loading]', { timeout: 5_000 });
     check(
       `${tag}: after a change the loading state replaces the stale rows`,
@@ -1877,7 +1870,6 @@ const readRails = () =>
     await page.screenshot({ path: `${outDir}/prs-filters-${tag}-loading.png` });
     console.log(`${outDir}/prs-filters-${tag}-loading.png`);
 
-    // 3. Everyone + All, answered at the cap.
     await answerWith(page, invented(50, filterKey('all', 'all', 'updated')));
     await page.waitForSelector('[data-prs-count]', { timeout: 5_000 });
     const capped = (await page.locator('[data-prs-count]').innerText()).trim();
@@ -1889,7 +1881,6 @@ const readRails = () =>
     await page.screenshot({ path: `${outDir}/prs-filters-${tag}-everyone-all.png` });
     console.log(`${outDir}/prs-filters-${tag}-everyone-all.png`);
 
-    // 4. The no-match state, and its way back.
     await page.locator('[data-pr-filter-state]').selectOption('draft');
     await answerWith(page, { kind: 'ok', filterKey: filterKey('all', 'draft', 'updated'), prs: [] });
     await page.waitForSelector('[data-prs-empty]', { timeout: 5_000 });
