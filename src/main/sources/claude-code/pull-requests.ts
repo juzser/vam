@@ -66,7 +66,12 @@ import { cliMissingMessage } from '../../env/cli-missing.js';
  */
 const PR_TIMEOUT_MS = 10_000;
 
-const MAX_OUTPUT_BYTES = 1024 * 1024;
+/**
+ * The LIST read's cap (the detail and action reads keep their own 1 MiB), the value `agents.ts` and `builtin-commands.ts`
+ * use. Fifty repository-wide pull requests with `statusCheckRollup` and
+ * `labels` can pass 1 MiB on a repository with heavy CI matrices.
+ */
+const MAX_LIST_OUTPUT_BYTES = 4 * 1024 * 1024;
 
 /** Injected in `readPullRequestsViaCli` so the directory check is testable
  *  without a filesystem. `statSync` rather than `existsSync`: a path that
@@ -260,6 +265,13 @@ export function classifyGhFailure(input: {
     return unavailable(
       'cli-missing',
       cliMissingMessage('gh', 'vam cannot ask GitHub about this branch'),
+    );
+  }
+  // Before the kill branch: execFile kills gh on maxBuffer, so `killed` is true.
+  if (failure.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
+    return unavailable(
+      'too-large',
+      'The pull request list is larger than vam reads (4 MiB). Narrow the filter or the search.',
     );
   }
   if (failure.killed === true) {
@@ -584,7 +596,7 @@ export const readPullRequestsViaCli =
       run(
         binary,
         prListArgv(filters),
-        { cwd, timeout: PR_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES, windowsHide: true },
+        { cwd, timeout: PR_TIMEOUT_MS, maxBuffer: MAX_LIST_OUTPUT_BYTES, windowsHide: true },
         (failure, stdout, stderr) => {
           resolve(
             failure
