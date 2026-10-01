@@ -1,14 +1,12 @@
 // @vitest-environment happy-dom
 
-/**
- * EC-52 (operator event #47): Esc and `Mod-[` leave Insert for Select and keep
- * the composer draft exactly as typed. Only a send clears it.
- */
+/** EC-52 (event #47): Esc and `Mod-[` leave Insert and keep the draft; only a send clears it. */
 
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
+import type { SessionSource } from '../../src/renderer/sources/port.js';
 
 function session(id: string): Session {
   return {
@@ -48,7 +46,6 @@ beforeAll(() => {
 
 afterEach(cleanup);
 
-/** Type a draft into the focused box, the way a person would. */
 function typeDraft(text: string) {
   const box = composer();
   act(() => {
@@ -75,6 +72,7 @@ describe('EC-52: leaving Insert keeps what was typed', () => {
     leaveWith('Escape');
     expect(mode()).toBe('Select');
     expect(composer().value).toBe('half a reply');
+    expect(document.activeElement).not.toBe(composer());
   });
 
   it('Mod-[ does the same', () => {
@@ -95,5 +93,49 @@ describe('EC-52: leaving Insert keeps what was typed', () => {
     });
     expect(mode()).toBe('Insert');
     expect(composer().value).toBe('keep me');
+  });
+
+  it('(a) the first Escape with a popover open closes only the popover', () => {
+    render(<Canvas model={MODEL} />);
+    typeDraft('mid-thought');
+    const toggle = document.querySelector('[data-provider-picker-toggle]') as HTMLElement;
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    leaveWith('Escape');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(mode()).toBe('Insert');
+    expect(composer().value).toBe('mid-thought');
+  });
+
+  it('(c) a shell-level cancel leaves every draft', () => {
+    render(<Canvas model={MODEL} />);
+    typeDraft('still here');
+    leaveWith('Escape');
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(composer().value).toBe('still here');
+  });
+});
+
+describe('EC-52: only a send empties the draft', () => {
+  it('(b) Submit still clears it', async () => {
+    const source = {
+      id: 'claude-code',
+      label: 'Claude Code',
+      capabilities: { recordPrompt: true, deliverPrompt: false, terminal: false },
+      declines: {},
+      viewerScope: { kind: 'connection', note: 'one local process' },
+      load: async () => [],
+      write: { recordPrompt: async () => {} },
+    } as unknown as SessionSource;
+    render(<Canvas model={MODEL} source={{ kind: 'session', source, onWrote: () => {} }} />);
+    typeDraft('send me');
+    await act(async () => {
+      composer().dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+      );
+    });
+    expect(composer().value).toBe('');
   });
 });

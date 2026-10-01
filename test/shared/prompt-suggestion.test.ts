@@ -1,12 +1,4 @@
-/**
- * EC-38: the provider TUI's own greyed prompt suggestion, read off a RECORDED
- * `capture-pane -e -p` screen (`test/fixtures/prompt-suggestion-screens.ts`).
- *
- * The recording shows the ghost is `ESC[2m` (dim) after the `❯` + NBSP on the
- * input row, between the box's two rules -- and that the fresh-session example
- * hint is styled identically, so the text rule (`Try "..."`) is what separates
- * them. A typed character is not dim; mid-turn the row is empty.
- */
+/** EC-38: the greyed suggestion, read off RECORDED `capture-pane -e -p` screens. */
 import { describe, expect, it } from 'vitest';
 import { readPromptSuggestion } from '../../src/shared/prompt-suggestion.js';
 import {
@@ -24,11 +16,8 @@ describe('readPromptSuggestion (EC-38)', () => {
     expect(readPromptSuggestion(SUGGESTION)).toBe('run the test');
   });
 
-  it('returns null once a character is typed', () => {
+  it('returns null once a character is typed, and mid-turn', () => {
     expect(readPromptSuggestion(ONE_CHAR)).toBeNull();
-  });
-
-  it('returns null mid-turn', () => {
     expect(readPromptSuggestion(MID_TURN)).toBeNull();
   });
 

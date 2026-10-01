@@ -1,9 +1,7 @@
 /**
- * RECORDED `capture-pane -e -p` screens of the provider CLI (claude 2.1.286) on a
- * private tmux socket (`tmux -L vam-ux3-suggest`), 120x30, in an empty scratch
- * dir, 2026-10-01 (EC-38). Only the scratch path is redacted. The greyed
- * prompt suggestion and the fresh-session example hint are BOTH `ESC[2m` (dim)
- * after `❯` + NBSP on the input row: the SGR does not tell them apart, the text does.
+ * RECORDED `capture-pane -e -p` screens of claude 2.1.286 (EC-38), 120x30, scratch
+ * path redacted. The suggestion and the fresh-session hint are BOTH dim after
+ * `❯` + NBSP: the SGR does not tell them apart, the text does.
  */
 
 export const SUGGESTION =

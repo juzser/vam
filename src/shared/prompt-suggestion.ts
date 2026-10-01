@@ -1,26 +1,16 @@
 /**
- * The provider TUI's own greyed prompt suggestion, read off a captured screen.
+ * The provider TUI's own greyed prompt suggestion, read off a captured `-e`
+ * screen. Only the pane holds it (the transcript records just the acceptance).
  *
- * Nothing else carries it: the transcript records only the ACCEPTANCE
- * (`promptSource: 'suggestion_accepted'`) and no hook payload has the text, so
- * the one place it exists is the pane -- which vam already captures with `-e`
- * (`capturePaneArgv`).
+ * The rule is what a live probe recorded (`test/fixtures/prompt-suggestion-
+ * screens.ts`, claude 2.1.286): the input box is one row between two rule rows,
+ * drawn `❯` + NBSP + text; a standing suggestion is that text painted DIM
+ * (`ESC[2m`) with nothing typed beside it. The fresh session's example hint
+ * (`Try "fix lint errors"`) is dim too, so it is named by its text. An open
+ * picker has no rule below its row, so it never reads as an input box.
  *
- * THE RULE IS WHAT A LIVE PROBE RECORDED (`test/fixtures/prompt-suggestion-
- * screens.ts`, claude 2.1.286), not a guess:
- *
- *  - the input box is one row between two rule rows, drawn `❯` + NBSP + text;
- *  - a standing suggestion is that text painted DIM (`ESC[2m`) with nothing
- *    typed beside it; one typed character makes the row ordinary text, and
- *    mid-turn the row is empty;
- *  - THE FRESH SESSION'S EXAMPLE HINT (`Try "fix lint errors"`) IS DIM TOO, so
- *    the colour cannot tell it from a suggestion. It is not one -- nothing was
- *    suggested, nothing would be accepted -- and it is named by its own text;
- *  - an open picker has `❯` rows but no rule BELOW the cursor row's own, so it
- *    never reads as an input box.
- *
- * Anything this cannot positively read is `null`: a missed ghost costs one
- * keystroke, an invented one writes text the operator never saw into a draft.
+ * Anything not positively read is `null`: a missed ghost costs one keystroke,
+ * an invented one writes text the operator never saw into a draft.
  */
 
 const ESC = String.fromCharCode(27);

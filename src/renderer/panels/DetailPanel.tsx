@@ -8737,10 +8737,11 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
    * saying that a pick is only a mark.
    */
   const cardSuggestion = suggestion !== null && suggestion !== '' ? suggestion : null;
-  // The provider TUI's own greyed suggestion, read off the pane. The card's
-  // offer has priority, so the hook stands down while it holds one.
+  // The TUI's own suggestion, read off the pane; the card's offer has priority.
   const paneSuggestion = usePaneSuggestion({
-    read: globalThis.window?.api?.terminal?.read,
+    // A pane can exist only for a session vam holds (as the other pane work does).
+    read:
+      entry?.session.vamControlled === true ? globalThis.window?.api?.terminal?.read : undefined,
     projectId: entry?.project.id ?? null,
     rowId: entry?.session.id,
     phone,
@@ -11010,9 +11011,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
             one child -- the textarea -- becomes the pill's own flex item;
             see `data-prompt-input` just above for that pill's own comment. */}
               <div className={phone ? 'contents' : 'relative flex items-start gap-2'}>
-                {/* THE OFFER, DRAWN AS A KEY BEFORE ITS TEXT. An overlay, so the
-                    textarea stays the one input; it takes no pointer. The
-                    phone has no Tab and keeps `data-prompt-suggestion-use`. */}
+                {/* The offer as a key before its text: an overlay, so the textarea stays the one input. */}
                 {promptSuggestion !== null && !phone && (
                   <div
                     data-prompt-suggestion-ghost
@@ -11026,6 +11025,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                 <textarea
                   ref={setInputRef}
                   rows={phone ? 1 : 2}
+                  aria-keyshortcuts={promptSuggestion !== null && !phone ? 'Tab' : undefined}
                   value={draft}
                   readOnly={!composing}
                   onFocus={() => {
@@ -11294,8 +11294,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                    Desktop is unaffected: both classes are phone-only. */
                   className={[
                     'vam-no-scrollbar vam-tap min-w-0 flex-1 resize-none bg-transparent text-body text-ink outline-none placeholder:text-ink-faint',
-                    // The ghost above is what is SEEN; the placeholder keeps the
-                    // suggestion as accessible text only.
+                    // The ghost above is what is seen; the placeholder is accessible text only.
                     promptSuggestion !== null && !phone ? 'placeholder:text-transparent' : '',
                     // `py-3` (12px a side) centres the one line in the 44px
                     // box: with no vertical padding the text sat flush

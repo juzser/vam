@@ -1,12 +1,6 @@
 // @vitest-environment happy-dom
 
-/**
- * EC-36 / EC-37: the provider TUI's suggestion in the prompt box, drawn as a
- * `Tab` key tag before its text, and the one Tab rule that takes it.
- *
- * The suggestion arrives the way it does in the app: `window.api.terminal.read`
- * returns the recorded pane screen and the polling hook parses it.
- */
+/** EC-36 / EC-37: the pane's suggestion drawn as a `Tab` key tag, and the one Tab rule that takes it. */
 
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -90,14 +84,17 @@ describe('EC-36: the suggestion is a Tab key tag before its text', () => {
     expect(el.textContent).toBe('Tabrun the test');
     expect(box().placeholder).toContain('run the test');
     expect(box().placeholder).not.toContain('Tab to use');
+    expect(box().getAttribute('aria-keyshortcuts')).toBe('Tab');
   });
 
-  it('is absent with a non-empty draft', async () => {
+  it('a session vam does not hold is never read, and offers nothing', async () => {
     const { read } = bridge(SUGGESTION);
-    draw({ draft: 'half a reply' });
+    const held = { ...SESSION, vamControlled: false };
+    draw({ entry: { project: PROJECT, session: held } });
     await act(async () => void (await new Promise((r) => setTimeout(r, 30))));
     expect(read).not.toHaveBeenCalled();
     expect(ghost()).toBeNull();
+    expect(box().hasAttribute('aria-keyshortcuts')).toBe(false);
   });
 
   it('is absent when the pane holds no suggestion', async () => {
@@ -107,6 +104,28 @@ describe('EC-36: the suggestion is a Tab key tag before its text', () => {
     await act(async () => void (await new Promise((r) => setTimeout(r, 30))));
     expect(ghost()).toBeNull();
     expect(box().placeholder).not.toContain('Tab');
+  });
+});
+
+describe('the question card keeps priority over the pane', () => {
+  it('draws the card offer, and reads nothing, while both would apply', async () => {
+    const { read } = bridge(SUGGESTION);
+    const options = [{ label: 'Codex CLI', description: 'a second CLI agent' }];
+    const question = {
+      id: 'q:0',
+      header: 'H',
+      question: 'Which?',
+      multiSelect: false,
+      options,
+      answer: null,
+    };
+    const session = { ...SESSION, questions: [question] };
+    draw({ entry: { project: PROJECT, session } });
+    fireEvent.click(q('[data-question-chat]') as HTMLElement);
+    await waitFor(() => expect(ghost()?.textContent).toBe('TabCodex CLI'));
+    await act(async () => void (await new Promise((r) => setTimeout(r, 30))));
+    expect(read).not.toHaveBeenCalled();
+    expect(ghost()?.textContent).not.toContain('run the test');
   });
 });
 

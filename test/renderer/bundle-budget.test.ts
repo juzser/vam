@@ -829,15 +829,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * `ENTRY_GZIP_BUDGET_BYTES` moves 220,750 -> 221,924: the measured figures
  * plus ~297 B / ~150 B of slack, inside plan v19's 739,500 / 222,100 ceiling.
  *
- * AN EIGHTEENTH, FROM vam-ux-3/task-17-composer-tab-suggestion: the Tab
- * KeyTag, the suggestion overlay and the pane-suggestion reader in
- * `DetailPanel.tsx` are all eager code. Measured, `electron-vite build
- * --mode production` (this machine's `darwin` zlib), the way this test
- * measures it: entry 740,863 B (over 739,000 by 1,863 B); gzip 222,495 B
- * (over 221,924 by 571 B). `ENTRY_BUDGET_BYTES` moves 739,000 -> 741,163 and
- * `ENTRY_GZIP_BUDGET_BYTES` moves 221,924 -> 222,645: the measured figures
- * plus ~300 B / ~150 B of slack, inside plan v20's 741,200 / 222,650
- * ceiling.
+ * AN EIGHTEENTH, FROM vam-ux-3/task-17-composer-tab-suggestion: the Tab KeyTag,
+ * suggestion overlay and pane reader are eager code. Measured the way this test
+ * measures it: entry 740,863 B, gzip 222,495 B. The budgets move 739,000 ->
+ * 741,163 and 221,924 -> 222,645, inside plan v20's 741,200 / 222,650 ceiling.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');

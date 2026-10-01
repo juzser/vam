@@ -2,19 +2,13 @@
  * The provider TUI's own greyed prompt suggestion, polled off the pane for the
  * Response view's prompt box (operator event #30).
  *
- * READ-ONLY, THROUGH THE ROUTE THE TERMINAL TAB ALREADY USES: `read` is
- * `window.api.terminal.read`, and every call is `PaneReadMode` `'echo'`. That
- * mode asks for the screen only and, riding a fresh aim, never writes it (main
- * only lets a proof set the aim's timestamp), so a view that never types
- * cannot extend the keystroke aim; with no fresh aim main falls through to the
- * same proving read the Terminal tab's poll uses. `'poll'` would re-prove and
- * refresh the aim on every read. Nothing here sends a key.
+ * READ-ONLY: every call is `terminal.read` in `PaneReadMode` `'echo'`, which
+ * asks for the screen only and never refreshes the keystroke aim. Nothing here
+ * sends a key.
  *
- * ONLY WHILE IT COULD BE OFFERED: desktop, Response showing, the session idle
- * (the TUI draws no ghost mid-turn), an empty draft, and no question card
- * offering one -- the card's `onSuggest` has priority. Whenever any of those
- * stops holding the value is dropped AT ONCE, before any new read, so a stale
- * ghost never survives a keystroke, a session switch or a new turn.
+ * ONLY WHILE IT COULD BE OFFERED: desktop, Response showing, session idle, an
+ * empty draft, and no question card offering one (the card has priority).
+ * When any stops holding the value is dropped AT ONCE, before any new read.
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -56,8 +50,7 @@ export function usePaneSuggestion({
     status === 'idle' &&
     draft === '' &&
     cardSuggestion === null;
-  // Keyed by the row it was read for, so a render between a switch and its
-  // effect cannot hand one session's ghost to another.
+  // Keyed by row, so a render between a switch and its effect cannot leak a ghost across sessions.
   const [found, setFound] = useState<{ readonly row: string; readonly text: string } | null>(null);
   const lastRead = useRef(Number.NEGATIVE_INFINITY);
 

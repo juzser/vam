@@ -1574,13 +1574,7 @@ check(
   `${afterPick.lines} lines`,
 );
 
-/**
- * THE COMPOSER'S TAB SUGGESTION (event #30) AND ITS DRAFT (event #47), in four
- * frames: the offer standing over an empty box, the draft after Tab, a typed
- * draft with no offer, and the same draft after Esc. The demo has no tmux, so
- * the pane read is a stub returning one recorded-shape screen: the input row
- * between two rules, its suggestion dim.
- */
+/** The composer's Tab offer (event #30) and its draft after Esc (event #47); the pane read is stubbed. */
 const SUGGEST_SCREEN = `\n${'─'.repeat(40)}\n❯ \u001b[2mrun the test\u001b[22m\n${'─'.repeat(40)}\n`;
 const composerPage = await browser.newPage({ viewport: { width: 1100, height: 620 } });
 composerPage.on('pageerror', (err) => console.error('PAGE ERROR (composer):', err));
@@ -1591,9 +1585,7 @@ await composerPage.addInitScript(
 await composerPage.goto(`${origin}/?demo=1&history=off`, { waitUntil: 'networkidle' });
 await composerPage.waitForSelector('[data-tab-strip]');
 await openSession(composerPage, 'notes-1');
-// The stub goes in AFTER the demo has booted: a `window.api` present at load
-// makes the app take the desktop bridge and the demo sessions never appear.
-// The hook reads `window.api` at render, so the next render picks it up.
+// Stubbed AFTER boot: a `window.api` at load would swap the demo for the desktop bridge.
 await composerPage.evaluate((screen) => {
   window.api = {
     terminal: {
@@ -1608,7 +1600,7 @@ await composerPage.evaluate((screen) => {
 }, SUGGEST_SCREEN);
 const composerBox = composerPage.locator('textarea[aria-label="prompt to session"]');
 await composerBox.focus();
-// A keystroke and its undo re-render the panel, which is what picks the stub up.
+// A keystroke and its undo re-render the panel, picking the stub up.
 await composerBox.fill('x');
 await composerBox.fill('');
 await composerPage.waitForSelector('[data-prompt-suggestion-ghost]', { timeout: 6_000 });

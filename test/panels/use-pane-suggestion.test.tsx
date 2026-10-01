@@ -1,12 +1,8 @@
 // @vitest-environment happy-dom
 
 /**
- * EC-39: the pane suggestion's read path and its staleness.
- *
- * The stub route is `readPane` over a recording `TmuxRun`, so what is counted
- * is the tmux argv a read would run -- and the claim that reading a suggestion
- * sends nothing is made against that argv, not against a spy on a function the
- * hook never calls.
+ * EC-39: the pane suggestion's read path and staleness, over a recording
+ * `TmuxRun` so "sends nothing" is claimed against the real tmux argv.
  */
 
 import { act, cleanup, renderHook } from '@testing-library/react';
@@ -17,7 +13,7 @@ import {
   usePaneSuggestion,
 } from '../../src/renderer/panels/use-pane-suggestion.js';
 import type { PaneReadMode } from '../../src/shared/terminal.js';
-import { FRESH_HINT, SUGGESTION } from '../fixtures/prompt-suggestion-screens.js';
+import { SUGGESTION } from '../fixtures/prompt-suggestion-screens.js';
 
 let screen = SUGGESTION;
 let argvs: (readonly string[])[] = [];
@@ -158,14 +154,6 @@ describe('usePaneSuggestion (EC-39)', () => {
     await act(async () => release?.());
     await settle();
     expect(view.result.current).toBeNull();
-  });
-
-  it('is null for a screen with no suggestion, such as the fresh-session hint', async () => {
-    screen = FRESH_HINT;
-    const { result } = renderHook((props) => usePaneSuggestion(props), { initialProps: BASE });
-    await settle();
-    expect(captures()).toBe(1);
-    expect(result.current).toBeNull();
   });
 
   it('only ever runs capture calls: reading sends nothing to the session', async () => {
