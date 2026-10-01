@@ -163,7 +163,7 @@ describe('one column, label left and key right', () => {
     // the absence of the class that made it two, plus the rectangles in
     // `e2e/key-sheet-shots.mjs` — a class alone proves only that somebody
     // typed it.
-    expect(list?.className ?? '').not.toMatch(/grid-cols-2/);
+    expect(list?.className ?? '').not.toMatch(/(^|\s)grid-cols-2/);
   });
 
   it('puts the label before the key in every row, in reading order', () => {

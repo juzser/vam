@@ -506,7 +506,7 @@ type SheetRow = {
  */
 export type SheetGroupId = ActionGroup | 'files';
 
-type SheetGroup = {
+export type SheetGroup = {
   readonly group: SheetGroupId;
   readonly title: string;
   readonly rows: readonly SheetRow[];
