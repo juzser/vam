@@ -73,14 +73,20 @@
  * file, checked the same way the rest of `src/` is.
  */
 
-import { Ban, ExternalLink, ImageOff } from 'lucide-react';
-import { type ReactNode, useContext, useState } from 'react';
+import { Ban, ExternalLink, FileText, ImageOff } from 'lucide-react';
+import { createContext, type ReactNode, useContext, useState } from 'react';
 import type { Components } from 'react-markdown';
 import { checkLink } from '../../shared/link.js';
+import {
+  type MdFileLink,
+  mdFileLinkHint,
+  mdFileLinkRef,
+  parseMdFileLink,
+} from '../../shared/md-file-link.js';
 import type { HighlightLang } from './highlight.js';
 import { resolveLang } from './highlight.js';
 import { Note } from './Note.js';
-import { useOutActions } from './out-actions.js';
+import { type OutActionResult, useOutActions } from './out-actions.js';
 import { Fence, Fenced, NO_ADDRESS, Refusal, readFence } from './out-markdown.js';
 
 /**
@@ -97,27 +103,68 @@ import { Fence, Fenced, NO_ADDRESS, Refusal, readFence } from './out-markdown.js
 export const FILES_MARKDOWN_URL_TRANSFORM = (url: string): string => url;
 
 /**
+ * THE DIRECTORY OF THE MARKDOWN FILE BEING PREVIEWED, relative to the session
+ * root (`''` for the root itself or when it is not known). A context for the
+ * reason `out-actions.ts` gives: `FILES_MARKDOWN` is a module-level constant,
+ * so its components cannot be handed anything at a call site. `FilesTab.tsx`
+ * publishes it around the preview; a relative link is tried against it first,
+ * as GitHub resolves one, and then against the session root.
+ */
+export const FilesMarkdownDir = createContext('');
+
+/**
+ * THE MARKDOWN FILE'S OWN DIRECTORY FIRST, then the session root -- and only
+ * the last attempt's answer comes back, so a refusal for the first guess is
+ * never drawn. An absolute or empty `dir` (a file outside the root, or one in
+ * it) has no first guess to make. Both attempts are the same contained
+ * `path:line` reference main resolves; nothing here decides what is allowed.
+ */
+async function openFileLink(
+  openFileRef: (reference: string) => Promise<OutActionResult>,
+  file: MdFileLink,
+  dir: string,
+): Promise<OutActionResult> {
+  if (dir !== '' && !dir.startsWith('/')) {
+    const first = await openFileRef(mdFileLinkRef(file, dir));
+    if (first.ok) return first;
+  }
+  return openFileRef(mdFileLinkRef(file));
+}
+
+/**
  * A LINK, DRAWN AS GITHUB DRAWS ONE -- inline, in the chip accent at rest,
  * underlined on hover, carrying the same glyph the transcript's own link
  * does -- and NEVER A REAL ANCHOR. See this file's header for why the button
  * is not optional and why `openLink` is the transcript's own act.
  */
 function FilesLink({ href, children }: { readonly href?: string; readonly children: ReactNode }) {
-  const { openLink } = useOutActions();
+  const { openLink, openFileRef } = useOutActions();
+  const dir = useContext(FilesMarkdownDir);
   const [note, setNote] = useState<string | null>(null);
   const checked = href === undefined ? null : checkLink(href);
+  // A relative path is a file in the project (`src/shared/md-file-link.ts`),
+  // opened through `openFileRef` and never `openLink`; see `OutLink`.
+  const file = checked?.ok === true ? null : parseMdFileLink(href);
   const ok = checked?.ok === true;
-  const hint = ok ? `opens ${checked.url} in the browser` : (checked?.reason ?? NO_ADDRESS);
+  const hint =
+    file !== null
+      ? mdFileLinkHint(file)
+      : ok
+        ? `opens ${checked.url} in the browser`
+        : (checked?.reason ?? NO_ADDRESS);
   // `Ban` for a refused address, exactly as `OutLink` draws it -- a control
   // that can only refuse still looks like a control, not like plain prose.
-  const Glyph = ok ? ExternalLink : Ban;
+  const Glyph = file !== null ? FileText : ok ? ExternalLink : Ban;
   return (
     <>
       <Note text={hint}>
         <button
           type="button"
           data-files-markdown-link
-          data-files-markdown-link-refused={checked?.ok === false ? 'true' : undefined}
+          data-files-markdown-link-file={file !== null ? 'true' : undefined}
+          data-files-markdown-link-refused={
+            file === null && checked?.ok === false ? 'true' : undefined
+          }
           className={[
             // `items-baseline` + the glyph's own `self-center`: the same
             // pairing `OutLink` uses, and for the same reason -- the text
@@ -127,9 +174,16 @@ function FilesLink({ href, children }: { readonly href?: string; readonly childr
             // THE REFUSED ONE IN THE INK OF ITS OWN REFUSAL, exactly as
             // `OutLink`'s does -- "this one is not like the others" is what
             // it has to say, and the chip accent would say the opposite.
-            ok ? 'text-chip' : 'text-failed',
+            ok || file !== null ? 'text-chip' : 'text-failed',
           ].join(' ')}
           onClick={() => {
+            if (file !== null) {
+              setNote(null);
+              void openFileLink(openFileRef, file, dir).then((outcome) => {
+                if (!outcome.ok) setNote(outcome.reason);
+              });
+              return;
+            }
             if (checked === null || !checked.ok) {
               setNote(checked?.reason ?? NO_ADDRESS);
               return;

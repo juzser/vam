@@ -192,7 +192,11 @@ import { applyTab, isMarkdownPath, lineStartOffset, relativeLabel } from './file
 import { FORMAT_OFFER, formatFile } from './files-format.js';
 import { type EditorLang, highlightEditor, highlightLangFor } from './files-highlight.js';
 import { FileRowIcon } from './files-icons.js';
-import { FILES_MARKDOWN, FILES_MARKDOWN_URL_TRANSFORM } from './files-markdown.js';
+import {
+  FILES_MARKDOWN,
+  FILES_MARKDOWN_URL_TRANSFORM,
+  FilesMarkdownDir,
+} from './files-markdown.js';
 import { EDITOR_KEYS, type FileTreeRow } from './files-tree.js';
 import { useFilesTreeState } from './files-tree-state.js';
 import { SYNTAX_CLASS } from './highlight.js';
@@ -2184,9 +2188,14 @@ function MarkdownPreview({
         <Suspense
           fallback={<div className="whitespace-pre-wrap font-mono text-ink-dim">{content}</div>}
         >
-          <LazyMarkdown components={FILES_MARKDOWN} urlTransform={FILES_MARKDOWN_URL_TRANSFORM}>
-            {content}
-          </LazyMarkdown>
+          {/* The file's own directory, for a relative link to try first. */}
+          <FilesMarkdownDir.Provider
+            value={label.includes('/') ? label.slice(0, label.lastIndexOf('/')) : ''}
+          >
+            <LazyMarkdown components={FILES_MARKDOWN} urlTransform={FILES_MARKDOWN_URL_TRANSFORM}>
+              {content}
+            </LazyMarkdown>
+          </FilesMarkdownDir.Provider>
         </Suspense>
       </div>
     </section>

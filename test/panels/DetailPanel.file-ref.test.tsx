@@ -189,3 +189,21 @@ describe('pressing a path:line reference an agent wrote', () => {
     expect(read).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('pressing a relative markdown link in an answer', () => {
+  it('opens that file in the Files tab through the same resolve, at the anchor’s line', async () => {
+    const decision: Decision = {
+      ...DECISION,
+      output: `${ANSWER} See [the notes](src/index.ts#L2).`,
+    };
+    const resolve = vi.fn(async () => ({ path: FILE, line: 2 }));
+    withBridge(resolve);
+    await draw({ decision, entry: { ...ENTRY, session: { ...SESSION, decisions: [decision] } } });
+    await press(q('[data-out-file-link]'));
+    expect(resolve).toHaveBeenCalledWith('s1', 'src/index.ts:2');
+    expect(q<HTMLElement>('[data-view="files"]')?.getAttribute('aria-pressed')).toBe('true');
+    await waitFor(() => {
+      expect(q<HTMLTextAreaElement>('[data-files-editor]')?.selectionStart).toBe(12);
+    });
+  });
+});

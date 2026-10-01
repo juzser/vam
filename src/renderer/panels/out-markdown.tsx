@@ -26,7 +26,7 @@
  * hole cannot be reopened by a highlighter.
  */
 
-import { Ban, ExternalLink } from 'lucide-react';
+import { Ban, ExternalLink, FileText } from 'lucide-react';
 import {
   createContext,
   Fragment,
@@ -38,6 +38,7 @@ import {
 import type { Components } from 'react-markdown';
 import { type FileRef, parseFileRef, splitFileRefs } from '../../shared/file-ref.js';
 import { checkLink } from '../../shared/link.js';
+import { mdFileLinkHint, mdFileLinkRef, parseMdFileLink } from '../../shared/md-file-link.js';
 import {
   type DiffKind,
   diffLineKind,
@@ -373,6 +374,16 @@ export const NO_ADDRESS = 'vam was given no address to open.';
  * "this one is not like the others" is exactly what it has to say, and it
  * names the scheme it refused, a `javascript:` address having no host.
  *
+ * A RELATIVE PATH (`docs/roadmap.md`) IS A THIRD KIND, a file in the session's
+ * own project rather than an address (`src/shared/md-file-link.ts`). `checkLink`
+ * has no base to resolve it against and still refuses it, so it is asked of
+ * `openFileRef` instead -- the contained route a `path:line` reference takes,
+ * where main resolves and authorises it against the session's working
+ * directory. It never reaches `openLink` and never becomes a `file:` URL. It
+ * is the same pill with a `FileText` glyph, in the live ink: it opens in this
+ * app's Files view, so neither the browser arrow nor the refused-address `Ban`
+ * says the right thing. A missing file is refused in the channel's own words.
+ *
  * PRESSING A REFUSED ONE IS NOT A NO-OP. The scheme check runs here first so
  * a refusal costs no round trip, and it is a CONVENIENCE: main runs the same
  * check on its own side of the boundary and would refuse the identical
@@ -386,11 +397,14 @@ export const NO_ADDRESS = 'vam was given no address to open.';
  * machine string and reads as a peer of the `path:line` chip beside it.
  */
 function OutLink({ href, children }: { readonly href?: string; readonly children: ReactNode }) {
-  const { openLink } = useOutActions();
+  const { openLink, openFileRef } = useOutActions();
   const [note, setNote] = useState<string | null>(null);
   const checked = href === undefined ? null : checkLink(href);
+  // A relative path is a file in the project, not an address `checkLink` can
+  // read; a web address never parses as one (`null` for every scheme).
+  const file = checked?.ok === true ? null : parseMdFileLink(href);
   const ok = checked?.ok === true;
-  const address = checked?.ok === true ? checked.url : href;
+  const address = file !== null ? undefined : checked?.ok === true ? checked.url : href;
   const text = plainText(children);
   const self = text !== null && href !== undefined && textIsAddress(text, href);
   // The host + path layout, taken only when a self-named address HAS a host:
@@ -405,17 +419,22 @@ function OutLink({ href, children }: { readonly href?: string; readonly children
   const lying = !self && text !== null && href !== undefined && textLooksLikeAddress(text);
   const realHost = lying && address !== undefined ? (linkParts(address)?.host ?? null) : null;
   const hint =
-    checked?.ok === true ? `opens ${address} in the browser` : (checked?.reason ?? NO_ADDRESS);
-  const Glyph = ok ? ExternalLink : Ban;
+    file !== null
+      ? mdFileLinkHint(file)
+      : checked?.ok === true
+        ? `opens ${address} in the browser`
+        : (checked?.reason ?? NO_ADDRESS);
+  const Glyph = file !== null ? FileText : ok ? ExternalLink : Ban;
   return (
     <>
       <Note text={hint}>
         <button
           type="button"
           data-out-link
+          data-out-file-link={file !== null ? 'true' : undefined}
           // The refused ones are marked so a guard can find them in a real
           // browser, and so they can be drawn as what they are.
-          data-out-link-refused={checked?.ok === false ? 'true' : undefined}
+          data-out-link-refused={file === null && checked?.ok === false ? 'true' : undefined}
           data-out-address={address}
           className={[
             // `items-baseline`, not `items-center`: the name and the glyph
@@ -465,9 +484,16 @@ function OutLink({ href, children }: { readonly href?: string; readonly children
             // pill that must not read as a sentence read as one. `failed` is
             // the ink the `Refusal` this control produces is printed in, so
             // the two halves of one outcome say the same thing.
-            ok ? 'hover:bg-out-pill-hover' : 'text-failed',
+            ok || file !== null ? 'hover:bg-out-pill-hover' : 'text-failed',
           ].join(' ')}
           onClick={() => {
+            if (file !== null) {
+              setNote(null);
+              void openFileRef(mdFileLinkRef(file)).then((outcome) => {
+                if (!outcome.ok) setNote(outcome.reason);
+              });
+              return;
+            }
             if (checked === null || !checked.ok) {
               setNote(checked?.reason ?? NO_ADDRESS);
               return;

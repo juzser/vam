@@ -209,3 +209,58 @@ describe('resolving a path:line reference against the session it was written in'
     expect((await invoke('s1', 'src/\0index.ts:1')).ok).toBe(false);
   });
 });
+
+/**
+ * THE REFERENCES A RELATIVE MARKDOWN LINK SENDS (`src/shared/md-file-link.ts`),
+ * in exactly the form `test/panels/md-relative-links.test.tsx` sends them:
+ * `<dir>/<href>:<line>`, untouched, with `..` left in for THIS side to refuse.
+ * They pass without any change to the handler, which is the claim: the
+ * contained route already holds for the new caller.
+ */
+describe('references sent by a relative markdown link', () => {
+  it.each(['../outside.md:1', 'docs/../../outside.md:1'])(
+    'refuses %s as not-authorized whether or not the outside file exists',
+    async (reference) => {
+      const invoke = harness();
+      expect(await codeOf(invoke('s1', reference))).toBe('not-authorized');
+      writeFileSync(join(scratch, 'outside.md'), 'nope\n');
+      expect(await codeOf(invoke('s1', reference))).toBe('not-authorized');
+    },
+  );
+
+  it('refuses a path through a symlink that points outside, existing or not', async () => {
+    mkdirSync(join(scratch, 'elsewhere'));
+    symlinkSync(join(scratch, 'elsewhere'), join(root, 'docs-link'));
+    const invoke = harness();
+    expect(await codeOf(invoke('s1', 'docs-link/missing.md:1'))).toBe('not-authorized');
+    writeFileSync(join(scratch, 'elsewhere', 'real.md'), 'nope\n');
+    expect(await codeOf(invoke('s1', 'docs-link/real.md:1'))).toBe('not-authorized');
+  });
+
+  it('refuses a sibling directory whose name begins with the root’s, existing or not', async () => {
+    const invoke = harness();
+    expect(await codeOf(invoke('s1', '../atlas-notes/secrets.md:1'))).toBe('not-authorized');
+    writeFileSync(join(scratch, 'atlas-notes', 'secrets.md'), 'nope\n');
+    expect(await codeOf(invoke('s1', '../atlas-notes/secrets.md:1'))).toBe('not-authorized');
+  });
+
+  it('says a missing file inside the project is not-found', async () => {
+    mkdirSync(join(root, 'docs'));
+    const invoke = harness();
+    const result = await invoke('s1', 'docs/missing.md:1');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('not-found');
+    expect(result.error.message).toContain('docs/missing.md');
+  });
+
+  it('resolves a file inside the project to its real path', async () => {
+    mkdirSync(join(root, 'docs'));
+    writeFileSync(join(root, 'docs', 'roadmap.md'), '# roadmap\n');
+    const invoke = harness();
+    expect(await invoke('s1', 'docs/roadmap.md:1')).toEqual({
+      ok: true,
+      value: { path: await realpath(join(root, 'docs', 'roadmap.md')), line: 1 },
+    });
+  });
+});
