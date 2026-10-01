@@ -104,7 +104,7 @@ export function PairedDeviceList({ read }: PairedDeviceListProps) {
                   a fact a screen reader needs as much as an eye does, and two
                   phones with similar names is the case this exists for. */}
               {device.deviceId === you && (
-                <span className="flex-none text-ink-dim text-meta">this device</span>
+                <span className="flex-none text-ink-dim text-meta">This device</span>
               )}
             </li>
           ))}

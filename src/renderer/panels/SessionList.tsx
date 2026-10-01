@@ -2343,7 +2343,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     <input
       data-group-draft
       value={groupDraftName}
-      placeholder="project name"
+      placeholder="Project name"
       aria-label="project name"
       ref={(node) => {
         if (node !== null && document.activeElement !== node) {
@@ -2372,7 +2372,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     <input
       data-project-draft
       value={projectDraftName}
-      placeholder="repo name"
+      placeholder="Repo name"
       aria-label="repo name"
       ref={(node) => {
         if (node !== null && document.activeElement !== node) {

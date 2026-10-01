@@ -2519,7 +2519,7 @@ function Tree({
           value={newFileName}
           onChange={(event) => onNewFileName(event.target.value)}
           onKeyDown={onBoxKeyDown}
-          placeholder="new file…"
+          placeholder="New file…"
           aria-label="create a new file"
           className="min-w-0 flex-1 bg-transparent font-mono text-control text-ink outline-none placeholder:text-ink-faint"
         />

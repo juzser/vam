@@ -566,7 +566,7 @@ export function WorktreesSection({
           {status?.dirty === true && (
             <span
               data-worktree-dirty
-              title="uncommitted changes"
+              title="Uncommitted changes"
               className="h-1.5 w-1.5 flex-none rounded-full bg-diff-file"
             />
           )}
@@ -721,7 +721,7 @@ export function WorktreesSection({
                     closeCreate();
                   }
                 }}
-                placeholder="worktree name"
+                placeholder="Worktree name"
                 // biome-ignore lint/a11y/noAutofocus: the form opens because the operator just asked for it (the "+" or the project menu); focusing its first field is the point.
                 autoFocus
                 className="min-w-0 rounded-[5px] border border-line-strong bg-panel px-1.5 py-1 font-mono text-control text-ink outline-none focus:border-line-loud"
@@ -736,7 +736,7 @@ export function WorktreesSection({
                     closeCreate();
                   }
                 }}
-                placeholder="base ref (current branch)"
+                placeholder="Base ref (current branch)"
                 className="min-w-0 rounded-[5px] border border-line-strong bg-panel px-1.5 py-1 font-mono text-control text-ink outline-none focus:border-line-loud"
               />
               {createError !== null && (

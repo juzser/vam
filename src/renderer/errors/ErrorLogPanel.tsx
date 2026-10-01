@@ -124,7 +124,7 @@ export function ErrorLogPanel({ onClose }: ErrorLogPanelProps) {
       />
       <div className="relative flex max-h-[80vh] w-[min(760px,92vw)] flex-col overflow-y-auto rounded-md border border-line bg-panel p-4">
         <div className="mb-3 flex items-baseline gap-2">
-          <h2 className="font-semibold text-ink text-heading">error log</h2>
+          <h2 className="font-semibold text-ink text-heading">Error log</h2>
           <span className="text-ink-faint text-meta">
             this session only — nothing here is written to disk
           </span>
@@ -155,7 +155,7 @@ export function ErrorLogPanel({ onClose }: ErrorLogPanelProps) {
 
         {events.length === 0 ? (
           <p data-testid="error-log-empty" className="py-6 text-center text-ink-faint text-control">
-            nothing has failed yet
+            Nothing has failed yet
           </p>
         ) : (
           <ul className="flex flex-col gap-1">

@@ -84,7 +84,7 @@ export function ProjectPicker({ groupName, choices, onToggle, onClose }: Project
         className="relative z-10 flex max-h-[380px] w-[340px] flex-col overflow-hidden rounded-[var(--radius-lg)] border border-line bg-panel shadow-[var(--shadow-node)]"
       >
         <div className="flex items-center gap-2 border-line border-b px-3 py-2">
-          <span className="text-meta text-ink-faint">repos in</span>
+          <span className="text-meta text-ink-faint">Repos in</span>
           <span className="font-mono font-semibold text-body text-ink">{groupName}</span>
         </div>
         {ordered.length === 0 ? (
