@@ -45,6 +45,31 @@ async function openIntegrations(status, theme) {
   await page.addInitScript((state) => {
     globalThis.window.api = {
       ...(globalThis.window.api ?? {}),
+      // `describe`/`load` answer the app's own startup read; without them the
+      // page paints a red "e.describe is not a function" banner over Settings.
+      describe: async () => ({
+        id: 'claude-code',
+        label: 'Claude Code',
+        capabilities: {
+          liveUpdates: false,
+          recordPrompt: false,
+          deliverPrompt: false,
+          promptAttachments: false,
+          slashCommands: false,
+          renameSession: false,
+          closeSession: false,
+          createSession: false,
+          governance: false,
+          pullRequests: false,
+          terminal: false,
+          agentRoster: false,
+          resumeSession: false,
+        },
+        declines: {},
+        viewerScope: { kind: 'connection', note: 'stub' },
+      }),
+      load: async () => [],
+      subscribe: () => () => {},
       github: {
         authStatus: async () => ({ kind: 'logged-out' }),
         connectStart: async () => null,
