@@ -194,3 +194,23 @@ export function focusInsertStop(pane: Element | null | undefined): boolean {
   stop.focus();
   return stop.ownerDocument.activeElement === stop;
 }
+
+/**
+ * The element holding the keyboard when it sits inside an insert scope, or
+ * `null`. Read at a window `blur` so `restoreInsertStop` can put it back.
+ */
+export function insertStopHeld(node: unknown): HTMLElement | null {
+  return node instanceof HTMLElement && cursorModeAt(node) === 'insert' ? node : null;
+}
+
+/**
+ * Give the keyboard back to `stop` after the window regained focus. Declines
+ * when the stop has left the document or something is already answering the
+ * keys, so a restore never steals focus from a box the operator moved to.
+ * Returns whether the keyboard is on `stop`.
+ */
+export function restoreInsertStop(stop: HTMLElement): boolean {
+  if (!stop.isConnected) return false;
+  if (!answeringKeys()) stop.focus();
+  return stop.ownerDocument.activeElement === stop;
+}

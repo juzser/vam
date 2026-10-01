@@ -21,7 +21,9 @@ import {
   INSERT_SCOPE,
   INSERT_STOP,
   insertScopeOf,
+  insertStopHeld,
   releaseInsert,
+  restoreInsertStop,
 } from '../../src/renderer/keyboard/focus-scope.js';
 
 /**
@@ -166,5 +168,36 @@ describe('entering Insert', () => {
     const second = pane({ question: true });
     expect(focusInsertStop(first)).toBe(false);
     expect(second.contains(document.activeElement)).toBe(false);
+  });
+});
+
+describe('insertStopHeld / restoreInsertStop', () => {
+  const mount = () => {
+    document.body.innerHTML = `<div ${INSERT_SCOPE}><textarea id="t"></textarea></div><input id="o">`;
+    return document.getElementById('t') as HTMLTextAreaElement;
+  };
+
+  it('reads the element only when it sits inside an insert scope', () => {
+    const box = mount();
+    expect(insertStopHeld(box)).toBe(box);
+    expect(insertStopHeld(document.getElementById('o'))).toBeNull();
+    expect(insertStopHeld(null)).toBeNull();
+  });
+
+  it('puts the keyboard back on a connected stop when nothing answers the keys', () => {
+    const box = mount();
+    expect(restoreInsertStop(box)).toBe(true);
+    expect(document.activeElement).toBe(box);
+  });
+
+  it('declines a stop that left the document, and one while another box holds focus', () => {
+    const box = mount();
+    const other = document.getElementById('o') as HTMLInputElement;
+    other.focus();
+    expect(restoreInsertStop(box)).toBe(false);
+    expect(document.activeElement).toBe(other);
+    box.remove();
+    other.blur();
+    expect(restoreInsertStop(box)).toBe(false);
   });
 });
