@@ -140,13 +140,16 @@ async function strip(x, y, w, h) {
   );
 }
 
-/** Every `<hr>` on the page and what its top edge declares. */
+/** Every resize handle on the page and what its top edge declares: the `<hr>`
+ *  handles, and the split dividers, which are `<div role="separator">`
+ *  elements because they hold a seam child an `<hr>` cannot. */
 const handles = () =>
   page.evaluate(() =>
-    [...document.querySelectorAll('hr')].map((el) => {
+    [...document.querySelectorAll('hr, [data-split-resize-handle]')].map((el) => {
       const cs = getComputedStyle(el);
       const r = el.getBoundingClientRect();
       return {
+        kind: el.tagName === 'HR' ? 'hr' : 'split separator',
         id:
           el.getAttribute('data-pane-resize-handle') ??
           el.getAttribute('data-split-resize-handle') ??
@@ -253,11 +256,14 @@ console.log(`${outDir}/sidebar-seam-top.png`);
 async function sweep(label, expected) {
   const found = await handles();
   console.log(`${label}: ${JSON.stringify(found)}`);
-  check(
-    `${label} — the sweep found the ${expected} handle(s) it is about`,
-    found.length === expected,
-    `${found.length} <hr> on screen`,
-  );
+  const count = (kind) => found.filter((h) => h.kind === kind).length;
+  for (const [kind, want] of Object.entries(expected)) {
+    check(
+      `${label} — the sweep found the ${want} ${kind} handle(s) it is about`,
+      count(kind) === want,
+      `${count(kind)} ${kind} on screen, expected ${want}`,
+    );
+  }
   const bordered = found.filter((h) => h.borderTopWidth !== '0px');
   check(
     `${label} — no resize handle paints a rule across its own top edge`,
@@ -266,7 +272,7 @@ async function sweep(label, expected) {
   );
 }
 
-await sweep('at rest', 1);
+await sweep('at rest', { hr: 1, 'split separator': 0 });
 
 // `zv` splits the focused pane vertically, `zs` splits it horizontally: one
 // divider of each orientation, which is two more handles and the only way the
@@ -277,7 +283,7 @@ await page.waitForTimeout(250);
 await page.keyboard.press('z');
 await page.keyboard.press('s');
 await page.waitForTimeout(250);
-await sweep('with a vertical and a horizontal split open', 3);
+await sweep('with a vertical and a horizontal split open', { hr: 1, 'split separator': 2 });
 
 // The light theme's answer to the same question. `currentColor` is what the
 // defect painted in, so the two themes drew two different lines and a
@@ -292,7 +298,7 @@ check(
   (await page.evaluate(() => document.documentElement.classList.contains('light'))) === true,
   await page.evaluate(() => document.documentElement.className),
 );
-await sweep('in the light theme', 3);
+await sweep('in the light theme', { hr: 1, 'split separator': 2 });
 
 await browser.close();
 

@@ -323,12 +323,11 @@ export function SplitResizer(props: SplitResizerProps) {
       <span
         data-pane-divider-seam
         aria-hidden="true"
-        className={[
-          'pointer-events-none absolute bg-pane-divider',
+        className={
           row
-            ? 'top-0 bottom-0 left-1/2 w-px -translate-x-1/2'
-            : 'left-0 right-0 top-1/2 h-px -translate-y-1/2',
-        ].join(' ')}
+            ? 'absolute inset-y-0 left-1/2 w-px bg-pane-divider'
+            : 'absolute inset-x-0 top-1/2 h-px bg-pane-divider'
+        }
       />
     </div>
   );
