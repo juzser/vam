@@ -9094,7 +9094,11 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
         // was one swatch for two surfaces. `--vam-pane` starts on that same
         // measured value in both themes (styles.css), so nothing moved; what
         // changed is that either can move alone now.
-        'relative flex h-full min-w-0 flex-col border-line border-l bg-pane',
+        // `min-h-0` BESIDE `min-w-0`: a flex item's `min-height: auto` is its
+        // content's min size, and the Files gutter is in flow and as tall as
+        // the file is long, so without it the pane could not shrink and the
+        // document grew a shell scrollbar.
+        'relative flex h-full min-h-0 min-w-0 flex-col border-line border-l bg-pane',
         // No width given means nobody is sizing this pane -- the phone shell's
         // case -- so it fills its host instead of refusing to shrink.
         width === undefined ? 'w-full' : 'shrink-0',
