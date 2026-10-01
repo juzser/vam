@@ -34,6 +34,10 @@
 import { describe, expect, it } from 'vitest';
 import { parsePrList, prListArgv } from '../../src/main/sources/claude-code/pull-requests.js';
 import type { PullRequest, PullRequestList } from '../../src/renderer/domain/model.js';
+import type { PrFilters } from '../../src/shared/pr-filters.js';
+
+/** Everyone, All: the widest set, so the field list is asserted against a plain query. */
+const EVERYONE_ALL: PrFilters = { author: 'all', state: 'all', sort: 'updated' };
 
 const rows = (list: PullRequestList): readonly PullRequest[] => {
   if (list.kind !== 'ok') throw new Error(`expected a list, got ${list.code}: ${list.message}`);
@@ -73,7 +77,8 @@ const FULL = {
 
 describe('the fields vam asks gh for', () => {
   it('asks for the diff size, the branches, the author, the review and the address', () => {
-    const fields = prListArgv('feature/x')[prListArgv('feature/x').indexOf('--json') + 1] ?? '';
+    const argv = prListArgv(EVERYONE_ALL);
+    const fields = argv[argv.indexOf('--json') + 1] ?? '';
     const asked = fields.split(',');
     // Every name here was checked against `gh pr list --help`'s own JSON
     // FIELDS list on this machine before it was written down. An invented
@@ -102,7 +107,7 @@ describe('the fields vam asks gh for', () => {
   });
 
   it('still names no repository and still asks for nothing that writes', () => {
-    const argv = prListArgv('feature/x');
+    const argv = prListArgv(EVERYONE_ALL);
     expect(argv).not.toContain('--repo');
     expect(argv.some((a) => /^--(?:web|edit|create)/.test(a))).toBe(false);
   });

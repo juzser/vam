@@ -17,6 +17,7 @@
 import type { AgentWork } from '../../shared/agent-work.js';
 import type { HistoryCursor, TranscriptPage } from '../../shared/history.js';
 import { setPrRepoOverrides } from '../sources/claude-code/pr-repos.js';
+import { setPrFilters } from '../sources/claude-code/pull-requests.js';
 import { combineSources } from '../sources/combine.js';
 import type { MainSource } from '../sources/source.js';
 import { CHANNELS, type IpcResult, type SourceError } from './channels.js';
@@ -142,6 +143,12 @@ export function registerSourceIpc(ipcMain: IpcMainLike, sources: readonly MainSo
    */
   ipcMain.handle(CHANNELS.setPrRepos, async (_event, ...args): Promise<IpcResult<void>> => {
     setPrRepoOverrides(args[0]);
+    return { ok: true, value: undefined };
+  });
+
+  /** The PRs view's filter set, validated by `setPrFilters` (total, per field). */
+  ipcMain.handle(CHANNELS.setPrFilters, async (_event, ...args): Promise<IpcResult<void>> => {
+    setPrFilters(args[0]);
     return { ok: true, value: undefined };
   });
 

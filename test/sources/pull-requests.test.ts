@@ -18,29 +18,28 @@ import {
   MIN_PR_READ_INTERVAL_MS,
   parsePrList,
   prListArgv,
+  readPullRequestsViaCli,
+  setPrFilters,
   summarizeChecks,
 } from '../../src/main/sources/claude-code/pull-requests.js';
 import type { PullRequestList } from '../../src/renderer/domain/model.js';
+import { DEFAULT_PR_FILTERS, type PrFilters } from '../../src/shared/pr-filters.js';
 
 const unavailable = (list: PullRequestList | undefined) =>
   list !== undefined && list.kind === 'unavailable' ? list : null;
 
+const EVERYONE_ALL: PrFilters = { author: 'all', state: 'all', sort: 'updated' };
+
 describe('the argv vam hands to gh', () => {
-  it('asks only about the session branch, and only for the fields the pane draws', () => {
-    const argv = prListArgv('feature/panel-rework');
+  it('asks the repository for the fields the pane draws, with no head and no repo', () => {
+    const argv = prListArgv(EVERYONE_ALL);
 
     expect(argv[0]).toBe('pr');
     expect(argv[1]).toBe('list');
-    // The branch is ONE element and is never interpolated: execFile runs no
-    // shell, so a branch name with a space or a quote in it has no meaning.
-    expect(argv).toContain('--head');
-    expect(argv[argv.indexOf('--head') + 1]).toBe('feature/panel-rework');
+    expect(argv).not.toContain('--head');
     const fields = argv[argv.indexOf('--json') + 1]?.split(',') ?? [];
-    // The four the ROW's identity rests on. The descriptive fields the
-    // operator asked for (the diff size, the branches, the author, the review,
-    // the labels, the address) are pinned in `pull-requests-detail.test.ts`,
-    // beside the measurements of the shapes they arrive in -- restating the
-    // whole list in two files is two lists that can drift.
+    // The four the ROW's identity rests on. The descriptive fields are pinned
+    // in `pull-requests-detail.test.ts`, beside the shapes they arrive in.
     expect(fields.slice(0, 5)).toEqual([
       'number',
       'title',
@@ -54,12 +53,41 @@ describe('the argv vam hands to gh', () => {
     expect(argv.some((a) => /^--(?:web|edit|create)/.test(a))).toBe(false);
   });
 
-  it('caps the answer, so one branch with a long history cannot flood the pane', () => {
-    const argv = prListArgv('main');
-    const limit = Number(argv[argv.indexOf('--limit') + 1]);
-    expect(Number.isInteger(limit)).toBe(true);
-    expect(limit).toBeGreaterThan(0);
-    expect(limit).toBeLessThanOrEqual(20);
+  it('caps the answer at fifty', () => {
+    const argv = prListArgv(EVERYONE_ALL);
+    expect(argv[argv.indexOf('--limit') + 1]).toBe('50');
+  });
+
+  it('pins the argv for every state, author and sort', () => {
+    const json = prListArgv(EVERYONE_ALL).at(-1);
+    const expected: Record<string, { state: string; extra: string }> = {
+      open: { state: 'open', extra: '' },
+      ready: { state: 'open', extra: 'draft:false ' },
+      draft: { state: 'open', extra: 'draft:true ' },
+      merged: { state: 'merged', extra: '' },
+      closed: { state: 'closed', extra: 'is:unmerged ' },
+      all: { state: 'all', extra: '' },
+    };
+    for (const [state, want] of Object.entries(expected)) {
+      for (const sort of ['updated', 'created'] as const) {
+        for (const author of ['mine', 'all'] as const) {
+          const argv = prListArgv({ author, state: state as PrFilters['state'], sort });
+          expect(argv).toEqual([
+            'pr',
+            'list',
+            '--state',
+            want.state,
+            ...(author === 'mine' ? ['--author', '@me'] : []),
+            '--search',
+            `${want.extra}sort:${sort}-desc`,
+            '--limit',
+            '50',
+            '--json',
+            json,
+          ]);
+        }
+      }
+    }
   });
 });
 
@@ -296,12 +324,11 @@ describe('the read throttle, so a broken setup cannot spawn a process per poll',
     expect(second).toEqual(first);
   });
 
-  it('keeps two branches in the same checkout apart', async () => {
+  it('keeps two checkouts apart', async () => {
     const h = harness(async () => OK);
     await h.read({ cwd: '/w/atlas', branch: 'topic/a' });
-    await h.read({ cwd: '/w/atlas', branch: 'topic/b' });
     await h.read({ cwd: '/w/other', branch: 'topic/a' });
-    expect(h.calls()).toBe(3);
+    expect(h.calls()).toBe(2);
   });
 
   it('serves every caller that arrives during a read from that one read', async () => {
@@ -312,15 +339,39 @@ describe('the read throttle, so a broken setup cannot spawn a process per poll',
       h.read({ cwd: '/w/atlas', branch: 'topic/a' }),
     ]);
     release(OK);
-    expect(await both).toEqual([OK, OK]);
+    expect(await both).toEqual([
+      { ...OK, filterKey: 'mine|open|updated' },
+      { ...OK, filterKey: 'mine|open|updated' },
+    ]);
     expect(h.calls()).toBe(1);
   });
 
-  it('answers about a session with no known branch without asking gh anything', async () => {
+  it("asks about a session with no known branch too: the list is the repository's", async () => {
     const h = harness(async () => OK);
     const list = await h.read({ cwd: '/w/atlas', branch: null });
-    expect(unavailable(list)?.code).toBe('branch-unknown');
-    expect(h.calls()).toBe(0);
+    expect(list.kind).toBe('ok');
+    expect(h.calls()).toBe(1);
+  });
+
+  it('makes one call per directory and filter set, whatever the branch', async () => {
+    const h = harness(async () => OK);
+    setPrFilters(DEFAULT_PR_FILTERS);
+    await h.read({ cwd: '/w/atlas', branch: 'topic/a' });
+    await h.read({ cwd: '/w/atlas', branch: 'topic/b' });
+    expect(h.calls()).toBe(1);
+
+    setPrFilters({ ...DEFAULT_PR_FILTERS, state: 'merged' });
+    const other = await h.read({ cwd: '/w/atlas', branch: 'topic/a' });
+    expect(h.calls()).toBe(2);
+    expect(other.kind === 'ok' && other.filterKey).toBe('mine|merged|updated');
+    setPrFilters(DEFAULT_PR_FILTERS);
+  });
+
+  it('still bounds the cache', async () => {
+    const h = harness(async () => OK);
+    for (let i = 0; i < 70; i += 1) await h.read({ cwd: `/w/d${i}`, branch: null });
+    await h.read({ cwd: '/w/d0', branch: null });
+    expect(h.calls()).toBe(71);
   });
 
   it('survives a reader that throws, and throttles that too', async () => {
@@ -331,5 +382,46 @@ describe('the read throttle, so a broken setup cannot spawn a process per poll',
     expect(unavailable(list)?.code).toBe('gh-failed');
     await h.read({ cwd: '/w/atlas', branch: 'topic/a' });
     expect(h.calls()).toBe(1);
+  });
+});
+
+describe('a match outside the newest fifty overall', () => {
+  const row = (number: number, author: string, updatedAt: string) => ({
+    number,
+    title: `Change ${number}`,
+    state: 'MERGED',
+    isDraft: false,
+    statusCheckRollup: [],
+    author: { login: author },
+    updatedAt,
+  });
+
+  it('is found because the filters ride the query, not a client-side slice', async () => {
+    const argvs: string[][] = [];
+    const run = (
+      _binary: string,
+      argv: readonly string[],
+      _options: unknown,
+      done: (failure: null, stdout: string, stderr: string) => void,
+    ) => {
+      argvs.push([...argv]);
+      const has = (flag: string, value: string) => argv[argv.indexOf(flag) + 1] === value;
+      const rows =
+        argv.includes('--author') && has('--author', '@me') && has('--state', 'merged')
+          ? [row(7, 'me', '2025-10-01T00:00:00Z')]
+          : argv.includes('--author') || !has('--state', 'all')
+            ? []
+            : Array.from({ length: 50 }, (_, i) => row(100 + i, 'other', '2026-09-30T00:00:00Z'));
+      done(null, JSON.stringify(rows), '');
+    };
+    const read = createPullRequestReader(readPullRequestsViaCli('gh', () => true, run));
+
+    setPrFilters({ author: 'mine', state: 'merged', sort: 'updated' });
+    const list = await read({ cwd: '/w/atlas', branch: 'topic/a' });
+    setPrFilters(DEFAULT_PR_FILTERS);
+
+    expect(list.kind === 'ok' && list.prs.map((pr) => pr.number)).toEqual([7]);
+    const sent = argvs[0] ?? [];
+    for (const word of ['--author', '@me', '--state', 'merged']) expect(sent).toContain(word);
   });
 });

@@ -82,6 +82,13 @@ export const CHANNELS = {
    */
   setPrRepos: 'vam:source:set-pr-repos',
   /**
+   * DESKTOP-ONLY, the same standing as `setPrRepos`: the PRs view's filter and
+   * sort set, pushed from the renderer's prefs into main, where it becomes the
+   * `gh pr list` query. Never a member of `PreloadSourceApi`; validated in main
+   * (`parsePrFilters`).
+   */
+  setPrFilters: 'vam:source:set-pr-filters',
+  /**
    * DESKTOP-ONLY, the same standing as `setPrRepos` above and for the
    * identical reason: it carries the operator's UI zoom preference from the
    * renderer's `prefs` into main, where `webContents.setZoomFactor` lives.
