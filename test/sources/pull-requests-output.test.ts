@@ -112,3 +112,18 @@ describe('an answer past the list cap', () => {
     expect(list).toMatchObject({ kind: 'unavailable', code: 'timed-out' });
   });
 });
+
+describe('the list read end to end', () => {
+  it('asks for the 4 MiB cap and names a maxBuffer kill too-large', async () => {
+    let seen = 0;
+    const runner: GhRunner = (_file, _args, options, callback) => {
+      seen = options.maxBuffer;
+      callback(maxBufferError(), '', '');
+      return undefined;
+    };
+    const read = readPullRequestsViaCli('gh', () => true, runner);
+    const list = await read({ cwd: '/somewhere', branch: 'main' });
+    expect(seen).toBe(FOUR_MIB);
+    expect(list).toEqual({ kind: 'unavailable', code: 'too-large', message: OVERSIZE });
+  });
+});
