@@ -218,7 +218,13 @@ describe('Select: hjkl chooses a session, exactly as before', () => {
     render(<Canvas model={ASKING} />);
     // The card is drawn — the question is open — and yet nothing in it has the
     // keyboard, because the keyboard is in the other pane.
-    expect(options()).toHaveLength(3);
+    // Three listed options plus the terminal's own free-text row.
+    expect(options().map((el) => optionLabel(el))).toEqual([
+      'Crimson',
+      'Cobalt',
+      'Emerald',
+      'Type something.',
+    ]);
     expect(cursorOption()).toBe('');
     press('j');
     expect(cursorOption()).toBe('');
