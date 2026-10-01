@@ -86,7 +86,7 @@ export function SettingsCard({
           (`e2e/settings-chrome-shots.mjs`'s ITEM 8 measures it), which this plain
           view still owes the same as the collapsible card it replaced. */}
       <div data-settings-card-body className="px-1 py-4">
-        <p data-settings-panel-hint className="vam-sentence mb-5 text-control text-ink-dim">
+        <p data-settings-panel-hint className="vam-sentence mb-5 text-control text-ink-faint">
           {hint}
         </p>
         <div data-settings-rows>{children}</div>
@@ -154,7 +154,7 @@ export function SettingsRow({
     </div>
   );
   const description = (
-    <p className="vam-sentence mt-1 max-w-[52ch] text-control text-ink-dim">{hint}</p>
+    <p className="vam-sentence mt-1 max-w-[52ch] text-control text-ink-faint">{hint}</p>
   );
   return (
     // `<fieldset>` is biome's own alternative, and it is the wrong one here:

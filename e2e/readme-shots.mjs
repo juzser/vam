@@ -779,12 +779,12 @@ function baseApiStub() {
   await page.locator('button[aria-label="settings"]').first().click();
   await page.waitForSelector('[data-settings-nav]', { timeout: 5_000 });
   await page.locator('[data-settings-nav-item="integrations"]').click();
-  await page.waitForSelector('[data-github-status]', { timeout: 5_000 });
-  await page.waitForSelector('[data-gitlab-status]', { timeout: 5_000 });
+  await page.waitForSelector('[data-github-status-pill]', { timeout: 5_000 });
+  await page.waitForSelector('[data-gitlab-status-pill]', { timeout: 5_000 });
 
   const shape = await page.evaluate(() => ({
-    github: document.querySelector('[data-github-status]')?.textContent ?? null,
-    gitlab: document.querySelector('[data-gitlab-status]')?.textContent ?? null,
+    github: document.querySelector('[data-github-account-line]')?.textContent ?? null,
+    gitlab: document.querySelector('[data-gitlab-account-line]')?.textContent ?? null,
   }));
   console.log('integrations:', JSON.stringify(shape));
   assert('both GitHub and GitLab cards are drawn', shape.github !== null && shape.gitlab !== null, JSON.stringify(shape));
