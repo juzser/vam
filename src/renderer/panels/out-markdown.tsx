@@ -374,15 +374,11 @@ export const NO_ADDRESS = 'vam was given no address to open.';
  * "this one is not like the others" is exactly what it has to say, and it
  * names the scheme it refused, a `javascript:` address having no host.
  *
- * A RELATIVE PATH (`docs/roadmap.md`) IS A THIRD KIND, a file in the session's
- * own project rather than an address (`src/shared/md-file-link.ts`). `checkLink`
- * has no base to resolve it against and still refuses it, so it is asked of
- * `openFileRef` instead -- the contained route a `path:line` reference takes,
- * where main resolves and authorises it against the session's working
- * directory. It never reaches `openLink` and never becomes a `file:` URL. It
- * is the same pill with a `FileText` glyph, in the live ink: it opens in this
- * app's Files view, so neither the browser arrow nor the refused-address `Ban`
- * says the right thing. A missing file is refused in the channel's own words.
+ * A RELATIVE PATH (`docs/roadmap.md`) IS A THIRD KIND: a file in the
+ * session's project (`src/shared/md-file-link.ts`), asked of `openFileRef`
+ * (main resolves and authorises it) and never of `openLink`, never a `file:`
+ * URL. Same pill, `FileText` glyph, live ink; a missing file is refused in
+ * the channel's own words.
  *
  * PRESSING A REFUSED ONE IS NOT A NO-OP. The scheme check runs here first so
  * a refusal costs no round trip, and it is a CONVENIENCE: main runs the same

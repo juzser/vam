@@ -103,21 +103,16 @@ import { Fence, Fenced, NO_ADDRESS, Refusal, readFence } from './out-markdown.js
 export const FILES_MARKDOWN_URL_TRANSFORM = (url: string): string => url;
 
 /**
- * THE DIRECTORY OF THE MARKDOWN FILE BEING PREVIEWED, relative to the session
- * root (`''` for the root itself or when it is not known). A context for the
- * reason `out-actions.ts` gives: `FILES_MARKDOWN` is a module-level constant,
- * so its components cannot be handed anything at a call site. `FilesTab.tsx`
- * publishes it around the preview; a relative link is tried against it first,
- * as GitHub resolves one, and then against the session root.
+ * The previewed file's directory, relative to the session root (`''` for the
+ * root). A context because `FILES_MARKDOWN` is a module-level constant
+ * (see `out-actions.ts`); `FilesTab.tsx` publishes it.
  */
 export const FilesMarkdownDir = createContext('');
 
 /**
- * THE MARKDOWN FILE'S OWN DIRECTORY FIRST, then the session root -- and only
- * the last attempt's answer comes back, so a refusal for the first guess is
- * never drawn. An absolute or empty `dir` (a file outside the root, or one in
- * it) has no first guess to make. Both attempts are the same contained
- * `path:line` reference main resolves; nothing here decides what is allowed.
+ * The markdown file's own directory first, then the session root; only the
+ * last attempt's answer comes back, so the first guess's refusal is never
+ * drawn. Both are the same contained `path:line` reference main resolves.
  */
 async function openFileLink(
   openFileRef: (reference: string) => Promise<OutActionResult>,
@@ -142,8 +137,7 @@ function FilesLink({ href, children }: { readonly href?: string; readonly childr
   const dir = useContext(FilesMarkdownDir);
   const [note, setNote] = useState<string | null>(null);
   const checked = href === undefined ? null : checkLink(href);
-  // A relative path is a file in the project (`src/shared/md-file-link.ts`),
-  // opened through `openFileRef` and never `openLink`; see `OutLink`.
+  // A relative path is a file in the project; see `OutLink`.
   const file = checked?.ok === true ? null : parseMdFileLink(href);
   const ok = checked?.ok === true;
   const hint =

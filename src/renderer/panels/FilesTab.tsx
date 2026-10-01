@@ -2188,7 +2188,6 @@ function MarkdownPreview({
         <Suspense
           fallback={<div className="whitespace-pre-wrap font-mono text-ink-dim">{content}</div>}
         >
-          {/* The file's own directory, for a relative link to try first. */}
           <FilesMarkdownDir.Provider
             value={label.includes('/') ? label.slice(0, label.lastIndexOf('/')) : ''}
           >

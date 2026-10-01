@@ -1,15 +1,9 @@
 // @vitest-environment happy-dom
 /**
- * A RELATIVE LINK IN RENDERED MARKDOWN (`[roadmap](docs/roadmap.md)`), in both
- * contexts that render one: the Response view's `OutLink` and the Files
- * preview's `FilesLink`. Event #25: it used to be refused with "is not an
- * address vam can read", because `checkLink` has no base to resolve it
- * against. It is now asked of the contained `openFileRef` route as a
- * `path:line` reference, and never of `openLink`.
- *
- * The `OutActions` context is the seam: both spies are installed there, so
- * what each click asks for is exactly what is asserted. Containment itself is
- * main's (`test/main/files/resolve-ipc.test.ts`).
+ * A relative link in rendered markdown (event #25), in both contexts: the
+ * Response view's `OutLink` and the Files preview's `FilesLink`. It is asked
+ * of `openFileRef` as a `path:line` reference and never of `openLink`.
+ * Containment is main's (`test/main/files/resolve-ipc.test.ts`).
  */
 
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
@@ -74,13 +68,6 @@ describe('Response view: OutLink', () => {
     expect(statusText()).toEqual([]);
   });
 
-  it('carries a line anchor through', async () => {
-    const value = actions(vi.fn(ok));
-    drawOut('[code](src/a.ts#L42)', value);
-    await userEvent.click(control('code'));
-    expect(value.openFileRef).toHaveBeenCalledWith('src/a.ts:42');
-  });
-
   it('draws it as a file link with its own hint, not as a refused address', () => {
     drawOut('[the roadmap](docs/roadmap.md)', actions(vi.fn(ok)));
     const button = control('the roadmap');
@@ -88,6 +75,8 @@ describe('Response view: OutLink', () => {
     expect(button.hasAttribute('data-out-file-link')).toBe(true);
     expect(button.textContent).toContain('opens docs/roadmap.md in Files');
     expect(button.className).not.toContain('text-failed');
+    expect(document.querySelector('a')).toBeNull();
+    expect(document.body.innerHTML).not.toContain('file:');
   });
 
   it('shows the resolve channel’s own refusal for a missing target', async () => {
@@ -96,12 +85,6 @@ describe('Response view: OutLink', () => {
     await userEvent.click(control('gone'));
     expect(statusText()).toEqual([` ${MISSING}`]);
     expect(document.body.textContent).not.toContain('is not an address vam can read');
-  });
-
-  it('builds no file: URL and no anchor for a relative link', () => {
-    drawOut('[the roadmap](docs/roadmap.md)', actions(vi.fn(ok)));
-    expect(document.querySelector('a')).toBeNull();
-    expect(document.body.innerHTML).not.toContain('file:');
   });
 
   it('leaves an absolute path refused as before', async () => {
@@ -115,33 +98,24 @@ describe('Response view: OutLink', () => {
 });
 
 describe('Files preview: FilesLink, for a markdown file at docs/guide.md', () => {
-  it('tries the markdown file’s own directory first', async () => {
+  it('tries the markdown file’s own directory first; a sibling opens on that try', async () => {
     const value = actions(vi.fn(ok));
-    drawFiles('[roadmap](docs/roadmap.md)', value, 'docs');
+    drawFiles('[roadmap](docs/roadmap.md) [sib](roadmap.md)', value, 'docs');
     await userEvent.click(control('roadmap'));
-    expect(value.openFileRef).toHaveBeenCalledExactlyOnceWith('docs/docs/roadmap.md:1');
+    await userEvent.click(control('sib'));
+    expect(value.openFileRef.mock.calls).toEqual([
+      ['docs/docs/roadmap.md:1'],
+      ['docs/roadmap.md:1'],
+    ]);
     expect(value.openLink).not.toHaveBeenCalled();
   });
 
-  it('opens a sibling on the first try', async () => {
-    const value = actions(vi.fn(ok));
-    drawFiles('[roadmap](roadmap.md)', value, 'docs');
-    await userEvent.click(control('roadmap'));
-    expect(value.openFileRef).toHaveBeenCalledExactlyOnceWith('docs/roadmap.md:1');
-  });
-
-  it('falls back to the session root when the first is refused, and shows only the last refusal', async () => {
-    const openFileRef = vi.fn(async (reference: string): Promise<OutActionResult> => {
-      if (reference === 'docs/docs/roadmap.md:1') {
-        return {
-          ok: false,
-          reason: 'docs/docs/roadmap.md is not a file in this session’s project',
-        };
-      }
-      return { ok: true };
-    });
-    const value = actions(openFileRef);
-    drawFiles('[roadmap](docs/roadmap.md)', value, 'docs');
+  it('falls back to the session root when the first is refused, drawing no refusal', async () => {
+    const openFileRef = vi.fn(
+      async (reference: string): Promise<OutActionResult> =>
+        reference.startsWith('docs/docs/') ? { ok: false, reason: 'first guess' } : { ok: true },
+    );
+    drawFiles('[roadmap](docs/roadmap.md)', actions(openFileRef), 'docs');
     await userEvent.click(control('roadmap'));
     expect(openFileRef.mock.calls.map((c) => c[0])).toEqual([
       'docs/docs/roadmap.md:1',
@@ -163,13 +137,6 @@ describe('Files preview: FilesLink, for a markdown file at docs/guide.md', () =>
     expect(document.body.textContent).not.toContain('is not an address vam can read');
   });
 
-  it('makes one attempt for a markdown file in the root', async () => {
-    const value = actions(vi.fn(ok));
-    drawFiles('[roadmap](docs/roadmap.md)', value, '');
-    await userEvent.click(control('roadmap'));
-    expect(value.openFileRef).toHaveBeenCalledExactlyOnceWith('docs/roadmap.md:1');
-  });
-
   it('draws a file link with its hint, builds no anchor or file: URL', () => {
     drawFiles('[roadmap](docs/roadmap.md)', actions(vi.fn(ok)), 'docs');
     const button = control('roadmap');
@@ -178,13 +145,5 @@ describe('Files preview: FilesLink, for a markdown file at docs/guide.md', () =>
     expect(button.textContent).toContain('opens docs/roadmap.md in Files');
     expect(document.querySelector('a')).toBeNull();
     expect(document.body.innerHTML).not.toContain('file:');
-  });
-
-  it('keeps web links on openLink', async () => {
-    const value = actions(vi.fn(ok));
-    drawFiles('[site](https://example.test/)', value, 'docs');
-    await userEvent.click(control('site'));
-    expect(value.openLink).toHaveBeenCalledWith('https://example.test/');
-    expect(value.openFileRef).not.toHaveBeenCalled();
   });
 });

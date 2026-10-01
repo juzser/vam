@@ -268,8 +268,7 @@ describe('a link in an agent answer is one pill', () => {
     expect(pill.getAttribute('data-out-link-refused')).toBe('true');
     // The text is the name, as on every other pill. The href stays raw and
     // percent-encoded on the control -- that is what remark hands `a:` for a
-    // destination with spaces in it (an address with a scheme: a bare
-    // `not a url` is a relative file link now, `md-relative-links.test.tsx`), and the raw href, not a prettier
+    // destination with spaces in it and the raw href, not a prettier
     // decoding of it, is what main would be asked to open.
     expect(printed(pill)).toBe('the thing');
     expect(pill.getAttribute('data-out-address')).toBe('https://exa%20mple.test/');

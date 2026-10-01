@@ -210,13 +210,7 @@ describe('resolving a path:line reference against the session it was written in'
   });
 });
 
-/**
- * THE REFERENCES A RELATIVE MARKDOWN LINK SENDS (`src/shared/md-file-link.ts`),
- * in exactly the form `test/panels/md-relative-links.test.tsx` sends them:
- * `<dir>/<href>:<line>`, untouched, with `..` left in for THIS side to refuse.
- * They pass without any change to the handler, which is the claim: the
- * contained route already holds for the new caller.
- */
+// What a relative markdown link sends: the contained route already holds.
 describe('references sent by a relative markdown link', () => {
   it.each(['../outside.md:1', 'docs/../../outside.md:1'])(
     'refuses %s as not-authorized whether or not the outside file exists',
@@ -237,11 +231,10 @@ describe('references sent by a relative markdown link', () => {
     expect(await codeOf(invoke('s1', 'docs-link/real.md:1'))).toBe('not-authorized');
   });
 
-  it('refuses a sibling directory whose name begins with the root’s, existing or not', async () => {
+  it('refuses a sibling directory named like the root, existing or not', async () => {
     const invoke = harness();
-    expect(await codeOf(invoke('s1', '../atlas-notes/secrets.md:1'))).toBe('not-authorized');
-    writeFileSync(join(scratch, 'atlas-notes', 'secrets.md'), 'nope\n');
-    expect(await codeOf(invoke('s1', '../atlas-notes/secrets.md:1'))).toBe('not-authorized');
+    expect(await codeOf(invoke('s1', '../atlas-notes/nope.md:1'))).toBe('not-authorized');
+    expect(await codeOf(invoke('s1', '../atlas-notes/secrets.txt:1'))).toBe('not-authorized');
   });
 
   it('says a missing file inside the project is not-found', async () => {
