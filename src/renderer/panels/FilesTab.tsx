@@ -1636,12 +1636,14 @@ export function FilesTab({
                 container-query gap contributes (`data-files-header`'s
                 `gap-0.5 @min-[380px]:gap-1.5`, above). The operator's other
                 half of the same report: "a gap from the prettier button".
-                For a `.env` (no preview toggle, so the path label
-                and the dot are all this row holds) at the narrowest legal pane the row gap alone is
-                `gap-0.5` — 2px, measured, and easy to read as touching next
-                to a 24px bordered button. `1.5` is `gap-1.5`'s OWN unit —
+                The Format and Preview/Raw controls now sit in the content
+                strip (`data-files-content-controls`), not in this row, so
+                the dot's neighbour here is only the path label before it.
+                At the narrowest legal pane the row gap alone is `gap-0.5` --
+                2px, measured, and easy to read as the dot touching the
+                label. `1.5` is `gap-1.5`'s OWN unit —
                 the widest this row's gap ever is — spelled as a margin so
-                the separation never depends on which control follows or how
+                the separation never depends on what follows the dot or how
                 wide the container query has folded; a gap on the row alone
                 could not do that without widening `gap-0.5` for every pair
                 in the row, including the ones that are already fine.
