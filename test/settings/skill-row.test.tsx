@@ -83,6 +83,20 @@ describe('the skill row layout (EC-53)', () => {
     expect(icon?.getAttribute('class')).toContain('lucide-star');
   });
 
+  it('names a count of exactly one in the singular', async () => {
+    render(
+      <AdhdSkillCard
+        prefs={EMPTY_PREFS}
+        onChange={vi.fn()}
+        api={stubApi(async () => ({ stars: 1 }))}
+      />,
+    );
+    await waitFor(() => expect(q('[data-skill-stars]')).not.toBeNull());
+    expect((q('[data-skill-stars]') as HTMLElement).getAttribute('aria-label')).toBe(
+      '1 star on GitHub',
+    );
+  });
+
   it('opens the repo through link.open, exactly once per click', async () => {
     render(
       <AdhdSkillCard prefs={EMPTY_PREFS} onChange={vi.fn()} api={stubApi(async () => null)} />,

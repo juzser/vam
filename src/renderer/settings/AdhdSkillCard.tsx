@@ -362,9 +362,14 @@ export function AdhdSkillCard(props: AdhdSkillCardProps) {
                   <span
                     data-skill-stars
                     role="img"
-                    aria-label={t('settings.behaviour.adhd.starsLabel', {
-                      count: STAR_COUNT_FORMAT.format(stars),
-                    })}
+                    aria-label={t(
+                      stars === 1
+                        ? 'settings.behaviour.adhd.starsLabelOne'
+                        : 'settings.behaviour.adhd.starsLabel',
+                      {
+                        count: STAR_COUNT_FORMAT.format(stars),
+                      },
+                    )}
                     className="inline-flex items-center gap-1 font-mono text-ink-dim text-meta"
                   >
                     <Star size={12} strokeWidth={1.8} aria-hidden="true" />
