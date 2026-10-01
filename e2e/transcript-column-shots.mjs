@@ -1585,26 +1585,32 @@ const SUGGEST_SCREEN = `\n${'─'.repeat(40)}\n❯ \u001b[2mrun the test\u001b[
 const composerPage = await browser.newPage({ viewport: { width: 1100, height: 620 } });
 composerPage.on('pageerror', (err) => console.error('PAGE ERROR (composer):', err));
 await composerPage.addInitScript(
-  ([key, payload, screen]) => {
-    window.localStorage.setItem(key, payload);
-    window.api = {
-      terminal: {
-        read: async () => ({
-          kind: 'ok',
-          name: 'vam-demo',
-          text: screen,
-          cursor: { row: 0, col: 0 },
-        }),
-      },
-    };
-  },
-  [CONCISE_PREFS, JSON.stringify({ theme }), SUGGEST_SCREEN],
+  ([key, payload]) => window.localStorage.setItem(key, payload),
+  [CONCISE_PREFS, JSON.stringify({ theme })],
 );
 await composerPage.goto(`${origin}/?demo=1&history=off`, { waitUntil: 'networkidle' });
 await composerPage.waitForSelector('[data-tab-strip]');
 await openSession(composerPage, 'notes-1');
+// The stub goes in AFTER the demo has booted: a `window.api` present at load
+// makes the app take the desktop bridge and the demo sessions never appear.
+// The hook reads `window.api` at render, so the next render picks it up.
+await composerPage.evaluate((screen) => {
+  window.api = {
+    terminal: {
+      read: async () => ({
+        kind: 'ok',
+        name: 'vam-demo',
+        text: screen,
+        cursor: { row: 0, col: 0 },
+      }),
+    },
+  };
+}, SUGGEST_SCREEN);
 const composerBox = composerPage.locator('textarea[aria-label="prompt to session"]');
 await composerBox.focus();
+// A keystroke and its undo re-render the panel, which is what picks the stub up.
+await composerBox.fill('x');
+await composerBox.fill('');
 await composerPage.waitForSelector('[data-prompt-suggestion-ghost]', { timeout: 6_000 });
 await composerPage.screenshot({ path: `${outDir}/composer-tab-offer-${theme}.png` });
 console.log(`${outDir}/composer-tab-offer-${theme}.png`);
