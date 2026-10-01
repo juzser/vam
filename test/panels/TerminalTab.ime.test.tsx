@@ -353,6 +353,27 @@ describe('the pane says what is being composed, because the box that holds it is
     expect(document.querySelectorAll('[data-terminal-composing]')).toHaveLength(1);
   });
 
+  it('takes the cursorless candidate away once the syllable has been sent', async () => {
+    await open('sent', {
+      kind: 'ok',
+      name: 'vam-atlas-a1b2c3',
+      text: 'the screen',
+      cursor: { kind: 'hidden' },
+    });
+    await compose('tiếng');
+    expect(document.querySelectorAll('[data-terminal-composing]')).toHaveLength(0);
+  });
+
+  it('draws no cursorless candidate while nothing is being composed', async () => {
+    await open('sent', {
+      kind: 'ok',
+      name: 'vam-atlas-a1b2c3',
+      text: 'the screen',
+      cursor: { kind: 'hidden' },
+    });
+    expect(document.querySelectorAll('[data-terminal-composing]')).toHaveLength(0);
+  });
+
   it('takes it away again once the syllable has been sent', async () => {
     await open();
     await compose('tiếng');
