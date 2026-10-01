@@ -5583,8 +5583,14 @@ function QuestionCard({
         // answered and offers nothing to mark; the set's Submit below is for
         // whatever is still open. `break-words`: the same rule as the
         // question/header above -- an answer is free text too.
-        <span data-question-answer className="break-words text-control text-ink-dim">
-          resolved — {question.answer}
+        // A set closed by an is_error tool_result reads as cancelled, never
+        // as an answer: the text it carries is the error, not a choice.
+        <span
+          data-question-answer
+          data-question-cancelled={question.cancelled === true ? 'true' : undefined}
+          className="break-words text-control text-ink-dim"
+        >
+          {question.cancelled === true ? 'cancelled' : `resolved — ${question.answer}`}
         </span>
       ) : (
         <>
@@ -6130,7 +6136,10 @@ const TurnBlock = memo(function TurnBlock({
   onUnfold,
   onPromptMenu,
   onAnswerMenu,
+  phone = false,
 }: {
+  /** Phone: the column reserves no jump gutter, so the pinned prompt gives none back. */
+  readonly phone?: boolean;
   readonly decision: Decision;
   /** Is this the turn the picker (or the canvas) has landed on? */
   readonly marked: boolean;
@@ -6286,7 +6295,7 @@ const TurnBlock = memo(function TurnBlock({
           event.preventDefault();
           onPromptMenu(decision.id, { x: event.clientX, y: event.clientY });
         }}
-        className="-ml-3.5 -mr-11 sticky top-0 z-10 flex max-h-[45cqh] min-h-0 flex-none flex-col gap-1 bg-pane pt-1.5 pr-11 pb-1.5 pl-3.5"
+        className={`-ml-3.5 ${phone ? '-mr-3.5 pr-3.5' : '-mr-11 pr-11'} sticky top-0 z-10 flex max-h-[45cqh] min-h-0 flex-none flex-col gap-1 bg-pane pt-1.5 pb-1.5 pl-3.5`}
       >
         {/* The region's name, announced and not drawn. */}
         <span className="sr-only">in</span>
@@ -9587,7 +9596,9 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                  resolves to nothing inside the per-turn wrapper and the pinned
                  prompt can cover the answer again (audit F2). `TurnBlock`'s
                  own comment carries the measurement. */
-              className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pl-3.5 pr-11 [container-type:size]"
+              className={`vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pl-3.5 [container-type:size] ${
+                phone ? 'pr-3.5' : 'pr-11'
+              }`}
             >
               {/*
               WHAT THE TOP OF THE COLUMN IS — said, not left to be inferred.
@@ -9672,8 +9683,8 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                  is. One `-mx-3.5` would leave it 30px short of the right edge
                  -- invisible here, since this block paints no ground, and a
                  trap for whoever gives it one. */
-                className={`-ml-3.5 -mr-11 flex flex-none flex-col gap-0.5 pt-3 pb-1 pl-3.5 font-mono text-meta text-ink-faint ${
-                  cornerOverlay ? '' : 'pr-11'
+                className={`-ml-3.5 ${phone ? '-mr-3.5' : '-mr-11'} flex flex-none flex-col gap-0.5 pt-3 pb-1 pl-3.5 font-mono text-meta text-ink-faint ${
+                  cornerOverlay ? '' : phone ? 'pr-3.5' : 'pr-11'
                 }`}
                 style={cornerOverlay ? { paddingRight: cornerReserve } : undefined}
               >
@@ -9960,6 +9971,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                   onUnfold={unfold}
                   onPromptMenu={openPromptMenu}
                   onAnswerMenu={openAnswerMenu}
+                  phone={phone}
                 />
               ))}
               {/* PHONE, RESPONSE VIEW ONLY (docs/design/phone-core-loop.md
