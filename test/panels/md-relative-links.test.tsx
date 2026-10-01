@@ -26,7 +26,7 @@ afterEach(cleanup);
 
 const MISSING = "docs/missing.md is not a file in this session's project";
 
-function actions(openFileRef: OutActions['openFileRef']) {
+function actions<F extends OutActions['openFileRef']>(openFileRef: F) {
   const openLink = vi.fn(async (): Promise<OutActionResult> => ({ ok: true }));
   return { openLink, openFileRef } satisfies OutActions;
 }
