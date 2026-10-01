@@ -263,7 +263,7 @@ describe('a link in an agent answer is one pill', () => {
   });
 
   it('draws an href it cannot parse as a refused pill quoting the text, and refuses in words', async () => {
-    const { openLink } = draw('[the thing](<https://exa mple.test/>)');
+    const { openLink } = draw('[the thing](<not a url>)');
     const pill = screen.getByRole('button', { name: /the thing/ });
     expect(pill.getAttribute('data-out-link-refused')).toBe('true');
     // The text is the name, as on every other pill. The href stays raw and
@@ -271,7 +271,7 @@ describe('a link in an agent answer is one pill', () => {
     // destination with spaces in it, and the raw href, not a prettier
     // decoding of it, is what main would be asked to open.
     expect(printed(pill)).toBe('the thing');
-    expect(pill.getAttribute('data-out-address')).toBe('https://exa%20mple.test/');
+    expect(pill.getAttribute('data-out-address')).toBe('not%20a%20url');
     await userEvent.click(pill);
     expect((await screen.findByRole('status')).textContent).toMatch(/not an address vam can read/);
     expect(openLink).not.toHaveBeenCalled();
