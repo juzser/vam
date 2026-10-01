@@ -176,15 +176,18 @@ describe('the count line', () => {
 
   it('shows every row the server sent, in the server order, past the first 50 shown by any renderer cap', () => {
     // EC-60: the match was outside the newest 50 of the repo; the server found it.
+    changePrFilters({ author: 'mine', state: 'merged', sort: 'updated' }, null);
     render(
       panel(
         okList(
-          [makePullRequest({ number: 4242, title: 'old match' })],
-          prFilterKey(DEFAULT_PR_FILTERS),
+          [makePullRequest({ number: 7, title: 'old match', author: 'me', state: 'merged' })],
+          prFilterKey(getPrFilters()),
         ),
       ),
     );
     expect(q('[data-pr-title]')?.textContent).toBe('old match');
+    expect(q('[data-pr-number]')?.textContent).toContain('7');
+    expect(q('[data-prs-count]')?.textContent).toBe('1 pull request');
   });
 });
 
