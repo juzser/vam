@@ -122,6 +122,16 @@ describe('render', () => {
     }
     for (const el of steppers) expect(has(el, 'h-[30px]')).toBe(true);
   });
+
+  it('keeps each control own radius; the shared FIELD constant carries none', () => {
+    for (const el of hex) expect(has(el, 'rounded')).toBe(true);
+    for (const el of selects) expect(has(el, 'rounded')).toBe(true);
+    for (const el of steppers) expect(has(el, 'rounded-[8px]')).toBe(true);
+    const src = readFileSync(join(DIR, 'SettingsOverlay.tsx'), 'utf8');
+    const field = /const FIELD = '([^']*)'/.exec(src)?.[1];
+    expect(field).toBeTruthy();
+    expect((field ?? '').split(/\s+/).filter((c) => /^(?:[a-z-]+:)*rounded/.test(c))).toEqual([]);
+  });
 });
 
 describe('pins', () => {
@@ -146,6 +156,19 @@ describe('pins', () => {
     for (const c of ['rounded', 'border', 'border-line', 'hover:border-line-loud', 'h-[28px]'])
       expect(tpl?.classList.contains(c), c).toBe(true);
     expect(tpl?.classList.contains('bg-raised')).toBe(false);
+    const choices = [
+      ...iface.container.querySelectorAll<HTMLElement>('button[aria-pressed].capitalize'),
+    ];
+    expect(choices.length).toBeGreaterThan(0);
+    for (const choice of choices) {
+      for (const c of ['vam-tap', 'h-[28px]', 'rounded', 'border', 'px-3', 'text-control'])
+        expect(choice.classList.contains(c), c).toBe(true);
+      expect(
+        choice.classList.contains(
+          choice.getAttribute('aria-pressed') === 'true' ? 'bg-raised' : 'border-line',
+        ),
+      ).toBe(true);
+    }
     iface.unmount();
     const term = mount('terminal');
     const chips = [...term.container.querySelectorAll<HTMLElement>('[data-terminal-theme]')];
