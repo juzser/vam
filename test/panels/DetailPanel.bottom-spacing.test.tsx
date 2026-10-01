@@ -6,7 +6,7 @@
  */
 
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentQuestion, Decision, Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/DetailPanel.js';
@@ -131,7 +131,6 @@ describe('the scroller ends with a large bottom spacing', () => {
   });
 
   it('lands scrollTop at scrollHeight and stays stuck when a turn arrives', () => {
-    const scrollTo = vi.fn();
     const entry: SessionEntry = { project: PROJECT, session: SESSION };
     const props = {
       entry,
@@ -151,7 +150,6 @@ describe('the scroller ends with a large bottom spacing', () => {
     const view = render(<DetailPanel {...props} />);
     const box = column() as HTMLElement;
     stub(box, 1400, 500);
-    box.scrollTo = scrollTo as unknown as typeof box.scrollTo;
     box.scrollTop = 900;
     fireEvent.scroll(box);
     const grown: Session = { ...SESSION, decisions: [turn('d8'), ...TURNS] };
@@ -165,7 +163,8 @@ describe('the scroller ends with a large bottom spacing', () => {
         />,
       );
     });
-    // Stuck means the effect moved the box to the padding's end.
-    expect(box.scrollTop === 1600 || scrollTo.mock.calls.length > 0).toBe(true);
+    // Stuck means the effect moved the box to the end of the trailing spacer,
+    // i.e. its stubbed scrollHeight.
+    expect(box.scrollTop).toBe(1600);
   });
 });

@@ -7687,14 +7687,6 @@ function CanvasInner({
   );
 
   /**
-   * The two panels’ props, lifted out of the JSX.
-   *
-   * A mechanical extraction with no behaviour of its own: the phone shell
-   * (`PhoneShell`) is handed the SAME two objects the columns are built from,
-   * so there is one assembly of each panel’s props and not a second one that
-   * could drift from it.
-   */
-  /**
    * Whether THIS BUILD can open a native directory picker at all --
    * `window.api?.dialog?.chooseDirectory`, the same bridge `newProject` and
    * `buildDetailProps`'s own `prRepo` read at their call sites rather than
@@ -7707,6 +7699,14 @@ function CanvasInner({
    */
   const hasDirectoryPicker = globalThis.window?.api?.dialog?.chooseDirectory !== undefined;
 
+  /**
+   * The two panels’ props, lifted out of the JSX.
+   *
+   * A mechanical extraction with no behaviour of its own: the phone shell
+   * (`PhoneShell`) is handed the SAME two objects the columns are built from,
+   * so there is one assembly of each panel’s props and not a second one that
+   * could drift from it.
+   */
   const sidebarProps: ComponentProps<typeof SessionList> = {
     // The line at this column's top edge, off the SAME `mode` the status
     // bar's word reads. Select is the sidebar's mode and only the
@@ -8302,7 +8302,7 @@ function CanvasInner({
               paneFocused={isFocused}
               drafts={draftsBySession}
               pending={pending}
-              // Same facts as `gettingStartedOn`, plus `hasOwnSession` (see `emptyText`).
+              // No entries, no own session (`hasOwnSession`) and the sidebar not loading (see `emptyText`).
               emptyText={
                 entries.length === 0 && !hasOwnSession && !sidebarLoading
                   ? 'no sessions yet'

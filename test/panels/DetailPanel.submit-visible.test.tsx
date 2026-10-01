@@ -97,6 +97,34 @@ describe('a rejected answer is drawn, not swallowed', () => {
     fireEvent.click(submit() as HTMLElement);
     await waitFor(() => expect(answer).toHaveBeenCalledTimes(2));
   });
+
+  it('a rejected resend clears the previous stop outcome', async () => {
+    const answer = vi
+      .fn((_p: string, _r: AnswerRequest, _row?: string) =>
+        Promise.resolve<AnswerResult>({ kind: 'unconfirmed', label: 'Crimson' }),
+      )
+      .mockImplementationOnce(() =>
+        Promise.resolve<AnswerResult>({ kind: 'unconfirmed', label: 'Crimson' }),
+      )
+      .mockImplementationOnce(() => Promise.reject(new Error('ipc closed')));
+    draw(QUESTION, { answer });
+    mark();
+    fireEvent.click(submit() as HTMLElement);
+    await waitFor(() => expect(q('[data-question-outcome]')).not.toBeNull());
+    expect(q('[data-question-outcome]')?.getAttribute('role')).toBe('alert');
+    const stale = q('[data-question-outcome]')?.textContent ?? '';
+    expect(stale).not.toBe('');
+    await waitFor(() => expect(submit()?.disabled).toBe(false));
+    fireEvent.click(submit() as HTMLElement);
+    await waitFor(() => expect(q('[data-question-refusal]')).not.toBeNull());
+    expect(q('[data-question-refusal]')?.textContent).toBe(
+      'not sent — vam could not reach the session. Press Submit to try again.',
+    );
+    expect(q('[data-question-outcome]')).toBeNull();
+    expect(text()).not.toContain(stale);
+    expect(all('[role="alert"]')).toHaveLength(1);
+    await waitFor(() => expect(submit()?.disabled).toBe(false));
+  });
 });
 
 const STOPS: AnswerResult[] = [

@@ -5147,6 +5147,9 @@ function QuestionCard({
     } catch {
       // A rejected bridge call used to end the click silently. The message is
       // a constant on purpose: an IPC error string is internals, not advice.
+      // The refusal is the only result drawn: a stop outcome from an earlier
+      // send would otherwise stay beside it.
+      setOutcome(null);
       setRefusal('not sent — vam could not reach the session. Press Submit to try again.');
     } finally {
       // Cleared here ONLY -- resolve or throw, never a timer, never
@@ -9584,7 +9587,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                  resolves to nothing inside the per-turn wrapper and the pinned
                  prompt can cover the answer again (audit F2). `TurnBlock`'s
                  own comment carries the measurement. */
-              className={`vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pl-3.5 pr-11 [container-type:size]`}
+              className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pl-3.5 pr-11 [container-type:size]"
             >
               {/*
               WHAT THE TOP OF THE COLUMN IS — said, not left to be inferred.
