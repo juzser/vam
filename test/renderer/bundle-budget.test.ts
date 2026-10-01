@@ -819,6 +819,15 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * Plan v17 allows up to 735,200 / 220,800, so `ENTRY_BUDGET_BYTES` moves
  * 733,900 -> 735,000 and `ENTRY_GZIP_BUDGET_BYTES` moves 220,350 -> 220,750
  * (~200 B / ~100 B of slack over the post-rebase figures).
+ *
+ * A SEVENTEENTH, FROM vam-ux-3/task-16-prs-view-filter-and-sort: the PRs
+ * tab's filter bar, its count line and the filter state in `DetailPanel.tsx`
+ * are all eager code. Measured, `electron-vite build --mode production`
+ * (this machine's `darwin` zlib), the way this test measures it: entry
+ * 738,703 B (over 735,000 by 3,703 B); gzip 221,774 B (over 220,750 by
+ * 1,024 B). `ENTRY_BUDGET_BYTES` moves 735,000 -> 739,000 and
+ * `ENTRY_GZIP_BUDGET_BYTES` moves 220,750 -> 221,924: the measured figures
+ * plus ~297 B / ~150 B of slack, inside plan v19's 739,500 / 222,100 ceiling.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -829,8 +838,8 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 // depends on is even present, decided BEFORE anything tries to build.
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
-const ENTRY_BUDGET_BYTES = 735_000;
-const ENTRY_GZIP_BUDGET_BYTES = 220_750;
+const ENTRY_BUDGET_BYTES = 739_000;
+const ENTRY_GZIP_BUDGET_BYTES = 221_924;
 
 // The one string this repo's markdown stack ships that nothing else in the
 // dependency graph or vam's own source does: `gfmTable`, the extension name
