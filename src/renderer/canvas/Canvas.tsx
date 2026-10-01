@@ -90,15 +90,12 @@ import {
   isAgentWorktreeSession,
   isEnded,
   isForeign,
-  isHiddenByAgentWorktreeFilter,
-  isHiddenByEndedFilter,
   isHiddenByForeignFilter,
-  isHiddenByIdleFilter,
-  isHiddenByOriginFilters,
   isIdle,
   isUnprompted,
 } from '../domain/session-filter.js';
 import { isOutsideVamScope } from '../domain/session-ownership.js';
+import { statusTally, visibleSessions } from '../domain/session-view.js';
 import { ErrorLogPanel } from '../errors/ErrorLogPanel.js';
 import { loggedEvents, noteFailure, recordRefusal, subscribeEvents } from '../errors/log.js';
 import {
@@ -116,7 +113,9 @@ import {
   answeringKeys,
   cursorModeAt,
   focusInsertStop,
+  insertStopHeld,
   releaseInsert,
+  restoreInsertStop,
 } from '../keyboard/focus-scope.js';
 import { type CursorMode, MODE_TITLES } from '../keyboard/keysheet.js';
 import { ChordGlyphs, primaryChord, ShortcutTip, TipProvider } from '../keyboard/ShortcutTip.js';
@@ -2638,12 +2637,31 @@ function CanvasInner({
     if (phone) return;
     const onFocusIn = (event: FocusEvent) => setMode(cursorModeAt(event.target));
     const onFocusOut = (event: FocusEvent) => setMode(cursorModeAt(event.relatedTarget));
+    // AN APP SWITCH TAKES THE KEYBOARD AWAY AND DOES NOT GIVE IT BACK. On
+    // `blur` remember the insert stop that held it; on `focus`, if the window
+    // came back with the keyboard nowhere and that stop is still in the
+    // document, put it back there. A select-mode blur remembers nothing, so
+    // select stays select.
+    let awayFrom: HTMLElement | null = null;
+    const onWindowBlur = () => {
+      awayFrom = insertStopHeld(document.activeElement);
+    };
+    const onWindowFocus = () => {
+      const stop = awayFrom;
+      awayFrom = null;
+      if (stop !== null) restoreInsertStop(stop);
+      setMode(cursorModeAt(document.activeElement));
+    };
     document.addEventListener('focusin', onFocusIn);
     document.addEventListener('focusout', onFocusOut);
+    window.addEventListener('blur', onWindowBlur);
+    window.addEventListener('focus', onWindowFocus);
     setMode(cursorModeAt(document.activeElement));
     return () => {
       document.removeEventListener('focusin', onFocusIn);
       document.removeEventListener('focusout', onFocusOut);
+      window.removeEventListener('blur', onWindowBlur);
+      window.removeEventListener('focus', onWindowFocus);
     };
   }, [phone]);
   /** Same per-session shape as the composer state above, and the same reason:
@@ -3698,107 +3716,38 @@ function CanvasInner({
     [prefs, hiddenProjects, vamListingGap, source.kind],
   );
 
-  const entries = useMemo(() => {
-    // THE FILTERED SET, in an IIFE so both of its own early-return branches
-    // (the listing-gap short-circuit below, and the ordinary tail) stay
-    // exactly as they were -- `applyViewOrder` is the one step every path
-    // through this memo now shares, applied ONCE, after the set is decided
-    // rather than threaded through each branch separately. `entries` is what
-    // `j`/`k`/`gt`/`gT`/`f` all step through (`sessionIds`, `stepProject`
-    // below), so the sidebar's Group-by/Sort-by choice has to land HERE, not
-    // as a second, SessionList-local reorder the keyboard would disagree
-    // with -- the same discipline PR 475 already holds for the foreign/
-    // dismissed filter one layer up. `allEntries` (tab membership) is never
+  /**
+   * THE VIEW CONTEXT `visibleSessions` reads. One object so the list and the
+   * pill counts below are fed identical inputs; `statusFilter` is the only
+   * field the tally overrides, once per pill.
+   */
+  const viewContext = useMemo(
+    () => ({
+      ownershipScope,
+      query,
+      matches,
+      prefs,
+      vamListingGap,
+      // The demo is exempt from `hideForeign` only: its fixture sets
+      // `vamControlled: false` on purpose, to show a row vam did not start.
+      foreignFilterApplies: source.kind !== 'demo',
+    }),
+    [ownershipScope, query, matches, prefs, vamListingGap, source.kind],
+  );
+
+  const entries = useMemo(
+    // `entries` is what `j`/`k`/`gt`/`gT`/`f` and the command palette all step
+    // through, so the filtered set (decided in `domain/session-view.ts`) and the
+    // Group-by/Sort-by order (`applyViewOrder`, applied once, after the set is
+    // decided) both have to land HERE. `allEntries` (tab membership) is never
     // touched: a display preference must not change which sessions are tabs.
-    const filtered = ((): SessionEntry[] => {
-      // FIRST, and not only in the sidebar. A removed project whose cards stayed
-      // drawn would leave `j` stepping onto a session with no row -- the exact
-      // defect the note below this memo describes, reintroduced by a different
-      // route. The three views agree on the SET.
-      const visible = allEntries.filter((e) => !isOutsideVamScope(e, ownershipScope));
-      const byText =
-        query.trim() === '' ? visible : visible.filter((e) => matches.includes(e.session.id));
-      const byStatus =
-        statusFilter === 'all' ? byText : byText.filter((e) => e.session.status === statusFilter);
-      // Both origin rules only ever exclude something vam POSITIVELY classified
-      // — see `session-filter.ts`. A session whose timeline has not arrived is
-      // `unknown` and survives both, because hiding what you did not check is
-      // how a filter loses work rather than narrowing it.
-      const byOrigin = byStatus.filter((e) => !isHiddenByOriginFilters(e.session, prefs.filters));
-      // THIS IS ALSO WHAT THE COMMAND PALETTE SEES. `entries` is what is handed
-      // to `CommandPalette` below, so the palette's groups are drawn from the
-      // list this line has already narrowed — which is why ended sessions are a
-      // filter here and not the third palette group
-      // `docs/design/reopening-a-session.md` proposed. Such a group would be fed
-      // by this array and so would be empty in exactly the state it exists for.
-      //
-      // DISMISSED IS ALWAYS APPLIED, EVEN WHILE `vamListingGap` STANDS THE
-      // OTHER TWO DOWN. Dismissal is not a guess about ownership the way
-      // `isEnded`/`isForeign` are -- it is the operator's own explicit "get
-      // this off my screen", `docs/design/vam-owns-the-session.md` §5's "Dismiss
-      // is the safe fallback" -- so an unreadable tmux listing has no more
-      // reason to stand it down than it does `hiddenProjects` above.
-      // `isSessionDismissed` reads `session.activity` FRESH on every entry,
-      // which is what lifts a dismissal the moment a resumed session shows
-      // activity newer than what vam saw when it was hidden -- never a
-      // snapshot taken once and reused.
-      const byDismissed = byOrigin.filter(
-        (e) =>
-          !isSessionDismissed(
-            prefs,
-            e.session.source ?? e.project.source ?? 'unknown',
-            e.session.id,
-            e.session.activity,
-          ),
-      );
-      // TMUX ITSELF COULD NOT BE READ THIS LOAD: neither rule below can be
-      // trusted, because both proxy a fact only vam's own tmux spine can
-      // answer -- whether a row is currently vam's. `docs/design/vam-owns-the-
-      // session.md`'s own trap: "an unreadable tmux listing must not empty the
-      // sidebar. The fallback is to show everything, with the reason on
-      // screen." Standing BOTH rules down here, rather than one, is what makes
-      // that literally true rather than true for one axis and silently false
-      // for the other.
-      if (vamListingGap !== null) return byDismissed;
-      // AND THE SAME DISCIPLINE FOR ENDINGS AND FOR OWNERSHIP. `isEnded` is a
-      // fact a source has positively reported: the Codex source reads it off a
-      // writer lock it probed, and says `idle` rather than `done` wherever it
-      // could not look. `isForeign` is the same discipline for `vamControlled`
-      // — see `session-filter.ts` for why the two are separate rules rather
-      // than one boolean standing for both claims.
-      //
-      // THE DEMO IS EXEMPT FROM `hideForeign`, AND ONLY FROM THIS ONE RULE.
-      // `?demo=1`'s own fixture was built around the two OLDER origin rules by
-      // never tripping them at all -- no demo session carries `startedBy:
-      // 'agent'` or `ended: true`, so `hideAgentStarted` and `hideEnded` narrow
-      // nothing there and needed no carve-out. `vamControlled: false` cannot
-      // get the same treatment: `fixtures/demo.ts`'s `vam-build-1` row sets it
-      // DELIBERATELY, to demonstrate the UI a session vam did not start draws
-      // (no Submit, no terminal) -- the very thing `docs/design/reopening-a-
-      // session.md` and a dozen guards under `e2e/` read that row for. The same
-      // field now also drives `isForeign`, and there is no way to keep the one
-      // meaning without tripping the other. `demo`'s whole purpose is the
-      // public showcase "vam is public, and every real session on this machine
-      // is somebody's work" (`sidebar-seam-shots.mjs`'s own words) -- showing
-      // the FULL breadth of what a row can be, not one operator's own narrowed
-      // default -- so it is the demo that gives way, the same way
-      // `sendPromptFor` already branches on `source.kind === 'demo'` above.
-      const foreignFilterApplies = source.kind !== 'demo';
-      return byDismissed.filter(
-        (e) =>
-          !isHiddenByEndedFilter(e.session, prefs.filters, statusFilter) &&
-          !isHiddenByIdleFilter(e.session, prefs.filters, statusFilter) &&
-          !isHiddenByAgentWorktreeFilter(e.session, prefs.filters) &&
-          (!foreignFilterApplies || !isHiddenByForeignFilter(e.session, prefs.filters)),
-      );
-    })();
-    return applyViewOrder(filtered, prefs.viewOptions);
-    // `prefs` ITSELF, not only `prefs.filters`/`prefs.dismissedSessions`
-    // separately: `isSessionDismissed` reads `prefs.dismissedSessions`, and a
-    // dependency array naming a nested field the memo does not otherwise use
-    // is a staleness bug waiting for the next field this filter chain grows.
-    // The same argument covers `prefs.viewOptions` now too.
-  }, [allEntries, ownershipScope, matches, query, statusFilter, prefs, vamListingGap, source.kind]);
+    () =>
+      applyViewOrder(
+        visibleSessions(allEntries, { ...viewContext, statusFilter }),
+        prefs.viewOptions,
+      ),
+    [allEntries, viewContext, statusFilter, prefs.viewOptions],
+  );
 
   /**
    * EVERY SESSION OF THE ACTIVE PROJECT VAM HAS NOT POSITIVELY EXCLUDED --
@@ -3942,22 +3891,15 @@ function CanvasInner({
    */
   const hasOwnSession = useMemo(() => allEntries.some((e) => !isForeign(e.session)), [allEntries]);
 
-  /** The pill counts are off the UNFILTERED list — a count that moved when you
-      clicked it would be a count of your own click. */
-  const tally = useMemo(() => {
-    const of = (status: SessionStatus) =>
-      allEntries.filter((e) => e.session.status === status).length;
-    return {
-      all: allEntries.length,
-      running: of('running'),
-      waiting: of('waiting'),
-      idle: of('idle'),
-      unstarted: of('unstarted'),
-      terminal: of('terminal'),
-      done: of('done'),
-      failed: of('failed'),
-    };
-  }, [allEntries]);
+  /**
+   * Each pill reads what selecting it would list: the same pipeline as
+   * `entries`, run once per status. No count reads `statusFilter`, so
+   * clicking a pill moves no number.
+   */
+  const tally = useMemo(
+    () => statusTally(allEntries, { ...viewContext, statusFilter: 'all' }),
+    [allEntries, viewContext],
+  );
 
   /**
    * What `hjkl`, `f` and `gg` may land on: every session in view, no filter
@@ -7086,6 +7028,16 @@ function CanvasInner({
           // and `beginComposing` is the one place that says so.
           if (paneComposer(focusedPaneId) !== null) {
             beginComposing();
+            // `DetailPanel` focuses the box when `composing` CHANGES, so a
+            // flag already true (left over from a blur that cleared nothing)
+            // would never re-run that effect and `i` would do nothing. The
+            // microtask lands the caret after this keydown has returned, so no
+            // composition crosses the move, and only when nothing else has.
+            const paneId = focusedPaneId;
+            queueMicrotask(() => {
+              if (cursorModeAt(document.activeElement) === 'insert') return;
+              paneComposer(paneId)?.querySelector<HTMLElement>('textarea')?.focus();
+            });
             return;
           }
           /**
@@ -7224,6 +7176,13 @@ function CanvasInner({
     // closes a session nobody meant to close.
     if (phone) return;
     function onKeyDown(event: KeyboardEvent) {
+      // A KEYDOWN THAT BELONGS TO AN IME COMPOSITION IS NOT A KEY. Under a
+      // Vietnamese (Telex/VNI) input method the key that starts or extends a
+      // composition arrives with `isComposing` set, or with the legacy
+      // `keyCode` 229, and acting on it (`i`, Esc, `j`...) moves focus or
+      // cancels in the middle of a word -- the stray first character of the
+      // operator's report. The composition owns it, in either mode.
+      if (event.isComposing || event.keyCode === 229) return;
       const target = event.target;
       const typing = target instanceof HTMLElement && /^(INPUT|TEXTAREA)$/.test(target.tagName);
       // A Cmd/Ctrl chord is never text entry — no layout produces a character
