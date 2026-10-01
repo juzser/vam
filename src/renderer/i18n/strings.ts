@@ -406,9 +406,9 @@ const EN = {
   // THE STAR COUNT'S ACCESSIBLE NAME (the row title's `[data-skill-stars]`).
   // The catalogue has no plural rules, so a count of exactly one has its own
   // key, picked in `AdhdSkillCard.tsx`. `{count}` arrives already formatted.
-  // THE REPO LINK. The proper noun, a `data-verbatim` button.
   'settings.behaviour.adhd.starsLabel': '{count} stars on GitHub',
   'settings.behaviour.adhd.starsLabelOne': '{count} star on GitHub',
+  // THE REPO LINK. The proper noun, a `data-verbatim` button.
   'settings.behaviour.adhd.creditLink': 'ayghri/i-have-adhd (MIT)',
   'settings.behaviour.adhd.coverageTitle': 'Agent coverage',
   'settings.behaviour.adhd.coverageHint': 'install above, then re-check',
