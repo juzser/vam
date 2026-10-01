@@ -12,8 +12,6 @@ describe('parseMdFileLink: a relative path is a file link', () => {
     ['src/a.ts#L42', { path: 'src/a.ts', line: 42 }],
     ['src/a.ts:42', { path: 'src/a.ts', line: 42 }],
     ['README.md:12', { path: 'README.md', line: 12 }],
-    ['docs/my%20notes.md', { path: 'docs/my notes.md', line: 1 }],
-    ['a%2520b.md', { path: 'a%20b.md', line: 1 }],
   ])('%s', (href, expected) => {
     expect(parseMdFileLink(href)).toEqual(expected);
   });
@@ -36,6 +34,12 @@ describe('parseMdFileLink: everything else keeps today’s behaviour (null)', ()
     'a%5Cb.md',
     'a%3Ab.md',
     'bad%zz.md',
+    './/etc/passwd',
+    './%2fetc/passwd',
+    'docs/my%20notes.md',
+    'my%20notes.md',
+    'LICENSE',
+    'caf%C3%A9.md',
   ])('%j', (href) => {
     expect(parseMdFileLink(href)).toBeNull();
   });

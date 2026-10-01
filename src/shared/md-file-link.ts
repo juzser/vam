@@ -11,20 +11,18 @@
  * that decodes to a NUL, colon or backslash. `README.md:12` has the shape of
  * a scheme, so a trailing `:digits` is read as a line first.
  */
-/** A file the link names, and the 1-based line it points at. */
+import { parseFileRef } from './file-ref.js';
+
 export type MdFileLink = { readonly path: string; readonly line: number };
 
-/** The same bound `parseFileRef` applies, so a ref this builds is never refused for length alone. */
 const MAX_HREF_LENGTH = 1_024;
 
 const TRAILING_LINE = /:(\d{1,7})$/;
-/** GitHub's own anchor: `#L42`, or the first of `#L42-L50`. */
 const LINE_ANCHOR = /^L(\d{1,7})(?:-L?\d{1,7})?$/;
 
 export function parseMdFileLink(href: unknown): MdFileLink | null {
   if (typeof href !== 'string' || href === '' || href.length > MAX_HREF_LENGTH) return null;
   if (href.startsWith('/') || href.includes('\\')) return null;
-
   let rest = href;
   let line = 1;
   const hash = rest.indexOf('#');
@@ -35,26 +33,24 @@ export function parseMdFileLink(href: unknown): MdFileLink | null {
   }
   const query = rest.indexOf('?');
   if (query !== -1) rest = rest.slice(0, query);
-
   const colonLine = TRAILING_LINE.exec(rest);
   if (colonLine !== null) {
     line = Number(colonLine[1]);
     rest = rest.slice(0, colonLine.index);
   }
-  // Anything with a colon left is a scheme (`https://x`, `mailto:a@b.c`).
   if (rest.includes(':')) return null;
-
   let path: string;
   try {
     path = decodeURIComponent(rest);
   } catch {
     return null;
   }
-  // Decoding can mint what the raw string did not have.
   if (/[\0:\\]/.test(path) || path.startsWith('/')) return null;
   while (path.startsWith('./')) path = path.slice(2);
-  if (path === '') return null;
-  return { path, line: line < 1 ? 1 : line };
+  if (path === '' || path.startsWith('/')) return null;
+  const at = line < 1 ? 1 : line;
+  // Main only admits what parseFileRef does.
+  return parseFileRef(`${path}:${at}`) === null ? null : { path, line: at };
 }
 
 /**
@@ -67,7 +63,7 @@ export function mdFileLinkRef(link: MdFileLink, dir = ''): string {
   return `${base}${link.path}:${link.line}`;
 }
 
-/** The hover/focus hint of a file link: `opens docs/roadmap.md in Files`, plus the line when one was asked for. */
+/** The hover/focus hint: `opens docs/roadmap.md in Files`. */
 export function mdFileLinkHint(link: MdFileLink): string {
   return `opens ${link.path} in Files${link.line > 1 ? ` at line ${link.line}` : ''}`;
 }
