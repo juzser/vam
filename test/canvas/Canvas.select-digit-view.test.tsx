@@ -217,8 +217,11 @@ describe('in Insert, the digit is text and nothing else', () => {
     press('I');
     expect(mode()).toBe('Insert');
     expect(document.activeElement?.hasAttribute('data-question-option')).toBe(true);
-    const event = fromCaret('2', 2);
-    expect(pressed('prs')).toBe('false');
+    // The card now draws a free-text row, which takes digit 2 here (one
+    // listed option, then the free row), so the stand-down is proved on a digit
+    // past that row: 4, the Agents view.
+    const event = fromCaret('4', 4);
+    expect(pressed('agents')).toBe('false');
     expect(event.defaultPrevented).toBe(false);
   });
 

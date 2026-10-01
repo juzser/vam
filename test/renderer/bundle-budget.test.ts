@@ -804,6 +804,21 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * 733,600 and `ENTRY_GZIP_BUDGET_BYTES` moves 218,700 -> 220,200. This is an
  * epic-wide allowance, not headroom any one PR may assume: the next PR to
  * land here still re-measures rather than assuming there is room.
+ *
+ * A SIXTEENTH, SMALL GROWTH, FROM vam-ux-3/task-4-card-matches-terminal: the
+ * question card now draws the terminal's own free-text row and follows the
+ * pane's step, all eager `DetailPanel.tsx` code. Measured, `electron-vite
+ * build --mode production` (this machine's `darwin` zlib), the way this test
+ * measures it: entry 733,717 B (over 733,600 by 117 B); gzip 220,218 B (over
+ * 220,200 by 18 B). `ENTRY_BUDGET_BYTES` moves 733,600 -> 733,900 and
+ * `ENTRY_GZIP_BUDGET_BYTES` moves 220,200 -> 220,350: the measured figures
+ * plus ~180 B / ~130 B of slack, inside the epic allowance's 734,000 /
+ * 220,400 ceiling. After the merge queue rebased this task onto integration
+ * with task-21, the same measurement read entry 734,798 B and gzip 220,648 B:
+ * the extra growth arrived with task-21 on integration, not from this task.
+ * Plan v17 allows up to 735,200 / 220,800, so `ENTRY_BUDGET_BYTES` moves
+ * 733,900 -> 735,000 and `ENTRY_GZIP_BUDGET_BYTES` moves 220,350 -> 220,750
+ * (~200 B / ~100 B of slack over the post-rebase figures).
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -814,8 +829,8 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 // depends on is even present, decided BEFORE anything tries to build.
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
-const ENTRY_BUDGET_BYTES = 733_600;
-const ENTRY_GZIP_BUDGET_BYTES = 220_200;
+const ENTRY_BUDGET_BYTES = 735_000;
+const ENTRY_GZIP_BUDGET_BYTES = 220_750;
 
 // The one string this repo's markdown stack ships that nothing else in the
 // dependency graph or vam's own source does: `gfmTable`, the extension name
