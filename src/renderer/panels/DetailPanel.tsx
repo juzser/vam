@@ -4914,8 +4914,6 @@ function QuestionCard({
   /** Steps with the free-text row chosen, by question id: a choice, never a mark. */
   const terminalNoteId = useId();
   const [free, setFree] = useState<Readonly<Record<string, boolean>>>({});
-  /** Free text on any step turns Submit off for the whole set. */
-  const freeChosen = questions.some((one) => free[one.id] === true);
   /** The step the terminal is on (-1 if none); followed once per change, and earlier steps count as taken. */
   const liveAt = pane === null ? -1 : questions.findIndex((one) => paneAsks(one, pane.title));
   // biome-ignore lint/correctness/useExhaustiveDependencies: only a change of the pane's step re-runs this; `questions` is a fresh array each render.
@@ -4950,6 +4948,8 @@ function QuestionCard({
   const picked = question === undefined ? [] : (marks[question.id] ?? []);
   /** What is left to send: every open step the picker has not already taken. */
   const pending = openSteps.slice(taken.length);
+  /** Free text on any step still to send turns Submit off; a step the terminal already took no longer counts. */
+  const freeChosen = pending.some((one) => free[one.id] === true);
   /** The pending steps still waiting for a mark -- what Submit is short of. */
   const unmarked = pending.filter((one) => (marks[one.id] ?? []).length === 0);
   const takenIds = new Set(openSteps.slice(0, taken.length).map((one) => one.id));
@@ -5332,7 +5332,7 @@ function QuestionCard({
     const short = pending.find((one) => (nextMarks[one.id] ?? []).length === 0);
     if (short === undefined) {
       // Another step still on free text keeps the whole set in the terminal.
-      if (!questions.some((one) => one.id !== question.id && free[one.id] === true)) {
+      if (!pending.some((one) => one.id !== question.id && free[one.id] === true)) {
         void send(nextMarks);
       }
       return;

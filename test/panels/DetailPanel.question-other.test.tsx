@@ -2,14 +2,14 @@
 
 /** The free-text row ("Type something."): Submit is off for the whole set while any step has it. */
 
-import { cleanup, render } from '@testing-library/react';
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { act } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { readPicker } from '../../src/main/terminal/answer.js';
+import { readPicker, readPrompt } from '../../src/main/terminal/answer.js';
 import type { AgentQuestion, Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/DetailPanel.js';
-import type { AnswerRequest } from '../../src/shared/answer.js';
+import type { AnswerRequest, PromptView } from '../../src/shared/answer.js';
 import {
   SINGLE,
   SINGLE_Q,
@@ -156,4 +156,75 @@ describe('free text chosen on any step turns Submit off for the whole set', () =
     expect(asked).toHaveLength(1);
     expect(asked[0]?.steps.map((step) => step.question)).toEqual([SINGLE_Q, STEP2_Q, SIZE_Q]);
   });
+});
+
+const listbox = () => document.querySelector('[role="listbox"]') as HTMLElement;
+const freeRow = () => document.querySelector<HTMLElement>('[data-question-free-text]');
+const asFree = () => freeRow()?.getAttribute('aria-selected');
+describe('keyboard routes into the free-text row', () => {
+  it('chooses it by its digit', async () => {
+    draw(SET.slice(0, 1), { prompt: async () => ({ kind: 'none' }) });
+    fireEvent.keyDown(listbox(), { key: String(optionLabels().length) });
+    expect(asFree()).toBe('true');
+  });
+
+  it('chooses it with Enter and with Space when the cursor is on it', async () => {
+    draw(SET.slice(0, 1), { prompt: async () => ({ kind: 'none' }) });
+    freeRow()?.focus();
+    fireEvent.keyDown(listbox(), { key: 'Enter' });
+    expect(asFree()).toBe('true');
+    fireEvent.keyDown(listbox(), { key: ' ' });
+    expect(asFree()).toBe('false');
+  });
+});
+
+describe('an Enter pick never auto-sends while another step is on free text', () => {
+  it('holds the answer when a multi-select step keeps a mark and is on free text', async () => {
+    const asked: AnswerRequest[] = [];
+    const multi = { ...ask(1, 'Pick many', ['A', 'B']), multiSelect: true };
+    const set = [ask(0, 'First', ['X', 'Y']), multi, ask(2, 'Third', ['P', 'Q'])];
+    draw(set, {
+      prompt: async () => ({ kind: 'none' }),
+      answer: async (_project, request) => {
+        asked.push(request);
+        return { kind: 'sent', answer: 'ok' };
+      },
+    });
+    await mark(0, false);
+    await click(tabs()[1]);
+    await click(document.querySelector('[data-question-option]'));
+    await click(freeRow());
+    await click(tabs()[2]);
+    document.querySelectorAll<HTMLElement>('[data-question-option]')[0]?.focus();
+    fireEvent.keyDown(listbox(), { key: 'Enter' });
+    expect(asked).toHaveLength(0);
+  });
+});
+
+describe('a free-text choice on a step the terminal has passed', () => {
+  it('does not hold Submit once the pane has moved on to the later steps', async () => {
+    const asked: AnswerRequest[] = [];
+    const prompt = readPrompt(STEP2_OF_3);
+    if (prompt === null) throw new Error('fixture screen holds no prompt');
+    let view: PromptView = { kind: 'none' };
+    draw(SET, {
+      prompt: async () => view,
+      answer: async (_project, request) => {
+        asked.push(request);
+        return { kind: 'sent', answer: 'ok' };
+      },
+    });
+    await mark(0, true);
+    view = { kind: 'prompt', prompt };
+    await waitFor(
+      () => expect(document.querySelector('[data-question-text]')?.textContent).toBe(STEP2_Q),
+      { timeout: 5000 },
+    );
+    await mark(1, false);
+    await mark(2, false);
+    expect(submit()?.disabled).toBe(false);
+    expect(note()).toBeNull();
+    await click(submit());
+    expect(asked[0]?.steps.map((step) => step.question)).toEqual([STEP2_Q, SIZE_Q]);
+  }, 10000);
 });
