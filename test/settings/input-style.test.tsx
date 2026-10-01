@@ -139,11 +139,25 @@ describe('pins', () => {
     expect(wrap?.className).toContain('has-[:focus-visible]:outline-2');
   });
 
-  it('theme Choice buttons keep their base classes', () => {
-    const { container } = mount('interface');
-    const btn = container.querySelector<HTMLElement>(
-      '[data-palette-template], [data-theme-choice]',
-    );
-    if (btn) expect(btn.className).toContain('border-line');
+  it('template-row and terminal-theme buttons keep their base classes', () => {
+    const iface = mount('interface');
+    const tpl = iface.container.querySelector<HTMLElement>('[data-palette-template]');
+    expect(tpl).not.toBeNull();
+    for (const c of ['rounded', 'border', 'border-line', 'hover:border-line-loud', 'h-[28px]'])
+      expect(tpl?.classList.contains(c), c).toBe(true);
+    expect(tpl?.classList.contains('bg-raised')).toBe(false);
+    iface.unmount();
+    const term = mount('terminal');
+    const chips = [...term.container.querySelectorAll<HTMLElement>('[data-terminal-theme]')];
+    expect(chips.length).toBeGreaterThan(0);
+    for (const chip of chips) {
+      expect(chip.classList.contains('h-[28px]')).toBe(true);
+      expect(chip.classList.contains('border')).toBe(true);
+      expect(
+        chip.classList.contains(
+          chip.getAttribute('aria-pressed') === 'true' ? 'bg-raised' : 'border-line',
+        ),
+      ).toBe(true);
+    }
   });
 });

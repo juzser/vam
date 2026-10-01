@@ -116,3 +116,53 @@ describe('pins: other states are unchanged', () => {
     expect(container.querySelector('[data-gitlab-status-pill]')).not.toBeNull();
   });
 });
+
+describe.each([
+  {
+    name: 'github',
+    mount: (s: GithubAuthStatus | GitlabAuthStatus) =>
+      render(<GithubPanel api={githubApi(s as GithubAuthStatus)} active={true} />),
+    missing: 'gh` is not installed',
+  },
+  {
+    name: 'gitlab',
+    mount: (s: GithubAuthStatus | GitlabAuthStatus) =>
+      render(<GitlabPanel api={gitlabApi(s as GitlabAuthStatus)} active={true} />),
+    missing: 'glab` is not installed',
+  },
+])('$name pins: unchanged sentences', ({ name, mount, missing }) => {
+  const sentence = (c: HTMLElement) => c.querySelector(`[data-${name}-status]`)?.textContent ?? '';
+
+  it('cli-missing keeps its sentence', async () => {
+    const { container } = mount({ kind: 'cli-missing', message: 'x' });
+    await waitFor(() => expect(sentence(container)).toContain(missing));
+  });
+
+  it('unknown keeps its sentence with the message', async () => {
+    const { container } = mount({ kind: 'unknown', message: 'boom' });
+    await waitFor(() => expect(sentence(container)).toBe('vam could not tell — boom'));
+  });
+
+  it('rechecking sentence shows before the first status arrives', () => {
+    const { container } = render(
+      name === 'github' ? (
+        <GithubPanel
+          api={{ ...githubApi({ kind: 'logged-out' }), authStatus: () => new Promise(() => {}) }}
+          active={true}
+        />
+      ) : (
+        <GitlabPanel
+          api={{ ...gitlabApi({ kind: 'logged-out' }), authStatus: () => new Promise(() => {}) }}
+          active={true}
+        />
+      ),
+    );
+    expect(sentence(container)).toBe('checking…');
+  });
+
+  it('logged-out never says "logged in as"', async () => {
+    const { container } = mount({ kind: 'logged-out' });
+    await waitFor(() => expect(sentence(container)).toBe('not logged in'));
+    expect(count(container.textContent ?? '')).toBe(0);
+  });
+});
