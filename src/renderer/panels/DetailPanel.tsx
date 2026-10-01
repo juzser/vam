@@ -105,6 +105,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -4753,12 +4754,29 @@ function isPersistentPermissionOption(label: string): boolean {
  *  the operator's visit to this question. */
 const ARM_TIMEOUT_MS = 3000;
 
+/** The terminal's own free-text row: drawn, never sent. */
+const FREE_TEXT_LABEL = 'Type something.';
+
+/** A recorded set is read only when it has several questions and a step open. */
+function followsPane(set: readonly AgentQuestion[]): boolean {
+  return set.length > 1 && set.some((one) => one.answer === null);
+}
+
+/** Whether the pane's title is THIS question (whitespace-blind; a folded title is a tail). */
+function paneAsks(question: AgentQuestion, title: string): boolean {
+  const asked = question.question.replace(/\s+/g, '');
+  const shown = title.replace(/\s+/g, '');
+  return shown !== '' && asked.endsWith(shown);
+}
+
 function QuestionCard({
   questions,
   firstOptionRef,
   onChat,
   onAnswer,
   onSuggest,
+  pane = null,
+  freeText = false,
   phone = false,
 }: {
   /**
@@ -4793,6 +4811,10 @@ function QuestionCard({
    * branch.
    */
   readonly onSuggest?: (label: string | null) => void;
+  /** The pane's prompt, read for this set; the card follows only a title of THIS set. */
+  readonly pane?: PanePrompt | null;
+  /** Draw the terminal's free-text row after each question's options (a recorded set omits it). */
+  readonly freeText?: boolean;
   /**
    * Draws the phone-inline skin instead of the desktop's fixed-block card
    * (docs/design/phone-core-loop.md §3.3): the same internals (state,
@@ -4889,6 +4911,22 @@ function QuestionCard({
    * all. Submit resumes at the first step the picker has not taken.
    */
   const [taken, setTaken] = useState<readonly string[]>([]);
+  /** Steps with the free-text row chosen, by question id: a choice, never a mark. */
+  const terminalNoteId = useId();
+  const [free, setFree] = useState<Readonly<Record<string, boolean>>>({});
+  /** Free text on any step turns Submit off for the whole set. */
+  const freeChosen = questions.some((one) => free[one.id] === true);
+  /** The step the terminal is on (-1 if none); followed once per change, and earlier steps count as taken. */
+  const liveAt = pane === null ? -1 : questions.findIndex((one) => paneAsks(one, pane.title));
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only a change of the pane's step re-runs this; `questions` is a fresh array each render.
+  useEffect(() => {
+    if (liveAt < 0) return;
+    setShowing(liveAt);
+    const before = questions.slice(0, liveAt).filter((one) => one.answer === null).length;
+    setTaken((already) =>
+      already.length >= before ? already : new Array<string>(before).fill(''),
+    );
+  }, [liveAt]);
 
   // One `tool_result` closes a whole call, so a part-answered set is not
   // something Claude Code produces -- but the model permits it, and a step
@@ -4921,7 +4959,7 @@ function QuestionCard({
    * them, because that is all the composer can carry -- text.
    */
   const suggested =
-    question === undefined || question.answer !== null
+    question === undefined || question.answer !== null || free[question.id] === true
       ? null
       : picked.length > 0
         ? picked.join(', ')
@@ -5187,12 +5225,34 @@ function QuestionCard({
    * copy that could drift from the first.
    */
   const trySend = () => {
+    // Free text is answered in the terminal: nothing of this set is sent.
+    if (freeChosen) return;
     const short = unmarked[0];
     if (short === undefined) {
       void send();
       return;
     }
     refuse(short);
+  };
+
+  /** The free-text row's index and label (the screen's own wording when the pane is on this question). */
+  const freeAt = freeText && question !== undefined ? question.options.length : -1;
+  const paneFreeLabel =
+    pane !== null &&
+    question !== undefined &&
+    paneAsks(question, pane.title) &&
+    question.options.every((option, at) => pane.options[at] === option.label)
+      ? pane.options[question.options.length]
+      : undefined;
+  const freeLabel = paneFreeLabel ?? FREE_TEXT_LABEL;
+  /** Choosing the row clears the step's marks; `keep` is Enter's, never an unchoose. */
+  const chooseFree = (keep = false) => {
+    if (question === undefined) return;
+    const id = question.id;
+    const choosing = keep || free[id] !== true;
+    setRefusal(null);
+    setFree((current) => ({ ...current, [id]: choosing }));
+    if (choosing && !question.multiSelect) setMarks((current) => ({ ...current, [id]: [] }));
   };
 
   const toggle = (label: string, viaPointer = false) => {
@@ -5210,6 +5270,9 @@ function QuestionCard({
       return;
     }
     if (armedLabel === label) disarm();
+    if (question !== undefined && free[question.id] === true) {
+      setFree((current) => ({ ...current, [question.id]: false }));
+    }
     // The refusal named a missing mark. Marking anything is the operator
     // answering it, so it stops being on screen -- a refusal that outlives
     // its cause is the next thing to be ignored.
@@ -5265,9 +5328,13 @@ function QuestionCard({
           [question.id]: question.multiSelect ? [...picked, option.label] : [option.label],
         };
     if (!already) setMarks(nextMarks);
+    if (free[question.id] === true) setFree((current) => ({ ...current, [question.id]: false }));
     const short = pending.find((one) => (nextMarks[one.id] ?? []).length === 0);
     if (short === undefined) {
-      void send(nextMarks);
+      // Another step still on free text keeps the whole set in the terminal.
+      if (!questions.some((one) => one.id !== question.id && free[one.id] === true)) {
+        void send(nextMarks);
+      }
       return;
     }
     refuse(short);
@@ -5318,6 +5385,12 @@ function QuestionCard({
       return;
     }
     if (action.kind === 'mark') {
+      if (action.at === freeAt) {
+        event.preventDefault();
+        chooseFree();
+        buttons[action.at]?.focus();
+        return;
+      }
       const option = question?.options[action.at];
       if (option === undefined) return;
       event.preventDefault();
@@ -5389,6 +5462,11 @@ function QuestionCard({
      * has already been answered.
      */
     if (action.kind === 'toggle') {
+      if (at === freeAt) {
+        event.preventDefault();
+        chooseFree();
+        return;
+      }
       const option = question?.options[at];
       if (option === undefined) return;
       event.preventDefault();
@@ -5399,6 +5477,12 @@ function QuestionCard({
     // `confirm` decides submit-or-walk itself; see its own comment for why
     // that decision cannot be made by reading `marks` back after the mark.
     if (action.kind === 'confirm') {
+      if (at === freeAt) {
+        // Enter on the free-text row only chooses it.
+        event.preventDefault();
+        chooseFree(true);
+        return;
+      }
       const option = question?.options[at];
       if (option === undefined) return;
       event.preventDefault();
@@ -5783,6 +5867,51 @@ function QuestionCard({
                     </button>
                   );
                 })}
+                {freeAt >= 0 && (
+                  /* THE TERMINAL'S OWN ROW, drawn and never sent. It is a real
+                     option of the list because the terminal lists it as one;
+                     choosing it hands the whole set to the terminal
+                     (`freeChosen`). */
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={free[question.id] === true}
+                    data-question-option
+                    data-question-free-text
+                    data-question-number={NUMBERED_OPTIONS[freeAt]}
+                    data-picked={free[question.id] === true ? 'true' : undefined}
+                    onClick={() => chooseFree()}
+                    className={[
+                      'group vam-tap flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] border px-1.5 py-1 text-left',
+                      OPTION_FOCUS_RING,
+                      free[question.id] === true
+                        ? `border-running ${OPTION_FILL}`
+                        : `border-line hover:${OPTION_FILL}`,
+                    ].join(' ')}
+                  >
+                    <span className="flex max-w-full items-baseline gap-1.5 text-control text-ink">
+                      {free[question.id] === true && (
+                        <Check
+                          aria-hidden="true"
+                          size={13}
+                          strokeWidth={2.5}
+                          className="flex-none text-running"
+                        />
+                      )}
+                      {NUMBERED_OPTIONS[freeAt] !== undefined && (
+                        <span className={`text-meta tabular-nums ${OPTION_QUIET_INK}`}>
+                          {NUMBERED_OPTIONS[freeAt]}
+                        </span>
+                      )}
+                      <span data-question-label className="min-w-0 break-words">
+                        {freeLabel}
+                      </span>
+                    </span>
+                    <span className={`min-w-0 break-words text-meta ${OPTION_QUIET_INK}`}>
+                      Typed in the terminal.
+                    </span>
+                  </button>
+                )}
               </div>
               {/* THE PANEL: the FULL preview of `activeOption` -- focused,
                   else marked, else the first option that has one -- never the
@@ -5913,12 +6042,11 @@ function QuestionCard({
           <button
             type="button"
             data-question-submit
-            /* `sending` ONLY. It used to read `unmarked.length > 0 ||
-               sending`, which took the click, the focus and the explanation
-               away together -- see `refusal`. The in-flight half stays: a
-               second Submit while the first is out would type into a picker
-               that is already moving. */
-            disabled={sending}
+            /* `sending` OR a free-text choice -- never a missing mark (see
+               `refusal`); `data-question-terminal-note` says why. */
+            disabled={sending || freeChosen}
+            aria-disabled={freeChosen ? true : undefined}
+            aria-describedby={freeChosen ? terminalNoteId : undefined}
             /* What the control is short of, as a fact rather than as a
                colour, for anything that has to check the state without
                reading a sentence. */
@@ -5926,7 +6054,7 @@ function QuestionCard({
             onClick={trySend}
             className={[
               'flex items-center gap-1.5 rounded-[6px] border px-1.5 py-1 text-control',
-              sending
+              sending || freeChosen
                 ? 'cursor-default border-line text-ink-faint'
                 : `cursor-pointer border-running text-ink hover:${OPTION_FILL}`,
             ].join(' ')}
@@ -5965,14 +6093,28 @@ function QuestionCard({
               submits"), and a control that already carries its own key need
               not be repeated beside it. */}
           <span data-question-progress className="text-meta text-ink-faint">
-            {pending.length > 1
-              ? unmarked.length > 0
-                ? `${pending.length - unmarked.length} of ${pending.length} marked`
-                : null
-              : unmarked.length > 0
-                ? 'not marked yet — pick an option above'
-                : null}
+            {freeChosen
+              ? null
+              : pending.length > 1
+                ? unmarked.length > 0
+                  ? `${pending.length - unmarked.length} of ${pending.length} marked`
+                  : null
+                : unmarked.length > 0
+                  ? 'not marked yet — pick an option above'
+                  : null}
           </span>
+          {freeChosen && (
+            /* Set-level, apart from `refusal`: a status, not an alert. */
+            <p
+              id={terminalNoteId}
+              data-question-terminal-note
+              role="status"
+              className="basis-full break-words text-control text-waiting"
+            >
+              Free text is typed in the terminal. Answer this whole set there; Submit is off so
+              nothing is sent from here.
+            </p>
+          )}
         </div>
       )}
       {refusal !== null && (
@@ -8309,12 +8451,14 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
    * established, which is not permission. So for every other row nothing is
    * read at all -- vam does not look into a pane it may not act in -- and the
    * waiting note above stays the whole of what is offered.
+   * A recorded set is read too, but only one with a step to follow
+   * (`followsPane`).
    */
   const readable =
     prompt !== undefined &&
     entry !== null &&
     waitingFor !== undefined &&
-    recorded.length === 0 &&
+    (recorded.length === 0 || followsPane(recorded)) &&
     entry.session.vamControlled === true;
   const [paneAsk, setPaneAsk] = useState<PanePrompt | null>(null);
   const projectId = entry?.project.id ?? '';
@@ -10005,6 +10149,8 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                     onChat={startChat}
                     onAnswer={questionOnAnswer}
                     onSuggest={setSuggestion}
+                    pane={recorded.length > 0 ? paneAsk : null}
+                    freeText={recorded.length > 0}
                     phone
                   />
                 </div>
@@ -10337,6 +10483,8 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                 onChat={startChat}
                 onAnswer={questionOnAnswer}
                 onSuggest={setSuggestion}
+                pane={recorded.length > 0 ? paneAsk : null}
+                freeText={recorded.length > 0}
               />
             )}
           </div>

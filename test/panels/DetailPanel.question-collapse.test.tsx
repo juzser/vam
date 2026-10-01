@@ -76,7 +76,11 @@ function draw(questions: readonly AgentQuestion[], over: Partial<DetailPanelProp
   );
 }
 
-const options = () => [...document.querySelectorAll<HTMLElement>('[data-question-option]')];
+const options = () => [
+  ...document.querySelectorAll<HTMLElement>(
+    '[data-question-option]:not([data-question-free-text])',
+  ),
+];
 const q = (selector: string) => document.querySelector<HTMLElement>(selector);
 const text = () => document.body.textContent ?? '';
 
