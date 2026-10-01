@@ -175,3 +175,34 @@ describe('AdvancedDisclosure', () => {
     );
   });
 });
+
+describe('description ink (EC-58, operator event #55)', () => {
+  it('draws hints in text-ink-faint and headings and labels in text-ink', () => {
+    render(
+      <SettingsCard id="interface" label="Interface" Icon={Palette} hint="card hint">
+        <SettingsRow label="Row label" hint="row hint">
+          <span>control</span>
+        </SettingsRow>
+      </SettingsCard>,
+    );
+    const cardHint = document.querySelector('[data-settings-panel-hint]') as HTMLElement;
+    const rowHint = screen.getByText('row hint');
+    for (const hint of [cardHint, rowHint]) {
+      expect(hint.classList.contains('text-ink-faint')).toBe(true);
+      expect(hint.classList.contains('text-ink-dim')).toBe(false);
+      expect(hint.classList.contains('vam-sentence')).toBe(true);
+      expect(hint.classList.contains('text-control')).toBe(true);
+    }
+    expect(cardHint.classList.contains('mb-5')).toBe(true);
+    expect(rowHint.classList.contains('mt-1')).toBe(true);
+    expect(rowHint.classList.contains('max-w-[52ch]')).toBe(true);
+    const heading = document.querySelector('[data-settings-heading]') as HTMLElement;
+    const label = screen.getByText('Row label');
+    expect(label.tagName).toBe('H4');
+    for (const el of [heading, label]) {
+      expect(el.classList.contains('text-ink')).toBe(true);
+      expect(el.classList.contains('text-ink-dim')).toBe(false);
+      expect(el.classList.contains('text-ink-faint')).toBe(false);
+    }
+  });
+});

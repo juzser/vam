@@ -173,12 +173,7 @@ function statusSentence(status: GithubAuthStatus | null): string {
       return t('settings.integrations.github.status.unknown', { message: status.message });
     case 'logged-in': {
       const active = status.accounts.find((a) => a.active) ?? status.accounts[0];
-      return active === undefined
-        ? t('settings.integrations.github.status.loggedOut')
-        : t('settings.integrations.github.status.loggedIn', {
-            login: active.login,
-            host: active.host,
-          });
+      return active === undefined ? t('settings.integrations.github.status.loggedOut') : '';
     }
     default:
       return '';
@@ -281,6 +276,10 @@ export function GithubPanel({ api, active, copyText, openExternal }: GithubPanel
       ? (status.accounts.find((a) => a.active)?.missingScopes ?? [])
       : [];
   const isLoggedIn = status?.kind === 'logged-in' && status.accounts.length > 0;
+  const sentence =
+    checking && status === null
+      ? t('settings.integrations.github.rechecking')
+      : statusSentence(status);
   const activeAccount =
     isLoggedIn && status?.kind === 'logged-in' ? status.accounts.find((a) => a.active) : undefined;
   const command =
@@ -341,13 +340,13 @@ export function GithubPanel({ api, active, copyText, openExternal }: GithubPanel
         ) : (
           <>
             <div className="flex flex-col gap-2">
-              <div className="flex items-center gap-2">
-                <span data-github-status className="text-body text-ink">
-                  {checking && status === null
-                    ? t('settings.integrations.github.rechecking')
-                    : statusSentence(status)}
-                </span>
-              </div>
+              {sentence === '' ? null : (
+                <div className="flex items-center gap-2">
+                  <span data-github-status className="text-body text-ink">
+                    {sentence}
+                  </span>
+                </div>
+              )}
               {status?.kind !== 'cli-missing' ? (
                 <button
                   type="button"

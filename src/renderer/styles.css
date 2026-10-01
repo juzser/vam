@@ -2674,6 +2674,15 @@ html {
   --text-control--line-height: calc(var(--vam-pane-size) * 16 / 13);
 }
 
+/* Settings follows the Output text size the same way the reading pane does
+   (operator event #58); the max() in --vam-pane-size keeps it >= today's. */
+[data-settings-overlay] {
+  --text-body: var(--vam-pane-size);
+  --text-body--line-height: calc(var(--vam-pane-size) * 20 / 13);
+  --text-control: calc(var(--vam-pane-size) * 12 / 13);
+  --text-control--line-height: calc(var(--vam-pane-size) * 16 / 13);
+}
+
 .vam-prose-ruler {
   font-size: min(var(--vam-out-font-size), var(--text-control));
 }

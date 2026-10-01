@@ -140,12 +140,7 @@ function statusSentence(status: GitlabAuthStatus | null): string {
       return t('settings.integrations.gitlab.status.unknown', { message: status.message });
     case 'logged-in': {
       const active = status.accounts[0];
-      return active === undefined
-        ? t('settings.integrations.gitlab.status.loggedOut')
-        : t('settings.integrations.gitlab.status.loggedIn', {
-            login: active.login,
-            host: active.host,
-          });
+      return active === undefined ? t('settings.integrations.gitlab.status.loggedOut') : '';
     }
     default:
       return '';
@@ -228,6 +223,10 @@ export function GitlabPanel({ api, active, copyText, openExternal }: GitlabPanel
   };
 
   const isLoggedIn = status?.kind === 'logged-in' && status.accounts.length > 0;
+  const sentence =
+    checking && status === null
+      ? t('settings.integrations.gitlab.rechecking')
+      : statusSentence(status);
   const activeAccount = isLoggedIn && status?.kind === 'logged-in' ? status.accounts[0] : undefined;
   const command =
     pane.kind === 'ok' && pane.authKind === 'logout' ? GITLAB_LOGOUT_COMMAND : GITLAB_LOGIN_COMMAND;
@@ -275,13 +274,13 @@ export function GitlabPanel({ api, active, copyText, openExternal }: GitlabPanel
         ) : (
           <>
             <div className="flex flex-col gap-2">
-              <div className="flex items-center gap-2">
-                <span data-gitlab-status className="text-body text-ink">
-                  {checking && status === null
-                    ? t('settings.integrations.gitlab.rechecking')
-                    : statusSentence(status)}
-                </span>
-              </div>
+              {sentence === '' ? null : (
+                <div className="flex items-center gap-2">
+                  <span data-gitlab-status className="text-body text-ink">
+                    {sentence}
+                  </span>
+                </div>
+              )}
               {status?.kind !== 'cli-missing' ? (
                 <button
                   type="button"

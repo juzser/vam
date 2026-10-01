@@ -324,6 +324,11 @@ const PROVIDER_HINT = CAN_CHOOSE_PROVIDER
 const FOCUS_RING =
   'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink';
 
+/** The text-like fields' shared border and ground (hex inputs, font selects,
+ *  number steppers): the template buttons' border and the selected ground.
+ *  Each control keeps its own radius, size, padding and focus ring. */
+const FIELD = 'border border-line bg-raised text-ink hover:border-line-loud';
+
 /** The two-column form's breakpoint, one spelling shared by the media query and
  *  the Tailwind `md:` classes it agrees with. */
 const WIDE_NAV = '(min-width: 768px)';
@@ -2595,7 +2600,7 @@ function HexField({
         if (hex !== null) onCommit(hex);
       }}
       onBlur={() => setDraft(null)}
-      className={`vam-tap h-[24px] w-[72px] rounded border border-ink-faint bg-well px-1.5 text-center font-mono text-control text-ink outline-none ${FOCUS_RING}`}
+      className={`vam-tap h-[24px] w-[72px] rounded px-1.5 text-center font-mono text-control outline-none ${FIELD} ${FOCUS_RING}`}
     />
   );
 }
@@ -2641,7 +2646,7 @@ function FontFamilySelect({
       aria-label={name}
       value={value}
       onChange={(event) => onCommit(event.target.value)}
-      className={`vam-tap h-[28px] w-full max-w-[280px] rounded border border-ink-faint bg-well px-2 text-body text-ink outline-none ${FOCUS_RING}`}
+      className={`vam-tap h-[28px] w-full max-w-[280px] rounded px-2 text-body outline-none ${FIELD} ${FOCUS_RING}`}
     >
       <option value="">{t('settings.fontFamily.systemDefault')}</option>
       {withMigrated.map((family) => (
@@ -2724,7 +2729,9 @@ function Stepper({
   };
   return (
     <div className="flex items-center">
-      <div className="inline-flex h-[30px] items-center rounded-[8px] border border-ink-faint bg-well p-[3px] has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-ink has-[:focus-visible]:outline-offset-2">
+      <div
+        className={`inline-flex h-[30px] items-center rounded-[8px] p-[3px] ${FIELD} has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-ink has-[:focus-visible]:outline-offset-2`}
+      >
         {/* The ring is on the pill, not the field: at `outline-offset-2` around
             a field inset by 3px it would land on the pill's own border and read
             as a thicker border rather than as a cursor. */}
