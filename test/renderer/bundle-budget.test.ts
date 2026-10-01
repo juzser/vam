@@ -813,7 +813,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * 220,200 by 18 B). `ENTRY_BUDGET_BYTES` moves 733,600 -> 733,900 and
  * `ENTRY_GZIP_BUDGET_BYTES` moves 220,200 -> 220,350: the measured figures
  * plus ~180 B / ~130 B of slack, inside the epic allowance's 734,000 /
- * 220,400 ceiling.
+ * 220,400 ceiling. After the merge queue rebased this task onto integration
+ * with task-21, the same measurement read entry 734,798 B and gzip 220,648 B:
+ * the extra growth arrived with task-21 on integration, not from this task.
+ * Plan v17 allows up to 735,200 / 220,800, so `ENTRY_BUDGET_BYTES` moves
+ * 733,900 -> 735,000 and `ENTRY_GZIP_BUDGET_BYTES` moves 220,350 -> 220,750
+ * (~200 B / ~100 B of slack over the post-rebase figures).
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -824,8 +829,8 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 // depends on is even present, decided BEFORE anything tries to build.
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
-const ENTRY_BUDGET_BYTES = 733_900;
-const ENTRY_GZIP_BUDGET_BYTES = 220_350;
+const ENTRY_BUDGET_BYTES = 735_000;
+const ENTRY_GZIP_BUDGET_BYTES = 220_750;
 
 // The one string this repo's markdown stack ships that nothing else in the
 // dependency graph or vam's own source does: `gfmTable`, the extension name
