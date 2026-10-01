@@ -227,6 +227,8 @@ export function createPrefsBridge(ipc: InvokerLike) {
      * this forwards.
      */
     setUiZoom: (percent: unknown) => unwrap<void>(ipc.invoke(CHANNELS.setUiZoom, percent)),
+    /** The PRs view's filter set; main validates it (`parsePrFilters`). */
+    setPrFilters: (filters: unknown) => unwrap<void>(ipc.invoke(CHANNELS.setPrFilters, filters)),
   };
 }
 

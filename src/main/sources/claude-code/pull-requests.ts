@@ -1,5 +1,5 @@
 /**
- * The pull requests on a session's branch, via the `gh` CLI.
+ * The repository's pull requests, filtered and sorted by GitHub, via the `gh` CLI.
  *
  * THIS IS THE FIRST TIME VAM REACHES THE NETWORK ON THE OPERATOR'S BEHALF,
  * with the operator's own credentials -- until now its only outbound call was
@@ -49,6 +49,13 @@
 import { execFile } from 'node:child_process';
 import { statSync } from 'node:fs';
 import type { PullRequest, PullRequestChecks, PullRequestList } from '../../../shared/model.js';
+import {
+  DEFAULT_PR_FILTERS,
+  PR_LIMIT,
+  type PrFilters,
+  parsePrFilters,
+  prFilterKey,
+} from '../../../shared/pr-filters.js';
 import { checkPrLink } from '../../../shared/pr-link.js';
 import { cliMissingMessage } from '../../env/cli-missing.js';
 
@@ -76,11 +83,10 @@ const defaultExists = (path: string): boolean => {
 const MAX_CLI_MESSAGE = 400;
 
 /**
- * How many pull requests one branch may contribute. A branch usually has one;
- * a long-lived branch reused across several merges has a handful. The cap is
- * what stops a pathological branch from filling a narrow pane.
+ * How many pull requests one query may return: the newest 50 of the filter
+ * set, in the set's own sort order. The cap is what stops a busy repository
+ * from filling a narrow pane, and the pane says so when it is reached.
  */
-const PR_LIMIT = 10;
 
 /**
  * The fields the pane draws, and no others.
@@ -132,31 +138,55 @@ const PR_FIELDS = [
 ] as const;
 
 /**
- * The exact argv. The branch is ONE element and is never interpolated:
- * `execFile` runs no shell, so a branch name containing a space, a quote or a
- * semicolon has no meaning beyond being a branch name.
+ * The exact argv for one filter set. Every element is a fixed literal chosen
+ * by a closed `PrFilters` value: nothing from the renderer's text reaches it,
+ * and `--search` is ONE element built only from fixed qualifiers. `execFile`
+ * runs no shell.
  *
  * No `--repo`: which repository is asked about is decided by the working
- * directory vam runs this in, which is the session's own `cwd`. Naming a
- * repository here would let a session's pane describe a repository the
- * session is not in.
+ * directory vam runs this in. No `--head`: the list is the repository's, and
+ * filtering and sorting happen in GitHub's query, so a match outside the
+ * newest `PR_LIMIT` overall is still found.
  *
- * `--state all` because a merged or closed pull request for this branch is
- * exactly as worth seeing as an open one -- "it already merged" is an answer.
+ * `--state open` already includes drafts, so Ready and Draft ride `--search`;
+ * search's closed includes merged, so Closed adds `is:unmerged`. `--author
+ * @me` is resolved by gh itself, so vam never looks up the viewer.
  */
-export function prListArgv(branch: string): readonly string[] {
+export function prListArgv(filters: PrFilters): readonly string[] {
+  const state = filters.state === 'ready' || filters.state === 'draft' ? 'open' : filters.state;
+  const qualifier =
+    filters.state === 'ready'
+      ? 'draft:false '
+      : filters.state === 'draft'
+        ? 'draft:true '
+        : filters.state === 'closed'
+          ? 'is:unmerged '
+          : '';
   return [
     'pr',
     'list',
-    '--head',
-    branch,
     '--state',
-    'all',
+    state,
+    ...(filters.author === 'mine' ? ['--author', '@me'] : []),
+    '--search',
+    `${qualifier}sort:${filters.sort}-desc`,
     '--limit',
     String(PR_LIMIT),
     '--json',
     PR_FIELDS.join(','),
   ];
+}
+
+/**
+ * The filter set the next read asks for. Module state, a projection of the
+ * renderer's pref pushed over the desktop-only `setPrFilters` channel, like
+ * `setPrRepoOverrides` in `pr-repos.ts`. Defaults until set.
+ */
+let currentFilters: PrFilters = DEFAULT_PR_FILTERS;
+
+/** Replace the set. Total: anything malformed lands per field on the default. */
+export function setPrFilters(raw: unknown): void {
+  currentFilters = parsePrFilters(raw);
 }
 
 const clip = (text: string): string =>
@@ -495,12 +525,22 @@ export function parsePrList(stdout: string): PullRequestList {
 /** What actually asks GitHub. Injectable so the throttle can be tested without a spawn. */
 export type ReadPrsFn = (input: {
   cwd: string;
+  /** Only a label for failure sentences; the query itself is not branch-scoped. */
   branch: string;
+  filters?: PrFilters;
   /** Optional so every existing caller and fake still compiles, and FALSE by
    *  default because "the session's own directory" is what vam did before
    *  anyone could choose otherwise. */
   overridden?: boolean;
 }) => Promise<PullRequestList>;
+
+/** The slice of `execFile` used here, injectable so a test can answer by argv. */
+export type GhRunner = (
+  file: string,
+  args: readonly string[],
+  options: { cwd: string; timeout: number; maxBuffer: number; windowsHide: boolean },
+  callback: (failure: Error | null, stdout: string | Buffer, stderr: string | Buffer) => void,
+) => unknown;
 
 /**
  * Run `gh pr list`. Resolves to a `PullRequestList` and NEVER rejects: a
@@ -508,8 +548,12 @@ export type ReadPrsFn = (input: {
  * the reason with it.
  */
 export const readPullRequestsViaCli =
-  (binary = 'gh', directoryExists: (path: string) => boolean = defaultExists): ReadPrsFn =>
-  ({ cwd, branch, overridden = false }) => {
+  (
+    binary = 'gh',
+    directoryExists: (path: string) => boolean = defaultExists,
+    run: GhRunner = execFile,
+  ): ReadPrsFn =>
+  ({ cwd, branch, filters = DEFAULT_PR_FILTERS, overridden = false }) => {
     /**
      * THE DIRECTORY, BEFORE THE SPAWN, and this is a correction rather than a
      * precaution.
@@ -537,9 +581,9 @@ export const readPullRequestsViaCli =
       );
     }
     return new Promise((resolve) => {
-      execFile(
+      run(
         binary,
-        prListArgv(branch),
+        prListArgv(filters),
         { cwd, timeout: PR_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES, windowsHide: true },
         (failure, stdout, stderr) => {
           resolve(
@@ -566,12 +610,15 @@ export const readPullRequestsViaCli =
 export const MIN_PR_READ_INTERVAL_MS = 60_000;
 
 /**
- * Beyond this many remembered branches the cache is dropped whole. vam shows
+ * Beyond this many remembered queries the cache is dropped whole. vam shows
  * single digits of sessions, so this is only ever reached by a long-running
  * app that has watched many branches come and go -- and forgetting them costs
  * one extra read each, never a wrong answer.
  */
-const MAX_CACHED_BRANCHES = 64;
+const MAX_CACHED_QUERIES = 64;
+
+/** What failure sentences call the thing asked about: the list is repository-wide. */
+const SUBJECT = 'this repository';
 
 export type ReadPullRequests = (input: {
   cwd: string;
@@ -590,8 +637,9 @@ export type ReadPullRequests = (input: {
  * answering the same way every time. That is the hole this closes, not a
  * smaller version of it.
  *
- * Keyed by working directory AND branch, because two sessions in one checkout
- * on different branches are genuinely different questions.
+ * Keyed by working directory AND filter set: the list is the repository's, so
+ * two sessions in one checkout on different branches ask the same question,
+ * and the same checkout under another filter set asks a different one.
  */
 export function createPullRequestReader(
   read: ReadPrsFn,
@@ -600,17 +648,10 @@ export function createPullRequestReader(
   const cache = new Map<string, { at: number; list: PullRequestList }>();
   const inFlight = new Map<string, Promise<PullRequestList>>();
 
-  return async ({ cwd, branch, overridden = false }) => {
-    if (branch === null) {
-      // vam has no branch for this session, so there is no question to ask.
-      // Reported rather than left absent: this source HAS a pull-request
-      // surface, it just cannot aim it here.
-      return unavailable(
-        'branch-unknown',
-        'vam could not tell which branch this session is on, so it has nothing to ask GitHub about',
-      );
-    }
-    const key = `${cwd} ${branch}`;
+  return async ({ cwd, overridden = false }) => {
+    const filters = currentFilters;
+    const filterKey = prFilterKey(filters);
+    const key = `${cwd}\n${filterKey}`;
     const last = cache.get(key);
     if (last !== undefined && now() - last.at < MIN_PR_READ_INTERVAL_MS) {
       return last.list;
@@ -621,16 +662,17 @@ export function createPullRequestReader(
     const pending = (async () => {
       let list: PullRequestList;
       try {
-        list = await read({ cwd, branch, overridden });
+        list = await read({ cwd, branch: SUBJECT, filters, overridden });
       } catch (error) {
         // `readPullRequestsViaCli` turns every ordinary failure into a value,
         // so a throw here is something neither it nor this reader foresaw.
         list = unavailable(
           'gh-failed',
-          `asking GitHub about ${branch} failed: ${error instanceof Error ? clip(error.message) : 'unknown error'}`,
+          `asking GitHub about ${SUBJECT} failed: ${error instanceof Error ? clip(error.message) : 'unknown error'}`,
         );
       }
-      if (cache.size >= MAX_CACHED_BRANCHES) cache.clear();
+      if (list.kind === 'ok') list = { ...list, filterKey };
+      if (cache.size >= MAX_CACHED_QUERIES) cache.clear();
       cache.set(key, { at: now(), list });
       inFlight.delete(key);
       return list;

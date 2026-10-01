@@ -187,6 +187,7 @@ declare global {
       readonly prefs?: {
         setPrRepos?(map: unknown): Promise<void>;
         setUiZoom?(percent: unknown): Promise<void>;
+        setPrFilters?(filters: unknown): Promise<void>;
       };
       /**
        * THE ADHD SKILL CARD'S BRIDGE: status, install, remove. Desktop-only,

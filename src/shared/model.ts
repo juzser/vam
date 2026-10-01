@@ -482,7 +482,12 @@ export type PullRequest = {
  * that could not be asked.
  */
 export type PullRequestList =
-  | { readonly kind: 'ok'; readonly prs: readonly PullRequest[] }
+  | {
+      readonly kind: 'ok';
+      readonly prs: readonly PullRequest[];
+      /** The `prFilterKey` of the filter set this list answered; absent from older readers. */
+      readonly filterKey?: string;
+    }
   | { readonly kind: 'unavailable'; readonly code: string; readonly message: string };
 
 /**

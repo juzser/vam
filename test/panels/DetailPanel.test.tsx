@@ -4048,7 +4048,7 @@ describe('the live line stands beside the answer, not instead of it', () => {
  * find out, on the operator's behalf and with the operator's credentials.
  *
  * What is pinned here is mostly the same thing the module underneath pins:
- * "this branch has no pull request" and "vam could not ask" must not look
+ * "no pull requests match these filters" and "vam could not ask" must not look
  * alike. A pane that renders a failure as an empty list would be telling the
  * operator there is nothing to see, on the strength of never having found
  * out. Every fixture below is invented.
@@ -4129,7 +4129,7 @@ describe('the PRs tab', () => {
     expect(all('[data-pr-row]')).toHaveLength(0);
     expect(q('[data-prs-empty]')).not.toBeNull();
     expect(q('[data-prs-unavailable]')).toBeNull();
-    expect(body()).toContain('no pull request');
+    expect(body()).toContain('No pull requests match these filters.');
   });
 
   it('says vam could not ask, in gh’s own terms, and never calls that "none"', () => {

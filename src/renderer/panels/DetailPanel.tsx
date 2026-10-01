@@ -116,6 +116,12 @@ import type { AgentWork } from '../../shared/agent-work.js';
 import type { AnswerRequest, AnswerResult, PanePrompt, PromptView } from '../../shared/answer.js';
 import type { PrAction } from '../../shared/pr-action.js';
 import {
+  DEFAULT_PR_FILTERS,
+  PR_LIMIT,
+  type PrFilters,
+  prFilterKey,
+} from '../../shared/pr-filters.js';
+import {
   CAN_CHOOSE_PROVIDER,
   PROVIDERS,
   type ProviderId,
@@ -151,6 +157,12 @@ import { questionKeys, resolveQuestionKey } from '../keyboard/question-keys.js';
 import { ChordGlyphs, ShortcutTip } from '../keyboard/ShortcutTip.js';
 import { usePhoneViewport } from '../phone/viewport.js';
 import { type AgentPermissions, isDesktopShell } from '../prefs/agent-permissions.js';
+import {
+  browserStorage,
+  changePrFilters,
+  getPrFilters,
+  subscribePrFilters,
+} from '../prefs/prefs.js';
 import {
   activeFocusView,
   drawsProgressLine,
@@ -208,6 +220,7 @@ import {
 import { Note } from './Note.js';
 import { type OutActionResult, OutActionsProvider } from './out-actions.js';
 import { OUT_MARKDOWN, OUT_URL_TRANSFORM } from './out-markdown.js';
+import { PrFilterBar } from './PrFilterBar.js';
 import { newestSet, toolUseOf } from './question-set.js';
 import { sendKeyRemote } from './send-key-remote.js';
 import { registerStartSession } from './start-session-registry.js';
@@ -1713,9 +1726,12 @@ function PullRequestsTab({
   sessionId,
   bridge,
   reserveCornerHeight = 0,
+  branch = null,
   now = () => new Date(),
 }: {
   readonly pullRequests: PullRequestList | undefined;
+  /** The session's git branch: the row whose head is this one is marked. */
+  readonly branch?: string | null;
   readonly repo?: DetailPanelProps['prRepo'];
   /** The project whose git remote names the repository when nothing is overridden. */
   readonly projectId?: string;
@@ -1882,9 +1898,20 @@ function PullRequestsTab({
         </button>
       </div>
     );
-  const framed = (body: ReactNode) => (
+  /**
+   * THE FILTER SET IN FORCE. Module state in `prefs.ts`, not a prop and not
+   * `Canvas`'s `Prefs` (see `activePrFilters` there). The renderer only draws
+   * the choice: main puts it into the `gh pr list` query.
+   */
+  const filters = useSyncExternalStore(subscribePrFilters, getPrFilters, getPrFilters);
+  const filterKey = prFilterKey(filters);
+  const storage = useMemo(() => browserStorage(), []);
+  const change = (next: PrFilters) => changePrFilters(next, storage);
+  const filtersAreDefault = prFilterKey(DEFAULT_PR_FILTERS) === filterKey;
+  const framed = (body: ReactNode, withBar = true) => (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
       {heading}
+      {withBar ? <PrFilterBar filters={filters} onChange={change} /> : null}
       {body}
     </div>
   );
@@ -1893,6 +1920,7 @@ function PullRequestsTab({
       <p data-prs data-prs-absent className="text-control text-ink-faint">
         This source does not report pull requests for a session.
       </p>,
+      false,
     );
   }
   if (pullRequests.kind === 'unavailable') {
@@ -1908,16 +1936,46 @@ function PullRequestsTab({
       </p>,
     );
   }
-  if (pullRequests.prs.length === 0) {
+  /* A list for ANOTHER filter set is never drawn as this one's: until main
+     answers the new key the rows are unmounted. A list that carries no key
+     (an older reader) is drawn as is. */
+  if (pullRequests.filterKey !== undefined && pullRequests.filterKey !== filterKey) {
     return framed(
-      <p data-prs data-prs-empty className="text-control text-ink-faint">
-        This branch has no pull request on GitHub.
+      <p data-prs data-prs-loading role="status" className="text-control text-ink-faint">
+        Asking GitHub for these pull requests…
       </p>,
     );
   }
+  if (pullRequests.prs.length === 0) {
+    return framed(
+      <div
+        data-prs
+        data-prs-empty
+        data-prs-empty-filtered
+        className="flex flex-col items-start gap-2"
+      >
+        <p className="text-control text-ink-faint">No pull requests match these filters.</p>
+        {filtersAreDefault ? null : (
+          <button
+            type="button"
+            data-pr-filters-clear
+            onClick={() => change(DEFAULT_PR_FILTERS)}
+            className={`vam-hit-24 cursor-pointer rounded border border-line px-2 py-0.5 text-ink-dim text-meta hover:border-line-loud hover:text-ink ${FOCUS_RING}`}
+          >
+            Clear filters
+          </button>
+        )}
+      </div>,
+    );
+  }
   const at = now();
+  const count = pullRequests.prs.length;
   return framed(
     <>
+      <p data-prs-count aria-live="polite" className="flex-none select-text text-ink-dim text-meta">
+        {count === 1 ? '1 pull request' : `${count} pull requests`}
+        {count === PR_LIMIT ? ` (the ${PR_LIMIT} most recently ${filters.sort})` : ''}
+      </p>
       <ul
         data-prs
         /**
@@ -1952,6 +2010,7 @@ function PullRequestsTab({
             key={pr.number}
             pr={pr}
             now={at}
+            current={branch !== null && pr.headRefName === branch}
             /* WITHDRAWN, NOT DISABLED, three times over: no bridge (the
                browser build), nothing to open (an address vam would refuse,
                which the reader already turned into `null`), and no session to
@@ -2255,10 +2314,13 @@ const PR_ACTION_SKIN =
 function PullRequestRow({
   pr,
   now,
+  current,
   onOpen,
   onAsk,
 }: {
   readonly pr: PullRequest;
+  /** Its head is the session's own branch: marked, never reordered. */
+  readonly current: boolean;
   readonly now: Date;
   readonly onOpen: ((url: string) => void) | null;
   readonly onAsk: ((pending: PendingPrAction) => void) | null;
@@ -2312,8 +2374,22 @@ function PullRequestRow({
           that reads it, AND on `title=` for an eye -- a truncated name with
           nowhere to read the rest is information the pane had and threw away,
           which is the same bargain `data-pr-branches` makes below. */}
-      <span data-pr-title title={pr.title} className="block truncate text-left text-body text-ink">
-        {pr.title}
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span
+          data-pr-title
+          title={pr.title}
+          className="block min-w-0 truncate text-left text-body text-ink"
+        >
+          {pr.title}
+        </span>
+        {current ? (
+          <span
+            data-pr-current
+            className="flex-none rounded border border-line px-1 text-ink-dim text-meta"
+          >
+            This branch
+          </span>
+        ) : null}
       </span>
       {/* THE META LINE, AND THE AGE IS ON IT NOW.
           `3h` used to be the third quantity on the rail's number line, sharing
@@ -2638,6 +2714,7 @@ function PullRequestRow({
       data-pr-row
       data-pr-state={pr.state}
       data-pr-checks={pr.checks}
+      data-prs-row-current={current ? 'true' : undefined}
       /* THE QUERY CONTAINER IS THE ROW AND THE RESPONDING BOX IS INSIDE IT. A
          container query does not apply to the element that DECLARES the
          container, so `@container` and `@min-[356px]:flex-row` on one element
@@ -9588,6 +9665,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                reason it is: a column at the pane's right edge cannot be
                cleared by right-hand padding. */
             reserveCornerHeight={cornerReserveHeight}
+            branch={entry?.session.branch ?? null}
           />
         ) : current === 'Files' ? // Drawn by the ALWAYS-MOUNTED `FilesTab` sibling below instead --
         // see its own comment for why. This slot contributes nothing so the

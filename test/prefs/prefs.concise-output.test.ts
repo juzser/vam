@@ -79,6 +79,6 @@ describe('migration: this value has no reader left in main', () => {
     // would not survive either.
     const { createPrefsBridge } = await import('../../src/preload/api.js');
     const bridge = createPrefsBridge({ invoke: async () => ({ ok: true, value: undefined }) });
-    expect(Object.keys(bridge)).toEqual(['setPrRepos', 'setUiZoom']);
+    expect(Object.keys(bridge)).toEqual(['setPrRepos', 'setUiZoom', 'setPrFilters']);
   });
 });

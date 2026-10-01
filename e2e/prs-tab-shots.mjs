@@ -1785,6 +1785,116 @@ const readRails = () =>
   await page.close();
 }
 
+/*
+ * The filter bar, count and states (task 16): default set, Everyone + All at
+ * the cap, the loading state a change leaves behind, and no-match. Every PR is
+ * invented; `__answer` stands in for main's list and a `focus` event is the
+ * reload that fetches it. 1280x800 and a 900px pane.
+ */
+{
+  const filterKey = (author, state, sort) => `${author}|${state}|${sort}`;
+  const invented = (count, key) => ({
+    kind: 'ok',
+    filterKey: key,
+    prs: Array.from({ length: count }, (_, i) => ({
+      number: 300 - i,
+      title: `Invented pull request ${300 - i}`,
+      state: 'open',
+      checks: 'none',
+      additions: 10,
+      deletions: 2,
+      changedFiles: 1,
+      headRefName: i === 0 ? 'fix/pool-limit' : `topic/${i}`,
+      baseRefName: 'main',
+      author: i % 2 === 0 ? 'operator' : 'someone-else',
+      review: null,
+      updatedAt: new Date(Date.now() - (i + 1) * 3600_000).toISOString(),
+      labels: [],
+      url: `https://github.com/operator/atlas/pull/${300 - i}`,
+      mergeable: null,
+    })),
+  });
+  const answerWith = async (page, answer) => {
+    await page.evaluate((a) => {
+      globalThis.window.__answer = a;
+      globalThis.window.dispatchEvent(new Event('focus'));
+    }, answer);
+  };
+  for (const width of [1280, 900]) {
+    const page = await browser.newPage({ viewport: { width, height: 800 } });
+    await page.addInitScript(install);
+    await page.addInitScript((a) => {
+      const api = globalThis.window.api;
+      const baseLoad = api.load;
+      globalThis.window.__answer = a;
+      api.load = async () => {
+        const projects = await baseLoad();
+        for (const project of projects) {
+          for (const session of project.sessions) session.pullRequests = globalThis.window.__answer;
+        }
+        return projects;
+      };
+    }, invented(3, filterKey('mine', 'open', 'updated')));
+    await page.goto(origin, { waitUntil: 'networkidle' });
+    await openPrs(page);
+    const tag = `${width}`;
+
+    check(
+      `${tag}: the filter bar is drawn with Mine pressed`,
+      (await page.locator('[data-pr-filter-choice="mine"][aria-pressed="true"]').count()) === 1,
+    );
+    check(
+      `${tag}: State and Sort are selects at their defaults`,
+      (await page.locator('[data-pr-filter-state]').inputValue()) === 'open' &&
+        (await page.locator('[data-pr-filter-sort]').inputValue()) === 'updated',
+    );
+    check(
+      `${tag}: the count line reads 3 pull requests`,
+      (await page.locator('[data-prs-count]').innerText()).trim() === '3 pull requests',
+    );
+    check(
+      `${tag}: this session's branch is marked`,
+      (await page.locator('[data-prs-row-current]').count()) === 1,
+    );
+    await page.screenshot({ path: `${outDir}/prs-filters-${tag}-default.png` });
+    console.log(`${outDir}/prs-filters-${tag}-default.png`);
+
+    // 2. A change: stale rows are unmounted until the new key is answered.
+    await page.locator('[data-pr-filter-choice="all"]').click();
+    await page.locator('[data-pr-filter-state]').selectOption('all');
+    await page.waitForSelector('[data-prs-loading]', { timeout: 5_000 });
+    check(
+      `${tag}: after a change the loading state replaces the stale rows`,
+      (await page.locator('[data-pr-row]').count()) === 0,
+    );
+    await page.screenshot({ path: `${outDir}/prs-filters-${tag}-loading.png` });
+    console.log(`${outDir}/prs-filters-${tag}-loading.png`);
+
+    await answerWith(page, invented(50, filterKey('all', 'all', 'updated')));
+    await page.waitForSelector('[data-prs-count]', { timeout: 5_000 });
+    const capped = (await page.locator('[data-prs-count]').innerText()).trim();
+    check(
+      `${tag}: Everyone + All names the cap`,
+      capped === '50 pull requests (the 50 most recently updated)',
+      capped,
+    );
+    await page.screenshot({ path: `${outDir}/prs-filters-${tag}-everyone-all.png` });
+    console.log(`${outDir}/prs-filters-${tag}-everyone-all.png`);
+
+    await page.locator('[data-pr-filter-state]').selectOption('draft');
+    await answerWith(page, { kind: 'ok', filterKey: filterKey('all', 'draft', 'updated'), prs: [] });
+    await page.waitForSelector('[data-prs-empty]', { timeout: 5_000 });
+    check(
+      `${tag}: the no-match state says so and offers Clear filters`,
+      (await page.locator('[data-prs-empty]').innerText()).includes('No pull requests match these filters.') &&
+        (await page.locator('[data-pr-filters-clear]').count()) === 1,
+    );
+    await page.screenshot({ path: `${outDir}/prs-filters-${tag}-no-match.png` });
+    console.log(`${outDir}/prs-filters-${tag}-no-match.png`);
+    await page.close();
+  }
+}
+
 await browser.close();
 
 if (failures.length > 0) {
