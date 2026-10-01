@@ -2503,6 +2503,23 @@ export function TerminalTab({
             </Fragment>
           ))}
         </pre>
+        {composing !== '' && !lines.some((spans) => spans.some((span) => span.cursor)) && (
+          /* THE CANDIDATE WHEN THERE IS NO CARET TO DRAW IT AT: the cursor is
+             `hidden` or `unreadable` in the normal agent state, or sits on a
+             row the capture does not hold, and the box that holds the syllable
+             is invisible. A zero-height sticky wrapper adds no scroll height,
+             so the captured lines never shift, and keeps the text at the
+             visible bottom edge, where the agent's input box is. Not
+             focusable: focus stays on the hidden input. */
+          <div className="sticky bottom-0 left-0 h-0">
+            <span
+              data-terminal-composing
+              className="absolute bottom-0 left-0 max-w-full overflow-hidden whitespace-pre bg-panel text-ink underline decoration-ink-quiet"
+            >
+              {composing}
+            </span>
+          </div>
+        )}
       </OverlayScroll>
     </div>
   );

@@ -322,13 +322,35 @@ describe('the pane says what is being composed, because the box that holds it is
     expect(cursor?.nextElementSibling).toBe(composing);
   });
 
-  it('draws nothing extra when no span carries the cursor', async () => {
-    await open();
+  it.each([
+    ['hidden', { kind: 'hidden' }],
+    ['unreadable', { kind: 'unreadable' }],
+    ['outside the captured lines', { kind: 'at', column: 2, row: 40 }],
+  ] as const)('draws the in-flight candidate when the cursor is %s', async (_name, cursor) => {
+    await open('sent', { kind: 'ok', name: 'vam-atlas-a1b2c3', text: 'the screen', cursor });
     const box = input() as HTMLTextAreaElement;
     composition(box, 'compositionstart', '');
     composition(box, 'compositionupdate', 'tieeng');
     await settle();
-    expect(q('[data-terminal-composing]')).toBeNull();
+    // The input box is invisible, and in the normal Claude Code state the
+    // cursor is not drawn, so the candidate still has to be on screen once.
+    const drawn = (pane() as HTMLElement).querySelectorAll('[data-terminal-composing]');
+    expect(drawn).toHaveLength(1);
+    expect(drawn[0]?.textContent).toBe('tieeng');
+  });
+
+  it('draws the candidate once when the cursor is on screen', async () => {
+    await open('sent', {
+      kind: 'ok',
+      name: 'vam-atlas-a1b2c3',
+      text: 'the screen',
+      cursor: { kind: 'at', column: 3, row: 0 },
+    });
+    const box = input() as HTMLTextAreaElement;
+    composition(box, 'compositionstart', '');
+    composition(box, 'compositionupdate', 'tieeng');
+    await settle();
+    expect(document.querySelectorAll('[data-terminal-composing]')).toHaveLength(1);
   });
 
   it('takes it away again once the syllable has been sent', async () => {
