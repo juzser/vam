@@ -108,7 +108,8 @@ function mount(
 describe('SplitResizer — what it is, before what it does', () => {
   it('is a separator carrying the slider contract, on the axis it divides', () => {
     const { handle } = mount();
-    expect(handle.tagName).toBe('HR');
+    expect(handle.tagName).toBe('DIV');
+    expect(handle.getAttribute('role')).toBe('separator');
     expect(handle.getAttribute('aria-orientation')).toBe('vertical');
     expect(handle.getAttribute('data-split-resize-handle')).toBe('sp:0');
     expect(handle.tabIndex).toBe(0);

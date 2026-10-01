@@ -1188,6 +1188,42 @@ if (Math.abs(painted.width - dragged[0]) > 4) {
 await page.screenshot({ path: `${outDir}/split-resize-ratio.png` });
 console.log(`${outDir}/split-resize-ratio.png`);
 
+// --- THE DIVIDER AT REST. A vivid `--vam-pane-divider` set on the root, the
+// pointer parked away from the handle: the 1px seam child must paint it.
+await page.mouse.move(2, 2);
+await page.evaluate(() => document.documentElement.style.setProperty('--vam-pane-divider', '#ff00aa'));
+// The seam must be inert (a click on it is a click on the handle) and exactly
+// centred on the handle, measured, because jsdom has no layout to prove either.
+const seamGeometry = await page.locator('[data-split-resize-handle]').first().evaluate((handle) => {
+  const seam = handle.querySelector('[data-pane-divider-seam]');
+  if (seam === null) return null;
+  const h = handle.getBoundingClientRect();
+  const r = seam.getBoundingClientRect();
+  return {
+    pointerEvents: getComputedStyle(seam).pointerEvents,
+    dx: r.left + r.width / 2 - (h.left + h.width / 2),
+    dy: r.top + r.height / 2 - (h.top + h.height / 2),
+    seamW: r.width,
+    seamH: r.height,
+    handleW: h.width,
+    handleH: h.height,
+  };
+});
+console.log('divider seam geometry:', seamGeometry);
+if (seamGeometry === null) throw new Error('the pane divider handle holds no [data-pane-divider-seam] child.');
+if (seamGeometry.pointerEvents !== 'none') {
+  throw new Error(`the seam computes pointer-events "${seamGeometry.pointerEvents}", not "none": it would eat the handle's pointer.`);
+}
+if (Math.abs(seamGeometry.dx) > 0.5 || Math.abs(seamGeometry.dy) > 0.5) {
+  throw new Error(`the seam is off-centre on its handle by (${seamGeometry.dx}, ${seamGeometry.dy})px.`);
+}
+if (Math.min(seamGeometry.seamW, seamGeometry.seamH) !== 1) {
+  throw new Error(`the seam is not 1px thick (${seamGeometry.seamW}x${seamGeometry.seamH}).`);
+}
+await page.screenshot({ path: `${outDir}/pane-divider-at-rest.png` });
+console.log(`${outDir}/pane-divider-at-rest.png`);
+await page.evaluate(() => document.documentElement.style.removeProperty('--vam-pane-divider'));
+
 // --- NOTHING SURVIVES THE DRAG. An overlay held across a pointer-capture
 // gesture is the classic way this feature breaks the whole app: it outlives
 // its drag and silently eats every click. Proven by clicking, not by counting
