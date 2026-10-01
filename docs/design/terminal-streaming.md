@@ -582,7 +582,7 @@ parity for the beta, not the flip itself, which the operator will test first.
 | font-size | `12.5px` (the operator's `terminalFontSize`) | `12.5px`, same store |
 | rendered row height | `19.375px` (CSS `line-height: 1.55`, exact) | `19px` (xterm's own `lineHeight` option, corrected -- see below) |
 | a red SGR sample | `rgb(252, 59, 68)` | `rgb(252, 59, 68)` -- both read `activeTerminalScheme()` |
-| branch / session name | drawn on a one-row status rule under the pane | same rule, same order, same classes (`[data-terminal-stream-status]`) |
+| branch / session name | not drawn as visible text: the one-row strip under the pane was removed, and the name survives only in the pane's accessible label (`terminal of <name>`) and the hidden input's (`type into <name>`) | same labels; no strip under the pane |
 | cursor | steady block, never blinks (this file's own design: a poll cannot honestly animate liveness) | steady block, `cursorBlink: false` set to MATCH -- this pane really is live, but the operator's ask is that the two screens look the same |
 | Insert/Select marks | `insertScopeMark`+`insertStopMark` on the pane, the hidden `<textarea>` forwarded to | `insertScopeMark` on the pane, `INSERT_STOP` on xterm's own `term.textarea` directly (already shipped, task-breakdown item 4) |
 
@@ -635,7 +635,8 @@ until this task.** `StreamOpenResult` (`main/terminal/stream-ipc.ts`) now
 carries `name: match.name` alongside `seed` -- the SAME `targetSession`
 pairing `terminal/ipc.ts`'s `read` channel resolves for `TerminalTab.tsx`'s
 own `view.name`. Threaded through `preload/api.ts`'s `TerminalStreamApi.open`
-type and drawn on the new status rule; `null` until the stream actually opens
+type for the pane's accessible label; the visible status strip that once drew
+it was removed, and nothing on screen shows the name now. It is `null` until the stream actually opens
 (`TerminalTab.tsx`'s own `view` starts `null` for the identical
 never-invent-an-identity reason).
 
