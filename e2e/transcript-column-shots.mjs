@@ -1638,8 +1638,29 @@ const POPOVER_VIEWPORTS = [
   { name: 'desktop', width: 1280, height: 800 },
   { name: 'pane-700', width: 700, height: 800 },
 ];
+// The demo source reports no terminal and no prompt delivery, so the model and mode
+// triggers never render on a plain ?demo=1 build. Force both capabilities in the served
+// bundle (same patterns as model-picker-shots.mjs); throw if they stop matching.
+const POP_TERMINAL = /[\w$]+\.kind===`session`&&[\w$]+\([^()]*\)\.capabilities\.terminal/g;
+const POP_DELIVERS = /[\w$]+\.kind===`session`&&[\w$]+\([^()]*\)\.capabilities\.deliverPrompt/g;
+const forceCapabilities = async (pg) => {
+  let patched = 0;
+  await pg.route('**/assets/*.js', async (route) => {
+    const response = await route.fetch();
+    const body = await response.text();
+    const t = new RegExp(POP_TERMINAL.source).test(body);
+    const d = new RegExp(POP_DELIVERS.source).test(body);
+    if (t !== d) throw new Error(`bundle carries only one capability expression (terminal: ${t}, deliverPrompt: ${d})`);
+    if (t) patched += 1;
+    await route.fulfill({ response, body: t ? body.replace(POP_TERMINAL, '!0').replace(POP_DELIVERS, '!0') : body });
+  });
+  return () => {
+    if (patched === 0) throw new Error('no chunk carried the capability expressions; the popover menus would not render');
+  };
+};
 for (const vp of POPOVER_VIEWPORTS) {
   const popPage = await browser.newPage({ viewport: { width: vp.width, height: vp.height } });
+  const assertForced = await forceCapabilities(popPage);
   popPage.on('pageerror', (err) => console.error('PAGE ERROR (popover):', err));
   await popPage.addInitScript(
     ([key, payload]) => window.localStorage.setItem(key, payload),
@@ -1647,6 +1668,7 @@ for (const vp of POPOVER_VIEWPORTS) {
   );
   await popPage.goto(`${origin}/?demo=1&history=off`, { waitUntil: 'networkidle' });
   await popPage.waitForSelector('[data-tab-strip]');
+  assertForced();
   await openSession(popPage, 'notes-1');
   const popBox = popPage.locator('textarea[aria-label="prompt to session"]');
   await popBox.focus();
