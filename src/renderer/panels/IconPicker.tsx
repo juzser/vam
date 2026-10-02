@@ -132,8 +132,11 @@ export function IconPicker({ title, value, onPick, onClose }: IconPickerProps) {
         // desktop the panel is what fixes the picker at the grid's own 340px.
         className="relative z-10 w-[340px] overflow-hidden rounded-[var(--radius-lg)] border border-line bg-panel shadow-[var(--shadow-node)]"
       >
-        <div className="flex items-center gap-2 border-line border-b px-3 py-2">
-          <span className="text-meta text-ink-faint">icon cho</span>
+        <div
+          data-icon-picker-heading
+          className="flex items-center gap-2 border-line border-b px-3 py-2"
+        >
+          <span className="text-meta text-ink-faint">Icon for</span>
           <span className="font-mono font-semibold text-body text-ink">{title}</span>
           <button
             type="button"
