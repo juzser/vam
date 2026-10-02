@@ -1806,8 +1806,6 @@ for (const vp of POPOVER_VIEWPORTS) {
     if (root === 'mode') {
       await assertModeLayout(popPage, vp.name);
     }
-    if (m !== null) {
-    }
     await popPage.screenshot({
       path: `${outDir}/composer-popover-${root}-${vp.name}-${theme}.png`,
     });
