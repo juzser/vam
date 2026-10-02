@@ -410,14 +410,14 @@ export async function readRolloutTail(
     const window = await source.read(from, boundary);
     spent += boundary - from;
     if (window.text !== '') {
-      const { lines, offsets: found } = parseWithOffsets(window.text, window.start);
+      const { lines, offsets: windowOffsets } = parseWithOffsets(window.text, window.start);
       for (const line of lines) {
         const found = itemOf(line);
         if (found?.item.type === 'UserMessage') sawUser = true;
         if (found?.item.type === 'AgentMessage') sawAgent = true;
       }
       collected.unshift(...lines);
-      offsets.unshift(...found);
+      offsets.unshift(...windowOffsets);
     }
     // The stop rule is the raw material of one turn -- a question and an
     // answer -- exactly as `claude-code/tail.ts` states it. The byte ceiling

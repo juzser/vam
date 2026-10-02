@@ -406,26 +406,26 @@ describe('Codex turn ids across window slides', () => {
 
     it('(i) a read holding U1..A2 is one turn', async () => {
       const d = await run(0);
-      expect(d).toHaveLength(1);
-      expect(d[0]).toMatchObject({ id: 'd-turn-x', input: 'U1\n\nU2', output: 'A1\n\nA2' });
+      expect(d).toMatchObject([{ id: 'd-turn-x', input: 'U1\n\nU2', output: 'A1\n\nA2' }]);
     });
 
     it('(ii) an answer-opened turn takes the steered text alone', async () => {
       const d = await run(1);
-      expect(d).toHaveLength(1);
-      expect(d[0]).toMatchObject({
-        id: 'd-turn-x',
-        input: 'U2',
-        promptedAt: null,
-        openedMidTurn: true,
-      });
+      expect(d).toMatchObject([
+        { id: 'd-turn-x', input: 'U2', promptedAt: null, openedMidTurn: true },
+      ]);
       expect(d[0]?.latestAt).toBe('2020-01-01T00:04:59.000Z');
     });
 
     it('(iii) a window opening after A1 is one turn opened by U2', async () => {
       const d = await run(2);
-      expect(d).toHaveLength(1);
-      expect(d[0]).toMatchObject({ id: 'd-turn-x', input: 'U2', output: 'A2' });
+      expect(d).toMatchObject([{ id: 'd-turn-x', input: 'U2', output: 'A2' }]);
+    });
+
+    it('a steered message with no text keeps the input and advances latestAt', async () => {
+      const lines = [msg('UserMessage', 1, X, 'U1'), msg('UserMessage', 3, X, '')];
+      const d = (await readFrom(`${lines.join('\n')}\n`, 0)).decisions;
+      expect(d).toMatchObject([{ input: 'U1', latestAt: '2020-01-01T00:03:00.000Z' }]);
     });
 
     it('a turn_id reused by a non-adjacent turn takes the offset form', async () => {
