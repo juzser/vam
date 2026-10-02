@@ -18,6 +18,8 @@ import {
   threadStartOf,
   turnsFromLines,
 } from '../../src/main/sources/codex/rollout.js';
+import { columnOf, retainLeft } from '../../src/renderer/panels/transcript-history.js';
+import type { Decision } from '../../src/shared/model.js';
 
 const TURN = 'turn-1';
 
@@ -273,6 +275,179 @@ describe('readRolloutTail', () => {
     const read = await readRolloutTail(sourceOf(`${userItem('only a question')}\n`), 'd', 1024);
     expect(read.starved).toBe(false);
     expect(read.decisions[0]?.output).toBeNull();
+  });
+});
+
+/** A turn keeps one id as the window slides: five turns T1..T5 read through the real `readRolloutTail`. */
+describe('Codex turn ids across window slides', () => {
+  const P = 'd';
+  const msg = (kind: string, n: number, turnId: string | null, text: string, extra = {}) =>
+    JSON.stringify({
+      timestamp: `2020-01-01T00:${String(n).padStart(2, '0')}:${kind === 'UserMessage' ? '00' : '59'}.000Z`,
+      type: 'event_msg',
+      payload: {
+        type: 'item_completed',
+        ...(turnId === null ? {} : { turn_id: turnId }),
+        item: { type: kind, id: 'i', content: [{ type: 'text', text }], ...extra },
+      },
+    });
+  /** One turn's three lines; `ids` false drops every `turn_id`. */
+  const turnLines = (n: number, ids: boolean): string[] => {
+    const id = ids ? `turn-${n}` : null;
+    return [
+      // T1's prompt holds a non-ASCII character: a character offset would be wrong after it.
+      msg('UserMessage', n, id, n === 1 ? 'question 1 café ✓' : `question ${n}`),
+      msg('CommandExecution', n, id, '', { command: ['/bin/zsh', '-lc', 'ls'], exit_code: 0 }),
+      msg('AgentMessage', n, id, `answer ${n}`),
+    ];
+  };
+  const fixture = (ids: boolean) => {
+    const lines = [1, 2, 3, 4, 5].flatMap((n) => turnLines(n, ids));
+    const startOf = (i: number) => Buffer.byteLength(`${lines.slice(0, i).join('\n')}\n`);
+    return { lines, startOf, text: (to: number) => `${lines.slice(0, to).join('\n')}\n` };
+  };
+  /** Line index of turn n's U (0), C (1) or A (2). */
+  const at = (n: number, part: 0 | 1 | 2) => (n - 1) * 3 + part;
+
+  /** `readRolloutTail` over `text`, its window opening at line index `from`. */
+  const readFrom = async (text: string, fromByte: number) => {
+    const bytes = Buffer.from(text, 'utf8');
+    let start = -1;
+    const source: TranscriptSource = {
+      size: async () => bytes.length,
+      read: async (a, b) => {
+        const w = readWindowOf(bytes, a, b);
+        if (start < 0) start = w.start;
+        return w;
+      },
+    };
+    const facts = await readRolloutTail(source, P, Math.max(1, bytes.length - fromByte));
+    return { decisions: facts.decisions, start };
+  };
+
+  /**
+   * The reads every case compares: `a` (T3,T4) then `b` (T4,T5) slide one turn;
+   * `early` (T2,T3) then `late` (opens at T3's command, so T3 is answer-opened)
+   * are the EC-104 pair. Poll order for EC-107 is early, late, b.
+   */
+  const reads = async (ids: boolean) => {
+    const f = fixture(ids);
+    const turn = f.startOf(at(4, 0)) - f.startOf(at(3, 0));
+    const a = await readFrom(f.text(at(4, 2) + 1), f.startOf(at(4, 0)) - turn - 100);
+    const b = await readFrom(f.text(15), f.startOf(at(4, 0)) - 100);
+    const early = await readFrom(f.text(at(3, 2) + 1), f.startOf(at(3, 0)) - turn - 100);
+    const late = await readFrom(f.text(at(4, 2) + 1), f.startOf(at(3, 1)));
+    return { f, a, b, early, late };
+  };
+  const numberOf = (d: Decision) =>
+    Number(/(\d)$/.exec(d.input === '' ? (d.output ?? '') : d.input)?.[1]);
+
+  it('EC-103: a turn present in two reads has the same id in both, <prefix>-<turn_id>', async () => {
+    const { a, b } = await reads(true);
+    expect(b.start).toBeGreaterThan(a.start);
+    for (const r of [a, b]) {
+      expect(r.decisions.length).toBeGreaterThanOrEqual(2);
+      expect(new Set(r.decisions.map((d) => d.id)).size).toBe(r.decisions.length);
+    }
+    expect(a.decisions.map((d) => d.id)).toEqual(['d-turn-4', 'd-turn-3']);
+    expect(b.decisions.map((d) => d.id)).toEqual(['d-turn-5', 'd-turn-4']);
+  });
+
+  it('EC-104: a turn whose question slid out keeps its id and is flagged answer-opened', async () => {
+    const { early: earlier, late: later } = await reads(true);
+    const before = earlier.decisions.find((d) => d.output === 'answer 3');
+    const after = later.decisions.find((d) => d.output === 'answer 3');
+    expect(after).toMatchObject({ id: 'd-turn-3', input: '', openedMidTurn: true });
+    expect(before?.id).toBe('d-turn-3');
+    expect(before?.openedMidTurn).toBeUndefined();
+  });
+
+  it('EC-105: without turn_id, ids are the opening line byte offset', async () => {
+    const { f, a, b, early, late } = await reads(false);
+    expect(f.lines[0]).toContain('é');
+    expect(a.decisions.map((d) => d.id)).toEqual([
+      `d:@${f.startOf(at(4, 0))}`,
+      `d:@${f.startOf(at(3, 0))}`,
+    ]);
+    expect(b.decisions.map((d) => d.id)).toEqual([
+      `d:@${f.startOf(at(5, 0))}`,
+      `d:@${f.startOf(at(4, 0))}`,
+    ]);
+    const was = early.decisions.find((d) => d.output === 'answer 3');
+    const now = late.decisions.find((d) => d.output === 'answer 3');
+    expect(now).toMatchObject({ id: `d:@${f.startOf(at(3, 2))}`, openedMidTurn: true });
+    expect(was?.id).toBe(`d:@${f.startOf(at(3, 0))}`);
+    for (const r of [a, b, early, late]) {
+      expect(new Set(r.decisions.map((d) => d.id)).size).toBe(r.decisions.length);
+      const flagged = r.decisions.filter((d) => d.openedMidTurn).map((d) => d.output);
+      expect(flagged).toEqual(r === late ? ['answer 3'] : []);
+    }
+  });
+
+  describe('EC-106: a steered UserMessage joins the open turn', () => {
+    const X = 'turn-x';
+    const six = [
+      msg('UserMessage', 1, X, 'U1'),
+      msg('AgentMessage', 2, X, 'A1'),
+      msg('UserMessage', 3, X, 'U2'),
+      msg('AgentMessage', 4, X, 'A2'),
+    ];
+    const run = async (from: number) => {
+      const text = `${six.join('\n')}\n`;
+      const off = Buffer.byteLength(`${six.slice(0, from).join('\n')}${from === 0 ? '' : '\n'}`);
+      return (await readFrom(text, off)).decisions;
+    };
+
+    it('(i) a read holding U1..A2 is one turn', async () => {
+      const d = await run(0);
+      expect(d).toMatchObject([{ id: 'd-turn-x', input: 'U1\n\nU2', output: 'A1\n\nA2' }]);
+    });
+
+    it('(ii) an answer-opened turn takes the steered text alone', async () => {
+      const d = await run(1);
+      expect(d).toMatchObject([
+        { id: 'd-turn-x', input: 'U2', promptedAt: null, openedMidTurn: true },
+      ]);
+      expect(d[0]?.latestAt).toBe('2020-01-01T00:04:59.000Z');
+    });
+
+    it('(iii) a window opening after A1 is one turn opened by U2', async () => {
+      const d = await run(2);
+      expect(d).toMatchObject([{ id: 'd-turn-x', input: 'U2', output: 'A2' }]);
+    });
+
+    it('a steered message with no text keeps the input and advances latestAt', async () => {
+      const lines = [msg('UserMessage', 1, X, 'U1'), msg('UserMessage', 3, X, '')];
+      const d = (await readFrom(`${lines.join('\n')}\n`, 0)).decisions;
+      expect(d).toMatchObject([{ input: 'U1', latestAt: '2020-01-01T00:03:00.000Z' }]);
+    });
+
+    it('a turn_id reused by a non-adjacent turn takes the offset form', async () => {
+      const lines = [
+        msg('UserMessage', 1, X, 'a'),
+        msg('UserMessage', 2, 'turn-y', 'b'),
+        msg('UserMessage', 3, X, 'c'),
+      ];
+      const d = (await readFrom(`${lines.join('\n')}\n`, 0)).decisions;
+      const third = Buffer.byteLength(`${lines.slice(0, 2).join('\n')}\n`);
+      expect(d.map((x) => x.id)).toEqual([`d:@${third}`, 'd-turn-y', 'd-turn-x']);
+    });
+  });
+
+  describe('EC-107: retention folds the polls with no duplicate and no loss', () => {
+    for (const ids of [true, false]) {
+      it(`${ids ? 'with' : 'without'} turn_id`, async () => {
+        const { early, late, b } = await reads(ids);
+        let older: readonly Decision[] = [];
+        let previous: readonly Decision[] = [];
+        for (const live of [early, late, b].map((r) => r.decisions)) {
+          older = retainLeft(previous, live, older);
+          previous = live;
+        }
+        const column = columnOf(previous, older).map(numberOf);
+        expect(column).toEqual([5, 4, 3, 2]);
+      });
+    }
   });
 });
 
