@@ -841,6 +841,16 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * 741,163 by 1,428 B), gzip 221,980 B (under 222,645, so unchanged).
  * `ENTRY_BUDGET_BYTES` moves 741,163 -> 743,500: the measured figure plus
  * 909 B of slack, inside plan v23's 2,000 B allowance.
+ *
+ * A TWENTIETH, FROM vam-ux-3/task-24-history-survives-idle (operator events
+ * #71 and #896 A2): retention across a window slide, the pager reset after a
+ * capped retain and the Bash `!` source are eager code. Measured the way this
+ * test measures it: entry 743,283 B at 07819140, 743,844 B at the first cut and
+ * 744,270 B at head after trimming (the shared command-candidate helper in
+ * `commandsInColumn`, the single skip set and the one-line offset parse in
+ * `retainLeft`); that still exceeds 743,500, so the raise stands.
+ * `ENTRY_BUDGET_BYTES` moves 743,500 -> 744,500 (+1,000 B, inside the 1,024 B
+ * allowance). `ENTRY_GZIP_BUDGET_BYTES` is unchanged at 222,645 (head: 222,643).
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -851,7 +861,7 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 // depends on is even present, decided BEFORE anything tries to build.
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
-const ENTRY_BUDGET_BYTES = 743_500;
+const ENTRY_BUDGET_BYTES = 744_500;
 const ENTRY_GZIP_BUDGET_BYTES = 222_645;
 
 // The one string this repo's markdown stack ships that nothing else in the

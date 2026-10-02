@@ -238,7 +238,9 @@ import {
   cursorToAsk,
   moreState,
   type PagerState,
+  pagerAfterRetain,
   RESTING_PAGER,
+  retainLeft,
   walkOlder,
 } from './transcript-history.js';
 import { usePaneSuggestion } from './use-pane-suggestion.js';
@@ -611,13 +613,37 @@ export function commandsInColumn(
 ): readonly Command[] {
   const seen = new Set<string>();
   const out: Command[] = [];
+  const add = (command: Command) => {
+    if (seen.has(command.command)) return;
+    seen.add(command.command);
+    out.push(command);
+  };
+  const own = (id: string, command: string) =>
+    add({ id, label: command.split(' ')[0] ?? command, command });
+  // `!cmd` and `> !cmd`: the text after the marker, as a candidate of its own.
+  const lift = (turn: Decision, text: string, quoted: RegExp) =>
+    text.split('\n').forEach((line) => {
+      const command = quoted.exec(line.trim())?.[1];
+      if (command) own(`${turn.id}:bang:${command}`, command);
+    });
   const turns = focused === null ? column : [focused, ...column.filter((t) => t.id !== focused.id)];
+  // WHAT THE AGENT RAN FIRST: a Bash tool call's `input.command`
+  // (`Decision.bash`), newest turn first and, within a turn, the last call first.
   for (const turn of turns) {
-    for (const command of turn.commands) {
-      if (seen.has(command.command)) continue;
-      seen.add(command.command);
-      out.push(command);
+    for (const command of [...(turn.bash ?? [])].reverse()) {
+      own(`${turn.id}:bash:${command}`, command);
     }
+  }
+  // THEN THE OPERATOR'S OWN `!cmd` TURNS: a command they typed and sent is the
+  // likeliest one to be reached for again.
+  for (const turn of turns) lift(turn, turn.input, /^!\s*(\S.*)$/);
+  // THEN WHAT THE AGENT PROPOSED: the lines `commands.ts` extracted (fenced,
+  // `! ` marker), and the lines it cannot see because a blockquote `>` or a
+  // list marker comes before the `!`. The composer's line-start rule
+  // (`bangQuery`) is not touched.
+  for (const turn of turns) {
+    for (const command of turn.commands) add(command);
+    lift(turn, turn.output ?? '', /^(?:(?:>|[-*+]\s|\d+[.)]\s)\s*)+!\s*(\S.*)$/);
   }
   return out;
 }
@@ -7162,12 +7188,13 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
    *  - and it is per-pane state that nothing outside this pane renders from,
    *    which is the same test `cycleNote` and the tab already pass.
    *
-   * ONLY THE OLDER HALF IS REMEMBERED, and `transcript-history.ts` carries the
+   * THE OLDER HALF IS WHAT IS REMEMBERED, and `transcript-history.ts` carries the
    * argument in full: the live list is used exactly as the poll delivered it,
    * so this pane holds no second opinion about a turn the poll is still
    * carrying, and `Canvas.tsx`'s optimistic paint -- with the retraction that
    * follows a refused write -- stays the poll's business rather than becoming a
-   * phantom this pane preserves.
+   * phantom this pane preserves. What `older` holds is the turns the pager
+   * walked AND the turns the live window has since slid past (`retainLeft`).
    */
   const [older, setOlder] = useState<readonly Decision[]>(NO_TURNS);
   const [pager, setPager] = useState<PagerState>(RESTING_PAGER);
@@ -7185,12 +7212,40 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
   // for THIS render -- the state updates queued here land on the next one, and
   // drawing the old session's history for one frame is the half-read flash
   // `focusKey` has always existed to avoid.
+  const liveDecisions = entry?.session.decisions ?? NO_TURNS;
+  /**
+   * THE LIVE LIST THE LAST RENDER DREW, so a turn the poll has stopped carrying
+   * can be told from one it never had. The live window is a byte window and it
+   * slides: a turn that rendered here and then left it is kept in `older`
+   * (`retainLeft`), because the reset rule below is the only thing allowed to
+   * drop a turn and it keys on the SESSION ID ALONE -- never on the entry's
+   * identity, which the poll rebuilds every ten seconds, or on a listing field.
+   * State rather than a ref, the render-phase pattern React documents: a ref
+   * written during render is lost on a discarded render.
+   */
+  const [drawnLive, setDrawnLive] = useState<readonly Decision[]>(liveDecisions);
+  let olderNext = older;
+  let pagerNext = pager;
   if (sessionChanged) readingRef.current = null;
   if (sessionChanged && older.length > 0) setOlder(NO_TURNS);
   if (sessionChanged && pager !== RESTING_PAGER) setPager(RESTING_PAGER);
-  const olderNow = sessionChanged ? NO_TURNS : older;
-  const pagerNow = sessionChanged ? RESTING_PAGER : pager;
-  const liveDecisions = entry?.session.decisions ?? NO_TURNS;
+  // A poll that carries no turns for the SAME session is a gap, not a window
+  // slide: it must not become the previous list, or the turn that comes back
+  // under a moved id meets an empty previous (`sameTurnUnderANewId`).
+  if (drawnLive !== liveDecisions && (liveDecisions.length || sessionChanged)) {
+    setDrawnLive(liveDecisions);
+    if (!sessionChanged) {
+      olderNext = retainLeft(drawnLive, liveDecisions, older);
+      if (olderNext !== older) {
+        setOlder(olderNext);
+        // The cap dropped turns off the old end: the pager must not skip them.
+        pagerNext = pagerAfterRetain(pager, older, olderNext);
+        setPager(pagerNext);
+      }
+    }
+  }
+  const olderNow = sessionChanged ? NO_TURNS : olderNext;
+  const pagerNow = sessionChanged ? RESTING_PAGER : pagerNext;
   // Memoized on the two inputs `columnOf` actually reads: an unrelated
   // re-render (a sibling pane's keystroke, a focus flip) must reuse the
   // previous array rather than rebuilding a Set, a filter and a spread over

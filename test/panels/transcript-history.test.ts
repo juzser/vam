@@ -12,6 +12,8 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import { readLiveTail } from '../../src/main/sources/claude-code/tail.js';
+import { readWindowOf, type TranscriptSource } from '../../src/main/sources/claude-code/window.js';
 import type { Decision } from '../../src/renderer/domain/model.js';
 import {
   appendOlder,
@@ -19,9 +21,12 @@ import {
   columnOf,
   cursorToAsk,
   MAX_BLANK_STEPS,
+  MAX_RETAINED_TURNS,
   moreState,
   type PagerState,
+  pagerAfterRetain,
   RESTING_PAGER,
+  retainLeft,
   walkOlder,
 } from '../../src/renderer/panels/transcript-history.js';
 import type { HistoryCursor, TranscriptPage } from '../../src/shared/history.js';
@@ -292,5 +297,131 @@ describe('moreState', () => {
         read,
       ),
     ).toBe('unavailable');
+  });
+});
+
+describe('retainLeft', () => {
+  it('keeps a turn that left the window, in front of what was already walked to', () => {
+    const kept = retainLeft([turn('c'), turn('b')], [turn('d'), turn('c')], [turn('a')]);
+    expect(kept.map((d) => d.id)).toEqual(['b', 'a']);
+  });
+
+  it('holds a turn once however often the window slides, and returns `older` when nothing left', () => {
+    const older = [turn('b')];
+    expect(retainLeft([turn('c')], [turn('c')], older)).toBe(older);
+    expect(retainLeft([turn('b')], [turn('c')], older)).toBe(older);
+  });
+
+  it('never keeps a turn vam painted itself', () => {
+    const paint: Decision = { ...turn('vam-pending-1'), unconfirmed: true };
+    expect(retainLeft([paint, turn('a')], [turn('b')], [])).toEqual([turn('a')]);
+  });
+});
+
+describe('EC-99 the retention cap never skips the pager', () => {
+  it('asks the next walk from the oldest turn still held, so the dropped turns come back', async () => {
+    // Newest first. `n1` is the poll's new turn; `h0` is the live turn that
+    // leaves; `h1..` are turns the pager walked, MAX_RETAINED_TURNS of them.
+    const history = Array.from({ length: MAX_RETAINED_TURNS + 6 }, (_, i) => turn(`h${i}`));
+    const walked = history.slice(1, MAX_RETAINED_TURNS + 1);
+    const handedBack = `@after-${walked.at(-1)?.id}`;
+    const pager: PagerState = { cursor: handedBack, phase: 'rest', error: null };
+    const live = [turn('n1')];
+    const older = retainLeft([history[0] as Decision], live, walked);
+    // The join was one longer than the cap, so the cap dropped the OLDEST end.
+    expect(older).toHaveLength(MAX_RETAINED_TURNS);
+    expect(older.at(-1)?.id).not.toBe(walked.at(-1)?.id);
+
+    const resumed = pagerAfterRetain(pager, walked, older);
+    const column = columnOf(live, older);
+    const read = vi.fn(async (_id: string, cursor: string | null) => {
+      const at = history.findIndex((d) => d.id === cursor);
+      // A handed-back cursor names the turn walked last; a turn id names itself.
+      const from = cursor === handedBack ? MAX_RETAINED_TURNS + 1 : at + 1;
+      return page({ turns: history.slice(from, from + 3), cursor: 'x', reachedStart: false });
+    });
+    const walk = await walkOlder(read, 's1', cursorToAsk(resumed.cursor, column) as string);
+    if (walk.kind !== 'page') throw new Error('expected a page');
+    const joined = columnOf(live, appendOlder(older, walk.turns));
+    const ids = joined.map((d) => d.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toEqual(['n1', ...history.slice(0, ids.length - 1).map((d) => d.id)]);
+    expect(ids).toContain(walked.at(-1)?.id);
+
+    // The hazard itself: WITHOUT the reset the stale cursor is asked, and the
+    // turn the cap dropped never comes back.
+    const stale = await walkOlder(read, 's1', cursorToAsk(pager.cursor, column) as string);
+    if (stale.kind !== 'page') throw new Error('expected a page');
+    const staleIds = columnOf(live, appendOlder(older, stale.turns)).map((d) => d.id);
+    expect(staleIds).not.toContain(walked.at(-1)?.id);
+  });
+});
+
+describe('EC-100 a window that opens mid-turn does not double the turn', () => {
+  const at = (text: string) => ({
+    type: 'user',
+    promptSource: 'typed',
+    timestamp: '2026-09-16T09:00:00.000Z',
+    message: { role: 'user', content: [{ type: 'text', text }] },
+  });
+  const marker = (text: string) => ({ type: 'last-prompt', lastPrompt: text });
+  const said = {
+    type: 'assistant',
+    message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] },
+  };
+  const tool = {
+    type: 'user',
+    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'x', content: 'r' }] },
+  };
+  const lines = [
+    at('ask S'),
+    marker('ask S'),
+    said, // S: 0..2
+    at('ask T'),
+    marker('ask T'),
+    said, // T: 3, marker 4, 5
+    marker('ask T'),
+    tool,
+    said, // R1 = 6
+    marker('ask T'),
+    tool,
+    said, // R2 = 9
+    marker('ask T'),
+    tool,
+    said, // R3 = 12
+  ].map((l) => JSON.stringify(l));
+  const text = `${lines.join('\n')}\n`;
+  const bytes = Buffer.from(text);
+  const offsetOf = (i: number) =>
+    Buffer.byteLength(`${lines.slice(0, i).join('\n')}${i ? '\n' : ''}`);
+
+  // One poll: the file as it was when it ended at `endLine`, read through the
+  // REAL `readLiveTail` with a step that opens the window at `startLine`.
+  const poll = async (endLine: number, startLine: number): Promise<Decision[]> => {
+    const end = offsetOf(endLine);
+    const source: TranscriptSource = {
+      size: async () => end,
+      read: async (from, to) => readWindowOf(bytes, from, Math.min(to, end)),
+    };
+    const tail = await readLiveTail(source, 'sess', end - offsetOf(startLine));
+    return [...tail.facts.decisions];
+  };
+
+  it('prints T once and S once over three growing reads', async () => {
+    const reads = [await poll(8, 0), await poll(11, 5), await poll(14, 7)];
+    // Read 1 holds T's marker; read 2 opens after it (T opens at R1); read 3
+    // opens after R1 (T opens at R2).
+    const idsOf = reads.map((r) => r.map((d) => d.id));
+    let held: readonly Decision[] = [];
+    let drawn: readonly Decision[] = reads[0] as Decision[];
+    for (const next of reads.slice(1)) {
+      held = retainLeft(drawn, next, held);
+      drawn = next;
+    }
+    const column = columnOf(drawn, held);
+    expect(
+      column.map((d) => d.input),
+      `T's id per read ${JSON.stringify(idsOf)}`,
+    ).toEqual(['ask T', 'ask S']);
   });
 });
