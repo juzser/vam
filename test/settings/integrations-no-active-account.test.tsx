@@ -139,3 +139,84 @@ describe('EC-71b pins, nothing else moves', () => {
     expect(q('[data-gitlab-no-active-account]')).toBeNull();
   });
 });
+
+describe('branch coverage: pill kind edges and copy command', () => {
+  it('GitHub: a mix of active and inactive accounts stays connected', async () => {
+    await renderGithub({
+      kind: 'logged-in',
+      accounts: [ghAccount('a', false), ghAccount('b', true)],
+    });
+    expect(q('[data-github-status-pill]')?.getAttribute('data-github-status-pill')).toBe(
+      'connected',
+    );
+    expect(q('[data-github-account-line]')?.textContent).toContain('b');
+    expect(q('[data-github-no-active-account]')).toBeNull();
+  });
+
+  it('GitHub: logged-in with an empty list never draws the prompt line', async () => {
+    await renderGithub({ kind: 'logged-in', accounts: [] });
+    expect(q('[data-github-status-pill]')?.getAttribute('data-github-status-pill')).not.toBe(
+      'no-active-account',
+    );
+    expect(q('[data-github-no-active-account]')).toBeNull();
+  });
+
+  it('GitHub and GitLab: unknown keeps the not-connected pill, no prompt line', async () => {
+    await renderGithub({ kind: 'unknown', message: 'boom' });
+    expect(q('[data-github-status-pill]')?.getAttribute('data-github-status-pill')).toBe(
+      'not-connected',
+    );
+    expect(q('[data-github-no-active-account]')).toBeNull();
+    cleanup();
+    await renderGitlab({ kind: 'unknown', message: 'boom' });
+    expect(q('[data-gitlab-status-pill]')?.getAttribute('data-gitlab-status-pill')).toBe(
+      'not-connected',
+    );
+    expect(q('[data-gitlab-no-active-account]')).toBeNull();
+  });
+
+  it('GitHub no-active-account copies the logout command', async () => {
+    const copyText = vi.fn(async () => true);
+    const api: GithubApi = {
+      authStatus: vi.fn(
+        async () =>
+          ({
+            kind: 'logged-in',
+            accounts: [ghAccount('a', false)],
+          }) as GithubAuthStatus,
+      ),
+      connectStart: vi.fn(async () => null),
+      connectRead: vi.fn(async () => ({ kind: 'none' }) as const),
+      reposList: vi.fn(async () => ({ kind: 'ok', repos: [] }) as const),
+      orgsList: vi.fn(async () => ({ kind: 'ok', orgs: [] }) as const),
+      projectRemotes: vi.fn(async () => []),
+    };
+    render(<GithubPanel api={api} active={true} copyText={copyText} />);
+    const btn = await waitFor(() => {
+      const el = q('[data-github-copy-command]');
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    btn.click();
+    await waitFor(() => expect(copyText).toHaveBeenCalledWith('gh auth logout -h github.com'));
+  });
+
+  it('GitLab empty-accounts copies the login command', async () => {
+    const copyText = vi.fn(async () => true);
+    const api: GitlabApi = {
+      authStatus: vi.fn(async () => ({ kind: 'logged-in', accounts: [] }) as GitlabAuthStatus),
+      connectStart: vi.fn(async () => null),
+      connectRead: vi.fn(async () => ({ kind: 'none' }) as const),
+    };
+    render(<GitlabPanel api={api} active={true} copyText={copyText} />);
+    const btn = await waitFor(() => {
+      const el = q('[data-gitlab-copy-command]');
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    btn.click();
+    await waitFor(() =>
+      expect(copyText).toHaveBeenCalledWith(expect.stringContaining('glab auth login')),
+    );
+  });
+});
