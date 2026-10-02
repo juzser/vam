@@ -269,7 +269,8 @@ const EN = {
   // EVERY ROW HERE IS ABOUT THE AGENT A SESSION DRIVES, which is what earned
   // the rename: which one starts and which key sends it a prompt. THE ADHD
   // SKILL PASSED THROUGH HERE, BUT DID NOT STAY: it joined Agents from
-  // Behaviour in the cards restructure (same reasoning: it decides what the agent is told to write, not what vam draws), then
+  // Behaviour in the cards restructure (same reasoning: it decides what the
+  // agent is told to write, not what vam draws), then
   // left for its own "Skills" section in the settings-views restructure
   // (item D) once it grew big enough (its own status pill, an
   // install/reinstall/repair flow) to read as a settled preference buried
