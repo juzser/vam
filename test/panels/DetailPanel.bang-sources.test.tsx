@@ -186,4 +186,16 @@ describe('EC-67 the ! list offers the bash the session holds', () => {
     const text = `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`;
     expect(summarizeTranscript(text, 's1', 0).decisions[0]?.bash).toEqual(['ok']);
   });
+
+  // EC-109: only a blockquote or a list marker followed by a space lifts a line.
+  it('lifts through `>` and spaced list markers, never through emphasis or a tight dash', () => {
+    const prose = turn(
+      'd9',
+      'which',
+      '**!important** read this\n-!ls tight\n> !ls quote\n- !ls dash\n* !ls star\n1. !ls one',
+    );
+    render(<Composer decisions={[prose]} />);
+    type('!');
+    expect([...suggested()].sort()).toEqual(['ls dash', 'ls one', 'ls quote', 'ls star']);
+  });
 });

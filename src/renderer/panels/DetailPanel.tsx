@@ -622,9 +622,9 @@ export function commandsInColumn(
     add({ id, label: command.split(' ')[0] ?? command, command });
   // `!cmd` and `> !cmd`: the text after the marker, as a candidate of its own.
   const lift = (turn: Decision, text: string, quoted: RegExp) =>
-    text.split('\n').forEach((line, index) => {
+    text.split('\n').forEach((line) => {
       const command = quoted.exec(line.trim())?.[1];
-      if (command !== undefined) own(`${turn.id}:bang:${index}`, command);
+      if (command) own(`${turn.id}:bang:${command}`, command);
     });
   const turns = focused === null ? column : [focused, ...column.filter((t) => t.id !== focused.id)];
   // WHAT THE AGENT RAN FIRST: a Bash tool call's `input.command`
@@ -643,7 +643,7 @@ export function commandsInColumn(
   // (`bangQuery`) is not touched.
   for (const turn of turns) {
     for (const command of turn.commands) add(command);
-    lift(turn, turn.output ?? '', /^(?:(?:>|[-*+]|\d+[.)])\s*)+!\s*(\S.*)$/);
+    lift(turn, turn.output ?? '', /^(?:(?:>|[-*+]\s|\d+[.)]\s)\s*)+!\s*(\S.*)$/);
   }
   return out;
 }
@@ -7229,7 +7229,10 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
   if (sessionChanged) readingRef.current = null;
   if (sessionChanged && older.length > 0) setOlder(NO_TURNS);
   if (sessionChanged && pager !== RESTING_PAGER) setPager(RESTING_PAGER);
-  if (drawnLive !== liveDecisions) {
+  // A poll that carries no turns for the SAME session is a gap, not a window
+  // slide: it must not become the previous list, or the turn that comes back
+  // under a moved id meets an empty previous (`sameTurnUnderANewId`).
+  if (drawnLive !== liveDecisions && (liveDecisions.length || sessionChanged)) {
     setDrawnLive(liveDecisions);
     if (!sessionChanged) {
       olderNext = retainLeft(drawnLive, liveDecisions, older);

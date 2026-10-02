@@ -283,11 +283,13 @@ export type Decision = {
    */
   readonly bash?: readonly string[];
   /**
-   * True on a turn whose id is the offset of a `last-prompt` RE-EMISSION, not of
-   * its opening marker: the read window began inside the turn, so the id moves
-   * as the window slides. Only the oldest turn of a window can carry it. A
-   * reader that holds turns across polls uses it to tell the same turn under a
-   * new id from a new turn (`retainLeft`). Absent is the ordinary case.
+   * True on a turn whose opening lies above the reader's window, so its id is
+   * the offset of a line inside the window (a `last-prompt` RE-EMISSION), not of
+   * its opening marker, and moves as the window slides. A reader sets it on any
+   * turn it opened without the operator's own line (Claude Code: `full === null`,
+   * which includes a later turn opened by a last-prompt whose text differs from
+   * the open turn's), but `retainLeft` reads it only on the window's oldest turn.
+   * Absent is the ordinary case.
    */
   readonly openedMidTurn?: boolean;
 };

@@ -151,4 +151,23 @@ describe('EC-66 history survives', () => {
     expect(read).toHaveBeenCalledExactlyOnceWith('s1', 't5');
     await waitFor(() => expect(turnIds()).toEqual(ids(3, 16)));
   });
+
+  // EC-110: the poll can deliver the SAME session with no turns for one tick.
+  // The turn drawn then must not be told apart from one the window passed.
+  it('a poll that carries no turns does not draw a mid-turn id twice', () => {
+    const at = (offset: number): Decision => ({
+      ...turn(1),
+      id: `s1:@${offset}`,
+      input: 'the mid turn prompt',
+      openedMidTurn: true,
+    });
+    const newer: Decision = { ...turn(2), id: 's1:@900', input: 'the newer prompt' };
+    const view = render(panel(sessionWith([newer, at(100)]), null));
+    view.rerender(panel(sessionWith([]), null));
+    view.rerender(panel(sessionWith([newer, at(200)]), null));
+    const text = document.body.textContent ?? '';
+    expect(text.split('the mid turn prompt')).toHaveLength(2);
+    expect(text.split('the newer prompt')).toHaveLength(2);
+    expect(text.indexOf('the mid turn prompt')).toBeLessThan(text.indexOf('the newer prompt'));
+  });
 });

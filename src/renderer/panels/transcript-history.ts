@@ -142,7 +142,7 @@ export function retainLeft(
   // Live, already held, or the same turn under a new id: none of these left.
   const skip = new Set<string | null>([sameTurnUnderANewId(previous, next)]);
   for (const d of [...next, ...older]) skip.add(d.id);
-  const left = previous.filter((d) => !skip.has(d.id) && d.unconfirmed !== true);
+  const left = previous.filter((d) => !skip.has(d.id) && !d.unconfirmed);
   if (left.length === 0) return older;
   return [...left, ...older].slice(0, MAX_RETAINED_TURNS);
 }
@@ -153,7 +153,7 @@ export function retainLeft(
  * transcript.ts` by a test, because the renderer does not import main.
  */
 function offsetOf(id: string): number {
-  return Number(/:@(\d+)$/.exec(id)?.[1]);
+  return Number(id.split(':@')[1]);
 }
 
 /**
@@ -171,11 +171,11 @@ function sameTurnUnderANewId(
   next: readonly Decision[],
 ): string | null {
   const oldest = next.at(-1);
-  if (oldest?.openedMidTurn !== true) return null;
+  if (!oldest?.openedMidTurn) return null;
   const at = offsetOf(oldest.id);
   // Newest first, so the first turn that began at or before `at` is the newest.
-  const found = previous.find((d) => offsetOf(d.id) <= at);
-  return found === undefined || found.id === oldest.id ? null : found.id;
+  const found = previous.find((d) => offsetOf(d.id) <= at)?.id;
+  return found === oldest.id ? null : (found ?? null);
 }
 
 /**
