@@ -833,6 +833,14 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * suggestion overlay and pane reader are eager code. Measured the way this test
  * measures it: entry 740,863 B, gzip 222,495 B. The budgets move 739,000 ->
  * 741,163 and 221,924 -> 222,645, inside plan v20's 741,200 / 222,650 ceiling.
+ *
+ * A NINETEENTH, FROM vam-ux-3/task-18-composer-popovers (2026-10-02): the
+ * ProviderIcon glyph record, the mode descriptions and the slash-popover
+ * heading are all eager in DetailPanel. Measured the way this test measures
+ * it, on that task's head (fa78b3a2 plus the task): entry 742,591 B (over
+ * 741,163 by 1,428 B), gzip 221,980 B (under 222,645, so unchanged).
+ * `ENTRY_BUDGET_BYTES` moves 741,163 -> 743,500: the measured figure plus
+ * 909 B of slack, inside plan v23's 2,000 B allowance.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -843,7 +851,7 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 // depends on is even present, decided BEFORE anything tries to build.
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
-const ENTRY_BUDGET_BYTES = 741_163;
+const ENTRY_BUDGET_BYTES = 743_500;
 const ENTRY_GZIP_BUDGET_BYTES = 222_645;
 
 // The one string this repo's markdown stack ships that nothing else in the
