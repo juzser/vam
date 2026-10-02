@@ -6994,7 +6994,7 @@ function CanvasInner({
           // turns would otherwise look like a key that did nothing.
           setStatus(
             next
-              ? 'focus view on — each turn’s working is folded, ··· brings one back'
+              ? 'focus view on — each turn’s working is folded, the arrow brings one back'
               : 'focus view off — every turn draws its working again',
           );
           return;

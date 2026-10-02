@@ -72,6 +72,7 @@ import {
   Box,
   Check,
   ChevronDown,
+  ChevronRight,
   ChevronsDown,
   ChevronsUp,
   Circle,
@@ -2927,7 +2928,7 @@ function AgentTurn({ turn }: { readonly turn: Decision }) {
         {/* ABSENT IS ITS OWN SENTENCE. An agent that has been asked and has
             not answered is the commonest live case, and a blank space there
             reads as an agent that answered with nothing. */}
-        {turn.output ?? <span className="text-ink-faint italic">no answer yet</span>}
+        {turn.output ?? <span className="text-ink-faint italic">No answer yet</span>}
       </div>
       {steps.length > 0 && (
         <ul
@@ -6330,6 +6331,16 @@ function StepRow({ step }: { readonly step: TurnStep }) {
 }
 
 /**
+ * THE UNFOLD ARROW'S TOOLTIP: the cheapest stat already on the turn, its step
+ * count. A source that lists no steps (`steps` absent) has no count to give, so
+ * the tip says what pressing the arrow will do instead.
+ */
+function unfoldTip(steps: readonly TurnStep[] | undefined, unfolded: boolean): string {
+  if (steps === undefined || steps.length === 0) return unfolded ? 'Hide working' : 'Show working';
+  return steps.length === 1 ? '1 step' : `${steps.length} steps`;
+}
+
+/**
  * ONE TURN OF THE TRANSCRIPT, as a block of the column.
  *
  * The pane used to draw exactly one of these -- whichever turn `selectedId`
@@ -6431,9 +6442,10 @@ const TurnBlock = memo(function TurnBlock({
   /**
    * AND THE WAY BACK, FROM THE SAME PAIR OF PREDICATES. Not `!showProgress`:
    * that would draw one on every turn while focus view is off, where nothing
-   * is folded and there is nothing to restore. `drawsUnfoldControl` is the
-   * complement of the line WITHIN focus view, written once so the two cannot
-   * drift into a turn that has neither.
+   * is folded and there is nothing to restore. `drawsUnfoldControl` is a
+   * TOGGLE's rule: the control is drawn for every turn focus view folds,
+   * whether the operator has unfolded it or not, so the same arrow that
+   * opens a turn folds it again. Its drawn part is a chevron in a 24px box.
    */
   const showUnfold = drawsUnfoldControl(focusView, turnFacts);
   /**
@@ -6593,9 +6605,21 @@ const TurnBlock = memo(function TurnBlock({
              fill (3.718:1) and must not be used here. The guard measures the
              ink this element is really painted with, so that constraint is
              enforced rather than noted. */
-          className="min-h-0 min-w-0 overflow-y-auto rounded-[10px] bg-in-bubble px-2.5 py-2"
+          className="max-w-[90%] min-h-0 min-w-0 self-end overflow-y-auto rounded-[10px] bg-in-bubble px-2.5 py-2"
         >
-          <p className="whitespace-pre-wrap break-words text-body text-ink">
+          {/* PHONE ONLY: THE JUMP PILL'S CLEARANCE. The pill's painted circle
+              sits 8px to 36px in from the column's right edge, and this
+              bubble's text box ends 24px in (14px gutter, 10px padding), so
+              the last glyph of a right-aligned prompt ran under it. 16px of
+              right padding on the paragraph, never on the band or the
+              scroller (the phone gutter is pinned), puts the text 40px in:
+              4px clear of the circle. Padding and not the desktop's float:
+              a float tall enough to span the pill's rows would also stretch
+              a one-line bubble to that height. */}
+          <p
+            data-detail-pill-reserve={phone ? '' : undefined}
+            className={`whitespace-pre-wrap break-words text-body text-ink${phone ? ' pr-4' : ''}`}
+          >
             {/* THE RESERVED CORNER, audit F1's obligation. A float rather than
                 padding because only the FIRST LINE meets the pill: padding
                 would indent all 300 lines of a long prompt to clear something
@@ -6672,14 +6696,17 @@ const TurnBlock = memo(function TurnBlock({
           "Folded activity stays one click away" -- and the setting this
           replaces had no such clause, which is why it was a deletion with a
           preference in front of it rather than a fold. So a folded turn is
-          never left with nothing: it draws this instead, in the same place,
-          and pressing it puts that turn's line back.
+          never left with nothing: it draws this toggle, in the same place.
+          Pressing it opens that turn's working in place, and pressing it
+          again folds the turn; it is drawn for every turn focus view folds,
+          unfolded or not.
 
           A BUTTON, NAMED IN WORDS. A control that cannot be found is the same
           defect as one that cannot act, so this is not a hover affordance and
           not a bare glyph: it takes a tab stop and its accessible name says
           what pressing it produces. The drawn part is deliberately almost
-          nothing -- an ellipsis at the progress line's own size and ink -- so
+          nothing -- a chevron in a 24px box, in the progress line's own ink,
+          turned a quarter turn once the turn is open -- so
           that folding still BUYS the operator the quiet page they asked for.
           A chip as loud as the line it replaced would be the setting doing
           nothing at all.
@@ -6689,12 +6716,14 @@ const TurnBlock = memo(function TurnBlock({
           that unfolded everything would be a second copy of the setting
           reached from a place that promised something smaller. */}
       {showUnfold && (
-        <button
-          type="button"
-          data-turn-unfold={decision.id}
-          onClick={() => onUnfold(decision.id)}
-          aria-label={`show this turn's working — ${decision.label}`}
-          /* IN FLOW, WHERE THE WORKING WAS -- and that is a reversal, so the
+        <ShortcutTip label={unfoldTip(decision.steps, unfolded)}>
+          <button
+            type="button"
+            data-turn-unfold={decision.id}
+            aria-expanded={unfolded}
+            onClick={() => onUnfold(decision.id)}
+            aria-label={`${unfolded ? 'hide' : 'show'} this turn's working — ${decision.label}`}
+            /* IN FLOW, WHERE THE WORKING WAS -- and that is a reversal, so the
              history is kept. The first cut put this OUT of flow, absolutely
              positioned in the article's top-right corner, so that it cost no
              height: vam then folded ONE line per turn, and a way back that
@@ -6709,8 +6738,8 @@ const TurnBlock = memo(function TurnBlock({
 
              SO IT STANDS EXACTLY WHERE THE PROGRESS REGION STANDS when it is
              back: between the prompt block and the answer, flush with the
-             answer's left edge. An ellipsis means "something is elided HERE";
-             drawn there, the click replaces the mark with the working in
+             answer's left edge. A chevron there says "something is folded HERE";
+             the click replaces the mark with the working in
              place rather than inserting rows somewhere else on the page.
              Document order was already this (the button precedes the region,
              `test/panels/DetailPanel.turn-progress.test.tsx` pins it); only
@@ -6737,19 +6766,25 @@ const TurnBlock = memo(function TurnBlock({
              only thing there is to read. Measured at 7.25:1 on the pane, the
              same ink the step rows wear; the corner, not the ink, was what
              made it hard to find. */
-          /* `vam-tap` grows this to the phone's 44 (`styles.css`), which is a
+            /* `vam-tap` grows this to the phone's 44 (`styles.css`), which is a
              floor 24 does not meet -- five of these draw on one folded
              screen, and this is the ONLY route back to a folded turn's
              working. In flow, the same `-my-1.5` makes that 32px net. */
-          className={`vam-tap -my-1.5 flex h-6 w-6 flex-none cursor-pointer items-center justify-center self-start rounded font-mono text-ink-quiet text-meta leading-none hover:text-ink ${FOCUS_RING}`}
-        >
-          {/* The phone's other half: hit 44, PAINT 30, the pattern the view
+            className={`vam-tap -my-1.5 flex h-6 w-6 flex-none cursor-pointer items-center justify-center self-start rounded text-ink-quiet hover:text-ink ${FOCUS_RING}`}
+          >
+            {/* The phone's other half: hit 44, PAINT 30, the pattern the view
               icons and the keystroke strip already use. On the desktop this
               span is unstyled and the box stays 24. */}
-          <span data-tap-skin aria-hidden="true">
-            ···
-          </span>
-        </button>
+            <span data-tap-skin aria-hidden="true">
+              <ChevronRight
+                size={15}
+                strokeWidth={1.8}
+                aria-hidden="true"
+                className={`transition-transform duration-150 ease-out motion-reduce:transition-none ${unfolded ? 'rotate-90' : ''}`}
+              />
+            </span>
+          </button>
+        </ShortcutTip>
       )}
       {showProgress && (
         <section data-detail-block="progress" className="flex flex-none flex-col gap-1">
@@ -9190,7 +9225,8 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
   const unfold = useCallback((id: string) => {
     setUnfolded((open) => {
       const next = new Set(open);
-      next.add(id);
+      // A toggle: the same control that opened a turn folds it again.
+      if (!next.delete(id)) next.add(id);
       return next;
     });
   }, []);

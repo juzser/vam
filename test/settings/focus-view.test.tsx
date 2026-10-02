@@ -186,7 +186,7 @@ describe('the appearance section offers focus view', () => {
     expect(promise()).toContain('waiting');
     expect(promise().toLowerCase()).toContain('working');
     // The way back, named where the choice is made.
-    expect(promise()).toContain('···');
+    expect(promise()).toContain('arrow');
     expect(promise().toLowerCase()).toContain('comes back');
   });
 

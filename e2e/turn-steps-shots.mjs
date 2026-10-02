@@ -37,6 +37,7 @@
  * having been drawn is the silent fold this surface exists to refuse.
  */
 
+import { mkdirSync, readdirSync, unlinkSync } from 'node:fs';
 import { chromium } from 'playwright-core';
 
 const origin = process.argv[2] ?? 'http://localhost:5520';
@@ -376,7 +377,7 @@ for (const p of placement) {
 // the first one on screen and was not, when this was written: focus view keeps
 // the newest turn's line (it has a present to report) and a failing turn's
 // (alarm is never folded), so the two turns the demo gave calls to were
-// precisely the two that never draw a `···`. This guard failed on that, and
+// precisely the two that never draw the arrow. This guard failed on that, and
 // `demo.ts` gained a quiet older turn with a list. The lookup is by turn id
 // rather than by position so it cannot silently start measuring the wrong one.
 const foldedTurn = await page.evaluate(
@@ -462,6 +463,132 @@ if (capped !== null) {
   await page.waitForTimeout(200);
   await page.screenshot({ path: `${outDir}/turn-steps-capped.png` });
   console.log(`${outDir}/turn-steps-capped.png`);
+}
+
+// ── 7. THE ARROW AND THE IN BUBBLE: FOUR FRAMES ───────────────────────────
+// Last on purpose: fresh pages (the theme must be seeded before the first
+// paint), and bubble text is rewritten. Shots go to argv[3], never docs/ui; the
+// previous run's `turn-arrow-*.png` are deleted first so exactly four remain:
+// desktop-light (1280x800, a turn WITH steps focused by Tab), desktop-dark (a
+// STEPLESS turn focused by Tab), phone-light and phone-dark (390x844, the jump
+// pill over a pinned bubble). Theme is the `theme` key of `vam.prefs.v1`;
+// `emulateMedia` alone does not switch it, so the painted ground is measured.
+mkdirSync(outDir, { recursive: true });
+for (const f of readdirSync(outDir)) if (/^turn-arrow-.*\.png$/.test(f)) unlinkSync(`${outDir}/${f}`);
+const SHORT_PROMPT = 'Ship it.';
+const BULLETS = 'Fix these:\n- first\n- second\n• third';
+// Demo `factory-sse-1`: d-plan has 3 steps, d-hello has none, d-scope and d-start carry the prompts.
+const [WITH_STEPS, STEPS, STEPLESS, OPENED, SHORT_ID] = ['d-plan', 3, 'd-hello', 'd-scope', 'd-start'];
+const lum = ([r, g, b]) => [r, g, b].map((v) => { const c = v / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; }).reduce((t, c, i) => t + c * [0.2126, 0.7152, 0.0722][i], 0);
+const top = (sel) => `(() => { const el = document.querySelector(${sel}); const t = el?.closest('[data-column-turn]'); return el && t ? el.getBoundingClientRect().top - t.getBoundingClientRect().top : null; })()`;
+for (const theme of ['light', 'dark']) {
+  for (const size of [{ name: 'desktop', width: 1280, height: 800 }, { name: 'phone', width: 390, height: 844 }]) {
+    const tag = `${size.name}-${theme}`;
+    const fp = await browser.newPage({ viewport: { width: size.width, height: size.height } });
+    fp.on('pageerror', (err) => console.error('PAGE ERROR:', err));
+    await fp.addInitScript((t) => localStorage.setItem('vam.prefs.v1', JSON.stringify({ theme: t, focusView: true, viewOptions: { groupBy: 'project', sortBy: 'needs-you' }, sortByMigrated: true })), theme);
+    await fp.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
+    if (size.name === 'phone') {
+      // At 390 the detail column mounts only once a session row is opened.
+      if ((await fp.locator('[data-phone-shell="list"]').count()) > 0) await fp.locator(`[data-session-row="${SESSION}"]`).first().click();
+      await fp.waitForSelector('[data-phone-shell="session"]');
+    }
+    await fp.waitForSelector('[data-column-turn]');
+    await fp.waitForTimeout(300);
+    const ground = await fp.evaluate(() => { for (let n = document.querySelector('[data-detail-block="in"]'); n; n = n.parentElement) { const c = getComputedStyle(n).backgroundColor; if (/^rgb\(\s*\d/.test(c)) return c.match(/[\d.]+/g).map(Number); } return null; });
+    check(`${tag}: the sticky In band is painted ${theme}`, ground !== null && (theme === 'light' ? lum(ground) >= 0.5 : lum(ground) <= 0.2), `rgb(${ground})`);
+    const arrow = (id) => fp.locator(`[data-turn-unfold="${id}"]`);
+    for (const id of [WITH_STEPS, OPENED, SHORT_ID, STEPLESS]) check(`${tag}: ${id} draws a folded arrow`, (await arrow(id).count()) > 0);
+    const before = await fp.evaluate(`${top(`'[data-turn-unfold="${OPENED}"]'`)}`);
+    await arrow(OPENED).click();
+    await fp.waitForTimeout(250);
+    const open = await fp.evaluate(() => {
+      const el = document.querySelector('[data-turn-unfold][aria-expanded="true"]');
+      const cs = el?.querySelector('svg') ? getComputedStyle(el.querySelector('svg')) : null;
+      return { found: !!el, turned: cs !== null && (cs.rotate === '90deg' || (cs.transform !== 'none' && cs.transform !== '')), rotate: cs?.rotate ?? '' };
+    });
+    const after = await fp.evaluate(`${top(`'[data-turn-unfold="${OPENED}"]'`)}`);
+    check(`${tag}: pressing it opens the turn and turns the arrow`, open.found && open.turned, open.rotate);
+    check(`${tag}: the box does not shift when it opens`, before !== null && after !== null && Math.abs(after - before) < 1.5, `${before} -> ${after}`);
+    await fp.evaluate(([o, s, short, bullets]) => {
+      const set = (id, v) => { const p = document.querySelector(`[data-column-turn="${id}"] [data-detail-scroll="in"] p`); if (p?.lastChild) p.lastChild.nodeValue = v; };
+      set(o, bullets);
+      set(s, short);
+    }, [OPENED, SHORT_ID, SHORT_PROMPT, BULLETS]);
+    await fp.waitForTimeout(150);
+    const bubbles = await fp.evaluate(() =>
+      [...document.querySelectorAll('[data-column-turn]')]
+        .map((turn) => {
+          const bubble = turn.querySelector('[data-detail-scroll="in"]');
+          const block = turn.querySelector('[data-detail-block="in"]');
+          if (bubble === null || block === null) return null;
+          const b = bubble.getBoundingClientRect();
+          const k = block.getBoundingClientRect();
+          const cs = getComputedStyle(block);
+          const content = k.right - Number.parseFloat(cs.paddingRight);
+          return { right: b.right, width: b.width, content, column: content - k.left - Number.parseFloat(cs.paddingLeft) };
+        })
+        .filter((m) => m !== null),
+    );
+    check(`${tag}: every In bubble's right edge is the column's content edge`, bubbles.length > 0 && bubbles.every((m) => Math.abs(m.right - m.content) <= 1), JSON.stringify(bubbles.map((m) => [m.right, m.content])));
+    check(`${tag}: no In bubble is wider than 90% of the column`, bubbles.every((m) => m.width <= m.column * 0.9 + 1), JSON.stringify(bubbles.map((m) => [m.width, m.column])));
+    check(`${tag}: a short prompt gets a bubble narrower than the column`, bubbles.some((m) => m.width < m.column * 0.5));
+    if (size.name === 'desktop') {
+      // Reached by Tab, not by click: the focus ring and the tooltip are what a keyboard operator sees.
+      const stepless = theme === 'dark' && (await arrow(STEPLESS).count()) > 0;
+      const [target, want] = stepless ? [STEPLESS, 'Show working'] : [WITH_STEPS, `${STEPS} steps`];
+      await fp.evaluate(() => document.activeElement?.blur());
+      let reached = false;
+      for (let i = 0; i < 400 && !reached; i += 1) {
+        await fp.keyboard.press('Tab');
+        reached = await fp.evaluate((id) => document.activeElement?.getAttribute('data-turn-unfold') === id, target);
+      }
+      // Tab scrolled the toggle in and the opened turn out; scroll the column so the toggle, the opened chevron and the bulleted bubble are all in view. A scroll dismisses the tooltip, so focus is re-taken without scrolling.
+      const sel = [`[data-turn-unfold="${target}"]`, `[data-turn-unfold="${OPENED}"] svg`, `[data-column-turn="${OPENED}"] [data-detail-scroll="in"]`];
+      await fp.evaluate((q) => {
+        const c = document.querySelector('[data-detail-column]');
+        c.scrollTop += Math.min(...q.map((x) => document.querySelector(x).getBoundingClientRect().top)) - c.getBoundingClientRect().top - 90;
+      }, sel);
+      await fp.waitForTimeout(300);
+      await fp.evaluate((q) => { const el = document.querySelector(q); el.blur(); el.focus({ preventScroll: true }); }, sel[0]);
+      await fp.waitForSelector('[role="tooltip"]', { timeout: 3000 }).catch(() => {});
+      const fit = await fp.evaluate((q) => {
+        const c = document.querySelector('[data-detail-column]').getBoundingClientRect();
+        const [toggle, chevron, bubble] = q.map((x) => document.querySelector(x));
+        const rects = Object.fromEntries(Object.entries({ toggle, chevron, bubble }).map(([k, e]) => { const x = e.getBoundingClientRect(); return [k, { box: [x.left, x.top, x.right, x.bottom].map(Math.round), inside: x.top >= Math.max(0, c.top) && x.bottom <= Math.min(innerHeight, c.bottom) }]; }));
+        return { focused: document.activeElement === toggle, tip: document.querySelector('[role="tooltip"]') !== null, rotate: getComputedStyle(chevron).rotate, lines: bubble.textContent.includes('third'), rects };
+      }, sel);
+      const seen = await fp.evaluate(() => { const el = document.activeElement; const cs = getComputedStyle(el); return { tip: document.querySelector('[role="tooltip"]')?.textContent ?? '', fv: el.matches(':focus-visible'), w: cs.outlineWidth, st: cs.outlineStyle }; });
+      for (const [k, v] of Object.entries(fit.rects)) check(`${tag}: after the scroll the ${k} is inside the viewport and the column`, v.inside, JSON.stringify(v.box));
+      check(`${tag}: Tab reached the toggle, and focus, tooltip, the 90deg chevron and the bulleted bubble survived it`, reached && fit.focused && fit.tip && fit.rotate === '90deg' && fit.lines, JSON.stringify([reached, fit.focused, fit.tip, fit.rotate, fit.lines]));
+      check(`${tag}: the tooltip reads exactly '${want}'`, seen.tip === want, seen.tip);
+      check(`${tag}: the focused arrow is :focus-visible, ring 2px and drawn`, seen.fv && seen.w === '2px' && seen.st !== 'none', `${seen.fv} ${seen.w} ${seen.st}`);
+    } else {
+      // Scroll until the opened turn's In band is stuck to the top with the pill beneath it; no prompt
+      // line may come within 4px of the pill's painted 28px circle (the span inside the 44px hit box).
+      await fp.evaluate((id) => { const c = document.querySelector('[data-detail-column]'); const t = document.querySelector(`[data-column-turn="${id}"]`); c.scrollTop += t.getBoundingClientRect().top - c.getBoundingClientRect().top + 30; }, OPENED);
+      await fp.waitForTimeout(400);
+      const pill = await fp.evaluate(() => {
+        const c = document.querySelector('[data-detail-column]').getBoundingClientRect();
+        const span = document.querySelector('[data-out-to-top] > span');
+        if (!span) return null;
+        const r = span.getBoundingClientRect();
+        const pinned = [...document.querySelectorAll('[data-detail-block="in"]')].some((n) => Math.abs(n.getBoundingClientRect().top - c.top) <= 2);
+        const hits = [];
+        for (const p of document.querySelectorAll('[data-detail-scroll="in"] p')) {
+          const range = document.createRange();
+          range.selectNodeContents(p);
+          for (const t of range.getClientRects()) if (t.right > r.left - 4 && t.left < r.right && t.bottom > r.top && t.top < r.bottom) hits.push([t.left, t.top, t.right, t.bottom].map(Math.round));
+        }
+        return { pinned, rect: [r.left, r.top, r.right, r.bottom].map(Math.round), hits };
+      });
+      check(`${tag}: the jump pill is drawn over a pinned In band`, pill !== null && pill.pinned);
+      check(`${tag}: no prompt text meets the jump pill`, pill !== null && pill.hits.length === 0, `pill ${pill?.rect}, text ${JSON.stringify(pill?.hits)}`);
+    }
+    await fp.screenshot({ path: `${outDir}/turn-arrow-${tag}.png` });
+    console.log(`${outDir}/turn-arrow-${tag}.png`);
+    await fp.close();
+  }
 }
 
 await browser.close();

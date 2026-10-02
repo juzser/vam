@@ -355,7 +355,7 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
   // settings row they may never open.
   toggleFocusView: {
     group: 'panes',
-    label: () => 'focus view — fold each turn’s working away, ··· brings it back',
+    label: () => 'focus view — fold each turn’s working away, the arrow brings it back',
   },
   splitPane: {
     group: 'panes',
