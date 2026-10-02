@@ -1628,6 +1628,125 @@ await composerPage.screenshot({ path: `${outDir}/composer-draft-kept-${theme}.pn
 console.log(`${outDir}/composer-draft-kept-${theme}.png`);
 await composerPage.close();
 
+/**
+ * Task-18: every composer popover open, once, and each measured against its
+ * own trigger (EC-41). The slash popover and the icon picker are framed too.
+ * Menus: 1280x800 and a 700px pane; a menu may flip to right-aligned only when
+ * left-aligned would overflow, and never spans the composer.
+ */
+const POPOVER_VIEWPORTS = [
+  { name: 'desktop', width: 1280, height: 800 },
+  { name: 'pane-700', width: 700, height: 800 },
+];
+for (const vp of POPOVER_VIEWPORTS) {
+  const popPage = await browser.newPage({ viewport: { width: vp.width, height: vp.height } });
+  popPage.on('pageerror', (err) => console.error('PAGE ERROR (popover):', err));
+  await popPage.addInitScript(
+    ([key, payload]) => window.localStorage.setItem(key, payload),
+    [CONCISE_PREFS, JSON.stringify({ theme })],
+  );
+  await popPage.goto(`${origin}/?demo=1&history=off`, { waitUntil: 'networkidle' });
+  await popPage.waitForSelector('[data-tab-strip]');
+  await openSession(popPage, 'notes-1');
+  const popBox = popPage.locator('textarea[aria-label="prompt to session"]');
+  await popBox.focus();
+  await popBox.fill('/');
+  await popPage.waitForSelector('[data-slash-suggest-heading]', { timeout: 6_000 });
+  check(
+    `${vp.name}: the slash popover opens with its heading first`,
+    await popPage.evaluate(
+      () =>
+        document.querySelector('[data-slash-suggest]')?.firstElementChild?.hasAttribute(
+          'data-slash-suggest-heading',
+        ) === true,
+    ),
+  );
+  await popPage.screenshot({ path: `${outDir}/composer-popover-slash-${vp.name}-${theme}.png` });
+  console.log(`${outDir}/composer-popover-slash-${vp.name}-${theme}.png`);
+  await popBox.fill('');
+  for (const [root, menuSel] of [
+    ['provider', '[data-provider-picker]'],
+    ['model', '[data-model-picker-menu]'],
+    ['mode', '[data-mode-picker]'],
+  ]) {
+    const trigger = popPage.locator(`[data-popover-root="${root}"] button[aria-haspopup="listbox"]`);
+    if ((await trigger.count()) === 0) {
+      check(`${vp.name}: the ${root} trigger is on screen`, false);
+      continue;
+    }
+    await trigger.first().click();
+    await popPage.waitForSelector(menuSel);
+    await popPage.waitForTimeout(100);
+    const m = await popPage.evaluate(
+      ([r, sel]) => {
+        const anchor = document.querySelector(`[data-popover-root="${r}"] [data-popover-anchor]`)
+          ?? document.querySelector(`[data-popover-root="${r}"][data-popover-anchor]`);
+        const menu = document.querySelector(sel);
+        const bar = document.querySelector('[data-composer-bar]');
+        if (!anchor || !menu || !bar) return null;
+        const a = anchor.getBoundingClientRect();
+        const b = menu.getBoundingClientRect();
+        const c = bar.getBoundingClientRect();
+        return {
+          aLeft: a.left, aRight: a.right, aTop: a.top,
+          mLeft: b.left, mRight: b.right, mBottom: b.bottom, mWidth: b.width,
+          barLeft: c.left, barRight: c.right, barWidth: c.width,
+          vw: window.innerWidth,
+        };
+      },
+      [root, menuSel],
+    );
+    console.log(`${root} menu @${vp.name}:`, JSON.stringify(m));
+    check(`${vp.name}: the ${root} menu and its anchor were measured`, m !== null);
+    if (m !== null) {
+      check(
+        `${vp.name}: the ${root} menu sits above its own trigger, not the composer`,
+        m.mBottom <= m.aTop + 0.5,
+        `menu bottom ${m.mBottom}, trigger top ${m.aTop}`,
+      );
+      check(
+        `${vp.name}: the ${root} menu does not span the composer`,
+        m.mWidth < m.barWidth - 16 || m.barWidth < 400,
+        `menu ${m.mWidth}px in a ${m.barWidth}px bar`,
+      );
+      const hangsLeft = Math.abs(m.mLeft - m.aLeft) <= 1;
+      const hangsRight = Math.abs(m.mRight - m.aRight) <= 1;
+      check(
+        `${vp.name}: the ${root} menu is aligned to its trigger and flips only on overflow`,
+        hangsLeft || (hangsRight && m.aLeft + m.mWidth > Math.min(m.barRight, m.vw) - 8),
+        `menu ${m.mLeft}..${m.mRight}, trigger ${m.aLeft}..${m.aRight}`,
+      );
+      check(
+        `${vp.name}: the ${root} menu stays inside the viewport`,
+        m.mLeft >= -0.5 && m.mRight <= m.vw + 0.5,
+      );
+    }
+    await popPage.screenshot({
+      path: `${outDir}/composer-popover-${root}-${vp.name}-${theme}.png`,
+    });
+    console.log(`${outDir}/composer-popover-${root}-${vp.name}-${theme}.png`);
+    await popPage.keyboard.press('Escape');
+    await popPage.waitForTimeout(100);
+  }
+  if (vp.name === 'desktop') {
+    const projectIcon = popPage.locator('[data-project-icon]');
+    if ((await projectIcon.count()) > 0) {
+      await projectIcon.first().click();
+      await popPage.waitForSelector('[data-icon-picker-heading]');
+      check(
+        'the icon picker heading reads "Icon for"',
+        (await popPage.locator('[data-icon-picker-heading] span').first().innerText()).trim() ===
+          'Icon for',
+      );
+      await popPage.screenshot({ path: `${outDir}/composer-popover-icon-picker-${theme}.png` });
+      console.log(`${outDir}/composer-popover-icon-picker-${theme}.png`);
+    } else {
+      check('the icon picker can be opened from a project icon', false);
+    }
+  }
+  await popPage.close();
+}
+
 await browser.close();
 
 if (failures.length > 0) {

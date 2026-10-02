@@ -222,6 +222,7 @@ import { Note } from './Note.js';
 import { type OutActionResult, OutActionsProvider } from './out-actions.js';
 import { OUT_MARKDOWN, OUT_URL_TRANSFORM } from './out-markdown.js';
 import { PrFilterBar } from './PrFilterBar.js';
+import { ProviderIcon } from './ProviderIcon.js';
 import { newestSet, toolUseOf } from './question-set.js';
 import { sendKeyRemote } from './send-key-remote.js';
 import { registerStartSession } from './start-session-registry.js';
@@ -554,28 +555,26 @@ const SUGGEST_BOX =
 /**
  * `provider`/`model`/`mode`: three short option lists, each opened off its
  * own small toggle in `data-prompt-tools` -- the row directly under the
- * textarea. `bottom-full left-0` used to resolve against that toggle's own
- * `position: relative` wrapper, so a popover of any real height grew upward
- * into the textarea it sits a `gap-2.5` above (`src/shared/providers.ts`'s
- * own measurement: "99x34 overlapping the textarea by 28px"). Their wrapper
- * no longer carries `position: relative` (search `data-popover-root`), so
- * `bottom-full` here resolves against `data-composer-bar` instead -- the
- * same ancestor `SUGGEST_LAYER` floats against -- and the popover clears the
- * WHOLE composer rather than only the toggle it hangs off.
+ * textarea. Each toggle sits in its own `relative` anchor
+ * (`data-popover-anchor`), so `bottom-full left-0` resolves against THAT
+ * trigger and the menu opens flush above the button it belongs to, not above
+ * the whole composer. (It used to resolve against `data-composer-bar`, which
+ * put a short menu a full input-height away from the control that opened it.)
  *
- * `left-0` still means "this popover's own containing block", which moved
- * with the rest of it: today that reads as the composer's own left padding
- * edge rather than the toggle's, which is the one visible trade-off this
- * takes -- a provider/model/mode popover no longer opens flush against its
- * own button. `SUGGEST_LAYER`'s boxes have drawn from that same left edge
- * all along, so this is not a new idiom, only a third and fourth control
- * joining the first two.
+ * `left-0` is the default; `popoverFit` swaps it for `right-0` when the menu
+ * would run past the composer's right edge, once per open.
  *
  * `vam-no-scrollbar overflow-y-auto` plus a measured `maxHeight`
  * (`suggestMaxHeight`) are what `SUGGEST_BOX` already does for the typeahead
  * lists -- the same cap, so a table that outgrows the room above the
  * composer scrolls instead of pushing past the top of the screen.
  */
+/** Breathing room between an open composer menu and the composer's right edge. */
+const POPOVER_EDGE_GUTTER = 8;
+
+/** The mode menu's own width ceiling, so a description truncates instead of widening it. */
+const MODE_MENU_MAX_WIDTH = 260;
+
 const COMPOSER_POPOVER_MENU =
   'absolute bottom-full left-0 z-10 mb-2 flex flex-col gap-0.5 overflow-y-auto rounded-[10px] border border-line-strong bg-card p-1 shadow-sm vam-no-scrollbar';
 
@@ -1264,6 +1263,19 @@ export { TABS, type Tab } from './tabs.js';
 const MODES = ['Auto', 'Manual', 'Plan'] as const;
 
 type Mode = (typeof MODES)[number];
+
+/**
+ * ONE LINE UNDER EACH MODE in its popover. The mode is a REQUEST written into
+ * the prompt (`setModeRequest` puts a leading `mode: <Mode>` line in the
+ * draft), never a provider flag, so each line says what the agent is asked to
+ * do. `MODE_SKIN[mode].means` is the tooltip's gloss of the same three modes.
+ * Exhaustive over `MODES` at compile time.
+ */
+export const MODE_DESCRIPTIONS: Readonly<Record<Mode, string>> = {
+  Auto: 'Asks the agent to decide its own next step.',
+  Manual: 'Asks the agent to check with you at each step.',
+  Plan: 'Asks the agent to write the list before it touches anything.',
+};
 
 /**
  * HOW EACH MODE IS DRAWN AND WHAT IT MEANS — one row per mode, because the
@@ -8446,15 +8458,10 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
    * `bottom-full` pins that layer's bottom edge to `data-composer-bar`'s top,
    * so the two numbers were always equal and `composerBarRef.top` says the
    * same thing without requiring the SUGGEST layer to be the one open. That
-   * substitution is what let `provider`/`model`/`mode` join this cap: three
-   * `absolute bottom-full` popovers that used to anchor to their OWN small
-   * toggle -- a wrapper sitting in `data-prompt-tools`, directly under the
-   * textarea with only a `gap-2.5` between them -- and grew upward into
-   * exactly the box they hang off (`src/shared/providers.ts`'s own
-   * measurement: "99x34 overlapping the textarea by 28px"). Un-anchoring
-   * their wrapper's own `position: relative` (search `data-popover-root`
-   * below) lets their `absolute` resolve against `data-composer-bar`
-   * instead, the same ancestor `SUGGEST_LAYER` already floats against.
+   * substitution is what let `provider`/`model`/`mode` join this cap. Those
+   * three now hang off their own trigger (`data-popover-anchor`), whose top
+   * is below the composer bar's, so the cap is a safe over-estimate for them:
+   * a menu clamped to the room above the bar still fits above its trigger.
    *
    * `null` while nothing is open, which draws no `style` at all and costs the
    * common case (no popover) nothing.
@@ -8486,6 +8493,51 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
     globalThis.addEventListener('resize', measure);
     return () => globalThis.removeEventListener('resize', measure);
   }, [composerPopoverOpen]);
+  /**
+   * WHERE THE OPEN provider/model/mode MENU SITS HORIZONTALLY, decided ONCE
+   * per open: it opens left-aligned to its trigger (`left-0`), and flips to
+   * `right-0` only when that would run past the composer's right edge. A menu
+   * wider than the bar is also capped to the bar's width. Never re-decided
+   * while open, so it cannot flip back and forth. Phone has no per-trigger
+   * anchor (its menus open from the "+" overflow row), so nothing is measured.
+   */
+  const [popoverFit, setPopoverFit] = useState<{
+    readonly flip: boolean;
+    readonly maxWidth: number | null;
+  }>({ flip: false, maxWidth: null });
+  useLayoutEffect(() => {
+    const menu =
+      phone || openPopover === null
+        ? null
+        : document.querySelector<HTMLElement>(
+            `[data-popover-root="${openPopover}"] [data-popover-anchor] > [data-composer-menu]`,
+          );
+    const bar = composerBarRef.current;
+    if (menu === null || bar === null) {
+      setPopoverFit((previous) =>
+        previous.flip || previous.maxWidth !== null ? { flip: false, maxWidth: null } : previous,
+      );
+      return;
+    }
+    const barRect = bar.getBoundingClientRect();
+    const right = Math.min(barRect.right, globalThis.innerWidth) - POPOVER_EDGE_GUTTER;
+    setPopoverFit({
+      flip: menu.getBoundingClientRect().right > right,
+      maxWidth: Math.max(0, barRect.width - 2 * POPOVER_EDGE_GUTTER),
+    });
+  }, [openPopover, phone]);
+  const popoverMenuClass = popoverFit.flip
+    ? COMPOSER_POPOVER_MENU.replace('left-0', 'right-0')
+    : COMPOSER_POPOVER_MENU;
+  /** The shared height cap plus the width cap, `cap` being the menu's own ceiling. */
+  const popoverMenuStyle = (cap?: number) => {
+    const widths = [cap, popoverFit.maxWidth].filter(
+      (w): w is number => w !== undefined && w !== null,
+    );
+    const maxWidth = widths.length === 0 ? undefined : Math.min(...widths);
+    if (suggestMaxHeight === null && maxWidth === undefined) return undefined;
+    return { maxHeight: suggestMaxHeight ?? undefined, maxWidth };
+  };
   /**
    * The question the card draws: the newest OPEN one, and only if there is
    * none, the newest answered one -- what is still being asked outranks what
@@ -10851,9 +10903,16 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                   className={SUGGEST_BOX}
                   style={suggestMaxHeight === null ? undefined : { maxHeight: suggestMaxHeight }}
                 >
-                  <p className="px-1.5 pb-0.5 text-control text-ink-faint">
-                    the provider's own commands — Enter picks one, Esc keeps what you typed
-                  </p>
+                  <div
+                    data-slash-suggest-heading
+                    className="flex flex-wrap items-center gap-x-1 gap-y-0.5 border-line border-b px-1.5 pb-1.5 text-meta text-ink-faint"
+                  >
+                    <span>The provider's own commands —</span>
+                    <KeyTag>Enter</KeyTag>
+                    <span>picks one,</span>
+                    <KeyTag>Esc</KeyTag>
+                    <span>keeps what you typed</span>
+                  </div>
                   {slashMatches.map((command, index) => (
                     <button
                       key={command.id}
@@ -11807,84 +11866,87 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                    only one of them would dismiss on a press inside the very
                    thing being pressed. */
                 <div data-popover-root="provider" className="flex-none">
-                  {/* PHONE: the toggle moves into the "+" overflow's "Provider"
+                  {/* `data-popover-anchor`: the menu's own positioning
+                      context, holding this trigger and nothing else. Phone
+                      has no trigger here (the "+" row opens the listbox), so
+                      it stays un-`relative` and the menu keeps resolving
+                      against the composer bar there. */}
+                  <div
+                    data-popover-anchor
+                    className={phone ? 'flex shrink-0' : 'relative flex shrink-0'}
+                  >
+                    {/* PHONE: the toggle moves into the "+" overflow's "Provider"
                       row, which opens this SAME listbox by setting the shared
                       `openPopover` state directly -- see `data-composer-overflow`
                       below. This wrapper and the listbox stay unconditional so
                       that row has something to open. */}
-                  {!phone && (
-                    <Note text="the agent NEW sessions start with — not this one, which is already running">
-                      <button
-                        type="button"
-                        data-provider-picker-toggle
-                        onKeyDown={dismissPopoverOnEscape}
-                        aria-haspopup="listbox"
-                        aria-expanded={providerPickerOpen}
-                        aria-label={`default provider for new sessions: ${currentProvider.label} — change`}
-                        onClick={() => togglePopover('provider')}
-                        className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center text-ink-dim hover:text-ink"
-                      >
-                        <span
-                          aria-hidden="true"
-                          data-tap-skin
-                          className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-card hover:bg-line-strong"
+                    {!phone && (
+                      <Note text="the agent NEW sessions start with — not this one, which is already running">
+                        <button
+                          type="button"
+                          data-provider-picker-toggle
+                          onKeyDown={dismissPopoverOnEscape}
+                          aria-haspopup="listbox"
+                          aria-expanded={providerPickerOpen}
+                          aria-label={`default provider for new sessions: ${currentProvider.label} — change`}
+                          onClick={() => togglePopover('provider')}
+                          className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center text-ink-dim hover:text-ink"
                         >
-                          {(() => {
-                            const mark = PROVIDER_MARKS[currentProvider.id];
-                            return mark === undefined ? (
-                              <Box size={12} strokeWidth={1.7} />
-                            ) : (
-                              <mark.Glyph size={12} />
-                            );
-                          })()}
-                        </span>
-                      </button>
-                    </Note>
-                  )}
-                  {providerPickerOpen && (
-                    <div
-                      data-provider-picker
-                      role="listbox"
-                      onKeyDown={dismissPopoverOnEscape}
-                      aria-label="default provider for new sessions"
-                      className={COMPOSER_POPOVER_MENU}
-                      style={
-                        suggestMaxHeight === null ? undefined : { maxHeight: suggestMaxHeight }
-                      }
-                    >
-                      {PROVIDERS.map((provider) => {
-                        const selected = provider.id === currentProvider.id;
-                        return (
-                          <button
-                            key={provider.id}
-                            type="button"
-                            data-provider-option={provider.id}
-                            role="option"
-                            aria-selected={selected}
-                            onClick={() => {
-                              onSetDefaultProvider(provider.id);
-                              setOpenPopover(null);
-                            }}
-                            /* `vam-tap`: a popover row is a touch target too,
+                          <span
+                            aria-hidden="true"
+                            data-tap-skin
+                            className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-card hover:bg-line-strong"
+                          >
+                            <ProviderIcon id={currentProvider.id} />
+                          </span>
+                        </button>
+                      </Note>
+                    )}
+                    {providerPickerOpen && (
+                      <div
+                        data-provider-picker
+                        data-composer-menu
+                        role="listbox"
+                        onKeyDown={dismissPopoverOnEscape}
+                        aria-label="default provider for new sessions"
+                        className={popoverMenuClass}
+                        style={popoverMenuStyle()}
+                      >
+                        {PROVIDERS.map((provider) => {
+                          const selected = provider.id === currentProvider.id;
+                          return (
+                            <button
+                              key={provider.id}
+                              type="button"
+                              data-provider-option={provider.id}
+                              role="option"
+                              aria-selected={selected}
+                              onClick={() => {
+                                onSetDefaultProvider(provider.id);
+                                setOpenPopover(null);
+                              }}
+                              /* `vam-tap`: a popover row is a touch target too,
                                and this one measured 89x24 at 390px the first
                                time a census ever opened the popover it lives
                                in. Dormant while `PROVIDERS` has one row and
                                this whole control is withdrawn -- and that is
                                the point of putting it here now rather than
                                with the row that brings it back. */
-                            className={[
-                              'vam-tap flex cursor-pointer items-center whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control',
-                              selected
-                                ? 'bg-line-strong text-ink'
-                                : 'text-ink-dim hover:bg-line-strong hover:text-ink',
-                            ].join(' ')}
-                          >
-                            {provider.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
+                              className={[
+                                'vam-tap flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control',
+                                selected
+                                  ? 'bg-line-strong text-ink'
+                                  : 'text-ink-dim hover:bg-line-strong hover:text-ink',
+                              ].join(' ')}
+                            >
+                              <ProviderIcon id={provider.id} />
+                              {provider.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
               {/* THE MODEL CONTROL, IN THREE STATES -- `modelControlState`
@@ -11977,6 +12039,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
               {modelControl === 'picker' && (
                 <div
                   data-popover-root="model"
+                  data-popover-anchor
                   /* `min-w-0 shrink` AND NOT `flex-none`, AND `flex` -- three
                      classes that only work together, each of which was put
                      here by a measurement at 520px (the button's own comment
@@ -11999,15 +12062,13 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                      shrinks WITH it, and the guard now measures the button
                      against its wrapper rather than trusting the row.
 
-                     NOT `relative` ANY MORE: it was this wrapper's own
-                     positioning context for `[data-model-picker-menu]`'s
-                     `absolute bottom-full`, which is what grew the popover
-                     upward into the textarea (`COMPOSER_POPOVER_MENU`'s own
-                     comment). Removing it does not touch the shrink fix
-                     above -- `position` plays no part in that measurement --
-                     and lets the popover resolve against `data-composer-bar`
-                     instead. */
-                  className="flex min-w-0 shrink"
+                     AND `relative` AGAIN, on purpose: this wrapper is
+                     `[data-model-picker-menu]`'s anchor
+                     (`data-popover-anchor`), so the menu opens above the
+                     model button rather than above the whole composer.
+                     `position` plays no part in the shrink measurement
+                     above. */
+                  className={phone ? 'flex min-w-0 shrink' : 'relative flex min-w-0 shrink'}
                 >
                   {/* THE NOTE SAYS WHAT THE ONE ROUTE COSTS, which is nothing
                       beyond this session. An ALIAS is walked onto the CLI's own
@@ -12138,10 +12199,9 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                   {modelPickerOpen && (
                     <div
                       data-model-picker-menu
-                      className={COMPOSER_POPOVER_MENU}
-                      style={
-                        suggestMaxHeight === null ? undefined : { maxHeight: suggestMaxHeight }
-                      }
+                      data-composer-menu
+                      className={popoverMenuClass}
+                      style={popoverMenuStyle()}
                     >
                       {/* THE FIVE, as a listbox of their own rather than the
                           popover being one. That began as a necessity -- a
@@ -12445,81 +12505,93 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
               thing that can disagree with the text actually recorded. */}
               {canCycleMode && (
                 <div data-popover-root="mode" className="flex-none">
-                  {/* PHONE: the toggle moves into the "+" overflow's "Mode"
+                  <div
+                    data-popover-anchor
+                    className={phone ? 'flex shrink-0' : 'relative flex shrink-0'}
+                  >
+                    {/* PHONE: the toggle moves into the "+" overflow's "Mode"
                       row, which opens this SAME listbox by setting the shared
                       `openPopover` state directly -- see the model toggle's
                       own comment above for the identical pattern. */}
-                  {!phone && (
-                    <Note
-                      text={`mode: ${currentMode} — ${MODE_SKIN[currentMode].means}. Your pick goes into the prompt; ${chordSymbols('Shift-Tab')} cycles the session’s own.`}
-                    >
-                      <button
-                        type="button"
-                        data-mode-toggle
-                        onKeyDown={dismissPopoverOnEscape}
-                        aria-haspopup="listbox"
-                        aria-expanded={modePickerOpen}
-                        aria-label={`mode: ${currentMode} — change, or ${chordSymbols('Shift-Tab')} to cycle the session's own`}
-                        onClick={() => togglePopover('mode')}
-                        className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center"
+                    {!phone && (
+                      <Note
+                        text={`mode: ${currentMode} — ${MODE_SKIN[currentMode].means}. Your pick goes into the prompt; ${chordSymbols('Shift-Tab')} cycles the session’s own.`}
                       >
-                        {/* The glyph carries the ink now (`MODE_SKIN`), so the
+                        <button
+                          type="button"
+                          data-mode-toggle
+                          onKeyDown={dismissPopoverOnEscape}
+                          aria-haspopup="listbox"
+                          aria-expanded={modePickerOpen}
+                          aria-label={`mode: ${currentMode} — change, or ${chordSymbols('Shift-Tab')} to cycle the session's own`}
+                          onClick={() => togglePopover('mode')}
+                          className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center"
+                        >
+                          {/* The glyph carries the ink now (`MODE_SKIN`), so the
                             button no longer sets one: `text-ink-dim
                             hover:text-ink` here would have been a second opinion
                             about the same pixels, settled by source order rather
                             than by intent. The hover affordance stays on the
                             chip, which is where it was already drawn. */}
-                        <span
-                          aria-hidden="true"
-                          data-tap-skin
-                          className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-card hover:bg-line-strong"
-                        >
-                          <ModeGlyph mode={currentMode} />
-                        </span>
-                      </button>
-                    </Note>
-                  )}
-                  {modePickerOpen && (
-                    <div
-                      data-mode-picker
-                      role="listbox"
-                      onKeyDown={dismissPopoverOnEscape}
-                      aria-label="mode for this prompt"
-                      className={COMPOSER_POPOVER_MENU}
-                      style={
-                        suggestMaxHeight === null ? undefined : { maxHeight: suggestMaxHeight }
-                      }
-                    >
-                      {MODES.map((mode) => {
-                        const selected = mode === currentMode;
-                        return (
-                          <button
-                            key={mode}
-                            type="button"
-                            data-mode-option={mode.toLowerCase()}
-                            role="option"
-                            aria-selected={selected}
-                            onClick={() => {
-                              onDraftChange(setModeRequest(draft, mode));
-                              setOpenPopover(null);
-                            }}
-                            className={[
-                              'flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control',
-                              selected
-                                ? 'bg-line-strong text-ink'
-                                : 'text-ink-dim hover:bg-line-strong hover:text-ink',
-                            ].join(' ')}
+                          <span
+                            aria-hidden="true"
+                            data-tap-skin
+                            className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-card hover:bg-line-strong"
                           >
-                            {/* Coloured here too: the picker is the one place
+                            <ModeGlyph mode={currentMode} />
+                          </span>
+                        </button>
+                      </Note>
+                    )}
+                    {modePickerOpen && (
+                      <div
+                        data-mode-picker
+                        data-composer-menu
+                        role="listbox"
+                        onKeyDown={dismissPopoverOnEscape}
+                        aria-label="mode for this prompt"
+                        className={popoverMenuClass}
+                        style={popoverMenuStyle(MODE_MENU_MAX_WIDTH)}
+                      >
+                        {MODES.map((mode) => {
+                          const selected = mode === currentMode;
+                          return (
+                            <button
+                              key={mode}
+                              type="button"
+                              data-mode-option={mode.toLowerCase()}
+                              role="option"
+                              aria-selected={selected}
+                              onClick={() => {
+                                onDraftChange(setModeRequest(draft, mode));
+                                setOpenPopover(null);
+                              }}
+                              className={[
+                                'vam-tap flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control',
+                                selected
+                                  ? 'bg-line-strong text-ink'
+                                  : 'text-ink-dim hover:bg-line-strong hover:text-ink',
+                              ].join(' ')}
+                            >
+                              {/* Coloured here too: the picker is the one place
                                 all three modes appear at once, so it is the
                                 only legend the hues have. */}
-                            <ModeGlyph mode={mode} />
-                            {mode}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
+                              <ModeGlyph mode={mode} />
+                              <span className="flex min-w-0 flex-col items-start">
+                                <span>{mode}</span>
+                                <span
+                                  data-mode-description
+                                  className="max-w-full truncate text-meta text-ink-faint"
+                                >
+                                  {MODE_DESCRIPTIONS[mode]}
+                                </span>
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
               {/* WHAT THE ⇧Tab PRESS DID, and the only channel that says so:
