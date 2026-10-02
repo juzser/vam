@@ -570,7 +570,7 @@ const SUGGEST_BOX =
  * composer scrolls instead of pushing past the top of the screen.
  */
 /** Breathing room between an open composer menu and the composer's right edge. */
-const POPOVER_EDGE_GUTTER = 8;
+export const POPOVER_EDGE_GUTTER = 8;
 
 /** The mode menu's own width ceiling, so a description truncates instead of widening it. */
 const MODE_MENU_MAX_WIDTH = 260;
@@ -1260,7 +1260,7 @@ export { TABS, type Tab } from './tabs.js';
  * a small popover over it, the pattern the provider picker beside it already
  * set, rather than a second idea of what a chooser looks like in this row.
  */
-const MODES = ['Auto', 'Manual', 'Plan'] as const;
+export const MODES = ['Auto', 'Manual', 'Plan'] as const;
 
 type Mode = (typeof MODES)[number];
 
@@ -1268,13 +1268,14 @@ type Mode = (typeof MODES)[number];
  * ONE LINE UNDER EACH MODE in its popover. The mode is a REQUEST written into
  * the prompt (`setModeRequest` puts a leading `mode: <Mode>` line in the
  * draft), never a provider flag, so each line says what the agent is asked to
- * do. `MODE_SKIN[mode].means` is the tooltip's gloss of the same three modes.
+ * do, and each is short enough to read whole under `MODE_MENU_MAX_WIDTH`.
+ * `MODE_SKIN[mode].means` is the tooltip's gloss of the same three modes.
  * Exhaustive over `MODES` at compile time.
  */
 export const MODE_DESCRIPTIONS: Readonly<Record<Mode, string>> = {
-  Auto: 'Asks the agent to decide its own next step.',
-  Manual: 'Asks the agent to check with you at each step.',
-  Plan: 'Asks the agent to write the list before it touches anything.',
+  Auto: 'Decides its own next step.',
+  Manual: 'Asks you before each step.',
+  Plan: 'Writes a plan before acting.',
 };
 
 /**
@@ -1379,7 +1380,7 @@ function ModeGlyph({ mode }: { readonly mode: Mode }) {
       size={12}
       fill={skin.fill}
       strokeWidth={skin.strokeWidth}
-      className={skin.ink}
+      className={`${skin.ink} shrink-0`}
     />
   );
 }
@@ -8510,7 +8511,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
       phone || openPopover === null
         ? null
         : document.querySelector<HTMLElement>(
-            `[data-popover-root="${openPopover}"] [data-popover-anchor] > [data-composer-menu]`,
+            `[data-popover-root="${openPopover}"] [data-composer-menu]`,
           );
     const bar = composerBarRef.current;
     if (menu === null || bar === null) {
@@ -8526,9 +8527,15 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
       maxWidth: Math.max(0, barRect.width - 2 * POPOVER_EDGE_GUTTER),
     });
   }, [openPopover, phone]);
-  const popoverMenuClass = popoverFit.flip
-    ? COMPOSER_POPOVER_MENU.replace('left-0', 'right-0')
-    : COMPOSER_POPOVER_MENU;
+  /**
+   * PHONE: the anchor is not `relative` there, so `left-0` resolves against a
+   * wider ancestor and the menu sat 1px from the screen edge, 12px left of the
+   * composer pill. `ml-3` is the 12px side margin (phone-core-loop.md).
+   */
+  const phoneMenuMargin = phone ? ' ml-3' : '';
+  const popoverMenuClass =
+    (popoverFit.flip ? COMPOSER_POPOVER_MENU.replace('left-0', 'right-0') : COMPOSER_POPOVER_MENU) +
+    phoneMenuMargin;
   /** The shared height cap plus the width cap, `cap` being the menu's own ceiling. */
   const popoverMenuStyle = (cap?: number) => {
     const widths = [cap, popoverFit.maxWidth].filter(
@@ -11593,7 +11600,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                       role="menu"
                       aria-label="composer tools"
                       onKeyDown={dismissPopoverOnEscape}
-                      className={COMPOSER_POPOVER_MENU}
+                      className={`${COMPOSER_POPOVER_MENU}${phoneMenuMargin}`}
                       style={
                         suggestMaxHeight === null ? undefined : { maxHeight: suggestMaxHeight }
                       }
@@ -12243,7 +12250,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                               setOpenPopover(null);
                               void sendModel(choice.id);
                             }}
-                            className="flex cursor-pointer items-center gap-3 whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                            className="vam-tap flex cursor-pointer items-center gap-3 whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
                           >
                             <span data-model-name>{choice.label}</span>
                             {/* THE TICK ON THE MODEL THIS SESSION IS RUNNING,
