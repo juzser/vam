@@ -997,17 +997,23 @@ describe('a turn that has genuinely scrolled out of the window', () => {
       focusNodeId: 's1',
     });
 
-    expect(document.body.textContent ?? '').toContain('scrolled out');
+    // Operator event #71 (history vanished from the Response view): d1 rendered
+    // in this pane, so the pane keeps it when the window slides past it and the
+    // pick is never missing. OLD: expect(...).toContain('scrolled out').
+    expect(document.body.textContent ?? '').not.toContain('scrolled out');
     // NOT MARKED AS THE ONE BEING READ. `d5` is on screen -- it is a turn of
     // this session and the column draws every turn it has, which is not a
     // substitution. The substitution this refuses is the pane pointing at
     // `d5` and calling it the turn the operator was reading, so what is
     // asserted is that NOTHING is marked while the pick is missing, that the
     // pane says so in words, and that it hid nothing to say it.
-    expect(all('[data-column-turn][data-turn-current="true"]')).toHaveLength(0);
-    expect(markedTurnId()).toBeNull();
-    expect(all('[data-progress-turn-missing]')).toHaveLength(1);
-    expect(all('[data-column-turn]')).toHaveLength(2);
+    // Operator event #71: the pick is still on screen (retained), so it IS
+    // marked and nothing is missing. OLD: toHaveLength(0) / toBeNull() /
+    // toHaveLength(1) / toHaveLength(2).
+    expect(all('[data-column-turn][data-turn-current="true"]')).toHaveLength(1);
+    expect(markedTurnId()).toBe('d1');
+    expect(all('[data-progress-turn-missing]')).toHaveLength(0);
+    expect(all('[data-column-turn]')).toHaveLength(5);
   });
 
   it('offers a way back to the turn the canvas is actually showing', () => {
@@ -1026,11 +1032,14 @@ describe('a turn that has genuinely scrolled out of the window', () => {
     });
 
     const back = q<HTMLButtonElement>('[data-progress-turn-return]');
-    expect(back).not.toBeNull();
+    // Operator event #71: d1 is retained, so there is nothing to go back from.
+    // OLD: expect(back).not.toBeNull().
+    expect(back).toBeNull();
     act(() => back?.click());
+    // Operator event #71: the pick stays d1. OLD: toContain('ask d5').
     expect(
       q<HTMLElement>('[data-column-turn][data-turn-current="true"]')?.textContent ?? '',
-    ).toContain('ask d5');
+    ).toContain('ask d1');
     expect(all('[data-progress-turn-missing]')).toHaveLength(0);
   });
 });

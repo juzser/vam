@@ -141,9 +141,60 @@ export function retainLeft(
 ): readonly Decision[] {
   const live = new Set(next.map((d) => d.id));
   const held = new Set(older.map((d) => d.id));
-  const left = previous.filter((d) => !live.has(d.id) && !held.has(d.id) && d.unconfirmed !== true);
+  const same = sameTurnUnderANewId(previous, next);
+  const left = previous.filter(
+    (d) => !live.has(d.id) && !held.has(d.id) && d.unconfirmed !== true && d.id !== same,
+  );
   if (left.length === 0) return older;
   return [...left, ...older].slice(0, MAX_RETAINED_TURNS);
+}
+
+/**
+ * The byte offset an offset-shaped decision id (`<prefix>:@<offset>`) names, or
+ * NaN. Kept in step with `turnStartOf` in `main/sources/claude-code/
+ * transcript.ts` by a test, because the renderer does not import main.
+ */
+function offsetOf(id: string): number {
+  const match = /:@(\d+)$/.exec(id);
+  return match === null ? Number.NaN : Number(match[1]);
+}
+
+/**
+ * THE ONE TURN WHOSE ID MOVES AS THE WINDOW SLIDES, found. A window that opens
+ * inside a turn opens it at a `last-prompt` re-emission, so the turn's id is
+ * that line's offset (`openedMidTurn` on the model) and the next, later window
+ * gives the same turn a later one. The newest turn of `previous` that began at
+ * or before that offset is the turn the line sits in, whatever its own id is.
+ * Returns that turn's id when it differs from the oldest turn of `next`, else
+ * `null`. By offset and the source's own flag -- never by prompt text, because
+ * two turns can carry the same words.
+ */
+function sameTurnUnderANewId(
+  previous: readonly Decision[],
+  next: readonly Decision[],
+): string | null {
+  const oldest = next.at(-1);
+  if (oldest?.openedMidTurn !== true) return null;
+  const at = offsetOf(oldest.id);
+  // Newest first, so the first turn that began at or before `at` is the newest.
+  const found = previous.find((d) => offsetOf(d.id) <= at);
+  return found === undefined || found.id === oldest.id ? null : found.id;
+}
+
+/**
+ * The pager after `retainLeft` ran: when the retention cap dropped turns off
+ * the OLDEST end of `older`, the cursor the last walk handed back now points
+ * past a gap, so it is forgotten -- the next walk asks from the oldest turn
+ * still held (`cursorToAsk`), and the dropped turns come back. The start is no
+ * longer proven either, so a `start` pager rests.
+ */
+export function pagerAfterRetain(
+  pager: PagerState,
+  before: readonly Decision[],
+  after: readonly Decision[],
+): PagerState {
+  if (before.length === 0 || after.at(-1) === before.at(-1)) return pager;
+  return { ...pager, cursor: null, phase: pager.phase === 'start' ? 'rest' : pager.phase };
 }
 
 /**

@@ -15,6 +15,7 @@ import { cleanup, fireEvent, render } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { extractCommands } from '../../src/main/sources/claude-code/commands.js';
+import { summarizeTranscript } from '../../src/main/sources/claude-code/transcript.js';
 import type { Decision, Project, Session } from '../../src/renderer/domain/model.js';
 import { DetailPanel } from '../../src/renderer/panels/DetailPanel.js';
 
@@ -30,6 +31,31 @@ const SHELL_TURN = turn('d2', '!git status', 'clean');
 const BLOCKQUOTE = turn('d3', 'what next', 'Run this:\n\n> !pnpm run test\n');
 const LIST_ITEM = turn('d4', 'and then', 'Steps:\n\n- ! pnpm run build\n');
 const FENCED = turn('d5', 'and last', 'Run:\n\n```bash\n! pnpm run typecheck\n```\n');
+
+// (1) An assistant Bash tool_use, parsed by transcript.ts itself from one JSONL
+// fixture, never hand-built.
+const jsonl = [
+  { type: 'user', promptSource: 'typed', message: { role: 'user', content: 'lint it' } },
+  { type: 'last-prompt', lastPrompt: 'lint it' },
+  {
+    type: 'assistant',
+    message: {
+      role: 'assistant',
+      content: [
+        { type: 'text', text: 'Running it.' },
+        {
+          type: 'tool_use',
+          id: 'tu1',
+          name: 'Bash',
+          input: { command: 'pnpm run lint', description: 'lint' },
+        },
+      ],
+    },
+  },
+]
+  .map((l) => JSON.stringify(l))
+  .join('\n');
+const BASH_TURN = summarizeTranscript(`${jsonl}\n`, 's1', 0).decisions;
 
 function Composer({ decisions }: { readonly decisions: readonly Decision[] }) {
   const [draft, setDraft] = useState('');
@@ -103,13 +129,19 @@ describe('EC-67 the ! list offers the bash the session holds', () => {
   });
 
   it('holds every shape at once, each exactly once, and `!pn` narrows to the pnpm rows', () => {
-    render(<Composer decisions={[SHELL_TURN, BLOCKQUOTE, LIST_ITEM, FENCED]} />);
+    render(<Composer decisions={[...BASH_TURN, SHELL_TURN, BLOCKQUOTE, LIST_ITEM, FENCED]} />);
     type('!');
     expect([...suggested()].sort()).toEqual(
-      ['git status', 'pnpm run build', 'pnpm run test', 'pnpm run typecheck'].sort(),
+      [
+        'git status',
+        'pnpm run build',
+        'pnpm run lint',
+        'pnpm run test',
+        'pnpm run typecheck',
+      ].sort(),
     );
     type('!pn');
-    expect(suggested()).toHaveLength(3);
+    expect(suggested()).toHaveLength(4);
     expect(suggested().every((c) => c.startsWith('pnpm'))).toBe(true);
   });
 
@@ -119,9 +151,14 @@ describe('EC-67 the ! list offers the bash the session holds', () => {
     expect(document.querySelector('[data-bang-suggest]')).toBeNull();
   });
 
-  // (1) An assistant Bash tool_use whose `input.command` is 'pnpm run lint'.
-  // BLOCKED, not written: no field of `Decision` carries a tool call's input
-  // (`TurnStep` holds only `label` and `failed`), so the panel cannot be handed
-  // this shape without a model change outside this task's claims.
-  it.todo('(1) offers an assistant Bash tool_use input.command');
+  // (1) An assistant Bash tool_use whose `input.command` is 'pnpm run lint',
+  // parsed by transcript.ts itself from one JSONL fixture, never hand-built.
+  it('(1) offers an assistant Bash tool_use input.command, once', () => {
+    expect(BASH_TURN).toHaveLength(1);
+    render(<Composer decisions={BASH_TURN} />);
+    type('!');
+    expect(suggested()).toEqual(['pnpm run lint']);
+    type('!pn');
+    expect(suggested()).toEqual(['pnpm run lint']);
+  });
 });

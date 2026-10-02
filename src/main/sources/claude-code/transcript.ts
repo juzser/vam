@@ -410,8 +410,20 @@ export function failedToolUseIds(line: Line): readonly string[] {
 export type ReadCall = {
   readonly toolUseId: string | null;
   readonly label: string;
+  /** A Bash call's `input.command`, when it is short enough to offer whole. */
+  readonly command?: string;
   failed: boolean;
 };
+
+const MAX_BASH_COMMAND = 500;
+
+/** The `input.command` of a `Bash` tool_use part, or `undefined`. */
+function bashCommand(part: Line): string | undefined {
+  const input = part['input'];
+  if (part['name'] !== 'Bash' || typeof input !== 'object' || input === null) return undefined;
+  const command = str((input as Line)['command']);
+  return command !== null && command.length <= MAX_BASH_COMMAND ? command : undefined;
+}
 
 /** `2m`, `6h`, `3d` -- the compact form the sidebar right-aligns. */
 export function compactAge(ms: number): string {
@@ -706,6 +718,7 @@ export function summarizeLines(
           working.calls.push({
             toolUseId: str(part['id']),
             label: toolUseLabel(part),
+            command: bashCommand(part),
             failed: false,
           });
         }
@@ -825,6 +838,13 @@ export function summarizeLines(
       // The prefix is the decision's OWN id, so no two decisions mint the
       // same command id -- the canvas finds a command by id to copy it.
       commands: turn.output === null ? [] : extractCommands(turn.output, turn.id),
+      // The Bash commands the turn RAN, for the composer's `!` list.
+      ...(turn.calls.some((call) => call.command !== undefined)
+        ? { bash: turn.calls.flatMap((call) => (call.command === undefined ? [] : [call.command])) }
+        : {}),
+      // A turn opened by a `last-prompt` re-emission alone (no operator line in
+      // the window) has an id that moves as the window slides.
+      ...(turn.full === null ? { openedMidTurn: true } : {}),
       // Always answered, zero included: this source CAN report tool failures,
       // so zero here is a reading and not a shrug. Absent is reserved for a
       // source that cannot look (`Decision.errorCount` in `model.ts`).

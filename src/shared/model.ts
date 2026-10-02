@@ -273,6 +273,23 @@ export type Decision = {
    * something vam could not reach.
    */
   readonly unread?: boolean;
+  /**
+   * The `input.command` of every Bash tool call the turn made, oldest first,
+   * for the `!` list in the Response view's composer (operator event #73).
+   * `steps` carries a call's NAME only, so a command the agent ran has no other
+   * way across. Absent is a source that cannot report calls or a turn that ran
+   * no Bash; a command over 500 characters is left out rather than cut, because
+   * a cut command is a different command.
+   */
+  readonly bash?: readonly string[];
+  /**
+   * True on a turn whose id is the offset of a `last-prompt` RE-EMISSION, not of
+   * its opening marker: the read window began inside the turn, so the id moves
+   * as the window slides. Only the oldest turn of a window can carry it. A
+   * reader that holds turns across polls uses it to tell the same turn under a
+   * new id from a new turn (`retainLeft`). Absent is the ordinary case.
+   */
+  readonly openedMidTurn?: boolean;
 };
 
 /**

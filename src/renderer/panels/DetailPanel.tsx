@@ -238,6 +238,7 @@ import {
   cursorToAsk,
   moreState,
   type PagerState,
+  pagerAfterRetain,
   RESTING_PAGER,
   retainLeft,
   walkOlder,
@@ -626,10 +627,15 @@ export function commandsInColumn(
       }
     });
   const turns = focused === null ? column : [focused, ...column.filter((t) => t.id !== focused.id)];
-  // THE OPERATOR'S OWN `!cmd` TURNS FIRST: a command they typed and sent is the
-  // likeliest one to be reached for again. (A command the agent RAN as a Bash
-  // tool call would come before these, but no field of `Decision` carries a
-  // tool call's input -- see the task's open question.)
+  // WHAT THE AGENT RAN FIRST: a Bash tool call's `input.command`
+  // (`Decision.bash`), newest turn first and, within a turn, the last call first.
+  for (const turn of turns) {
+    for (const command of [...(turn.bash ?? [])].reverse()) {
+      add({ id: `${turn.id}:bash:${command}`, label: command.split(' ')[0] ?? command, command });
+    }
+  }
+  // THEN THE OPERATOR'S OWN `!cmd` TURNS: a command they typed and sent is the
+  // likeliest one to be reached for again.
   for (const turn of turns) lift(turn, turn.input, /^!\s*(\S.*)$/);
   // THEN WHAT THE AGENT PROPOSED: the lines `commands.ts` extracted (fenced,
   // `! ` marker), and the lines it cannot see because a blockquote `>` or a
@@ -7219,6 +7225,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
    */
   const [drawnLive, setDrawnLive] = useState<readonly Decision[]>(liveDecisions);
   let olderNext = older;
+  let pagerNext = pager;
   if (sessionChanged) readingRef.current = null;
   if (sessionChanged && older.length > 0) setOlder(NO_TURNS);
   if (sessionChanged && pager !== RESTING_PAGER) setPager(RESTING_PAGER);
@@ -7226,11 +7233,16 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
     setDrawnLive(liveDecisions);
     if (!sessionChanged) {
       olderNext = retainLeft(drawnLive, liveDecisions, older);
-      if (olderNext !== older) setOlder(olderNext);
+      if (olderNext !== older) {
+        setOlder(olderNext);
+        // The cap dropped turns off the old end: the pager must not skip them.
+        pagerNext = pagerAfterRetain(pager, older, olderNext);
+        setPager(pagerNext);
+      }
     }
   }
   const olderNow = sessionChanged ? NO_TURNS : olderNext;
-  const pagerNow = sessionChanged ? RESTING_PAGER : pager;
+  const pagerNow = sessionChanged ? RESTING_PAGER : pagerNext;
   // Memoized on the two inputs `columnOf` actually reads: an unrelated
   // re-render (a sibling pane's keystroke, a focus flip) must reuse the
   // previous array rather than rebuilding a Set, a filter and a spread over

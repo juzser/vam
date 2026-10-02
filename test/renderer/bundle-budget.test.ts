@@ -841,6 +841,16 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * 741,163 by 1,428 B), gzip 221,980 B (under 222,645, so unchanged).
  * `ENTRY_BUDGET_BYTES` moves 741,163 -> 743,500: the measured figure plus
  * 909 B of slack, inside plan v23's 2,000 B allowance.
+ *
+ * A TWENTIETH, FROM vam-ux-3/task-24-history-survives-idle (operator event #71,
+ * #896 A2): retention across a window slide, the pager reset after a capped
+ * retain, the same-turn-under-a-new-id join and the Bash `!` source are all
+ * eager code. Measured the way this test measures it: entry 743,283 B at
+ * 07819140 (under the old 743,500 cap), 743,844 B at the first cut, and
+ * 744,336 B at head after trimming the pager-reset and same-turn helpers (the
+ * trim could not bring it back under 743,500); gzip 222,663 B (over 222,645 by
+ * 18 B). `ENTRY_BUDGET_BYTES` moves 743,500 -> 744,500 (+1,000 B, inside the
+ * 1,024 B allowance) and `ENTRY_GZIP_BUDGET_BYTES` moves 222,645 -> 222,800.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -851,8 +861,8 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 // depends on is even present, decided BEFORE anything tries to build.
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
-const ENTRY_BUDGET_BYTES = 743_500;
-const ENTRY_GZIP_BUDGET_BYTES = 222_645;
+const ENTRY_BUDGET_BYTES = 744_500;
+const ENTRY_GZIP_BUDGET_BYTES = 222_800;
 
 // The one string this repo's markdown stack ships that nothing else in the
 // dependency graph or vam's own source does: `gfmTable`, the extension name
