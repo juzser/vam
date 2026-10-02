@@ -267,16 +267,14 @@ const EN = {
 
   // ── Agents (renamed from Sessions) ───────────────────────────────────────
   // EVERY ROW HERE IS ABOUT THE AGENT A SESSION DRIVES, which is what earned
-  // the rename: which one starts, which key sends it a prompt, how long its
-  // cache lives. THE ADHD SKILL PASSED THROUGH HERE, BUT DID NOT STAY: it
-  // joined Agents from Behaviour in the cards restructure (same reasoning:
-  // it decides what the agent is told to write, not what vam draws), then
+  // the rename: which one starts and which key sends it a prompt. THE ADHD
+  // SKILL PASSED THROUGH HERE, BUT DID NOT STAY: it joined Agents from
+  // Behaviour in the cards restructure (same reasoning: it decides what the agent is told to write, not what vam draws), then
   // left for its own "Skills" section in the settings-views restructure
   // (item D) once it grew big enough (its own status pill, an
   // install/reinstall/repair flow) to read as a settled preference buried
   // in a bigger card rather than as the one thing a section is about.
-  'settings.agents.hint':
-    'which agent a new session starts, which key sends it a prompt, and how long its cache lives',
+  'settings.agents.hint': 'which agent a new session starts and which key sends it a prompt',
   // Skills' own hint, read by the new section `AdhdSkillCard` moved into.
   'settings.skills.hint': 'the real upstream skills vam can install into an agent’s own directory',
   'settings.agents.provider.label': 'default provider',
