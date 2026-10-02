@@ -347,6 +347,13 @@ describe('EC-99 the retention cap never skips the pager', () => {
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids).toEqual(['n1', ...history.slice(0, ids.length - 1).map((d) => d.id)]);
     expect(ids).toContain(walked.at(-1)?.id);
+
+    // The hazard itself: WITHOUT the reset the stale cursor is asked, and the
+    // turn the cap dropped never comes back.
+    const stale = await walkOlder(read, 's1', cursorToAsk(pager.cursor, column) as string);
+    if (stale.kind !== 'page') throw new Error('expected a page');
+    const staleIds = columnOf(live, appendOlder(older, stale.turns)).map((d) => d.id);
+    expect(staleIds).not.toContain(walked.at(-1)?.id);
   });
 });
 

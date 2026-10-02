@@ -618,20 +618,20 @@ export function commandsInColumn(
     seen.add(command.command);
     out.push(command);
   };
+  const own = (id: string, command: string) =>
+    add({ id, label: command.split(' ')[0] ?? command, command });
   // `!cmd` and `> !cmd`: the text after the marker, as a candidate of its own.
   const lift = (turn: Decision, text: string, quoted: RegExp) =>
     text.split('\n').forEach((line, index) => {
       const command = quoted.exec(line.trim())?.[1];
-      if (command !== undefined) {
-        add({ id: `${turn.id}:bang:${index}`, label: command.split(' ')[0] ?? command, command });
-      }
+      if (command !== undefined) own(`${turn.id}:bang:${index}`, command);
     });
   const turns = focused === null ? column : [focused, ...column.filter((t) => t.id !== focused.id)];
   // WHAT THE AGENT RAN FIRST: a Bash tool call's `input.command`
   // (`Decision.bash`), newest turn first and, within a turn, the last call first.
   for (const turn of turns) {
     for (const command of [...(turn.bash ?? [])].reverse()) {
-      add({ id: `${turn.id}:bash:${command}`, label: command.split(' ')[0] ?? command, command });
+      own(`${turn.id}:bash:${command}`, command);
     }
   }
   // THEN THE OPERATOR'S OWN `!cmd` TURNS: a command they typed and sent is the

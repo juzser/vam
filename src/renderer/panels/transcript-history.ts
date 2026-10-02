@@ -139,12 +139,10 @@ export function retainLeft(
   next: readonly Decision[],
   older: readonly Decision[],
 ): readonly Decision[] {
-  const live = new Set(next.map((d) => d.id));
-  const held = new Set(older.map((d) => d.id));
-  const same = sameTurnUnderANewId(previous, next);
-  const left = previous.filter(
-    (d) => !live.has(d.id) && !held.has(d.id) && d.unconfirmed !== true && d.id !== same,
-  );
+  // Live, already held, or the same turn under a new id: none of these left.
+  const skip = new Set<string | null>([sameTurnUnderANewId(previous, next)]);
+  for (const d of [...next, ...older]) skip.add(d.id);
+  const left = previous.filter((d) => !skip.has(d.id) && d.unconfirmed !== true);
   if (left.length === 0) return older;
   return [...left, ...older].slice(0, MAX_RETAINED_TURNS);
 }
@@ -155,8 +153,7 @@ export function retainLeft(
  * transcript.ts` by a test, because the renderer does not import main.
  */
 function offsetOf(id: string): number {
-  const match = /:@(\d+)$/.exec(id);
-  return match === null ? Number.NaN : Number(match[1]);
+  return Number(/:@(\d+)$/.exec(id)?.[1]);
 }
 
 /**
