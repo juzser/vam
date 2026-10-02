@@ -111,7 +111,6 @@ import {
   paletteValue,
   setAgentPermissions,
   setAutoTabTitles,
-  setCacheTimer,
   setDefaultAgent,
   setDefaultProvider,
   setEditorHighlight,
@@ -1300,27 +1299,6 @@ export function SettingsOverlay({
                     <p data-submit-key-note className="mt-3 max-w-[52ch] text-control text-ink-dim">
                       the other one takes a newline, so the box stays multiline either way. The
                       composer says which is which while you type.
-                    </p>
-                  </SettingsRow>
-
-                  <SettingsRow
-                    name="cache-timer"
-                    label={t('settings.agents.cacheTimer.label')}
-                    hint={t('settings.agents.cacheTimer.hint')}
-                  >
-                    <Switch
-                      name="cache-timer"
-                      label={t('settings.agents.cacheTimer.label')}
-                      checked={prefs.cacheTimer}
-                      onChange={(next) => onChange(setCacheTimer(prefs, next))}
-                      on={t('settings.agents.cacheTimer.on')}
-                      off={t('settings.agents.cacheTimer.off')}
-                    />
-                    <p
-                      data-cache-timer-note
-                      className="mt-3 max-w-[52ch] text-control text-ink-dim"
-                    >
-                      {t('settings.agents.cacheTimer.note')}
                     </p>
                   </SettingsRow>
 

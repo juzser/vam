@@ -282,22 +282,10 @@ const EN = {
   'settings.agents.provider.label': 'default provider',
   'settings.agents.sendKey.label': 'send key',
   'settings.agents.sendKey.hint': 'which key sends the prompt you are typing to the session',
-  // Operator, translated from Orca's own Agents settings: "Claude caches your
-  // conversation to reduce costs. When idle too long the cache expires and
-  // the next message resends full context at higher cost. This shows a
-  // countdown so you know when to resume." The row and its note carry that
-  // same explanation in vam's own voice.
-  'settings.agents.cacheTimer.label': 'cache timer',
-  'settings.agents.cacheTimer.hint':
-    'a countdown on an idle Claude Code session, to when its prompt cache expires',
-  'settings.agents.cacheTimer.on': 'on',
-  'settings.agents.cacheTimer.off': 'off',
-  'settings.agents.cacheTimer.note':
-    'Claude caches a session’s context for a few minutes to an hour after it last did anything; once that cache expires, the next message you send resends the whole context at the uncached price. The badge shows how long is left, beside the age, only while a session is idle or waiting on you.',
 
   // KEEP COMPUTER AWAKE, via Electron’s own `powerSaveBlocker`. Off by
-  // default -- see `prefs/keep-awake.ts` for why this direction, unlike
-  // `cacheTimer` above, is the safe one to ship silently.
+  // default -- see `prefs/keep-awake.ts` for why this direction is the safe
+  // one to ship silently.
   'settings.agents.keepAwake.label': 'keep computer awake',
   'settings.agents.keepAwake.hint': 'while vam is open, or only while an agent runs',
   'settings.agents.keepAwake.on': 'on',
