@@ -10,7 +10,7 @@
  * now" signal into exactly one `start`/`stop` pair, never a leaked blocker
  * id); `Off` never blocks at all.
  *
- * OFF BY DEFAULT. Unlike `cache-timer.ts`'s countdown, this changes a REAL
+ * OFF BY DEFAULT. Unlike a pure display flag, this changes a REAL
  * fact about the operator's machine -- whether it can sleep -- and doing that
  * silently for an operator who never opens Settings is the wrong direction
  * for a brand-new capability to fail in.

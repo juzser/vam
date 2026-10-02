@@ -34,11 +34,6 @@
  * one project, and an open question with long unbroken text all at once,
  * which neither `?demo=1` nor `phone-core-loop.pw.ts`'s `STUB` states).
  *
- * `phone-cache-timer.pw.ts` runs here too, on its own FOURTH stub -- see that
- * file's own header for why: seeding the cache-timer countdown's three
- * phases onto `?demo=1`'s shared `DEMO_MODEL` was tried first and reverted,
- * after it broke two unrelated desktop guards that generically iterate
- * "every project" in the sidebar.
  */
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -53,7 +48,6 @@ export default defineConfig({
     'phone-shell.pw.ts',
     'phone-core-loop.pw.ts',
     'phone-overflow.pw.ts',
-    'phone-cache-timer.pw.ts',
     'phone-composer-layout.pw.ts',
     'phone-composer-keys.pw.ts',
   ],
