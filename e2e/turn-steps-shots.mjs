@@ -543,9 +543,24 @@ for (const theme of ['light', 'dark']) {
         await fp.keyboard.press('Tab');
         reached = await fp.evaluate((id) => document.activeElement?.getAttribute('data-turn-unfold') === id, target);
       }
+      // Tab scrolled the toggle in and the opened turn out; scroll the column so the toggle, the opened chevron and the bulleted bubble are all in view. A scroll dismisses the tooltip, so focus is re-taken without scrolling.
+      const sel = [`[data-turn-unfold="${target}"]`, `[data-turn-unfold="${OPENED}"] svg`, `[data-column-turn="${OPENED}"] [data-detail-scroll="in"]`];
+      await fp.evaluate((q) => {
+        const c = document.querySelector('[data-detail-column]');
+        c.scrollTop += Math.min(...q.map((x) => document.querySelector(x).getBoundingClientRect().top)) - c.getBoundingClientRect().top - 90;
+      }, sel);
+      await fp.waitForTimeout(300);
+      await fp.evaluate((q) => { const el = document.querySelector(q); el.blur(); el.focus({ preventScroll: true }); }, sel[0]);
       await fp.waitForSelector('[role="tooltip"]', { timeout: 3000 }).catch(() => {});
+      const fit = await fp.evaluate((q) => {
+        const c = document.querySelector('[data-detail-column]').getBoundingClientRect();
+        const [toggle, chevron, bubble] = q.map((x) => document.querySelector(x));
+        const rects = Object.fromEntries(Object.entries({ toggle, chevron, bubble }).map(([k, e]) => { const x = e.getBoundingClientRect(); return [k, { box: [x.left, x.top, x.right, x.bottom].map(Math.round), inside: x.top >= Math.max(0, c.top) && x.bottom <= Math.min(innerHeight, c.bottom) }]; }));
+        return { focused: document.activeElement === toggle, tip: document.querySelector('[role="tooltip"]') !== null, rotate: getComputedStyle(chevron).rotate, lines: bubble.textContent.includes('third'), rects };
+      }, sel);
       const seen = await fp.evaluate(() => { const el = document.activeElement; const cs = getComputedStyle(el); return { tip: document.querySelector('[role="tooltip"]')?.textContent ?? '', fv: el.matches(':focus-visible'), w: cs.outlineWidth, st: cs.outlineStyle }; });
-      check(`${tag}: Tab reaches the arrow of ${target}`, reached);
+      for (const [k, v] of Object.entries(fit.rects)) check(`${tag}: after the scroll the ${k} is inside the viewport and the column`, v.inside, JSON.stringify(v.box));
+      check(`${tag}: and focus, tooltip, the 90deg chevron and the bulleted bubble survived it`, fit.focused && fit.tip && fit.rotate === '90deg' && fit.lines, JSON.stringify([fit.focused, fit.tip, fit.rotate, fit.lines]));
       check(`${tag}: the tooltip reads exactly '${want}'`, seen.tip === want, seen.tip);
       check(`${tag}: the focused arrow is :focus-visible, ring 2px and drawn`, seen.fv && seen.w === '2px' && seen.st !== 'none', `${seen.fv} ${seen.w} ${seen.st}`);
     } else {
