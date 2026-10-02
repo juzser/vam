@@ -17,6 +17,11 @@
  *     POLL OWNS THE LIVE REGION, the pager owns everything older, and a turn
  *     the poll still carries is never drawn from the pager's copy.
  *
+ *     (SUPERSEDED IN PART, EC-66: a turn the SOURCE reported that then leaves the
+ *     live window is now kept, by `retainLeft`, because operators lost history
+ *     to the slide. The paragraph below still explains why a turn vam PAINTED
+ *     itself is never kept.)
+ *
  *     THAT RULE COSTS SOMETHING AND THE COST IS NAMED. The tail is a BYTE
  *     window, so a turn can fall off its old end -- measured, on five of the
  *     six largest transcripts on the operator's machine the tail holds one
@@ -101,6 +106,44 @@ export function columnOf(
   if (older.length === 0) return decisions;
   const live = new Set(decisions.map((d) => d.id));
   return [...decisions, ...older.filter((d) => !live.has(d.id))];
+}
+
+/**
+ * How many turns one pane keeps for itself once the poll's window has passed
+ * them. The same figure as the live window's own cap (`MAX_DECISIONS` in
+ * `main/sources/claude-code/transcript.ts`), so the retained half can never
+ * outgrow what the live half is allowed to be.
+ */
+export const MAX_RETAINED_TURNS = 3276;
+
+/**
+ * THE TURNS THAT LEFT THE LIVE WINDOW, kept: `older` after the poll moved from
+ * `previous` to `next`.
+ *
+ * The live window is a BYTE window, so a turn that has rendered can fall off
+ * its old end between two polls. A turn gone from `next` that was in `previous`
+ * is joined to the FRONT of `older` -- it is newer than everything already
+ * walked back to, older than everything still live -- keeping newest first and
+ * the id as the key, so a turn is held once however often the window slides.
+ *
+ * NEVER A TURN VAM PAINTED ITSELF (`unconfirmed`). The module header's argument
+ * against retention is about exactly those: `Canvas.tsx` retracts an optimistic
+ * prompt when the write lands or is refused, and from two arrays alone that
+ * retraction cannot be told from the window sliding. Everything the source
+ * reported is kept; nothing vam painted is.
+ *
+ * Returns `older` itself when nothing left, so a quiet poll costs no render.
+ */
+export function retainLeft(
+  previous: readonly Decision[],
+  next: readonly Decision[],
+  older: readonly Decision[],
+): readonly Decision[] {
+  const live = new Set(next.map((d) => d.id));
+  const held = new Set(older.map((d) => d.id));
+  const left = previous.filter((d) => !live.has(d.id) && !held.has(d.id) && d.unconfirmed !== true);
+  if (left.length === 0) return older;
+  return [...left, ...older].slice(0, MAX_RETAINED_TURNS);
 }
 
 /**

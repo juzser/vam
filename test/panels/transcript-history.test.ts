@@ -22,6 +22,7 @@ import {
   moreState,
   type PagerState,
   RESTING_PAGER,
+  retainLeft,
   walkOlder,
 } from '../../src/renderer/panels/transcript-history.js';
 import type { HistoryCursor, TranscriptPage } from '../../src/shared/history.js';
@@ -292,5 +293,23 @@ describe('moreState', () => {
         read,
       ),
     ).toBe('unavailable');
+  });
+});
+
+describe('retainLeft', () => {
+  it('keeps a turn that left the window, in front of what was already walked to', () => {
+    const kept = retainLeft([turn('c'), turn('b')], [turn('d'), turn('c')], [turn('a')]);
+    expect(kept.map((d) => d.id)).toEqual(['b', 'a']);
+  });
+
+  it('holds a turn once however often the window slides, and returns `older` when nothing left', () => {
+    const older = [turn('b')];
+    expect(retainLeft([turn('c')], [turn('c')], older)).toBe(older);
+    expect(retainLeft([turn('b')], [turn('c')], older)).toBe(older);
+  });
+
+  it('never keeps a turn vam painted itself', () => {
+    const paint: Decision = { ...turn('vam-pending-1'), unconfirmed: true };
+    expect(retainLeft([paint, turn('a')], [turn('b')], [])).toEqual([turn('a')]);
   });
 });

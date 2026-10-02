@@ -239,6 +239,7 @@ import {
   moreState,
   type PagerState,
   RESTING_PAGER,
+  retainLeft,
   walkOlder,
 } from './transcript-history.js';
 import { usePaneSuggestion } from './use-pane-suggestion.js';
@@ -611,13 +612,32 @@ export function commandsInColumn(
 ): readonly Command[] {
   const seen = new Set<string>();
   const out: Command[] = [];
+  const add = (command: Command) => {
+    if (seen.has(command.command)) return;
+    seen.add(command.command);
+    out.push(command);
+  };
+  // `!cmd` and `> !cmd`: the text after the marker, as a candidate of its own.
+  const lift = (turn: Decision, text: string, quoted: RegExp) =>
+    text.split('\n').forEach((line, index) => {
+      const command = quoted.exec(line.trim())?.[1];
+      if (command !== undefined) {
+        add({ id: `${turn.id}:bang:${index}`, label: command.split(' ')[0] ?? command, command });
+      }
+    });
   const turns = focused === null ? column : [focused, ...column.filter((t) => t.id !== focused.id)];
+  // THE OPERATOR'S OWN `!cmd` TURNS FIRST: a command they typed and sent is the
+  // likeliest one to be reached for again. (A command the agent RAN as a Bash
+  // tool call would come before these, but no field of `Decision` carries a
+  // tool call's input -- see the task's open question.)
+  for (const turn of turns) lift(turn, turn.input, /^!\s*(\S.*)$/);
+  // THEN WHAT THE AGENT PROPOSED: the lines `commands.ts` extracted (fenced,
+  // `! ` marker), and the lines it cannot see because a blockquote `>` or a
+  // list marker comes before the `!`. The composer's line-start rule
+  // (`bangQuery`) is not touched.
   for (const turn of turns) {
-    for (const command of turn.commands) {
-      if (seen.has(command.command)) continue;
-      seen.add(command.command);
-      out.push(command);
-    }
+    for (const command of turn.commands) add(command);
+    lift(turn, turn.output ?? '', /^(?:(?:>|[-*+]|\d+[.)])\s*)+!\s*(\S.*)$/);
   }
   return out;
 }
@@ -7162,12 +7182,13 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
    *  - and it is per-pane state that nothing outside this pane renders from,
    *    which is the same test `cycleNote` and the tab already pass.
    *
-   * ONLY THE OLDER HALF IS REMEMBERED, and `transcript-history.ts` carries the
+   * THE OLDER HALF IS WHAT IS REMEMBERED, and `transcript-history.ts` carries the
    * argument in full: the live list is used exactly as the poll delivered it,
    * so this pane holds no second opinion about a turn the poll is still
    * carrying, and `Canvas.tsx`'s optimistic paint -- with the retraction that
    * follows a refused write -- stays the poll's business rather than becoming a
-   * phantom this pane preserves.
+   * phantom this pane preserves. What `older` holds is the turns the pager
+   * walked AND the turns the live window has since slid past (`retainLeft`).
    */
   const [older, setOlder] = useState<readonly Decision[]>(NO_TURNS);
   const [pager, setPager] = useState<PagerState>(RESTING_PAGER);
@@ -7185,12 +7206,31 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
   // for THIS render -- the state updates queued here land on the next one, and
   // drawing the old session's history for one frame is the half-read flash
   // `focusKey` has always existed to avoid.
+  const liveDecisions = entry?.session.decisions ?? NO_TURNS;
+  /**
+   * THE LIVE LIST THE LAST RENDER DREW, so a turn the poll has stopped carrying
+   * can be told from one it never had. The live window is a byte window and it
+   * slides: a turn that rendered here and then left it is kept in `older`
+   * (`retainLeft`), because the reset rule below is the only thing allowed to
+   * drop a turn and it keys on the SESSION ID ALONE -- never on the entry's
+   * identity, which the poll rebuilds every ten seconds, or on a listing field.
+   * State rather than a ref, the render-phase pattern React documents: a ref
+   * written during render is lost on a discarded render.
+   */
+  const [drawnLive, setDrawnLive] = useState<readonly Decision[]>(liveDecisions);
+  let olderNext = older;
   if (sessionChanged) readingRef.current = null;
   if (sessionChanged && older.length > 0) setOlder(NO_TURNS);
   if (sessionChanged && pager !== RESTING_PAGER) setPager(RESTING_PAGER);
-  const olderNow = sessionChanged ? NO_TURNS : older;
+  if (drawnLive !== liveDecisions) {
+    setDrawnLive(liveDecisions);
+    if (!sessionChanged) {
+      olderNext = retainLeft(drawnLive, liveDecisions, older);
+      if (olderNext !== older) setOlder(olderNext);
+    }
+  }
+  const olderNow = sessionChanged ? NO_TURNS : olderNext;
   const pagerNow = sessionChanged ? RESTING_PAGER : pager;
-  const liveDecisions = entry?.session.decisions ?? NO_TURNS;
   // Memoized on the two inputs `columnOf` actually reads: an unrelated
   // re-render (a sibling pane's keystroke, a focus flip) must reuse the
   // previous array rather than rebuilding a Set, a filter and a spread over
