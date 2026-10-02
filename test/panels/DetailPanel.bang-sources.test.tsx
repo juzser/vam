@@ -198,4 +198,11 @@ describe('EC-67 the ! list offers the bash the session holds', () => {
     type('!');
     expect([...suggested()].sort()).toEqual(['ls dash', 'ls one', 'ls quote', 'ls star']);
   });
+
+  it('lifts through `+`, `1)` and nested `> -` markers', () => {
+    const prose = turn('d10', 'which', '+ !ls plus\n1) !ls paren\n> - !ls nested');
+    render(<Composer decisions={[prose]} />);
+    type('!');
+    expect([...suggested()].sort()).toEqual(['ls nested', 'ls paren', 'ls plus']);
+  });
 });

@@ -122,6 +122,14 @@ describe('EC-66 history survives', () => {
     expect(turnIds()).toEqual(ids(20, 22));
   });
 
+  it('a session change after a turn-less poll still clears what was retained', () => {
+    const view = render(panel(sessionWith(turns(1, 12)), null));
+    view.rerender(panel(sessionWith(turns(5, 14)), null));
+    view.rerender(panel(sessionWith([]), null));
+    view.rerender(panel(sessionWith(turns(20, 22), { id: 's2' }), null));
+    expect(turnIds()).toEqual(ids(20, 22));
+  });
+
   it('a paint vam made itself (unconfirmed) is never kept once it is retracted', () => {
     const paint: Decision = { ...turn(13), id: 'vam-pending-1', unconfirmed: true };
     const view = render(panel(sessionWith([paint, ...turns(1, 12)]), null));
