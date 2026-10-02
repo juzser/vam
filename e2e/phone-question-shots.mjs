@@ -146,8 +146,8 @@ for (const theme of ['light', 'dark']) {
     JSON.stringify(shape.options),
   );
 
-  // EC-6 gap 0: at the column's end the inline card pins flush on the scroller's
-  // bottom edge, with no trailing spacer and no fade painting over it.
+  // EC-6 gap 0: at the column's end the inline card sits flush at the scroll end
+  // as an in-flow block, with no trailing spacer and no fade painting over it.
   await page.evaluate(() => {
     const column = document.querySelector('[data-phone-shell] [data-detail-column]');
     if (column === null) return;

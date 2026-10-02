@@ -3165,10 +3165,10 @@ html {
  *    the Response view's inline question, the last child in normal flow
  *    of the transcript's own scroller now rather than the fixed
  *    `data-question-bar` footer -- but it is STILL the bottom of the
- *    screen whenever the composer stands down, and its own last row is the same option-to-tap
- *    the fixed card's rule was written for. Missing this selector would have
- *    been the exact regression the rule above already fixed once, on the
- *    new mount point. */
+ *    screen whenever the composer stands down, and its own last row is
+ *    the same option-to-tap the fixed card's rule was written for.
+ *    Missing this selector would have been the exact regression the rule
+ *    above already fixed once, on the new mount point. */
 [data-phone-shell] [data-composer-bar],
 [data-phone-shell] [data-question-bar],
 [data-phone-shell] [data-question-bar-inline],
