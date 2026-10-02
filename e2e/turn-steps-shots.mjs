@@ -550,6 +550,8 @@ for (const theme of ['light', 'dark']) {
         c.scrollTop += Math.min(...q.map((x) => document.querySelector(x).getBoundingClientRect().top)) - c.getBoundingClientRect().top - 90;
       }, sel);
       await fp.waitForTimeout(300);
+      // Scroll events are dispatched on a frame; let the last one land first, or it arrives after the focus and dismisses the tip.
+      await fp.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
       await fp.evaluate((q) => { const el = document.querySelector(q); el.blur(); el.focus({ preventScroll: true }); }, sel[0]);
       await fp.waitForSelector('[role="tooltip"]', { timeout: 3000 }).catch(() => {});
       const fit = await fp.evaluate((q) => {
@@ -591,9 +593,9 @@ for (const theme of ['light', 'dark']) {
           const r = el.getBoundingClientRect();
           const hit = document.elementFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2);
           const svg = el.querySelector('svg');
-          return { inside: r.top >= c.top && r.bottom <= c.bottom && r.left >= c.left && r.right <= c.right, hit: hit === el || el.contains(hit), rotate: svg ? getComputedStyle(svg).rotate : '', box: [r.left, r.top, r.right, r.bottom].map(Math.round) };
+          return { inside: r.top >= c.top && r.bottom <= c.bottom && r.left >= c.left && r.right <= c.right, hit: hit === el || el.contains(hit), over: hit === el || el.contains(hit) ? '' : String(hit?.outerHTML).slice(0, 90), rotate: svg ? getComputedStyle(svg).rotate : '', box: [r.left, r.top, r.right, r.bottom].map(Math.round) };
         });
-        return found.find((f) => f.inside) ?? found[0] ?? null;
+        return found.find((f) => f.inside && f.hit) ?? found.find((f) => f.inside) ?? found[0] ?? null;
       });
       check(`${tag}: an unfolded chevron (turn ${below}) is in view, hit-testable, and turned 90deg (EC-101)`, chev !== null && chev.inside && chev.hit && chev.rotate === '90deg', JSON.stringify(chev));
       const pill = await fp.evaluate(() => {
