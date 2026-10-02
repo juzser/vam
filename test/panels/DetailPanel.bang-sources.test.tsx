@@ -161,4 +161,29 @@ describe('EC-67 the ! list offers the bash the session holds', () => {
     type('!pn');
     expect(suggested()).toEqual(['pnpm run lint']);
   });
+
+  // Odd input: only a non-empty string `command` on a `Bash` call, of at most 500 chars.
+  it('keeps odd Bash inputs out of the ! list', () => {
+    const use = (name: string, input: unknown) => ({ type: 'tool_use', id: 'u', name, input });
+    const lines = [
+      { type: 'user', promptSource: 'typed', message: { role: 'user', content: 'go' } },
+      { type: 'last-prompt', lastPrompt: 'go' },
+      {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [
+            use('Read', { command: 'not-bash' }),
+            use('Bash', { command: 42 }),
+            use('Bash', { command: '' }),
+            use('Bash', undefined),
+            use('Bash', { command: 'x'.repeat(501) }),
+            use('Bash', { command: 'ok' }),
+          ],
+        },
+      },
+    ];
+    const text = `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`;
+    expect(summarizeTranscript(text, 's1', 0).decisions[0]?.bash).toEqual(['ok']);
+  });
 });
