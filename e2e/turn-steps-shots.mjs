@@ -560,7 +560,7 @@ for (const theme of ['light', 'dark']) {
       }, sel);
       const seen = await fp.evaluate(() => { const el = document.activeElement; const cs = getComputedStyle(el); return { tip: document.querySelector('[role="tooltip"]')?.textContent ?? '', fv: el.matches(':focus-visible'), w: cs.outlineWidth, st: cs.outlineStyle }; });
       for (const [k, v] of Object.entries(fit.rects)) check(`${tag}: after the scroll the ${k} is inside the viewport and the column`, v.inside, JSON.stringify(v.box));
-      check(`${tag}: and focus, tooltip, the 90deg chevron and the bulleted bubble survived it`, fit.focused && fit.tip && fit.rotate === '90deg' && fit.lines, JSON.stringify([fit.focused, fit.tip, fit.rotate, fit.lines]));
+      check(`${tag}: Tab reached the toggle, and focus, tooltip, the 90deg chevron and the bulleted bubble survived it`, reached && fit.focused && fit.tip && fit.rotate === '90deg' && fit.lines, JSON.stringify([reached, fit.focused, fit.tip, fit.rotate, fit.lines]));
       check(`${tag}: the tooltip reads exactly '${want}'`, seen.tip === want, seen.tip);
       check(`${tag}: the focused arrow is :focus-visible, ring 2px and drawn`, seen.fv && seen.w === '2px' && seen.st !== 'none', `${seen.fv} ${seen.w} ${seen.st}`);
     } else {
