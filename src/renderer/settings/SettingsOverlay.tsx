@@ -1493,9 +1493,9 @@ export function SettingsOverlay({
                       off={t('settings.behaviour.focusView.off')}
                     />
                     <p data-focus-view-note className="mt-3 max-w-[52ch] text-control text-ink-dim">
-                      A folded turn keeps <code className="text-ink">···</code> where its working
-                      was — press it and the turn comes back. Nothing is folded from a turn whose
-                      tools failed, or from the newest turn while the session is working or waiting.
+                      A folded turn keeps an arrow where its working was — press it and the turn
+                      comes back. Nothing is folded from a turn whose tools failed, or from the
+                      newest turn while the session is working or waiting.
                     </p>
                   </SettingsRow>
 

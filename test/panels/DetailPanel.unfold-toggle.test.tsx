@@ -142,6 +142,8 @@ describe('the tooltip says how many steps are folded', () => {
     ['1 step', 1, false, '1 step'],
     ['no steps, folded', undefined, false, 'Show working'],
     ['no steps, open', undefined, true, 'Hide working'],
+    ['empty steps, folded', 0, false, 'Show working'],
+    ['empty steps, open', 0, true, 'Hide working'],
   ])('reads the right text on keyboard focus: %s', async (_name, n, expand, text) => {
     drawFolded({ steps: n === undefined ? undefined : steps(n) });
     if (expand) fireEvent.click(toggle());

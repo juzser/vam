@@ -295,7 +295,7 @@ export const DEMO_MODEL: CanvasModel = {
               // the one the unfold exists for. Focus view keeps the newest
               // turn's line (it has a present to report) and the failing
               // turn's (alarm is never folded), so NEITHER of them ever draws
-              // a `···` -- and without a turn like this, "press the way back
+              // an arrow -- and without a turn like this, "press the way back
               // and the calls return" was unreachable from the only session a
               // guard may drive. `e2e/turn-steps-shots.mjs` found that by
               // failing on it.

@@ -6442,9 +6442,10 @@ const TurnBlock = memo(function TurnBlock({
   /**
    * AND THE WAY BACK, FROM THE SAME PAIR OF PREDICATES. Not `!showProgress`:
    * that would draw one on every turn while focus view is off, where nothing
-   * is folded and there is nothing to restore. `drawsUnfoldControl` is the
-   * complement of the line WITHIN focus view, written once so the two cannot
-   * drift into a turn that has neither.
+   * is folded and there is nothing to restore. `drawsUnfoldControl` is a
+   * TOGGLE's rule: the control is drawn for every turn focus view folds,
+   * whether the operator has unfolded it or not, so the same arrow that
+   * opens a turn folds it again. Its drawn part is a chevron in a 24px box.
    */
   const showUnfold = drawsUnfoldControl(focusView, turnFacts);
   /**
@@ -6606,7 +6607,19 @@ const TurnBlock = memo(function TurnBlock({
              enforced rather than noted. */
           className="max-w-[90%] min-h-0 min-w-0 self-end overflow-y-auto rounded-[10px] bg-in-bubble px-2.5 py-2"
         >
-          <p className="whitespace-pre-wrap break-words text-body text-ink">
+          {/* PHONE ONLY: THE JUMP PILL'S CLEARANCE. The pill's painted circle
+              sits 8px to 36px in from the column's right edge, and this
+              bubble's text box ends 24px in (14px gutter, 10px padding), so
+              the last glyph of a right-aligned prompt ran under it. 16px of
+              right padding on the paragraph, never on the band or the
+              scroller (the phone gutter is pinned), puts the text 40px in:
+              4px clear of the circle. Padding and not the desktop's float:
+              a float tall enough to span the pill's rows would also stretch
+              a one-line bubble to that height. */}
+          <p
+            data-detail-pill-reserve={phone ? '' : undefined}
+            className={`whitespace-pre-wrap break-words text-body text-ink${phone ? ' pr-4' : ''}`}
+          >
             {/* THE RESERVED CORNER, audit F1's obligation. A float rather than
                 padding because only the FIRST LINE meets the pill: padding
                 would indent all 300 lines of a long prompt to clear something
@@ -6683,14 +6696,17 @@ const TurnBlock = memo(function TurnBlock({
           "Folded activity stays one click away" -- and the setting this
           replaces had no such clause, which is why it was a deletion with a
           preference in front of it rather than a fold. So a folded turn is
-          never left with nothing: it draws this instead, in the same place,
-          and pressing it puts that turn's line back.
+          never left with nothing: it draws this toggle, in the same place.
+          Pressing it opens that turn's working in place, and pressing it
+          again folds the turn; it is drawn for every turn focus view folds,
+          unfolded or not.
 
           A BUTTON, NAMED IN WORDS. A control that cannot be found is the same
           defect as one that cannot act, so this is not a hover affordance and
           not a bare glyph: it takes a tab stop and its accessible name says
           what pressing it produces. The drawn part is deliberately almost
-          nothing -- an ellipsis at the progress line's own size and ink -- so
+          nothing -- a chevron in a 24px box, in the progress line's own ink,
+          turned a quarter turn once the turn is open -- so
           that folding still BUYS the operator the quiet page they asked for.
           A chip as loud as the line it replaced would be the setting doing
           nothing at all.
@@ -6722,8 +6738,8 @@ const TurnBlock = memo(function TurnBlock({
 
              SO IT STANDS EXACTLY WHERE THE PROGRESS REGION STANDS when it is
              back: between the prompt block and the answer, flush with the
-             answer's left edge. An ellipsis means "something is elided HERE";
-             drawn there, the click replaces the mark with the working in
+             answer's left edge. A chevron there says "something is folded HERE";
+             the click replaces the mark with the working in
              place rather than inserting rows somewhere else on the page.
              Document order was already this (the button precedes the region,
              `test/panels/DetailPanel.turn-progress.test.tsx` pins it); only

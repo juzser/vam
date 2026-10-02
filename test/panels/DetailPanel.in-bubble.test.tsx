@@ -14,14 +14,16 @@ const INPUT = 'Fix these:\n- first\n- second\n• third';
 const noop = () => {};
 type Props = ComponentProps<typeof DetailPanel>;
 
-function draw(input: string) {
+function draw(input: string, over: Partial<Props> = {}) {
   const decision = { id: 'a', label: 'turn-a', input, output: 'done a', commands: [] };
   const built = { id: 's1', title: 'T', status: 'running', activity: null, decisions: [decision] };
   const entry = { project: { id: 'p1', name: 'atlas', sessions: [built] }, session: built };
   const rest = { composing: false, active: false, actionIndex: 0, resizeHandle: null, width: 408 };
   const props = { ...rest, entry, decision, draft: '', onDraftChange: noop, onSubmit: noop };
   render(
-    <DetailPanel {...({ ...props, onCompose: noop, onStopComposing: noop } as unknown as Props)} />,
+    <DetailPanel
+      {...({ ...props, onCompose: noop, onStopComposing: noop, ...over } as unknown as Props)}
+    />,
   );
 }
 
@@ -61,18 +63,44 @@ describe('the In bubble is right-aligned and shrinks to its prompt', () => {
     expect(classesOf(block)).toEqual(expect.arrayContaining(['flex', 'flex-col']));
   });
 
-  it('keeps the corner reserve as the paragraph’s first child when a pill is drawn', () => {
-    draw(INPUT);
+  it('keeps the corner reserve as the paragraph’s first child in a focused pane', () => {
+    draw(INPUT, { paneFocused: true });
     const paragraph = bubble().querySelector('p') as HTMLElement;
     const reserve = paragraph.querySelector('[data-detail-corner-reserve]');
-    // Absent when no pill is drawn (an unfocused pane); when present it leads.
-    if (reserve !== null) expect(paragraph.firstElementChild).toBe(reserve);
+    expect(reserve).not.toBeNull();
+    expect(paragraph.firstElementChild).toBe(reserve);
+    // The first NODE too: an element-only query would not see text drawn before it.
+    expect(paragraph.firstChild).toBe(reserve);
+  });
+
+  it('draws no corner reserve in an unfocused pane, where no pill is drawn', () => {
+    draw(INPUT, { paneFocused: false });
+    expect(document.querySelector('[data-detail-corner-reserve]')).toBeNull();
   });
 
   it('leaves the output block as it was', () => {
     draw(INPUT);
     const out = find('[data-detail-scroll="out"]');
-    expect(classesOf(out)).not.toContain('self-end');
-    expect(classesOf(out)).not.toContain('max-w-[90%]');
+    expect(out.className).toBe('flex flex-col gap-2 text-[length:var(--vam-out-font-size,12px)]');
+  });
+});
+
+describe('on a phone the jump pill clears the pinned prompt', () => {
+  it('reserves 16px of right padding inside the paragraph, and nothing on the band', () => {
+    draw(INPUT, { phone: true });
+    const paragraph = bubble().querySelector('p') as HTMLElement;
+    expect(paragraph.hasAttribute('data-detail-pill-reserve')).toBe(true);
+    expect(classesOf(paragraph)).toContain('pr-4');
+    expect(classesOf(bubble().closest('[data-detail-block="in"]') as HTMLElement)).toContain(
+      'pr-3.5',
+    );
+    expect(paragraph.textContent).toBe(INPUT);
+  });
+
+  it('draws no pill reserve on the desktop', () => {
+    draw(INPUT);
+    const paragraph = bubble().querySelector('p') as HTMLElement;
+    expect(paragraph.hasAttribute('data-detail-pill-reserve')).toBe(false);
+    expect(classesOf(paragraph)).not.toContain('pr-4');
   });
 });

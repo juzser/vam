@@ -220,6 +220,8 @@ describe('the way back', () => {
     let checked = 0;
     const stranded: string[] = [];
     const misplaced: string[] = [];
+    const wrongControl: string[] = [];
+    const wrongLine: string[] = [];
     for (const focus of bools) {
       for (const errorCount of counts) {
         for (const newest of bools) {
@@ -231,12 +233,20 @@ describe('the way back', () => {
                 const line = drawsProgressLine(focus, turn);
                 const way = drawsUnfoldControl(focus, turn);
                 const name = `${focus ? 'focus' : 'full'} ${JSON.stringify(turn)}`;
+                // THE ORACLE IS WRITTEN OUT HERE and calls neither predicate:
+                // a sweep that derived its expectation from the code under
+                // test would pass whatever that code did.
+                const foldEligible =
+                  focus &&
+                  !((errorCount ?? 0) > 0) &&
+                  !(newest && (activity !== null || waitingCause !== null));
+                if (way !== foldEligible) wrongControl.push(name);
+                if (line !== (!foldEligible || unfolded)) wrongLine.push(name);
                 // Neither is a deletion.
                 if (!line && !way) stranded.push(name);
                 // Both is right only for a turn focus view folds and the
-                // operator unfolded: focus on, nothing else holding the line.
-                const foldable = focus && drawsUnfoldControl(focus, turn);
-                if (line && way && !(foldable && unfolded)) misplaced.push(name);
+                // operator unfolded.
+                if (line && way && !(foldEligible && unfolded)) misplaced.push(name);
               }
             }
           }
@@ -245,7 +255,13 @@ describe('the way back', () => {
     }
     // 2 x 3 x 2 x 2 x 2 x 2. The literal is the point: a sweep that examined
     // nothing would satisfy the emptiness check forever.
-    expect({ checked, stranded, misplaced }).toEqual({ checked: 96, stranded: [], misplaced: [] });
+    expect({ checked, stranded, misplaced, wrongControl, wrongLine }).toEqual({
+      checked: 96,
+      stranded: [],
+      misplaced: [],
+      wrongControl: [],
+      wrongLine: [],
+    });
   });
 });
 

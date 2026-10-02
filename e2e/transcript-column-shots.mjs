@@ -1545,7 +1545,7 @@ check(
 // folding is reversible; without this the setting reads as a delete.
 check(
   'and that the folded working comes back',
-  promised !== null && /···/.test(promised) && /comes back/i.test(promised),
+  promised !== null && /arrow/.test(promised) && /comes back/i.test(promised),
   String(promised),
 );
 check(
