@@ -10400,9 +10400,11 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                 </div>
               )}
               {/* The breathing room at the scroll end is a trailing SPACER, not
-                scroller padding: a trailing spacer keeps the phone inline
-                question flush with the column's bottom edge. Skipped while that question is
-                drawn -- it IS the end of the column and pins flush. */}
+                scroller padding. Skipped while the phone inline question is
+                drawn: that card is an ordinary in-flow block at the end of
+                the column, so it is the end and sits flush there; it scrolls
+                with the transcript and the jump pill shows while it is out
+                of view. */}
               {!inlineQuestionEnds && (
                 <div
                   data-detail-spacer

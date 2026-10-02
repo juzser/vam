@@ -224,6 +224,7 @@ for (const theme of ['light', 'dark']) {
     const overlap = (a, b) => ({ l: Math.max(a.l, b.l), t: Math.max(a.t, b.t), r: Math.min(a.r, b.r), b: Math.min(a.b, b.b) });
     const area = (x) => Math.max(0, x.r - x.l) * Math.max(0, x.b - x.t);
     const overlaps = [];
+    let bands = 0;
     let leftAt = null;
     column.scrollTop = column.scrollHeight;
     await wait(100);
@@ -233,15 +234,16 @@ for (const theme of ['light', 'dark']) {
       const c = box(column);
       const k = box(card());
       for (const band of document.querySelectorAll('[data-detail-scroll="in"]')) {
+        bands += 1;
         const x = overlap(overlap(box(band), k), c);
         if (area(x) > 0) overlaps.push({ scrollTop: column.scrollTop, band: box(band), card: k, at: String(document.elementFromPoint((x.l + x.r) / 2, (x.t + x.b) / 2)?.outerHTML).slice(0, 80) });
       }
       if (leftAt === null && area(overlap(k, c)) === 0) { leftAt = top; break; }
     }
-    return { leftAt, overlaps };
+    return { leftAt, overlaps, bands };
   });
   check(`${theme}: the card scrolls out of the column (EC-90)`, sweep.error === undefined && sweep.leftAt !== null, JSON.stringify(sweep));
-  check(`${theme}: no sticky In band meets the card at any step (EC-91)`, sweep.overlaps?.length === 0, JSON.stringify(sweep.overlaps));
+  check(`${theme}: no sticky In band meets the card at any step (EC-91)`, sweep.bands > 0 && sweep.overlaps?.length === 0, JSON.stringify({ bands: sweep.bands, overlaps: sweep.overlaps }));
   if (sweep.leftAt !== null && sweep.error === undefined) {
     await page.waitForTimeout(150);
     const pill = await page.evaluate(() => {

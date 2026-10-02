@@ -550,7 +550,8 @@ for (const theme of ['light', 'dark']) {
         c.scrollTop += Math.min(...q.map((x) => document.querySelector(x).getBoundingClientRect().top)) - c.getBoundingClientRect().top - 90;
       }, sel);
       await fp.waitForTimeout(300);
-      // Scroll events are dispatched on a frame; let the last one land first, or it arrives after the focus and dismisses the tip.
+      // A scroll event that lands after the focus reaches Radix and closes the tip,
+      // so wait for layout and scroll to settle before asserting EC-102.
       await fp.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
       await fp.evaluate((q) => { const el = document.querySelector(q); el.blur(); el.focus({ preventScroll: true }); }, sel[0]);
       await fp.waitForSelector('[role="tooltip"]', { timeout: 3000 }).catch(() => {});
