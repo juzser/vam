@@ -2721,7 +2721,7 @@ describe('the Agents tab', () => {
       await act(async () => {});
       const detail = q<HTMLElement>('[data-agent-detail]');
       expect(detail?.textContent).toContain('the brief the parent wrote');
-      expect(detail?.textContent).toContain('no answer yet');
+      expect(detail?.textContent).toContain('No answer yet');
     });
 
     it('says an agent has done nothing vam could read, when that is the reading', async () => {

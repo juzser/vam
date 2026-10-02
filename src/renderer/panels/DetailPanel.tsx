@@ -72,6 +72,7 @@ import {
   Box,
   Check,
   ChevronDown,
+  ChevronRight,
   ChevronsDown,
   ChevronsUp,
   Circle,
@@ -2927,7 +2928,7 @@ function AgentTurn({ turn }: { readonly turn: Decision }) {
         {/* ABSENT IS ITS OWN SENTENCE. An agent that has been asked and has
             not answered is the commonest live case, and a blank space there
             reads as an agent that answered with nothing. */}
-        {turn.output ?? <span className="text-ink-faint italic">no answer yet</span>}
+        {turn.output ?? <span className="text-ink-faint italic">No answer yet</span>}
       </div>
       {steps.length > 0 && (
         <ul
@@ -6330,6 +6331,16 @@ function StepRow({ step }: { readonly step: TurnStep }) {
 }
 
 /**
+ * THE UNFOLD ARROW'S TOOLTIP: the cheapest stat already on the turn, its step
+ * count. A source that lists no steps (`steps` absent) has no count to give, so
+ * the tip says what pressing the arrow will do instead.
+ */
+function unfoldTip(steps: readonly TurnStep[] | undefined, unfolded: boolean): string {
+  if (steps === undefined || steps.length === 0) return unfolded ? 'Hide working' : 'Show working';
+  return steps.length === 1 ? '1 step' : `${steps.length} steps`;
+}
+
+/**
  * ONE TURN OF THE TRANSCRIPT, as a block of the column.
  *
  * The pane used to draw exactly one of these -- whichever turn `selectedId`
@@ -6593,7 +6604,7 @@ const TurnBlock = memo(function TurnBlock({
              fill (3.718:1) and must not be used here. The guard measures the
              ink this element is really painted with, so that constraint is
              enforced rather than noted. */
-          className="min-h-0 min-w-0 overflow-y-auto rounded-[10px] bg-in-bubble px-2.5 py-2"
+          className="max-w-[90%] min-h-0 min-w-0 self-end overflow-y-auto rounded-[10px] bg-in-bubble px-2.5 py-2"
         >
           <p className="whitespace-pre-wrap break-words text-body text-ink">
             {/* THE RESERVED CORNER, audit F1's obligation. A float rather than
@@ -6689,12 +6700,14 @@ const TurnBlock = memo(function TurnBlock({
           that unfolded everything would be a second copy of the setting
           reached from a place that promised something smaller. */}
       {showUnfold && (
-        <button
-          type="button"
-          data-turn-unfold={decision.id}
-          onClick={() => onUnfold(decision.id)}
-          aria-label={`show this turn's working — ${decision.label}`}
-          /* IN FLOW, WHERE THE WORKING WAS -- and that is a reversal, so the
+        <ShortcutTip label={unfoldTip(decision.steps, unfolded)}>
+          <button
+            type="button"
+            data-turn-unfold={decision.id}
+            aria-expanded={unfolded}
+            onClick={() => onUnfold(decision.id)}
+            aria-label={`${unfolded ? 'hide' : 'show'} this turn's working — ${decision.label}`}
+            /* IN FLOW, WHERE THE WORKING WAS -- and that is a reversal, so the
              history is kept. The first cut put this OUT of flow, absolutely
              positioned in the article's top-right corner, so that it cost no
              height: vam then folded ONE line per turn, and a way back that
@@ -6737,19 +6750,25 @@ const TurnBlock = memo(function TurnBlock({
              only thing there is to read. Measured at 7.25:1 on the pane, the
              same ink the step rows wear; the corner, not the ink, was what
              made it hard to find. */
-          /* `vam-tap` grows this to the phone's 44 (`styles.css`), which is a
+            /* `vam-tap` grows this to the phone's 44 (`styles.css`), which is a
              floor 24 does not meet -- five of these draw on one folded
              screen, and this is the ONLY route back to a folded turn's
              working. In flow, the same `-my-1.5` makes that 32px net. */
-          className={`vam-tap -my-1.5 flex h-6 w-6 flex-none cursor-pointer items-center justify-center self-start rounded font-mono text-ink-quiet text-meta leading-none hover:text-ink ${FOCUS_RING}`}
-        >
-          {/* The phone's other half: hit 44, PAINT 30, the pattern the view
+            className={`vam-tap -my-1.5 flex h-6 w-6 flex-none cursor-pointer items-center justify-center self-start rounded text-ink-quiet hover:text-ink ${FOCUS_RING}`}
+          >
+            {/* The phone's other half: hit 44, PAINT 30, the pattern the view
               icons and the keystroke strip already use. On the desktop this
               span is unstyled and the box stays 24. */}
-          <span data-tap-skin aria-hidden="true">
-            ···
-          </span>
-        </button>
+            <span data-tap-skin aria-hidden="true">
+              <ChevronRight
+                size={15}
+                strokeWidth={1.8}
+                aria-hidden="true"
+                className={`transition-transform duration-150 ease-out motion-reduce:transition-none ${unfolded ? 'rotate-90' : ''}`}
+              />
+            </span>
+          </button>
+        </ShortcutTip>
       )}
       {showProgress && (
         <section data-detail-block="progress" className="flex flex-none flex-col gap-1">
@@ -9190,7 +9209,8 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
   const unfold = useCallback((id: string) => {
     setUnfolded((open) => {
       const next = new Set(open);
-      next.add(id);
+      // A toggle: the same control that opened a turn folds it again.
+      if (!next.delete(id)) next.add(id);
       return next;
     });
   }, []);

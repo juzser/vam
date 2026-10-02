@@ -376,7 +376,7 @@ for (const p of placement) {
 // the first one on screen and was not, when this was written: focus view keeps
 // the newest turn's line (it has a present to report) and a failing turn's
 // (alarm is never folded), so the two turns the demo gave calls to were
-// precisely the two that never draw a `···`. This guard failed on that, and
+// precisely the two that never draw the arrow. This guard failed on that, and
 // `demo.ts` gained a quiet older turn with a list. The lookup is by turn id
 // rather than by position so it cannot silently start measuring the wrong one.
 const foldedTurn = await page.evaluate(
@@ -416,6 +416,91 @@ await page.evaluate((id) => {
 }, foldedTurn);
 await page.waitForTimeout(150);
 await page.screenshot({ path: `${outDir}/turn-steps-folded.png` });
+
+// ── 5b. THE ARROW AND THE IN BUBBLE, BOTH THEMES, DESKTOP AND PHONE ───────
+// Operator events 49 and 68. The arrow turns 90 degrees once its turn is open
+// and the same press folds it again; the In bubble is right-aligned, at most
+// 90% of the column, and its right edge is the column's content edge, measured
+// against the answer block's right edge. The one-line and the 4-line bulleted
+// prompts are written into two existing bubbles for the shot only (the demo
+// fixture has neither); the tooltip is hovered on the folded arrow. Shots go
+// to the argv[3] directory, never to docs/ui.
+const SHORT_PROMPT = 'Ship it.';
+const BULLETS = 'Fix these:\n- first\n- second\n• third';
+for (const theme of ['light', 'dark']) {
+  await page.emulateMedia({ colorScheme: theme });
+  for (const size of [
+    { name: 'desktop', width: 1280, height: 800 },
+    { name: 'phone', width: 390, height: 844 },
+  ]) {
+    await page.setViewportSize({ width: size.width, height: size.height });
+    await page.waitForTimeout(250);
+    const tag = `${size.name}-${theme}`;
+    const arrow = page.locator('[data-turn-unfold]').first();
+    check(`${tag}: a folded turn draws the arrow`, (await arrow.count()) > 0);
+    if ((await arrow.count()) === 0) continue;
+    const before = await arrow.boundingBox();
+    await arrow.click();
+    await page.waitForTimeout(250);
+    const open = await page.evaluate(() => {
+      const el = document.querySelector('[data-turn-unfold][aria-expanded="true"]');
+      const svg = el?.querySelector('svg');
+      const rect = el?.getBoundingClientRect();
+      return {
+        found: el !== null && el !== undefined,
+        transform: svg === undefined || svg === null ? '' : getComputedStyle(svg).transform,
+        top: rect?.top ?? null,
+      };
+    });
+    check(`${tag}: pressing it opens the turn and turns the arrow`, open.found && open.transform !== 'none', open.transform);
+    check(`${tag}: the box does not shift when it opens`, open.top !== null && Math.abs(open.top - before.y) < 1.5, `${before.y} -> ${open.top}`);
+    await page.evaluate(
+      ([short, bullets]) => {
+        const paras = [...document.querySelectorAll('[data-detail-scroll="in"] p')];
+        if (paras[0] !== undefined) paras[0].textContent = short;
+        if (paras[1] !== undefined) paras[1].textContent = bullets;
+      },
+      [SHORT_PROMPT, BULLETS],
+    );
+    await page.waitForTimeout(150);
+    const bubbles = await page.evaluate(() =>
+      [...document.querySelectorAll('[data-column-turn]')]
+        .map((turn) => {
+          const bubble = turn.querySelector('[data-detail-scroll="in"]');
+          const answer = turn.querySelector('[data-detail-block="out"]');
+          const block = turn.querySelector('[data-detail-block="in"]');
+          if (bubble === null || answer === null || block === null) return null;
+          const b = bubble.getBoundingClientRect();
+          const a = answer.getBoundingClientRect();
+          const cs = getComputedStyle(block);
+          const content = block.getBoundingClientRect().right - Number.parseFloat(cs.paddingRight);
+          return { right: b.right, width: b.width, answerRight: a.right, content, column: content - block.getBoundingClientRect().left - Number.parseFloat(cs.paddingLeft) };
+        })
+        .filter((m) => m !== null),
+    );
+    check(`${tag}: every In bubble's right edge is the column's content edge`, bubbles.length > 0 && bubbles.every((m) => Math.abs(m.right - m.content) <= 1), JSON.stringify(bubbles.map((m) => [m.right, m.content])));
+    check(`${tag}: no In bubble is wider than 90% of the column`, bubbles.every((m) => m.width <= m.column * 0.9 + 1), JSON.stringify(bubbles.map((m) => [m.width, m.column])));
+    check(`${tag}: a short prompt gets a bubble narrower than the column`, bubbles.some((m) => m.width < m.column * 0.5));
+    await page.screenshot({ path: `${outDir}/turn-arrow-bubble-${tag}.png` });
+    console.log(`${outDir}/turn-arrow-bubble-${tag}.png`);
+    if (size.name === 'desktop' && theme === 'dark') {
+      // The tooltip, on a folded arrow: fold the opened turn again first.
+      await page.locator('[data-turn-unfold][aria-expanded="true"]').first().click();
+      await page.waitForTimeout(150);
+      await page.locator('[data-turn-unfold][aria-expanded="false"]').first().hover();
+      await page.waitForTimeout(700);
+      const tip = await page.evaluate(() => document.querySelector('[role="tooltip"]')?.textContent ?? '');
+      check(`${tag}: hovering the folded arrow shows a step count`, /^(\d+ steps?|Show working)$/.test(tip), tip);
+      await page.screenshot({ path: `${outDir}/turn-arrow-tooltip-${tag}.png` });
+      console.log(`${outDir}/turn-arrow-tooltip-${tag}.png`);
+    } else {
+      await page.locator('[data-turn-unfold][aria-expanded="true"]').first().click();
+    }
+  }
+}
+await page.emulateMedia({ colorScheme: null });
+await page.setViewportSize({ width: 1100, height: 760 });
+await page.waitForTimeout(250);
 
 await page.keyboard.press('z');
 await page.keyboard.press('f');
