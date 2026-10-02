@@ -70,10 +70,12 @@ function GitlabMark({ size = 16 }: { readonly size?: number }) {
 
 /** `GithubPillKind`'s own three states, restated for GitLab -- coarser than
  *  `GitlabAuthStatus['kind']`, which also carries `unknown`. */
-type GitlabPillKind = 'connected' | 'not-connected' | 'cli-missing';
+type GitlabPillKind = 'connected' | 'not-connected' | 'cli-missing' | 'no-active-account';
 
-function pillKindFor(kind: GitlabAuthStatus['kind']): GitlabPillKind {
+function pillKindFor(status: GitlabAuthStatus): GitlabPillKind {
+  const kind = status.kind;
   if (kind === 'cli-missing') return 'cli-missing';
+  if (status.kind === 'logged-in' && status.accounts.length === 0) return 'no-active-account';
   if (kind === 'logged-in') return 'connected';
   return 'not-connected';
 }
@@ -82,6 +84,7 @@ const PILL_TEXT: Record<GitlabPillKind, string> = {
   connected: t('settings.integrations.gitlab.pill.connected'),
   'not-connected': t('settings.integrations.gitlab.pill.notConnected'),
   'cli-missing': t('settings.integrations.gitlab.pill.cliMissing'),
+  'no-active-account': t('settings.integrations.gitlab.pill.noActiveAccount'),
 };
 
 /** `GithubStatusPill`'s own tone tables, reused. */
@@ -89,11 +92,13 @@ const PILL_TONE: Record<GitlabPillKind, string> = {
   connected: 'text-done',
   'not-connected': 'text-waiting',
   'cli-missing': 'text-failed',
+  'no-active-account': 'text-waiting',
 };
 const PILL_BORDER: Record<GitlabPillKind, string> = {
   connected: 'border-done-tint',
   'not-connected': 'border-waiting-tint',
   'cli-missing': 'border-failed/40',
+  'no-active-account': 'border-waiting-tint',
 };
 
 /**
@@ -139,8 +144,7 @@ function statusSentence(status: GitlabAuthStatus | null): string {
     case 'unknown':
       return t('settings.integrations.gitlab.status.unknown', { message: status.message });
     case 'logged-in': {
-      const active = status.accounts[0];
-      return active === undefined ? t('settings.integrations.gitlab.status.loggedOut') : '';
+      return '';
     }
     default:
       return '';
@@ -245,7 +249,7 @@ export function GitlabPanel({ api, active, copyText, openExternal }: GitlabPanel
               </h4>
               {api !== undefined && status !== null && (
                 <span className="ml-auto">
-                  <GitlabStatusPill kind={pillKindFor(status.kind)} />
+                  <GitlabStatusPill kind={pillKindFor(status)} />
                 </span>
               )}
             </div>
@@ -254,6 +258,15 @@ export function GitlabPanel({ api, active, copyText, openExternal }: GitlabPanel
             </p>
           </div>
         </div>
+
+        {api !== undefined && status !== null && pillKindFor(status) === 'no-active-account' ? (
+          <p
+            data-gitlab-no-active-account
+            className="vam-sentence m-0 max-w-[52ch] text-control text-ink-dim"
+          >
+            {t('settings.integrations.gitlab.noActiveAccount')}
+          </p>
+        ) : null}
 
         {isLoggedIn && activeAccount !== undefined ? (
           <p data-gitlab-account-line className="m-0 text-control text-ink-dim">
