@@ -732,11 +732,12 @@ describe('the prompt box', () => {
     expect(statusBar()).toContain('read-only');
   });
 
-  it('Mod-[ leaves it and drops the draft', () => {
+  it('Mod-[ leaves it and keeps the draft', () => {
     // THE KEY MOVED, THE BEHAVIOUR DID NOT. Escape in the composer is the
     // agent's interrupt now (the operator's request, Claude Code's default),
     // so the way out took `Mod-[` -- vim's `Ctrl-[`, which IS Escape, and
-    // `Mod` folds Ctrl and Cmd. What it does is byte-for-byte what Escape did.
+    // `Mod` folds Ctrl and Cmd. It leaves Insert for Select and keeps the
+    // draft exactly as typed (EC-52); only Submit clears a draft.
     render(<Canvas model={MODEL} />);
     press('i');
     typeInto(promptInput() as HTMLTextAreaElement, 'halfway typed');
@@ -746,7 +747,7 @@ describe('the prompt box', () => {
       cancelable: true,
     });
     expect(mode()).toBe('Select');
-    expect(promptInput()?.value).toBe('');
+    expect(promptInput()?.value).toBe('halfway typed');
   });
 });
 

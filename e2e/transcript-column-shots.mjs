@@ -1574,6 +1574,60 @@ check(
   `${afterPick.lines} lines`,
 );
 
+/** The composer's Tab offer (event #30) and its draft after Esc (event #47); the pane read is stubbed. */
+const SUGGEST_SCREEN = `\n${'─'.repeat(40)}\n❯ \u001b[2mrun the test\u001b[22m\n${'─'.repeat(40)}\n`;
+const composerPage = await browser.newPage({ viewport: { width: 1100, height: 620 } });
+composerPage.on('pageerror', (err) => console.error('PAGE ERROR (composer):', err));
+await composerPage.addInitScript(
+  ([key, payload]) => window.localStorage.setItem(key, payload),
+  [CONCISE_PREFS, JSON.stringify({ theme })],
+);
+await composerPage.goto(`${origin}/?demo=1&history=off`, { waitUntil: 'networkidle' });
+await composerPage.waitForSelector('[data-tab-strip]');
+await openSession(composerPage, 'notes-1');
+// Stubbed AFTER boot: a `window.api` at load would swap the demo for the desktop bridge.
+await composerPage.evaluate((screen) => {
+  window.api = {
+    terminal: {
+      read: async () => ({
+        kind: 'ok',
+        name: 'vam-demo',
+        text: screen,
+        cursor: { row: 0, col: 0 },
+      }),
+    },
+  };
+}, SUGGEST_SCREEN);
+const composerBox = composerPage.locator('textarea[aria-label="prompt to session"]');
+await composerBox.focus();
+// A keystroke and its undo re-render the panel, picking the stub up.
+await composerBox.fill('x');
+await composerBox.fill('');
+await composerPage.waitForSelector('[data-prompt-suggestion-ghost]', { timeout: 6_000 });
+await composerPage.screenshot({ path: `${outDir}/composer-tab-offer-${theme}.png` });
+console.log(`${outDir}/composer-tab-offer-${theme}.png`);
+await composerPage.keyboard.press('Tab');
+await composerPage.waitForTimeout(150);
+await composerPage.screenshot({ path: `${outDir}/composer-tab-filled-${theme}.png` });
+console.log(`${outDir}/composer-tab-filled-${theme}.png`);
+await composerBox.fill('a draft I typed');
+await composerPage.waitForTimeout(150);
+check(
+  'the offer is withdrawn once the draft carries text',
+  (await composerPage.locator('[data-prompt-suggestion-ghost]').count()) === 0,
+);
+await composerPage.screenshot({ path: `${outDir}/composer-draft-typed-${theme}.png` });
+console.log(`${outDir}/composer-draft-typed-${theme}.png`);
+await composerPage.keyboard.press('Escape');
+await composerPage.waitForTimeout(150);
+check(
+  'Escape leaves Insert and keeps the draft',
+  (await composerBox.inputValue()) === 'a draft I typed',
+);
+await composerPage.screenshot({ path: `${outDir}/composer-draft-kept-${theme}.png` });
+console.log(`${outDir}/composer-draft-kept-${theme}.png`);
+await composerPage.close();
+
 await browser.close();
 
 if (failures.length > 0) {

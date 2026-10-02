@@ -8127,8 +8127,9 @@ function CanvasInner({
         // to write anywhere.
         onStopComposing: () => {
           if (sessionId === null) return;
+          // The draft is KEPT: leaving Insert is not cancelling what was
+          // typed. Only a send clears it (the submit path's own write).
           setComposingFor(sessionId, false);
-          setDraftFor(sessionId, '');
         },
         width: undefined,
         resizeHandle: null,

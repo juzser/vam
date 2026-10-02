@@ -104,7 +104,7 @@ describe('the prompt box offers the open question suggestion', () => {
     expect(box().value).toBe('');
     expect(box().getAttribute('data-prompt-suggestion')).toBe('Codex CLI');
     expect(box().placeholder).toContain('Codex CLI');
-    expect(box().placeholder).toContain('Tab');
+    expect(box().placeholder).not.toContain('Tab to use');
   });
 
   it('follows the mark: picking the second option moves the offer to it', () => {

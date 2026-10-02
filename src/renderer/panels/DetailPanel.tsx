@@ -210,6 +210,7 @@ import {
   StartShortcuts,
   TERMINAL_ONLY_SHORTCUT_ROWS,
 } from './GettingStarted.js';
+import { KeyTag } from './KeyTag.js';
 import {
   MODEL_CHOICES,
   modelButtonLabel,
@@ -238,6 +239,7 @@ import {
   RESTING_PAGER,
   walkOlder,
 } from './transcript-history.js';
+import { usePaneSuggestion } from './use-pane-suggestion.js';
 
 // `react-markdown` + `remark-gfm`, in their own lazy chunk: see
 // `LazyMarkdown.tsx`'s own header for the measured cost and why the split
@@ -8734,8 +8736,21 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
    * recorded or sent is the existing button's business, and the card goes on
    * saying that a pick is only a mark.
    */
-  const promptSuggestion =
-    suggestion !== null && suggestion !== '' && draft === '' ? suggestion : null;
+  const cardSuggestion = suggestion !== null && suggestion !== '' ? suggestion : null;
+  // The TUI's own suggestion, read off the pane; the card's offer has priority.
+  const paneSuggestion = usePaneSuggestion({
+    // A pane can exist only for a session vam holds (as the other pane work does).
+    read:
+      entry?.session.vamControlled === true ? globalThis.window?.api?.terminal?.read : undefined,
+    projectId: entry?.project.id ?? null,
+    rowId: entry?.session.id,
+    phone,
+    tab,
+    status: entry?.session.status ?? null,
+    draft,
+    cardSuggestion,
+  });
+  const promptSuggestion = draft === '' ? (cardSuggestion ?? paneSuggestion) : null;
   // `records === false` is a source that has no route to record a prompt at
   // all -- a read-only server, where `/api/record-prompt` is not registered
   // and 404s. The box is then not DRAWN, rather than drawn and refused on tap:
@@ -10995,10 +11010,22 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
             wrapper contributes no box of its own (`display: contents`) so its
             one child -- the textarea -- becomes the pill's own flex item;
             see `data-prompt-input` just above for that pill's own comment. */}
-              <div className={phone ? 'contents' : 'flex items-start gap-2'}>
+              <div className={phone ? 'contents' : 'relative flex items-start gap-2'}>
+                {/* The offer as a key before its text: an overlay, so the textarea stays the one input. */}
+                {promptSuggestion !== null && !phone && (
+                  <div
+                    data-prompt-suggestion-ghost
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-x-0 top-0 flex items-baseline gap-1.5 overflow-hidden text-body text-ink-faint"
+                  >
+                    <KeyTag>Tab</KeyTag>
+                    <span className="truncate">{promptSuggestion}</span>
+                  </div>
+                )}
                 <textarea
                   ref={setInputRef}
                   rows={phone ? 1 : 2}
+                  aria-keyshortcuts={promptSuggestion !== null && !phone ? 'Tab' : undefined}
                   value={draft}
                   readOnly={!composing}
                   onFocus={() => {
@@ -11223,7 +11250,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                     entry === null
                       ? 'Pick a session first'
                       : promptSuggestion !== null && !phone
-                        ? `${promptSuggestion} — Tab to use`
+                        ? promptSuggestion
                         : phone
                           ? // PHONE ONLY, SHORTER: the desktop sentence wraps to
                             // three lines at the merged row's own width, cramped
@@ -11267,6 +11294,8 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                    Desktop is unaffected: both classes are phone-only. */
                   className={[
                     'vam-no-scrollbar vam-tap min-w-0 flex-1 resize-none bg-transparent text-body text-ink outline-none placeholder:text-ink-faint',
+                    // The ghost above is what is seen; the placeholder is accessible text only.
+                    promptSuggestion !== null && !phone ? 'placeholder:text-transparent' : '',
                     // `py-3` (12px a side) centres the one line in the 44px
                     // box: with no vertical padding the text sat flush
                     // against the pill's top border (item 19, measured).
