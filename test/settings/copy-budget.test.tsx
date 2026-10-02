@@ -33,7 +33,7 @@
  *   window         6 paragraphs   63 words (longest 33) -- re-measured when
  *                  Settings step 2B added the sidebar-appearance and
  *                  status-bar rows `settings.window.hint` already named
- *   agents        13 paragraphs  172 words (longest 54) -- re-measured when
+ *   agents         8 paragraphs   92 words (longest 22) -- re-measured when
  *                  step 2B added keep-awake, auto tab titles, agent
  *                  permissions and default agent, THEN AGAIN when a security
  *                  review found the permissions row's own gate needed to be
@@ -41,6 +41,7 @@
  *                  viewport width -- this harness has no `window.api`, so the
  *                  permissions row and its note (2 paragraphs) never draw
  *                  here at all, same as a paired browser tab would see
+ *                  (and again when the cache-timer row's hint and note left)
  *   behaviour      6 paragraphs  103 words (longest 38)
  *   notifications  5 paragraphs   79 words (longest 28) -- unchanged by the
  *                  cards restructure, and its ceiling stays the number the
@@ -159,7 +160,7 @@ const BUDGET: readonly (readonly [string, number, number])[] = [
   // "Skills" section (settings-views restructure, item D) -- Agents dropped
   // from 13/172 to 10/160 the moment that card's hint, credit line, copy-
   // command hint and coverage hint stopped drawing here.
-  ['agents', 10, 175],
+  ['agents', 8, 175],
   // SMALLER THAN IT WAS: `view width` and `streaming terminal` left for
   // Window & Sidebar and Terminal, and the file editor's own two rows (one
   // of them, `file editor colours`, moved IN from Appearance) joined focus
