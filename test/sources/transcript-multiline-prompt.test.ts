@@ -35,31 +35,39 @@ const reply = (text: string) => ({
 const inputsOf = (text: string, windowStart = 0) =>
   summarizeTranscript(text, 'sess-1', windowStart).decisions.map((d) => d.input);
 
+const LONG = `Fix these:\n${Array.from({ length: 12 }, (_, i) => `- item ${i} with some padding`).join('\n')}\n• last`;
+const CUT = `${LONG.replace(/\s+/g, ' ').slice(0, 200)}…`;
+const parts = {
+  ...typed(''),
+  message: { role: 'user', content: [{ type: 'text', text: TYPED }] },
+};
+
 describe('the typed prompt survives the marker', () => {
-  it('(i) keeps four lines and both bullet styles when the marker follows the user line', () => {
-    const text = jsonl(typed(TYPED), marker(MARKER), reply('on it'));
-    expect(inputsOf(text)).toEqual([TYPED]);
+  it('(ii) fixture is over 200 characters, and (i) is four lines', () => {
+    expect(LONG.length).toBeGreaterThan(200);
     expect(TYPED.split('\n')).toHaveLength(4);
   });
 
-  it('(ii) keeps a prompt over 200 characters whole while the marker is cut with an ellipsis', () => {
-    const body = Array.from({ length: 12 }, (_, i) => `- item number ${i} with some padding`);
-    const long = `Fix these:\n${body.join('\n')}\n• last`;
-    expect(long.length).toBeGreaterThan(200);
-    const flat = long.replace(/\s+/g, ' ');
-    const cut = `${flat.slice(0, 200)}…`;
-    const text = jsonl(typed(long), marker(cut), reply('on it'));
-    expect(inputsOf(text)).toEqual([long]);
-  });
-
-  it('(iii) keeps it when the marker is re-emitted after the answer', () => {
-    const text = jsonl(typed(TYPED), marker(MARKER), reply('on it'), marker(MARKER));
-    expect(inputsOf(text)).toEqual([TYPED]);
-  });
-
-  it('(iii) keeps it when the marker is only flushed after the answer', () => {
-    const text = jsonl(typed(TYPED), reply('on it'), marker(MARKER), marker(MARKER));
-    expect(inputsOf(text)).toEqual([TYPED]);
+  it.each([
+    ['(i) the marker follows the user line', [typed(TYPED), marker(MARKER), reply('ok')], TYPED],
+    [
+      '(ii) a prompt over 200 characters, marker cut with an ellipsis',
+      [typed(LONG), marker(CUT), reply('ok')],
+      LONG,
+    ],
+    [
+      '(iii) the marker is re-emitted after the answer',
+      [typed(TYPED), marker(MARKER), reply('ok'), marker(MARKER)],
+      TYPED,
+    ],
+    [
+      '(iii) the marker is only flushed after the answer',
+      [typed(TYPED), reply('ok'), marker(MARKER), marker(MARKER)],
+      TYPED,
+    ],
+    ['the typed prompt is held as text parts', [parts, marker(MARKER), reply('ok')], TYPED],
+  ])('keeps the text as typed when %s', (_name, lines, want) => {
+    expect(inputsOf(jsonl(...lines))).toEqual([want]);
   });
 
   it('(iv) falls back to the marker, the only text the file holds, when the window starts after the user line', () => {
@@ -67,13 +75,5 @@ describe('the typed prompt survives the marker', () => {
     const at = whole.indexOf(JSON.stringify(marker(MARKER)));
     const start = Buffer.byteLength(whole.slice(0, at));
     expect(inputsOf(whole.slice(at), start)).toEqual([MARKER]);
-  });
-
-  it('keeps a typed prompt held as text parts, not a bare string', () => {
-    const parts = {
-      ...typed(''),
-      message: { role: 'user', content: [{ type: 'text', text: TYPED }] },
-    };
-    expect(inputsOf(jsonl(parts, marker(MARKER), reply('ok')))).toEqual([TYPED]);
   });
 });

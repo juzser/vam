@@ -10,67 +10,48 @@
  * undo itself.
  */
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import type { ComponentProps } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Decision, Project, Session, TurnStep } from '../../src/renderer/domain/model.js';
-import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
+import type { Decision, Session, TurnStep } from '../../src/renderer/domain/model.js';
 import { DetailPanel } from '../../src/renderer/panels/DetailPanel.js';
 import { DEFAULT_FOCUS_VIEW, setActiveFocusView } from '../../src/renderer/prefs/progress.js';
 
 const step = (id: string): TurnStep => ({ id, label: `Bash: ${id}`, failed: false });
 const steps = (n: number) => Array.from({ length: n }, (_, i) => step(`s${i}`));
 
-function turn(id: string, over: Partial<Decision> = {}): Decision {
-  return {
-    id,
-    label: `turn-${id}`,
-    input: `ask ${id}`,
-    output: `done ${id}`,
-    commands: [],
-    ...over,
-  };
-}
+const turn = (id: string, over: Partial<Decision> = {}): Decision => ({
+  id,
+  label: `turn-${id}`,
+  input: `ask ${id}`,
+  output: `done ${id}`,
+  commands: [],
+  ...over,
+});
+
+const noop = () => {};
+const base = { draft: '', onDraftChange: noop, onSubmit: noop, onCompose: noop, width: 408 };
+type Props = ComponentProps<typeof DetailPanel>;
 
 function draw(decisions: readonly Decision[], session: Partial<Session> = {}) {
-  const built: Session = {
-    id: 's1',
-    title: 'Provider survey',
-    epic: null,
-    branch: null,
-    status: 'running',
-    runningAgents: 0,
-    activity: null,
-    age: '3m',
-    decisions,
-    ...session,
-  };
-  const project: Project = { id: 'p1', name: 'atlas', sessions: [built] };
-  const entry: SessionEntry = { project, session: built };
-  render(
-    <DetailPanel
-      entry={entry}
-      decision={decisions[0] ?? null}
-      draft=""
-      onDraftChange={() => {}}
-      onSubmit={() => {}}
-      composing={false}
-      onCompose={() => {}}
-      onStopComposing={() => {}}
-      active={false}
-      actionIndex={0}
-      width={408}
-      resizeHandle={null}
-    />,
-  );
+  const built = { id: 's1', title: 'T', status: 'running', activity: null, decisions, ...session };
+  const entry = { project: { id: 'p1', name: 'atlas', sessions: [built] }, session: built };
+  const rest = { composing: false, active: false, actionIndex: 0, resizeHandle: null };
+  const props = { ...base, ...rest, onStopComposing: noop, entry, decision: decisions[0] ?? null };
+  render(<DetailPanel {...(props as unknown as Props)} />);
 }
 
-const toggle = () => document.querySelector<HTMLButtonElement>('[data-turn-unfold]') as HTMLElement;
 const toggles = () => [...document.querySelectorAll<HTMLElement>('[data-turn-unfold]')];
+const toggle = () => toggles()[0] as HTMLElement;
 const regions = () => document.querySelectorAll('[data-detail-block="progress"]');
-const folded = (label = 'turn-a') => `show this turn's working — ${label}`;
-const open = (label = 'turn-a') => `hide this turn's working — ${label}`;
+const folded = "show this turn's working — turn-a";
+const open = "hide this turn's working — turn-a";
 const drawFolded = (over: Partial<Decision> = {}) => {
   setActiveFocusView(true);
   draw([turn('a', { steps: steps(3), ...over })]);
+};
+const drawQuiet = (over: Partial<Decision>, session: Partial<Session> = {}) => {
+  setActiveFocusView(true);
+  draw([turn('a', { steps: steps(3), ...over })], session);
 };
 
 afterEach(() => {
@@ -78,52 +59,46 @@ afterEach(() => {
   setActiveFocusView(DEFAULT_FOCUS_VIEW);
 });
 
-describe('the mark is a right arrow, not three dots', () => {
-  it('holds lucide’s chevron-right, aria-hidden, and no text mark', () => {
-    drawFolded();
-    const button = toggle();
-    const svg = button.querySelector('svg');
-    expect(svg?.classList.contains('lucide-chevron-right')).toBe(true);
-    expect(svg?.getAttribute('aria-hidden')).toBe('true');
-    expect(button.textContent).not.toContain('···');
-    expect(button.getAttribute('aria-expanded')).toBe('false');
-    expect(button.getAttribute('aria-label')).toBe(folded());
-    expect(svg?.classList.contains('rotate-90')).toBe(false);
-  });
+it('holds lucide’s chevron-right, aria-hidden, and no text mark', () => {
+  drawFolded();
+  const svg = toggle().querySelector('svg');
+  expect(svg?.classList.contains('lucide-chevron-right')).toBe(true);
+  expect(svg?.getAttribute('aria-hidden')).toBe('true');
+  expect(toggle().textContent).not.toContain('···');
+  expect(toggle().getAttribute('aria-expanded')).toBe('false');
+  expect(toggle().getAttribute('aria-label')).toBe(folded);
+  expect(svg?.classList.contains('rotate-90')).toBe(false);
 });
 
-describe('pressing it toggles the turn', () => {
-  it('opens on click, turns the arrow, and folds again on a second click', () => {
-    drawFolded();
-    fireEvent.click(toggle());
-    expect(regions()).toHaveLength(1);
-    expect(toggles()).toHaveLength(1);
-    expect(toggle().getAttribute('aria-expanded')).toBe('true');
-    expect(toggle().getAttribute('aria-label')).toBe(open());
-    expect(toggle().querySelector('svg')?.classList.contains('rotate-90')).toBe(true);
-    fireEvent.click(toggle());
-    expect(regions()).toHaveLength(0);
-    expect(toggle().getAttribute('aria-expanded')).toBe('false');
-    expect(toggle().getAttribute('aria-label')).toBe(folded());
-  });
-
-  // A native button turns Enter and Space into a click in a browser; happy-dom
-  // does not, so the assertion that matters here is that the control IS a
-  // native button (no role/keydown handler to forget) and that the click it
-  // synthesises round-trips.
-  it.each(['Enter', ' '])('is a native button, so %j is a click on it', (key) => {
-    drawFolded();
+// A native button turns Enter and Space into a click in a browser; happy-dom
+// does not, so the keyed cases assert the control IS a native button (no
+// role/keydown handler to forget) and that the click it synthesises round-trips.
+it.each([
+  ['click', null],
+  ['Enter', 'Enter'],
+  ['Space', ' '],
+])('%s opens the turn, turns the arrow, and folds it again', (_name, key) => {
+  drawFolded();
+  const press = () => {
     const button = toggle();
+    if (key === null) return fireEvent.click(button);
     expect(button.tagName).toBe('BUTTON');
     button.focus();
     expect(document.activeElement).toBe(button);
     fireEvent.keyDown(button, { key });
     fireEvent.keyUp(button, { key });
     fireEvent.click(button);
-    expect(regions()).toHaveLength(1);
-    fireEvent.click(toggle());
-    expect(regions()).toHaveLength(0);
-  });
+  };
+  press();
+  expect(regions()).toHaveLength(1);
+  expect(toggles()).toHaveLength(1);
+  expect(toggle().getAttribute('aria-expanded')).toBe('true');
+  expect(toggle().getAttribute('aria-label')).toBe(open);
+  expect(toggle().querySelector('svg')?.classList.contains('rotate-90')).toBe(true);
+  press();
+  expect(regions()).toHaveLength(0);
+  expect(toggle().getAttribute('aria-expanded')).toBe('false');
+  expect(toggle().getAttribute('aria-label')).toBe(folded);
 });
 
 describe('what it is drawn for', () => {
@@ -133,55 +108,44 @@ describe('what it is drawn for', () => {
   });
 
   it('is not drawn on a turn whose tools failed, which keeps its line', () => {
-    setActiveFocusView(true);
-    draw([turn('a', { steps: steps(3), errorCount: 2 })]);
+    drawQuiet({ errorCount: 2 });
     expect(toggles()).toHaveLength(0);
     expect(regions()).toHaveLength(1);
   });
 
-  it('is not drawn on the newest turn while the session has a present to report', () => {
-    setActiveFocusView(true);
-    draw([turn('a', { steps: steps(3) })], { activity: 'coder · round 2' });
-    expect(toggles()).toHaveLength(0);
-    cleanup();
-    draw([turn('a', { steps: steps(3) })], { status: 'waiting', waitingFor: 'permission prompt' });
-    expect(toggles()).toHaveLength(0);
-  });
+  it.each([
+    { activity: 'coder · round 2' },
+    { status: 'waiting', waitingFor: 'permission prompt' } as const,
+  ])(
+    'is not drawn on the newest turn while the session has a present to report (%j)',
+    (session) => {
+      drawQuiet({}, session);
+      expect(toggles()).toHaveLength(0);
+    },
+  );
 });
 
 describe('the tooltip says how many steps are folded', () => {
-  const hover = (button: HTMLElement) => fireEvent.pointerMove(button, { pointerType: 'mouse' });
   const tipText = async () => (await screen.findByRole('tooltip')).textContent;
 
-  it('reads "3 steps" on hover', async () => {
+  it('reads "3 steps" on hover, with no fetch', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     drawFolded();
-    hover(toggle());
+    fireEvent.pointerMove(toggle(), { pointerType: 'mouse' });
     expect(await tipText()).toBe('3 steps');
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
   });
 
-  it('reads "3 steps" on keyboard focus', async () => {
-    drawFolded();
+  it.each([
+    ['3 steps', 3, false, '3 steps'],
+    ['1 step', 1, false, '1 step'],
+    ['no steps, folded', undefined, false, 'Show working'],
+    ['no steps, open', undefined, true, 'Hide working'],
+  ])('reads the right text on keyboard focus: %s', async (_name, n, expand, text) => {
+    drawFolded({ steps: n === undefined ? undefined : steps(n) });
+    if (expand) fireEvent.click(toggle());
     fireEvent.focus(toggle());
-    expect(await tipText()).toBe('3 steps');
-  });
-
-  it('reads "1 step" for a single step', async () => {
-    drawFolded({ steps: steps(1) });
-    fireEvent.focus(toggle());
-    expect(await tipText()).toBe('1 step');
-  });
-
-  it('reads "Show working" folded and "Hide working" open when the source lists no steps', async () => {
-    drawFolded({ steps: undefined });
-    fireEvent.focus(toggle());
-    expect(await tipText()).toBe('Show working');
-    cleanup();
-    drawFolded({ steps: undefined });
-    fireEvent.click(toggle());
-    fireEvent.focus(toggle());
-    expect(await tipText()).toBe('Hide working');
+    expect(await tipText()).toBe(text);
   });
 });
