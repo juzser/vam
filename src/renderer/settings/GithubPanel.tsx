@@ -92,10 +92,17 @@ export function GithubMark({ size = 16 }: { readonly size?: number }) {
  * longer `data-github-status` sentence right below the pill still carries
  * the raw message for an operator who wants it.
  */
-type GithubPillKind = 'connected' | 'not-connected' | 'cli-missing';
+type GithubPillKind = 'connected' | 'not-connected' | 'cli-missing' | 'no-active-account';
 
-function pillKindFor(kind: GithubAuthStatus['kind']): GithubPillKind {
+function pillKindFor(status: GithubAuthStatus): GithubPillKind {
+  const kind = status.kind;
   if (kind === 'cli-missing') return 'cli-missing';
+  if (
+    status.kind === 'logged-in' &&
+    status.accounts.length > 0 &&
+    !status.accounts.some((a) => a.active)
+  )
+    return 'no-active-account';
   if (kind === 'logged-in') return 'connected';
   return 'not-connected';
 }
@@ -104,6 +111,7 @@ const PILL_TEXT: Record<GithubPillKind, string> = {
   connected: t('settings.integrations.github.pill.connected'),
   'not-connected': t('settings.integrations.github.pill.notConnected'),
   'cli-missing': t('settings.integrations.github.pill.cliMissing'),
+  'no-active-account': t('settings.integrations.github.pill.noActiveAccount'),
 };
 
 /** `SessionList.tsx`'s own status-filter pill tokens, the same precedent
@@ -112,11 +120,13 @@ const PILL_TONE: Record<GithubPillKind, string> = {
   connected: 'text-done',
   'not-connected': 'text-waiting',
   'cli-missing': 'text-failed',
+  'no-active-account': 'text-waiting',
 };
 const PILL_BORDER: Record<GithubPillKind, string> = {
   connected: 'border-done-tint',
   'not-connected': 'border-waiting-tint',
   'cli-missing': 'border-failed/40',
+  'no-active-account': 'border-waiting-tint',
 };
 
 /**
@@ -307,7 +317,7 @@ export function GithubPanel({ api, active, copyText, openExternal }: GithubPanel
                   against in the browser build. */}
               {api !== undefined && status !== null && (
                 <span className="ml-auto">
-                  <GithubStatusPill kind={pillKindFor(status.kind)} />
+                  <GithubStatusPill kind={pillKindFor(status)} />
                 </span>
               )}
             </div>
@@ -321,6 +331,15 @@ export function GithubPanel({ api, active, copyText, openExternal }: GithubPanel
             `data-verbatim`: a GitHub login is a proper name a person chose,
             the same rank `AdhdSkillCard.tsx`'s credit link already carries
             for a handle. */}
+        {api !== undefined && status !== null && pillKindFor(status) === 'no-active-account' ? (
+          <p
+            data-github-no-active-account
+            className="vam-sentence m-0 max-w-[52ch] text-control text-ink-dim"
+          >
+            {t('settings.integrations.github.noActiveAccount')}
+          </p>
+        ) : null}
+
         {isLoggedIn && activeAccount !== undefined ? (
           <p data-github-account-line className="m-0 text-control text-ink-dim">
             {t('settings.integrations.github.loggedInAs')}{' '}
