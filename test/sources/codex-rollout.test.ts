@@ -278,11 +278,7 @@ describe('readRolloutTail', () => {
   });
 });
 
-/**
- * A TURN KEEPS ONE ID AS THE WINDOW SLIDES (vam-ux-3 task-47). Five turns
- * T1..T5, each a UserMessage, a CommandExecution and an AgentMessage, read
- * through the REAL `readRolloutTail` with an explicit `step`.
- */
+/** A turn keeps one id as the window slides: five turns T1..T5 read through the real `readRolloutTail`. */
 describe('Codex turn ids across window slides', () => {
   const P = 'd';
   const msg = (kind: string, n: number, turnId: string | null, text: string, extra = {}) =>
@@ -353,10 +349,8 @@ describe('Codex turn ids across window slides', () => {
       expect(r.decisions.length).toBeGreaterThanOrEqual(2);
       expect(new Set(r.decisions.map((d) => d.id)).size).toBe(r.decisions.length);
     }
-    const idsA = a.decisions.map((d) => d.id);
-    const idsB = b.decisions.map((d) => d.id);
-    expect(idsA).toEqual(['d-turn-4', 'd-turn-3']);
-    expect(idsB).toEqual(['d-turn-5', 'd-turn-4']);
+    expect(a.decisions.map((d) => d.id)).toEqual(['d-turn-4', 'd-turn-3']);
+    expect(b.decisions.map((d) => d.id)).toEqual(['d-turn-5', 'd-turn-4']);
   });
 
   it('EC-104: a turn whose question slid out keeps its id and is flagged answer-opened', async () => {

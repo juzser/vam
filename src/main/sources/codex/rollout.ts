@@ -129,7 +129,7 @@ export function parseRolloutLines(text: string): readonly Line[] {
   return parseWithOffsets(text, 0).lines;
 }
 
-/** `parseRolloutLines`, plus each kept line's absolute byte offset when `text` begins at `start`. */
+/** `parseRolloutLines` plus each kept line's absolute byte offset (`text` begins at `start`). */
 function parseWithOffsets(text: string, start: number): { lines: Line[]; offsets: number[] } {
   const lines: Line[] = [];
   const offsets: number[] = [];
@@ -197,11 +197,10 @@ function itemOf(line: Line): { item: Item; turnId: string | null } | null {
  * in a map keyed by decision id.
  *
  * A TURN'S ID DOES NOT MOVE WITH THE WINDOW: `<prefix>-<turn_id>`, else
- * `<prefix>:@<offset>` (the opening line's absolute byte offset, from
- * `offsets`), else positional when the caller gives none. A `UserMessage` with
- * the open turn's `turn_id` is steered input and joins it.
+ * `<prefix>:@<offset>` (opening line's absolute byte offset, from `offsets`),
+ * else positional. A `UserMessage` with the open turn's `turn_id` joins it.
  */
-export function turnsFromLines(
+export function turnsFromLinesAt(
   lines: readonly Line[],
   decisionIdPrefix: string,
   offsets?: readonly number[],
@@ -223,7 +222,6 @@ export function turnsFromLines(
   let sawMessage = false;
   let index = 0;
   const taken = new Set<string>();
-
   const idOf = (turnId: string | null, offset: number | undefined): string => {
     index += 1;
     const own = turnId === null ? null : `${decisionIdPrefix}-${turnId}`;
@@ -331,6 +329,11 @@ export function turnsFromLines(
   return { decisions, activity, starved: !sawMessage };
 }
 
+/** `turnsFromLinesAt` with no offsets: positional ids. */
+export function turnsFromLines(lines: readonly Line[], decisionIdPrefix: string): RolloutFacts {
+  return turnsFromLinesAt(lines, decisionIdPrefix);
+}
+
 /**
  * WHAT A NON-MESSAGE ITEM DID, and whether it failed -- or null when there is
  * nothing an operator could act on.
@@ -435,5 +438,5 @@ export async function readRolloutTail(
     if (spent + stride > budget) break;
   }
 
-  return turnsFromLines(collected, decisionIdPrefix, offsets);
+  return turnsFromLinesAt(collected, decisionIdPrefix, offsets);
 }
