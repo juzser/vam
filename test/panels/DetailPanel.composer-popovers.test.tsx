@@ -7,10 +7,15 @@
  */
 
 import { act, cleanup, render } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Decision, Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
-import { DetailPanel, MODE_DESCRIPTIONS } from '../../src/renderer/panels/DetailPanel.js';
+import {
+  DetailPanel,
+  MODE_DESCRIPTIONS,
+  MODES,
+  POPOVER_EDGE_GUTTER,
+} from '../../src/renderer/panels/DetailPanel.js';
 import { PROVIDERS } from '../../src/shared/providers.js';
 
 const DECISION: Decision = {
@@ -37,7 +42,7 @@ const SESSION: Session = {
 const PROJECT: Project = { id: 'p1', name: 'atlas', sessions: [SESSION] };
 const ENTRY: SessionEntry = { project: PROJECT, session: SESSION };
 
-function draw() {
+function draw(phone = false) {
   render(
     <DetailPanel
       entry={ENTRY}
@@ -56,6 +61,7 @@ function draw() {
       terminal={true}
       defaultProvider="claude-code"
       onSetDefaultProvider={() => {}}
+      phone={phone}
     />,
   );
 }
@@ -161,5 +167,115 @@ describe('each mode option carries a one-line description', () => {
     }
     expect(seen.size).toBe(options.length);
     expect(all('[data-mode-description]')).toHaveLength(options.length);
+  });
+});
+
+describe('task-44: the mode descriptions read whole (EC-72, finding 53f7e550)', () => {
+  it('is non-empty English, a full sentence, distinct, and at most 38 characters for every mode', () => {
+    expect(Object.keys(MODE_DESCRIPTIONS).sort()).toEqual([...MODES].sort());
+    const texts = MODES.map((mode) => MODE_DESCRIPTIONS[mode]);
+    for (const text of texts) {
+      expect(text.trim()).not.toBe('');
+      expect(text).toMatch(/^[\x20-\x7e]+\.$/);
+      expect(text.length).toBeLessThanOrEqual(38);
+    }
+    expect(new Set(texts).size).toBe(MODES.length);
+  });
+});
+
+describe('task-44: popoverFit flips and caps every composer menu (EC-74, finding df747a7f)', () => {
+  const BAR_WIDTH = 240;
+  const realRect = HTMLElement.prototype.getBoundingClientRect;
+  /** The bar is 240 wide; the open menu's right edge is `menuRight`. */
+  function stubRects(menuRight: number) {
+    HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+      const box = (left: number, right: number) =>
+        ({
+          left,
+          right,
+          width: right - left,
+          top: 0,
+          bottom: 0,
+          height: 0,
+          x: left,
+          y: 0,
+        }) as DOMRect;
+      if (this.hasAttribute('data-composer-bar')) return box(0, BAR_WIDTH);
+      if (this.hasAttribute('data-composer-menu')) return box(menuRight - 100, menuRight);
+      return realRect.call(this);
+    };
+  }
+  afterEach(() => {
+    HTMLElement.prototype.getBoundingClientRect = realRect;
+    vi.restoreAllMocks();
+  });
+
+  for (const [name, trigger, menu] of TRIGGERS) {
+    it(`the ${name} menu is flipped to right-0 and width-capped when it passes the bar's right edge`, () => {
+      stubRects(BAR_WIDTH - POPOVER_EDGE_GUTTER + 1);
+      draw();
+      const popover = openMenu(trigger, menu);
+      expect(popover.className.split(/\s+/)).toContain('right-0');
+      expect(popover.className.split(/\s+/)).not.toContain('left-0');
+      expect(popover.style.maxWidth).toBe(`${BAR_WIDTH - 2 * POPOVER_EDGE_GUTTER}px`);
+    });
+
+    it(`the ${name} menu keeps left-0 when it fits`, () => {
+      stubRects(BAR_WIDTH - POPOVER_EDGE_GUTTER);
+      draw();
+      const popover = openMenu(trigger, menu);
+      expect(popover.className.split(/\s+/)).toContain('left-0');
+      expect(popover.className.split(/\s+/)).not.toContain('right-0');
+    });
+  }
+});
+
+describe('task-44: the mode glyph does not shrink (EC-75, finding 8d9a5d30)', () => {
+  it('every glyph in the mode menu carries shrink-0, so the label column is one width', () => {
+    draw();
+    const menu = openMenu('[data-mode-toggle]', '[data-mode-picker]');
+    const glyphs = [...menu.querySelectorAll('[data-mode-glyph]')];
+    expect(glyphs).toHaveLength(MODES.length);
+    for (const glyph of glyphs) {
+      expect((glyph.getAttribute('class') ?? '').split(/\s+/)).toContain('shrink-0');
+    }
+  });
+});
+
+describe('task-44: phone menus keep the side margin and 44px rows (EC-73, EC-76, phone-07)', () => {
+  const openFromOverflow = (row: string, menu: string) => {
+    draw(true);
+    act(() => q<HTMLButtonElement>('[data-composer-overflow]')?.click());
+    const overflow = q<HTMLElement>('[data-composer-overflow-menu]');
+    expect(overflow?.className.split(/\s+/)).toContain('ml-3');
+    act(() => q<HTMLButtonElement>(row)?.click());
+    return q<HTMLElement>(menu) as HTMLElement;
+  };
+
+  it('every model option carries vam-tap and the menu keeps the margin class', () => {
+    const menu = openFromOverflow('[data-composer-overflow-model]', '[data-model-picker-menu]');
+    expect(menu.className.split(/\s+/)).toContain('ml-3');
+    const options = [...menu.querySelectorAll('[data-model-option]')];
+    expect(options.length).toBeGreaterThan(0);
+    for (const option of options) expect(option.className.split(/\s+/)).toContain('vam-tap');
+  });
+
+  it('every mode option carries vam-tap and the menu keeps the margin class', () => {
+    const menu = openFromOverflow('[data-composer-overflow-mode]', '[data-mode-picker]');
+    expect(menu.className.split(/\s+/)).toContain('ml-3');
+    const options = [...menu.querySelectorAll('[data-mode-option]')];
+    expect(options).toHaveLength(MODES.length);
+    for (const option of options) expect(option.className.split(/\s+/)).toContain('vam-tap');
+  });
+
+  it('the provider menu keeps the margin class on phone, and desktop menus do not carry it', () => {
+    const menu = openFromOverflow('[data-composer-overflow-provider]', '[data-provider-picker]');
+    expect(menu.className.split(/\s+/)).toContain('ml-3');
+    cleanup();
+    draw();
+    for (const [, trigger, desktopMenu] of TRIGGERS) {
+      expect(openMenu(trigger, desktopMenu).className.split(/\s+/)).not.toContain('ml-3');
+      act(() => q<HTMLButtonElement>(trigger)?.click());
+    }
   });
 });

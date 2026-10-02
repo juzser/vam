@@ -1658,6 +1658,47 @@ const forceCapabilities = async (pg) => {
     if (patched === 0) throw new Error('no chunk carried the capability expressions; the popover menus would not render');
   };
 };
+/**
+ * Task-44. Option rows' heights, and the mode menu's copy and label edges. Base
+ * (28d36402) row heights, measured: model rows 24px at 1280 and at the 700px
+ * pane, mode rows 40px.
+ */
+const BASE_ROW_HEIGHT = { 'desktop-model': 24, 'pane-700-model': 24, 'desktop-mode': 40, 'pane-700-mode': 40 };
+const MODE_MENU_MAX_WIDTH = 260;
+const measureOptions = (pg, sel) =>
+  pg.evaluate(
+    (s) => [...document.querySelectorAll(s)].map((el) => ({ height: el.getBoundingClientRect().height })),
+    sel,
+  );
+/** EC-72 + EC-75: copy whole, menu <= 260, one left edge, 12px glyphs. */
+async function assertModeLayout(pg, where) {
+  const r = await pg.evaluate(() => ({
+    menuWidth: document.querySelector('[data-mode-picker]').getBoundingClientRect().width,
+    descriptions: [...document.querySelectorAll('[data-mode-description]')].map((d) => ({
+      text: d.textContent,
+      scrollWidth: d.scrollWidth,
+      clientWidth: d.clientWidth,
+    })),
+    labelLefts: [...document.querySelectorAll('[data-mode-option]')].map(
+      (o) => o.querySelector('[data-mode-description]').previousElementSibling.getBoundingClientRect().left,
+    ),
+    descLefts: [...document.querySelectorAll('[data-mode-description]')].map((d) => d.getBoundingClientRect().left),
+    glyphWidths: [...document.querySelectorAll('[data-mode-picker] [data-mode-glyph]')].map(
+      (g) => g.getBoundingClientRect().width,
+    ),
+  }));
+  console.log(`mode layout @${where}:`, JSON.stringify(r));
+  check(
+    `${where}: every mode description reads whole (no ellipsis)`,
+    r.descriptions.length === 3 && r.descriptions.every((d) => d.scrollWidth <= d.clientWidth),
+    r.descriptions.map((d) => `${d.scrollWidth}>${d.clientWidth} "${d.text}"`).join('; '),
+  );
+  check(`${where}: the mode menu is at most ${MODE_MENU_MAX_WIDTH}px wide`, r.menuWidth <= MODE_MENU_MAX_WIDTH + 0.5, `${r.menuWidth}px`);
+  const spread = (xs) => Math.max(...xs) - Math.min(...xs);
+  check(`${where}: Auto, Manual and Plan labels share one left edge`, spread(r.labelLefts) <= 1, `edges ${r.labelLefts}`);
+  check(`${where}: descriptions share the label's left edge`, spread([...r.labelLefts, ...r.descLefts]) <= 1, `edges ${r.descLefts}`);
+  check(`${where}: every mode glyph is 12px wide`, r.glyphWidths.length === 3 && r.glyphWidths.every((w) => Math.abs(w - 12) <= 0.5), `widths ${r.glyphWidths}`);
+}
 for (const vp of POPOVER_VIEWPORTS) {
   const popPage = await browser.newPage({ viewport: { width: vp.width, height: vp.height } });
   const assertForced = await forceCapabilities(popPage);
@@ -1742,6 +1783,30 @@ for (const vp of POPOVER_VIEWPORTS) {
         `${vp.name}: the ${root} menu stays inside the viewport`,
         m.mLeft >= -0.5 && m.mRight <= m.vw + 0.5,
       );
+      if (root === 'model') {
+        // Task-44 EC-74: the model menu flips and caps like the other two.
+        console.log(`model menu @${vp.name} rects:`, JSON.stringify({ mLeft: m.mLeft, mRight: m.mRight, barRight: m.barRight }));
+        check(
+          `${vp.name}: the model menu's right edge is at most the bar's right edge minus 8`,
+          m.mRight <= m.barRight - 8 + 0.5,
+          `menu right ${m.mRight}, bar right ${m.barRight}`,
+        );
+      }
+    }
+    if (root === 'model' || root === 'mode') {
+      const rows = await measureOptions(popPage, root === 'model' ? '[data-model-option]' : '[data-mode-option]');
+      console.log(`${root} option rows @${vp.name}:`, JSON.stringify(rows.map((r) => r.height)));
+      const base = BASE_ROW_HEIGHT[`${vp.name}-${root}`];
+      check(
+        `${vp.name}: every ${root} option row keeps its base height ${base}px`,
+        base === undefined || rows.every((r) => Math.abs(r.height - base) <= 1),
+        `heights ${rows.map((r) => r.height)}`,
+      );
+    }
+    if (root === 'mode') {
+      await assertModeLayout(popPage, vp.name);
+    }
+    if (m !== null) {
     }
     await popPage.screenshot({
       path: `${outDir}/composer-popover-${root}-${vp.name}-${theme}.png`,
@@ -1767,6 +1832,107 @@ for (const vp of POPOVER_VIEWPORTS) {
     }
   }
   await popPage.close();
+}
+
+/**
+ * Task-44 EC-73 + EC-76 (+ EC-72/75 on phone): the 390x844 phone shell. Every
+ * menu keeps 12px from both viewport edges, every model and mode option row is
+ * at least 44px tall, and the mode menu reads whole. The provider menu is only
+ * opened when the build lists two providers.
+ */
+const PHONE_MARGIN = 12;
+/** Base (28d36402) widths of the phone menus, measured at 390x844. */
+const BASE_PHONE_WIDTH = { model: 155.75, mode: 260 };
+{
+  const ph = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  const assertForcedPhone = await forceCapabilities(ph);
+  ph.on('pageerror', (err) => console.error('PAGE ERROR (phone popover):', err));
+  await ph.addInitScript(
+    ([key, payload]) => window.localStorage.setItem(key, payload),
+    [CONCISE_PREFS, JSON.stringify({ theme })],
+  );
+  await ph.goto(`${origin}/?demo=1&history=off`, { waitUntil: 'networkidle' });
+  await ph.waitForSelector('[data-phone-shell="list"]');
+  assertForcedPhone();
+  await ph.locator('[data-session-row="notes-1"]').first().click();
+  await ph.waitForSelector('[data-phone-shell="session"]');
+  await ph.waitForSelector('textarea[aria-label="prompt to session"]');
+  check(
+    'phone: the composer is inside the .vam-phone shell',
+    await ph.evaluate(() => document.querySelector('[data-composer-bar]')?.closest('.vam-phone') != null),
+  );
+  const rectOf = (sel) =>
+    ph.evaluate((s) => {
+      const el = document.querySelector(s);
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { left: r.left, right: r.right, width: r.width, vw: window.innerWidth };
+    }, sel);
+  const openOverflow = async () => {
+    await ph.locator('[data-composer-overflow]').first().click();
+    await ph.waitForSelector('[data-composer-overflow-menu]');
+  };
+  const margins = (name, r) => {
+    console.log(`phone ${name} menu rect:`, JSON.stringify(r));
+    check(`phone: the ${name} menu is measured`, r !== null);
+    if (r === null) return;
+    check(
+      `phone: the ${name} menu keeps ${PHONE_MARGIN}px from both viewport edges`,
+      r.left >= PHONE_MARGIN - 0.5 && r.vw - r.right >= PHONE_MARGIN - 0.5,
+      `left ${r.left}, right gap ${r.vw - r.right}`,
+    );
+  };
+  await openOverflow();
+  margins('overflow', await rectOf('[data-composer-overflow-menu]'));
+  await ph.screenshot({ path: `${outDir}/composer-popover-overflow-phone-${theme}.png` });
+  console.log(`${outDir}/composer-popover-overflow-phone-${theme}.png`);
+  await ph.keyboard.press('Escape');
+  for (const [name, rowSel, menuSel, optSel] of [
+    ['provider', '[data-composer-overflow-provider]', '[data-provider-picker]', null],
+    ['model', '[data-composer-overflow-model]', '[data-model-picker-menu]', '[data-model-option]'],
+    ['mode', '[data-composer-overflow-mode]', '[data-mode-picker]', '[data-mode-option]'],
+  ]) {
+    await openOverflow();
+    if ((await ph.locator(rowSel).count()) === 0) {
+      console.log(`phone ${name} menu: dormant (the build lists no such row)`);
+      await ph.keyboard.press('Escape');
+      continue;
+    }
+    await ph.locator(rowSel).first().click();
+    await ph.waitForSelector(menuSel);
+    await ph.waitForTimeout(100);
+    const r = await rectOf(menuSel);
+    margins(name, r);
+    if (optSel !== null) {
+      const rows = await measureOptions(ph, optSel);
+      console.log(`phone ${name} option rows:`, JSON.stringify(rows.map((o) => o.height)));
+      check(
+        `phone: every ${name} option row is at least 44px tall`,
+        rows.length > 0 && rows.every((o) => o.height >= 43.5),
+        `heights ${rows.map((o) => o.height)}`,
+      );
+      const base = BASE_PHONE_WIDTH[name];
+      if (base !== null && r !== null) {
+        // The mode menu is sized by its content up to 260px, so EC-72's shorter copy
+        // narrows it on purpose: it may only be narrower than base, never wider.
+        const widthOk =
+          name === 'mode'
+            ? r.width <= Math.min(base, r.vw - 2 * PHONE_MARGIN) + 1
+            : Math.abs(r.width - Math.min(base, r.vw - 2 * PHONE_MARGIN)) <= 1;
+        check(
+          `phone: the ${name} menu width is its base width ${base}px (mode: at most, the shorter copy narrows it)`,
+          widthOk,
+          `${r.width}px`,
+        );
+      }
+    }
+    if (name === 'mode') await assertModeLayout(ph, 'phone');
+    await ph.screenshot({ path: `${outDir}/composer-popover-${name}-phone-${theme}.png` });
+    console.log(`${outDir}/composer-popover-${name}-phone-${theme}.png`);
+    await ph.keyboard.press('Escape');
+    await ph.waitForTimeout(100);
+  }
+  await ph.close();
 }
 
 await browser.close();
