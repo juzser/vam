@@ -222,8 +222,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * under it, more than either feature alone needed.
  *
  * THE CACHE-TIMER COUNTDOWN THEN MERGED IN TOO, on top of the ADHD-card +
- * Integrations tree above: `domain/cache-timer.ts`, `panels/
- * CacheCountdown.tsx`, `panels/cache-timer-clock.ts`, three new `Session`
+ * Integrations tree above: the countdown's domain module, row
+ * component and shared clock (all since deleted), three new `Session`
  * fields threaded through `SessionList.tsx`, and the sidebar's first-ever
  * use of lucide's `Timer` glyph, eager by necessity -- it draws in the
  * sidebar, which every load already pays for, so there is no lazy boundary

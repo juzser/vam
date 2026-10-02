@@ -1,6 +1,6 @@
 /**
  * WHEN CLAUDE CODE'S OWN PROMPT CACHE WAS LAST TOUCHED, AND HOW LONG THAT
- * TOUCH LIVES -- what the sidebar's cache-timer countdown counts down from.
+ * TOUCH LIVES -- what a cache countdown would count down from.
  *
  * ── WHERE THIS COMES FROM ─────────────────────────────────────────────────
  * The operator asked for a countdown: Claude Code caches your conversation to
