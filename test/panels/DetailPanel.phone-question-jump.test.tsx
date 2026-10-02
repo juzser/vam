@@ -55,7 +55,10 @@ class FakeIntersectionObserver {
   static instances: FakeIntersectionObserver[] = [];
   readonly observed: Element[] = [];
   disconnected = false;
-  constructor(readonly callback: IntersectionObserverCallback) {
+  constructor(
+    readonly callback: IntersectionObserverCallback,
+    readonly options?: IntersectionObserverInit,
+  ) {
     FakeIntersectionObserver.instances.push(this);
   }
   observe(target: Element) {
@@ -167,5 +170,49 @@ describe('the jump-to-question pill (phone)', () => {
     draw({ phone: false, width: 700 });
     expect(FakeIntersectionObserver.instances).toHaveLength(0);
     expect(q('[data-jump-to-question]')).toBeNull();
+  });
+});
+
+describe('the inline question card is in flow (phone, EC-88; desktop, EC-89)', () => {
+  it('is no longer sticky: every class but sticky and bottom-0 is unchanged, and it stays in the column', () => {
+    draw();
+    const card = q('[data-question-bar-inline]');
+    const tokens = (card?.className ?? '').split(/\s+/).filter((t) => t !== '');
+    expect(tokens).not.toContain('sticky');
+    expect(tokens).not.toContain('bottom-0');
+    expect([...tokens].sort()).toEqual(['bg-pane', 'flex', 'flex-col', 'pt-1.5']);
+    expect(q('[data-detail-column]')?.contains(card ?? null)).toBe(true);
+  });
+
+  it('desktop draws no inline card; the fixed footer stays outside the column', () => {
+    draw({ phone: false, width: 1280 });
+    expect(q('[data-question-bar-inline]')).toBeNull();
+    const bar = q('[data-question-bar]');
+    expect(bar).not.toBeNull();
+    expect(q('[data-detail-column]')?.contains(bar)).toBe(false);
+    const tokens = (bar?.className ?? '').split(/\s+/);
+    expect(tokens).toContain('flex-none');
+    expect(tokens).toContain('border-t');
+    expect(tokens).not.toContain('sticky');
+  });
+});
+
+describe('the pill brings the card back (EC-90 pins)', () => {
+  it('roots the observer at the column with threshold 0', () => {
+    draw();
+    const { options } = latestObserver();
+    expect(options?.root).toBe(q('[data-detail-column]'));
+    expect(options?.threshold).toBe(0);
+  });
+
+  it("clicking the pill sets the column's scrollTop to its scrollHeight", () => {
+    draw();
+    const column = q('[data-detail-column]') as HTMLElement;
+    Object.defineProperty(column, 'scrollHeight', { configurable: true, value: 1234 });
+    const set = vi.fn();
+    Object.defineProperty(column, 'scrollTop', { configurable: true, get: () => 0, set });
+    act(() => latestObserver().fire(false));
+    act(() => (q('[data-jump-to-question]') as HTMLButtonElement).click());
+    expect(set).toHaveBeenCalledWith(1234);
   });
 });

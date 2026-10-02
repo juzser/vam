@@ -588,7 +588,7 @@ test.describe('the phone shell at 390px', () => {
     await openFirstSession(page);
     // `data-question-bar-inline`, not the retired fixed `data-question-bar`
     // (docs/design/phone-core-loop.md §3.2-3.3): the Response view's
-    // question is inline now, `sticky bottom-0` inside the transcript's own
+    // question is inline now, the last child in flow of the transcript's own
     // scroller, and it is STILL the bottom of the screen whenever the
     // composer stands down.
     expect(

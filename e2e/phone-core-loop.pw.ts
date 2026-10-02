@@ -341,7 +341,7 @@ type Band = { readonly top: number; readonly bottom: number; readonly h: number 
  * the 140px keyboard cap (`styles.css`) still bites. `column` reads the
  * Response view's own scroller (`data-detail-column`), which now holds BOTH
  * the transcript and — when a question is open — the inline question as its
- * newest item (`data-question-bar-inline`, `sticky bottom-0`, no cap of its
+ * newest item (`data-question-bar-inline`, in flow as the last child, no cap of its
  * own): AC-3's "one continuous scroll region" means there is no longer a
  * SEPARATE capped sub-scroll to measure there, only the one shared scroller.
  */

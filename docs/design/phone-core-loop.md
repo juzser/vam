@@ -272,9 +272,8 @@ already serves "pick the right session fast".
   gates `KEY_STRIP`); `QuestionCard`'s own internals (the listbox, `onKeys`,
   `NUMBERED_OPTIONS`, `AnswerRequest` construction, `onAnswer`) are REUSED,
   not rewritten — only the container it mounts in changes, from
-  `flex-none` fixed footer to a flow child of the scroller with `sticky
-  bottom-0` (see below) so it still reads as "the thing at the bottom
-  demanding attention" without being pinned outside the scroll content.
+  `flex-none` fixed footer to the scroller's last child in normal flow,
+  which scrolls away with the column (plan v25, task-46).
 - Measured target: with the tab strip gone (−45px) and the question moved
   inline (so it no longer reserves a separate 313px band — it becomes part
   of the same scroll content the transcript already is, costing only its
@@ -630,8 +629,8 @@ desktop card vs. a left-edge `border-l-2` accent bar on phone) — no
 change to any state, handler, or the JSX of the interactive rows. On
 phone's Response view, the newest open question mounts as
 `data-question-bar-inline` inside `data-detail-column`, the same scroller
-`orderedTurns` already renders into, `sticky bottom-0` so it settles at
-the bottom of that shared scroll region rather than floating separately.
+`orderedTurns` already renders into, as the scroller's last child in
+normal flow: it scrolls away with the column (plan v25, task-46).
 The old fixed-footer mount (`data-question-bar`) is now conditioned
 `(!phone || current !== 'Response')`, so it still renders for phone's
 Agents view and for desktop everywhere — unchanged there.
@@ -697,6 +696,13 @@ the pill (`data-jump-to-question`) renders only when phone + an open
 question + not in viewport + on the Response view, and replaces (never
 joins) the existing `data-out-to-bottom` "jump to latest" chevron in that
 same corner — one jump control at a time, per the doc's own AC.
+
+*Note, plan v25, task-46, operator events #827 and #828.* The inline card
+was first pinned with `position: sticky` at the bottom edge, and its containing
+block is the whole scroll content, so it never left the scroller's view and
+the pill never drew. The
+card is now in flow as the column's last child; it scrolls away, and the
+pill brings it back in one tap.
 
 **4b, persistent-permission risk marker — shipped, with one wording
 addition beyond the doc's own examples.** §3.3/§3.7 named

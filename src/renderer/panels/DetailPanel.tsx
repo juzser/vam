@@ -6742,7 +6742,7 @@ const TurnBlock = memo(function TurnBlock({
           that unfolded everything would be a second copy of the setting
           reached from a place that promised something smaller. */}
       {showUnfold && (
-        <ShortcutTip label={unfoldTip(decision.steps, unfolded)}>
+        <ShortcutTip label={unfoldTip(decision.steps, unfolded)} align="start">
           <button
             type="button"
             data-turn-unfold={decision.id}
@@ -8846,8 +8846,8 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
       },
       // `root`: the SCROLLER, not the viewport -- the default target for a
       // plain `IntersectionObserver` is the browser viewport, which this
-      // element never leaves (it is `position: sticky` inside a pane that
-      // itself never scrolls the WINDOW). What it leaves is `outRef`'s own
+      // element never leaves (it sits in flow inside a pane that itself
+      // never scrolls the WINDOW). What it leaves is `outRef`'s own
       // scrolled content, so that is what has to be the root.
       { root, threshold: 0 },
     );
@@ -10370,12 +10370,13 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                 THIS SAME scroller instead of `DetailPanel`'s fixed footer
                 block below (`data-question-bar`, `!phone` there). AC-1: one
                 scrollable container holds both a prior turn's text and
-                `[data-question-option]`. `sticky bottom-0` (not `flex-none`,
-                per AC-2) so it reads as "the thing demanding attention" at
-                the bottom of the scroll content without being pinned
-                outside it -- scrolling UP into history lets it scroll out
-                of view like any other message, which is what the jump-to-
-                question pill (§3.2 deviation) answers. `QuestionCard`'s own
+                `[data-question-option]`. In normal flow as the column's last
+                child (not `flex-none`, per AC-2, and not pinned: a pinned
+                card's containing block is the whole scroll content, so it
+                never left the view and the pill never drew) -- scrolling UP
+                into history lets it scroll out of view like any other
+                message, which is what the jump-to-question pill (§3.2
+                deviation) answers. `QuestionCard`'s own
                 internals are UNCHANGED -- `phone` only swaps its root
                 classes; see that prop's own doc. */}
               {phone && current === 'Response' && newestQuestion !== null && (
@@ -10383,7 +10384,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                   ref={questionInlineRef}
                   data-question-bar-inline
                   {...insertScopeMark}
-                  className="sticky bottom-0 flex flex-col bg-pane pt-1.5"
+                  className="flex flex-col bg-pane pt-1.5"
                 >
                   <QuestionCard
                     key={setId}
@@ -10399,9 +10400,8 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                 </div>
               )}
               {/* The breathing room at the scroll end is a trailing SPACER, not
-                scroller padding: Chromium treats a scroller's bottom padding as
-                the `sticky bottom-0` inset, which floated the phone inline
-                question above the composer. Skipped while that question is
+                scroller padding: a trailing spacer keeps the phone inline
+                question flush with the column's bottom edge. Skipped while that question is
                 drawn -- it IS the end of the column and pins flush. */}
               {!inlineQuestionEnds && (
                 <div

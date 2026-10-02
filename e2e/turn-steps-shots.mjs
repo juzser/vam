@@ -559,6 +559,15 @@ for (const theme of ['light', 'dark']) {
         return { focused: document.activeElement === toggle, tip: document.querySelector('[role="tooltip"]') !== null, rotate: getComputedStyle(chevron).rotate, lines: bubble.textContent.includes('third'), rects };
       }, sel);
       const seen = await fp.evaluate(() => { const el = document.activeElement; const cs = getComputedStyle(el); return { tip: document.querySelector('[role="tooltip"]')?.textContent ?? '', fv: el.matches(':focus-visible'), w: cs.outlineWidth, st: cs.outlineStyle }; });
+      // EC-102: the tip clears the sidebar -- its left edge is no further left than the column's, and it lies in the viewport.
+      const tipBox = await fp.evaluate(() => {
+        const wrap = document.querySelector('[data-radix-popper-content-wrapper]');
+        if (wrap === null) return null;
+        const r = wrap.getBoundingClientRect();
+        return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, column: document.querySelector('[data-detail-column]').getBoundingClientRect().left, vw: innerWidth, vh: innerHeight };
+      });
+      check(`${tag}: the tip's left edge is not left of the column's (EC-102)`, tipBox !== null && tipBox.left >= tipBox.column - 1, JSON.stringify(tipBox));
+      check(`${tag}: the tip lies inside the viewport (EC-102)`, tipBox !== null && tipBox.left >= 0 && tipBox.top >= 0 && tipBox.right <= tipBox.vw && tipBox.bottom <= tipBox.vh, JSON.stringify(tipBox));
       for (const [k, v] of Object.entries(fit.rects)) check(`${tag}: after the scroll the ${k} is inside the viewport and the column`, v.inside, JSON.stringify(v.box));
       check(`${tag}: Tab reached the toggle, and focus, tooltip, the 90deg chevron and the bulleted bubble survived it`, reached && fit.focused && fit.tip && fit.rotate === '90deg' && fit.lines, JSON.stringify([reached, fit.focused, fit.tip, fit.rotate, fit.lines]));
       check(`${tag}: the tooltip reads exactly '${want}'`, seen.tip === want, seen.tip);
@@ -566,8 +575,27 @@ for (const theme of ['light', 'dark']) {
     } else {
       // Scroll until the opened turn's In band is stuck to the top with the pill beneath it; no prompt
       // line may come within 4px of the pill's painted 28px circle (the span inside the 44px hit box).
+      // EC-101: unfold a turn BELOW the pinned one, by its toggle, so an unfolded chevron is in view at the shot.
+      const below = await fp.evaluate((id) => {
+        const opened = document.querySelector(`[data-column-turn="${id}"]`);
+        const toggle = [...document.querySelectorAll('[data-turn-unfold]')].find((el) => el.getAttribute('aria-expanded') !== 'true' && opened.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
+        toggle?.click();
+        return toggle?.getAttribute('data-turn-unfold') ?? null;
+      }, OPENED);
+      await fp.waitForTimeout(250);
       await fp.evaluate((id) => { const c = document.querySelector('[data-detail-column]'); const t = document.querySelector(`[data-column-turn="${id}"]`); c.scrollTop += t.getBoundingClientRect().top - c.getBoundingClientRect().top + 30; }, OPENED);
       await fp.waitForTimeout(400);
+      const chev = await fp.evaluate(() => {
+        const c = document.querySelector('[data-detail-column]').getBoundingClientRect();
+        const found = [...document.querySelectorAll('[data-turn-unfold][aria-expanded="true"]')].map((el) => {
+          const r = el.getBoundingClientRect();
+          const hit = document.elementFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+          const svg = el.querySelector('svg');
+          return { inside: r.top >= c.top && r.bottom <= c.bottom && r.left >= c.left && r.right <= c.right, hit: hit === el || el.contains(hit), rotate: svg ? getComputedStyle(svg).rotate : '', box: [r.left, r.top, r.right, r.bottom].map(Math.round) };
+        });
+        return found.find((f) => f.inside) ?? found[0] ?? null;
+      });
+      check(`${tag}: an unfolded chevron (turn ${below}) is in view, hit-testable, and turned 90deg (EC-101)`, chev !== null && chev.inside && chev.hit && chev.rotate === '90deg', JSON.stringify(chev));
       const pill = await fp.evaluate(() => {
         const c = document.querySelector('[data-detail-column]').getBoundingClientRect();
         const span = document.querySelector('[data-out-to-top] > span');
