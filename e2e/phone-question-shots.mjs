@@ -254,8 +254,8 @@ for (const theme of ['light', 'dark']) {
       return { inside: r.left >= c.left && r.right <= c.right && r.top >= c.top && r.bottom <= c.bottom, h: Math.round(r.height), w: Math.round(r.width) };
     });
     check(`${theme}: the jump pill is drawn inside the column with a 44px hit box (EC-90)`, pill !== null && pill.inside && pill.h >= 44 && pill.w >= 44, JSON.stringify(pill));
-    await page.screenshot({ path: `${outDir}/phone-question-scrolled-${theme}.png` });
-    console.log(`${outDir}/phone-question-scrolled-${theme}.png`);
+    await page.screenshot({ path: `${outDir}/phone-question-scrolled-mobile-${theme}.png` });
+    console.log(`${outDir}/phone-question-scrolled-mobile-${theme}.png`);
     if (pill !== null) {
       await page.locator('[data-jump-to-question]').click();
       await page.waitForTimeout(300);
@@ -326,6 +326,22 @@ for (const theme of ['light', 'dark']) {
 
   await page.screenshot({ path: `${outDir}/phone-composer-${theme}.png` });
   console.log(`${outDir}/phone-composer-${theme}.png`);
+  await page.close();
+}
+
+// -------------------------------------- 4. DESKTOP KEEPS THE FIXED FOOTER (EC-89)
+for (const theme of ['light', 'dark']) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  page.on('pageerror', (err) => console.error('PAGE ERROR:', err));
+  await page.addInitScript((t) => localStorage.setItem('vam.prefs.v1', JSON.stringify({ theme: t })), theme);
+  await page.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
+  await page.locator(`[data-session-row="${QUESTION_SESSION}"]`).first().click();
+  await page.waitForSelector('[data-question-bar]');
+  await page.waitForTimeout(300);
+  const d = await page.evaluate(() => ({ inline: document.querySelector('[data-question-bar-inline]') !== null, pos: getComputedStyle(document.querySelector('[data-question-bar]')).position }));
+  check(`${theme}: desktop draws the fixed footer, no inline card (EC-89)`, !d.inline && d.pos === 'static', JSON.stringify(d));
+  await page.screenshot({ path: `${outDir}/desktop-question-desktop-${theme}.png` });
+  console.log(`${outDir}/desktop-question-desktop-${theme}.png`);
   await page.close();
 }
 
