@@ -321,6 +321,7 @@ export function ShortcutTip({
   label,
   action,
   mode,
+  align,
   children,
 }: {
   /** What the button is called — its own name, not the sheet's caption. */
@@ -329,6 +330,8 @@ export function ShortcutTip({
   readonly action?: KeyAction;
   /** The mode the button acts in, where that changes what the keys mean. */
   readonly mode?: CursorMode;
+  /** Where the tip sits along the trigger's edge; Radix's centred default when omitted. */
+  readonly align?: 'start' | 'center' | 'end';
   readonly children: ReactNode;
 }) {
   const lines = shortcutLines(action, mode);
@@ -346,6 +349,7 @@ export function ShortcutTip({
             full: a tip that covers its trigger hides what it explains. */}
         <Tooltip.Content
           side="top"
+          align={align}
           sideOffset={6}
           collisionPadding={8}
           className="z-50 flex max-w-[280px] flex-col gap-1 rounded-[7px] bg-tip px-2 py-1.5 text-control shadow-tip"

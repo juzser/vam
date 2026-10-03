@@ -146,15 +146,15 @@ for (const theme of ['light', 'dark']) {
     JSON.stringify(shape.options),
   );
 
-  // EC-6 gap 0: at the column's end the inline card pins flush on the scroller's
-  // bottom edge, with no trailing spacer and no fade painting over it.
+  // EC-6 gap 0: at the column's end the inline card sits flush at the scroll end
+  // as an in-flow block, with no trailing spacer and no fade painting over it.
   await page.evaluate(() => {
     const column = document.querySelector('[data-phone-shell] [data-detail-column]');
     if (column === null) return;
     // The fixture transcript is shorter than the phone column, so it never
     // overflows and "the column's end" would be free space, not the scroll
     // end. Pad the content (a filler child before the card) so the column
-    // really scrolls; the sticky card's inset is what is being measured.
+    // really scrolls; the in-flow card's flush bottom edge is what is being measured.
     if (column.scrollHeight <= column.clientHeight) {
       const filler = document.createElement('div');
       filler.setAttribute('aria-hidden', 'true');
@@ -188,6 +188,85 @@ for (const theme of ['light', 'dark']) {
 
   await page.screenshot({ path: `${outDir}/phone-question-inline-${theme}.png` });
   console.log(`${outDir}/phone-question-inline-${theme}.png`);
+  await page.close();
+}
+
+// ------------------------------- 1b. THE CARD SCROLLS AWAY; THE PILL BRINGS IT BACK
+// EC-90 / EC-91: 390x844, `?demo=1`, `factory-sse-1`, focus view on, Response view.
+// The card is in flow, so a 40px sweep up from the bottom must find a step where
+// it leaves the column's rect, draw the pill there, and no sticky In band may
+// ever overlap it. A sweep that never finds that step is a FAILURE, not a skip.
+for (const theme of ['light', 'dark']) {
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  page.on('pageerror', (err) => console.error('PAGE ERROR:', err));
+  await page.addInitScript((t) => {
+    localStorage.setItem('vam.prefs.v1', JSON.stringify({ theme: t, focusView: true, viewOptions: { groupBy: 'project', sortBy: 'needs-you' }, sortByMigrated: true }));
+  }, theme);
+  await page.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('[data-phone-shell="list"]');
+  await page.locator('[data-session-row="factory-sse-1"]').first().click();
+  await page.waitForSelector('[data-phone-shell="session"]');
+  await page.waitForSelector('[data-question-bar-inline]');
+  await page.waitForTimeout(300);
+  const sweep = await page.evaluate(async () => {
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const column = document.querySelector('[data-phone-shell] [data-detail-column]');
+    const card = () => document.querySelector('[data-phone-shell] [data-question-bar-inline]');
+    if (column === null || card() === null) return { error: 'no column or inline card' };
+    // The same filler section 1 uses, when the column barely overflows.
+    if (column.scrollHeight - column.clientHeight < card().getBoundingClientRect().height + 80) {
+      const filler = document.createElement('div');
+      filler.setAttribute('aria-hidden', 'true');
+      filler.style.height = `${column.clientHeight * 2}px`;
+      column.insertBefore(filler, column.firstElementChild?.nextSibling ?? null);
+    }
+    const box = (el) => { const r = el.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom }; };
+    const overlap = (a, b) => ({ l: Math.max(a.l, b.l), t: Math.max(a.t, b.t), r: Math.min(a.r, b.r), b: Math.min(a.b, b.b) });
+    const area = (x) => Math.max(0, x.r - x.l) * Math.max(0, x.b - x.t);
+    const overlaps = [];
+    let bands = 0;
+    let leftAt = null;
+    column.scrollTop = column.scrollHeight;
+    await wait(100);
+    for (let top = column.scrollHeight - column.clientHeight; top >= 0; top -= 40) {
+      column.scrollTop = top;
+      await wait(30);
+      const c = box(column);
+      const k = box(card());
+      for (const band of document.querySelectorAll('[data-detail-scroll="in"]')) {
+        bands += 1;
+        const x = overlap(overlap(box(band), k), c);
+        if (area(x) > 0) overlaps.push({ scrollTop: column.scrollTop, band: box(band), card: k, at: String(document.elementFromPoint((x.l + x.r) / 2, (x.t + x.b) / 2)?.outerHTML).slice(0, 80) });
+      }
+      if (leftAt === null && area(overlap(k, c)) === 0) { leftAt = top; break; }
+    }
+    return { leftAt, overlaps, bands };
+  });
+  check(`${theme}: the card scrolls out of the column (EC-90)`, sweep.error === undefined && sweep.leftAt !== null, JSON.stringify(sweep));
+  check(`${theme}: no sticky In band meets the card at any step (EC-91)`, sweep.bands > 0 && sweep.overlaps?.length === 0, JSON.stringify({ bands: sweep.bands, overlaps: sweep.overlaps }));
+  if (sweep.leftAt !== null && sweep.error === undefined) {
+    await page.waitForTimeout(150);
+    const pill = await page.evaluate(() => {
+      const el = document.querySelector('[data-jump-to-question]');
+      const c = document.querySelector('[data-phone-shell] [data-detail-column]').getBoundingClientRect();
+      if (el === null) return null;
+      const r = el.getBoundingClientRect();
+      return { inside: r.left >= c.left && r.right <= c.right && r.top >= c.top && r.bottom <= c.bottom, h: Math.round(r.height), w: Math.round(r.width) };
+    });
+    check(`${theme}: the jump pill is drawn inside the column with a 44px hit box (EC-90)`, pill !== null && pill.inside && pill.h >= 44 && pill.w >= 44, JSON.stringify(pill));
+    await page.screenshot({ path: `${outDir}/phone-question-scrolled-mobile-${theme}.png` });
+    console.log(`${outDir}/phone-question-scrolled-mobile-${theme}.png`);
+    if (pill !== null) {
+      await page.locator('[data-jump-to-question]').click();
+      await page.waitForTimeout(300);
+      const back = await page.evaluate(() => {
+        const c = document.querySelector('[data-phone-shell] [data-detail-column]').getBoundingClientRect();
+        const k = document.querySelector('[data-phone-shell] [data-question-bar-inline]').getBoundingClientRect();
+        return { gap: Math.abs(c.bottom - k.bottom), pill: document.querySelector('[data-jump-to-question]') !== null, chevron: document.querySelector('[data-out-to-bottom]') !== null };
+      });
+      check(`${theme}: a tap brings the card back flush, and no jump control is left (EC-90)`, back.gap <= 1 && !back.pill && !back.chevron, JSON.stringify(back));
+    }
+  }
   await page.close();
 }
 
@@ -247,6 +326,22 @@ for (const theme of ['light', 'dark']) {
 
   await page.screenshot({ path: `${outDir}/phone-composer-${theme}.png` });
   console.log(`${outDir}/phone-composer-${theme}.png`);
+  await page.close();
+}
+
+// -------------------------------------- 4. DESKTOP KEEPS THE FIXED FOOTER (EC-89)
+for (const theme of ['light', 'dark']) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  page.on('pageerror', (err) => console.error('PAGE ERROR:', err));
+  await page.addInitScript((t) => localStorage.setItem('vam.prefs.v1', JSON.stringify({ theme: t })), theme);
+  await page.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
+  await page.locator(`[data-session-row="${QUESTION_SESSION}"]`).first().click();
+  await page.waitForSelector('[data-question-bar]');
+  await page.waitForTimeout(300);
+  const d = await page.evaluate(() => ({ inline: document.querySelector('[data-question-bar-inline]') !== null, pos: getComputedStyle(document.querySelector('[data-question-bar]')).position }));
+  check(`${theme}: desktop draws the fixed footer, no inline card (EC-89)`, !d.inline && d.pos === 'static', JSON.stringify(d));
+  await page.screenshot({ path: `${outDir}/desktop-question-desktop-${theme}.png` });
+  console.log(`${outDir}/desktop-question-desktop-${theme}.png`);
   await page.close();
 }
 
