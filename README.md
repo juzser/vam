@@ -53,7 +53,7 @@ started itself.
 | `1` ... `9` | Show a view (Response, PRs, Terminal, Agents, Files) | Text |
 | `Mod-.` | Send a literal Escape into the session's pane (works in either mode) | |
 | `Mod-k` | Command palette | |
-| `/` | Search sessions, `n` / `N` next / previous match | Command suggestions at the start of a prompt line |
+| `/` | Search sessions, `n` / `N` next / previous match | Slash-command suggestions at the start of a prompt line |
 | `o` `x` | Start / close a session | |
 | `f` `F` | Jump labels / filters | |
 | `zs` `zv` | Split the focused tab, stacked or side by side | |
@@ -84,9 +84,9 @@ vam never answers for you.
 
 ### Command suggestion
 
-Type `/` at the start of a line in the prompt and vam lists the session's slash commands:
-Claude Code's built-ins, plus your own from `~/.claude/commands` and the project's
-`.claude/commands`. Accept one with `Enter`.
+Type `!` at the start of a line in the prompt and vam lists the shell commands the agent
+proposed earlier in the session, narrowing as you type. `Up` / `Down` move, `Enter` fills in
+the command, `Esc` closes the list; vam never runs it. (`/` at line start lists slash commands.)
 
 </td>
 <td><img src="docs/assets/readme/keyboard-today.png" alt="The searchable shortcuts sheet, Select and Insert side by side" /></td>
