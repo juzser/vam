@@ -4,13 +4,13 @@
 
 # vam
 
-**A vim-like, keyboard-first session manager — every Claude Code and Codex session on this machine, in one place.**
+**vim for agent management. Keyboard-first, with Select and Insert modes, for every Claude Code and Codex session on this machine.**
 
 [![Platform](https://img.shields.io/badge/platform-macOS%20(arm64)-black)](#-build-from-source)
 [![Built with Electron](https://img.shields.io/badge/built%20with-Electron-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-[Features](#-features) · [Download](#-download) · [Build from source](#-build-from-source) · [Keyboard](#️-keyboard-shortcuts) · [License](#-license)
+[Why](#why-vam) · [Keys](#modes-and-keys) · [Highlights](#highlights) · [Download](#-download) · [Build from source](#-build-from-source) · [License](#-license)
 
 </div>
 
@@ -22,47 +22,59 @@
 
 ## Why vam
 
-vam is modal, like vim. **Select** mode drives the session list with `hjkl`, vim-style
-prefix chords and a command palette; **Insert** mode types into the prompt or answers an
-agent's question. `i` goes in, and `Esc` comes back out, in the prompt and in the
-streaming terminal alike, so your hands stay on the keyboard and never have to find the
-mouse.
+You run several agents at once. Every one of them stops to ask something: a permission, a
+choice, a next step. Mouse-driven dashboards make that a chore. vam makes it a key press.
+
+vam is modal, like vim, with two modes:
+
+- **Select** is for moving and acting. Walk the session list, jump, split, close, open a
+  view, and answer nothing by accident.
+- **Insert** is for talking to the agent. Type into the prompt, or answer a question card.
+
+`i` goes in, and `Escape` comes back out. That holds in the prompt box and in the terminal
+tab alike, and a binding you press by mistake never reaches the agent's pane.
 
 Under the keys, each session is a **tmux pane vam starts and tags**. It types your prompts
 into the pane as you would and reads the transcript back with `capture-pane`, because
 Claude Code and Codex offer no API to watch a running session. vam only shows sessions it
-started itself. Every session lives in a real pane, so turn on phone access and the same
-live session carries on in your pocket, over your own tailnet, with no relay run by anyone
-else.
+started itself.
 
-## ✨ Features
+## Modes and keys
+
+`Mod` is Cmd on macOS and Ctrl elsewhere.
+
+| Key | Select mode | Insert mode |
+| --- | --- | --- |
+| `i` | Enter Insert, caret in the prompt | |
+| `Escape` | Cancel whatever is half-typed | Back to Select (also from the terminal tab) |
+| `j` `k` | Walk the session list | Walk a question's options |
+| `h` `l` | Cycle the project's open tabs | `h` back to Select, `l` next step of a multi-question call |
+| `Enter` | | Mark the option and send once every step is marked; opens the prompt if no question is on screen |
+| `1` ... `9` | Show a view (Response, PRs, Terminal, Agents, Files) | Text |
+| `Mod-.` | Send a literal Escape into the session's pane (works in either mode) | |
+| `Mod-k` | Command palette | |
+| `/` | Search sessions, `n` / `N` next / previous match | Command suggestions at the start of a prompt line |
+| `o` `x` | Start / close a session | |
+| `f` `F` | Jump labels / filters | |
+| `zs` `zv` | Split the focused tab, stacked or side by side | |
+| `,` `.` | Settings / Remote | |
+| `?` | Searchable sheet of every binding | |
+
+Every binding is in [docs/keyboard.md](docs/keyboard.md), which a unit test holds against
+the key tables.
+
+## Features
 
 <table>
 <tr>
 <td width="42%" valign="middle">
 
-### Modal keyboard — Select, Insert, chords, palette
+### Select option
 
-Walk sessions with `hjkl`, split with `zs`/`zv`, jump with `f`, and open the palette with
-`Mod-k`. `Escape` leaves Insert and hands the keyboard back without reaching the pane;
-`Mod-.` sends Escape into the focused session's pane instead, whether it is running,
-waiting or idle. `?` opens a searchable sheet of every binding, and Settings → Keyboard
-flags a chord that two actions claim with a red dot.
-
-</td>
-<td>
-<img src="docs/assets/readme/keyboard-today.png" alt="The searchable shortcuts sheet, Select and Insert side by side" /><br/>
-<img src="docs/assets/readme/keyboard-settings.png" alt="Settings → Keyboard: a contested chord's red conflict dot, its tooltip open, and the Mod-. interrupt binding" />
-</td>
-</tr>
-<tr>
-<td width="42%" valign="middle">
-
-### Terminal-first sessions — Claude Code and Codex
-
-Pick a provider and a permission mode (**Manual** asks before every tool call, **Yolo**
-skips the provider's prompts for that session), then start. Questions and permission
-prompts land as cards in the transcript, and vam never answers for you.
+An agent's question (`AskUserQuestion`, a permission prompt) lands as a card in the
+transcript. Press `i`, walk the options with `j` / `k`, mark with `Enter`, send
+with `Enter` or `Mod-Enter`. A multi-question call is answered one `Enter` per question.
+vam never answers for you.
 
 </td>
 <td><img src="docs/assets/readme/start-flow.png" alt="Starting a session: provider, permission mode, Start session" /></td>
@@ -70,11 +82,23 @@ prompts land as cards in the transcript, and vam never answers for you.
 <tr>
 <td width="42%" valign="middle">
 
-### Your phone, too — over Tailscale Serve
+### Command suggestion
+
+Type `/` at the start of a line in the prompt and vam lists the session's slash commands:
+Claude Code's built-ins, plus your own from `~/.claude/commands` and the project's
+`.claude/commands`. Accept one with `Enter`.
+
+</td>
+<td><img src="docs/assets/readme/keyboard-today.png" alt="The searchable shortcuts sheet, Select and Insert side by side" /></td>
+</tr>
+<tr>
+<td width="42%" valign="middle">
+
+### Remote
 
 Turn on phone access in **Settings → Remote** and vam runs `tailscale serve` for you. Pair
-with a QR, and the phone drives the same live sessions, with a quick-key strip for the
-keys a touch screen lacks.
+with a QR, and the phone drives the same live sessions over your own tailnet, with no relay
+run by anyone else. A quick-key strip supplies the keys a touch screen lacks.
 
 </td>
 <td>
@@ -84,9 +108,21 @@ keys a touch screen lacks.
 </tr>
 </table>
 
-**Also:** usage popover for both providers' rate limits · workspace filters and worktrees
-nested under their project · Settings as one full-window overlay · GitHub and GitLab pull
-requests through your own `gh` and `glab` sign-in.
+- **Terminal mode.** The Terminal view is a real terminal on the session's tmux pane.
+  Arrow keys, Ctrl chords and typing go to the program, so you can walk a Claude Code
+  picker from inside it. `Escape` or `Tab` leaves it, and `Mod-.` sends a literal Escape.
+- **Apply skill.** **Settings → Skills** installs a bundled skill (`i-have-adhd`, pinned to
+  a commit, no network) into Claude Code's `~/.claude/skills` and Codex's
+  `~/.agents/skills`, and removes it again.
+- **Connect repo PRs.** Sign in to GitHub or GitLab in **Settings** (through your own `gh`
+  and `glab`). The PRs view then lists the session's pull requests and can merge one or
+  delete its branch. Never with `--admin` or `--auto`.
+- **Claude Code and Codex.** Pick a provider and a permission mode (**Manual** asks before
+  every tool call, **Yolo** skips the provider's prompts) per session.
+- **Splits and tabs.** `zs` / `zv` split a tab, `Mod-1` ... `Mod-9` pick a tab,
+  `Mod-Shift-[` and `]` cycle them.
+- **Files tab.** Browse, edit and save a session's files with vim-style `j` `k` `h` `l` in
+  the tree.
 
 ## 📦 Download
 
@@ -120,35 +156,6 @@ pnpm run dist         # build:app + build:web + electron-builder -> an unsigned 
 `pnpm run dist` produces a `.dmg`/`.zip` on macOS, unsigned — right-click → **Open** on
 first launch (Gatekeeper otherwise refuses it; there is no Apple Developer identity behind
 these builds yet).
-
-## ⌨️ Keyboard shortcuts
-
-`Mod` is Cmd on macOS and Ctrl elsewhere. The chords below are the most-used ones; every
-one of them is listed in [docs/keyboard.md](docs/keyboard.md), which a unit test holds
-against the key tables.
-
-| Key | Action |
-| --- | --- |
-| `j` `k` | Select: walk the session list |
-| `h` `l` | Select: cycle the focused project's open tabs |
-| `i` | Enter Insert — type into the prompt, or answer a question |
-| `Escape` | Leave Insert, back to Select — never into the session's pane; in the streaming terminal, Esc returns to Select mode too |
-| `Mod-.` | Send Escape to the focused session's pane — interrupt, running or not |
-| `Mod-Enter` | Start the session on a fresh pane, as the Start button does |
-| `o` / `Mod-n` | Start a session in the focused project |
-| `x` / `Mod-w` | Close the focused session |
-| `Mod-Shift-p` | New project |
-| `Mod-Shift-w` | New worktree |
-| `/` | Search sessions · `n` / `N` next / previous match |
-| `F` | Workspace options — group, sort, filters |
-| `,` | Settings · `.` Remote (phone pairing) |
-| `Mod-k` | Command palette |
-| `Ctrl-Alt-1` … `Ctrl-Alt-9` | Show a view — Response, PRs, Terminal, Agents, Files |
-| `zs` `zv` | Split the focused tab, stacked or side by side |
-| `?` | The in-app shortcut sheet |
-
-On a phone there is no physical keyboard, so a 24-chip strip (23 where the session has no terminal) above the composer taps the
-keys for you: Keyboard, Paste, twenty keys, Terminal where the session has one, and More.
 
 ## 🤝 Contributing
 
