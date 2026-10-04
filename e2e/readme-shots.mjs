@@ -56,6 +56,9 @@ import { chromium } from 'playwright-core';
 
 const origin = process.argv[2] ?? 'http://localhost:5529';
 const outDir = process.argv[3] ?? 'docs/assets/readme';
+// Hides ONLY the demo strip's text (the `text-waiting` span `SourceReadout`
+// draws for `source.kind === 'demo'`), not the whole `[data-source]` cell.
+const DEMO_STRIP_CSS = '[data-source] > .text-waiting { visibility: hidden !important; }';
 mkdirSync(outDir, { recursive: true });
 
 /**
@@ -684,23 +687,28 @@ function baseApiStub() {
 }
 
 // ── 9b. COMMAND SUGGESTION — `!` plus a partial command, list open ─────────
-// Pure `?demo=1`, `prompt-suggest-shots.mjs`'s own route: `vam-build-1` asks a
-// question, "Chat about this" is the way to a box, and typing `!` there lists
-// the shell commands earlier turns proposed (`data-bang-suggest`), narrowing as
+// Pure `?demo=1`: `factory-sse-1` has a proposed command and no open question,
+// and typing `!` in its box lists the shell commands earlier turns proposed (`data-bang-suggest`), narrowing as
 // more is typed. Typed one key at a time, as a person does.
 {
   const page = await browser.newPage({ viewport: DESKTOP, deviceScaleFactor: RETINA });
   page.on('pageerror', (err) => console.error('COMMAND-SUGGEST PAGE ERROR:', err));
   await page.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
   await page.waitForSelector('[data-tab-strip]');
-  await page.locator('[data-session-row="vam-build-1"]').first().click();
+  // `factory-sse-1` carries a proposed command (`smith findings raise ...`).
+  // Every demo session that has one also holds a pending card (a permission
+  // prompt here, a question on `vam-build-1`) drawn just above the box, which
+  // is where the list opens -- so the card is taken off this one page, in the
+  // shot script alone, and the list stands over the transcript by itself.
+  await page.locator('[data-session-row="factory-sse-1"]').first().click();
   await page.waitForTimeout(200);
   const chat = page.locator('[data-question-chat]');
   if ((await chat.count()) > 0) await chat.click();
+  await page.addStyleTag({ content: '[data-question] { display: none !important; }' });
   await page.waitForSelector('[data-prompt-box] textarea');
   const box = page.locator('[data-prompt-box] textarea');
   await box.click();
-  await page.keyboard.type('!pnpm', { delay: 12 });
+  await page.keyboard.type('!smith', { delay: 12 });
   await page.waitForSelector('[data-bang-suggest]', { timeout: 5_000 });
 
   const rows = await page
@@ -710,6 +718,7 @@ function baseApiStub() {
   assert('the ! list offers commands from the session', rows.length > 0, JSON.stringify(rows));
 
   await page.waitForTimeout(150);
+  await page.addStyleTag({ content: DEMO_STRIP_CSS });
   await freeze(page);
   await page.screenshot({ path: `${outDir}/command-suggest.png` });
   console.log(`${outDir}/command-suggest.png`);
@@ -796,7 +805,7 @@ function baseApiStub() {
   // The hero is the product's face, so the "demo data -- every write is
   // refused" readout (`[data-source]`, `SourceReadout` in Canvas.tsx) is hidden
   // here by a style injected into this shot's page alone; no product code.
-  await page.addStyleTag({ content: '[data-source] { visibility: hidden !important; }' });
+  await page.addStyleTag({ content: DEMO_STRIP_CSS });
   await freeze(page);
   await page.screenshot({ path: `${outDir}/hero.png` });
   console.log(`${outDir}/hero.png`);
