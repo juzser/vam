@@ -69,12 +69,12 @@ describe('the sections the shortcut list is cut into', () => {
     for (const mode of CURSOR_MODES) {
       const section = sections.find((s) => s.id === mode);
       expect(
-        section?.rows.map((row) => row.id),
+        section?.rows.filter((row) => row.reserved !== true).map((row) => row.id),
         mode,
       ).toEqual(dependent.map((row) => row.id));
       // The caption is the one for THIS mode -- listing the binding twice with
       // the same words would differentiate nothing.
-      for (const row of section?.rows ?? []) {
+      for (const row of (section?.rows ?? []).filter((r) => r.reserved !== true)) {
         const source = dependent.find((candidate) => candidate.id === row.id);
         expect(row.label, `${row.id} in ${mode}`).toBe(source?.byMode?.[mode]);
       }
@@ -103,7 +103,8 @@ describe('the sections the shortcut list is cut into', () => {
     // Every binding is still reachable: the split partitions the list, it does
     // not shorten it.
     const ids = new Set(sections.flatMap((section) => section.rows.map((row) => row.id)));
-    expect(ids.size).toBe(allRows.length);
+    const reservedCount = SHEET.flatMap((group) => group.reserved ?? []).length;
+    expect(ids.size).toBe(allRows.length + reservedCount);
   });
 
   it('drops a section with nothing in it rather than titling an empty one', () => {

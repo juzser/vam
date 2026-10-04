@@ -273,6 +273,25 @@ export type Decision = {
    * something vam could not reach.
    */
   readonly unread?: boolean;
+  /**
+   * The `input.command` of every Bash tool call the turn made, oldest first,
+   * for the `!` list in the Response view's composer (operator event #73).
+   * `steps` carries a call's NAME only, so a command the agent ran has no other
+   * way across. Absent is a source that cannot report calls or a turn that ran
+   * no Bash; a command over 500 characters is left out rather than cut, because
+   * a cut command is a different command.
+   */
+  readonly bash?: readonly string[];
+  /**
+   * True on a turn whose opening lies above the reader's window, so its id is
+   * the offset of a line inside the window (a `last-prompt` RE-EMISSION), not of
+   * its opening marker, and moves as the window slides. A reader sets it on any
+   * turn it opened without the operator's own line (Claude Code: `full === null`,
+   * which includes a later turn opened by a last-prompt whose text differs from
+   * the open turn's), but `retainLeft` reads it only on the window's oldest turn.
+   * Absent is the ordinary case.
+   */
+  readonly openedMidTurn?: boolean;
 };
 
 /**
@@ -482,7 +501,12 @@ export type PullRequest = {
  * that could not be asked.
  */
 export type PullRequestList =
-  | { readonly kind: 'ok'; readonly prs: readonly PullRequest[] }
+  | {
+      readonly kind: 'ok';
+      readonly prs: readonly PullRequest[];
+      /** The `prFilterKey` of the filter set this list answered; absent from older readers. */
+      readonly filterKey?: string;
+    }
   | { readonly kind: 'unavailable'; readonly code: string; readonly message: string };
 
 /**
@@ -544,6 +568,8 @@ export type AgentQuestion = {
   readonly options: readonly QuestionOption[];
   /** `null` while the question is still open; otherwise what was answered. */
   readonly answer: string | null;
+  /** Present and `true` only when the closing tool_result carried `is_error`. */
+  readonly cancelled?: true;
 };
 
 export type Session = {
@@ -645,8 +671,8 @@ export type Session = {
   /**
    * WHEN CLAUDE CODE'S OWN PROMPT CACHE WAS LAST READ OR WRITTEN, ISO-8601,
    * and how long that entry lives from that moment (`cacheTtlMs`) -- together
-   * what the sidebar's cache-timer countdown counts down from
-   * (`domain/cache-timer.ts`). `main/sources/claude-code/cache-activity.ts`
+   * what a cache countdown would count down from
+   * (no renderer reads them today). `main/sources/claude-code/cache-activity.ts`
    * carries the whole reading rule, off the transcript tail already read for
    * `decisions`.
    *
@@ -676,7 +702,7 @@ export type Session = {
    * this problem because it is a STRING the source already finished
    * computing; a live countdown cannot be pre-rendered the same way and
    * still tick, so it needs the source's clock reading alongside its data
-   * instead. `panels/CacheCountdown.tsx` is the one reader: it captures the
+   * instead. A reader would capture the
    * OFFSET between this device's clock and this value, once, the moment a
    * fresh reading of it arrives, and applies that fixed offset to every
    * later live tick rather than re-deriving it from a device clock that has
@@ -685,7 +711,7 @@ export type Session = {
    * `null` exactly when `lastCacheActivityAt` is `null` -- there being no
    * reading to time. Absent under the same rule as `lastCacheActivityAt`:
    * a source that has not been taught this yet, or a fixture with no
-   * opinion about it, and `CacheCountdown.tsx` falls back to the device's
+   * opinion about it, and a reader falls back to the device's
    * own clock uncorrected rather than throwing.
    */
   readonly cacheSourceNowMs?: number | null;

@@ -22,8 +22,8 @@
  *      the scheme's red, not in `bold`.
  *   3. THE SCHEME STOPS AT THE SCREEN'S EDGE. The document root computes no
  *      `--vam-term-*` at all and still computes the STYLESHEET's `--vam-ansi-*`
- *      pair -- Hans's red is on the pane and nowhere else -- and the status
- *      rule under the screen is still drawn in the app's own ink.
+ *      pair -- Hans's red is on the pane and nowhere else -- and the app's own
+ *      chrome outside the frame (the view tabs) is still drawn in the app's ink.
  *   4. THE SCHEME FOLLOWS THE THEME WITHOUT A RELOAD, by both paths that
  *      exist: the operator's own click on the sidebar's sun (a prefs write,
  *      so `activatePrefs`), and the OS flipping under `system` (no write at
@@ -306,7 +306,7 @@ const readPaint = () =>
     const cursor = pane.querySelector('[data-terminal-cursor]');
     const selection = getComputedStyle(pane.querySelector('pre'), '::selection');
     const root = getComputedStyle(document.documentElement);
-    const status = document.querySelector('[data-terminal-status]');
+    const chrome = document.querySelector('nav[data-view-tabs]');
     const tones = {};
     for (const key of [
       'black',
@@ -351,7 +351,7 @@ const readPaint = () =>
       rootTermBg: root.getPropertyValue('--vam-term-bg'),
       rootTermFg: root.getPropertyValue('--vam-term-fg'),
       rootAnsiRed: root.getPropertyValue('--vam-ansi-red').trim(),
-      statusInk: status === null ? null : getComputedStyle(status).color,
+      chromeInk: chrome === null ? null : getComputedStyle(chrome).color,
       lightClass: document.documentElement.classList.contains('light'),
       rect: document.querySelector('[data-terminal]').getBoundingClientRect().toJSON(),
     };
@@ -410,9 +410,9 @@ function checkScope(label, paint, want) {
     `root --vam-ansi-red is ${paint.rootAnsiRed}`,
   );
   check(
-    `${label}: the status rule under the screen is still drawn in the app's ink, not the scheme's`,
-    paint.statusInk !== null && paint.statusInk !== rgb(want.foreground),
-    paint.statusInk,
+    `${label}: the app chrome outside the frame is still drawn in the app's ink, not the scheme's`,
+    paint.chromeInk !== null && paint.chromeInk !== rgb(want.foreground),
+    paint.chromeInk,
   );
 }
 

@@ -45,7 +45,14 @@ export type FileTreeRow = {
   readonly parent: string | null;
   /** True while this open directory's children are still being read. */
   readonly loading?: boolean;
+  /** De-emphasised, never disabled: a dot name, `node_modules`, a git-ignored entry, or a child of one. */
+  readonly muted?: true;
 };
+
+/** The renderer's own name rule for a muted row; git's `ignored` mark is added by the caller. */
+export function isMutedName(name: string): boolean {
+  return name.startsWith('.') || name === 'node_modules';
+}
 
 type Node = {
   readonly name: string;
@@ -174,7 +181,7 @@ export function lazyTreeRows({
   readonly expanded: ReadonlySet<string>;
 }): readonly FileTreeRow[] {
   const rows: FileTreeRow[] = [];
-  const walk = (dir: string, depth: number, parent: string | null): void => {
+  const walk = (dir: string, depth: number, parent: string | null, inMuted: boolean): void => {
     const entries = [...(dirs.get(dir) ?? [])].sort((a, b) => {
       if (a.kind !== b.kind) return a.kind === 'dir' ? -1 : 1;
       return a.name.localeCompare(b.name);
@@ -183,6 +190,7 @@ export function lazyTreeRows({
       const path = `${dir}/${entry.name}`;
       const isDirectory = entry.kind === 'dir';
       const open = isDirectory && expanded.has(path);
+      const muted = inMuted || entry.ignored === true || isMutedName(entry.name);
       rows.push({
         path,
         name: entry.name,
@@ -190,11 +198,12 @@ export function lazyTreeRows({
         isDirectory,
         parent,
         ...(open && loading.has(path) ? { loading: true } : {}),
+        ...(muted ? { muted: true as const } : {}),
       });
-      if (open) walk(path, depth + 1, path);
+      if (open) walk(path, depth + 1, path, muted);
     }
   };
-  walk(baseOf(root), 0, null);
+  walk(baseOf(root), 0, null, false);
   return rows;
 }
 

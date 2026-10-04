@@ -528,8 +528,8 @@ test.describe('the phone shell at 390px', () => {
    * THE SAME SCREEN IN THE OTHER STATE, because a fixture is a state and a
    * guard only ever measures the one it opens.
    *
-   * Focus view (`prefs.focusView`) folds each turn's working away and draws a
-   * `···` control to bring it back. It is OFF by default, so the test above --
+   * Focus view (`prefs.focusView`) folds each turn's working away and draws an
+   * arrow control to bring it back. It is OFF by default, so the test above --
    * which is otherwise a complete census of the session screen -- has never
    * seen that control at all. Measured here for the first time, five of them
    * came back 24x24: the desktop's floor, on the surface with a 44px one.
@@ -588,7 +588,7 @@ test.describe('the phone shell at 390px', () => {
     await openFirstSession(page);
     // `data-question-bar-inline`, not the retired fixed `data-question-bar`
     // (docs/design/phone-core-loop.md §3.2-3.3): the Response view's
-    // question is inline now, `sticky bottom-0` inside the transcript's own
+    // question is inline now, the last child in flow of the transcript's own
     // scroller, and it is STILL the bottom of the screen whenever the
     // composer stands down.
     expect(

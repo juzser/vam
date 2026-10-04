@@ -111,7 +111,6 @@ import {
   paletteValue,
   setAgentPermissions,
   setAutoTabTitles,
-  setCacheTimer,
   setDefaultAgent,
   setDefaultProvider,
   setEditorHighlight,
@@ -323,6 +322,11 @@ const PROVIDER_HINT = CAN_CHOOSE_PROVIDER
 
 const FOCUS_RING =
   'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink';
+
+/** The text-like fields' shared border and ground (hex inputs, font selects,
+ *  number steppers): the template buttons' border and the selected ground.
+ *  Each control keeps its own radius, size, padding and focus ring. */
+const FIELD = 'border border-line bg-raised text-ink hover:border-line-loud';
 
 /** The two-column form's breakpoint, one spelling shared by the media query and
  *  the Tailwind `md:` classes it agrees with. */
@@ -1299,27 +1303,6 @@ export function SettingsOverlay({
                   </SettingsRow>
 
                   <SettingsRow
-                    name="cache-timer"
-                    label={t('settings.agents.cacheTimer.label')}
-                    hint={t('settings.agents.cacheTimer.hint')}
-                  >
-                    <Switch
-                      name="cache-timer"
-                      label={t('settings.agents.cacheTimer.label')}
-                      checked={prefs.cacheTimer}
-                      onChange={(next) => onChange(setCacheTimer(prefs, next))}
-                      on={t('settings.agents.cacheTimer.on')}
-                      off={t('settings.agents.cacheTimer.off')}
-                    />
-                    <p
-                      data-cache-timer-note
-                      className="mt-3 max-w-[52ch] text-control text-ink-dim"
-                    >
-                      {t('settings.agents.cacheTimer.note')}
-                    </p>
-                  </SettingsRow>
-
-                  <SettingsRow
                     label={t('settings.agents.keepAwake.label')}
                     hint={t('settings.agents.keepAwake.hint')}
                   >
@@ -1510,9 +1493,9 @@ export function SettingsOverlay({
                       off={t('settings.behaviour.focusView.off')}
                     />
                     <p data-focus-view-note className="mt-3 max-w-[52ch] text-control text-ink-dim">
-                      A folded turn keeps <code className="text-ink">···</code> where its working
-                      was — press it and the turn comes back. Nothing is folded from a turn whose
-                      tools failed, or from the newest turn while the session is working or waiting.
+                      A folded turn keeps an arrow where its working was — press it and the turn
+                      comes back. Nothing is folded from a turn whose tools failed, or from the
+                      newest turn while the session is working or waiting.
                     </p>
                   </SettingsRow>
 
@@ -2117,6 +2100,36 @@ function BindingLine({
 }) {
   const slots = Array.from({ length: MAX_BINDINGS }, (_, slot) => slot);
   const armed = capturing?.id === row.id && capturing.scope === scope;
+  if (row.reserved === true) {
+    // A fixed key: the grammar answers it ahead of every table, so it has no
+    // slot to rebind, no capture box and no reset. Same grid as an ordinary
+    // row so the label and key columns stay aligned.
+    const key = row.keys[0] ?? '';
+    return (
+      <li className="grid grid-cols-[1fr_minmax(112px,max-content)_minmax(112px,max-content)] items-center gap-x-[10px] py-[3px]">
+        <span className="flex min-w-0 items-center gap-2">
+          <span
+            data-binding-label={row.id}
+            title={row.label}
+            className="vam-sentence truncate text-body text-ink"
+          >
+            {row.label}
+          </span>
+        </span>
+        <span
+          role="img"
+          title="fixed — cannot be rebound"
+          aria-label={`${chordSymbols(key)}, ${row.label} — fixed, cannot be rebound`}
+          className={`${SLOT_BOX} cursor-default border-ink-faint bg-transparent text-ink-dim`}
+        >
+          <kbd data-settings-keys className="border-none bg-transparent">
+            <ChordGlyphs chord={key} />
+          </kbd>
+        </span>
+        <span aria-hidden="true" />
+      </li>
+    );
+  }
   return (
     // Three columns, in the order the row is read: what the action is, then its
     // first key, then its second. The label takes the one flexible track and
@@ -2565,7 +2578,7 @@ function HexField({
         if (hex !== null) onCommit(hex);
       }}
       onBlur={() => setDraft(null)}
-      className={`vam-tap h-[24px] w-[72px] rounded border border-ink-faint bg-well px-1.5 text-center font-mono text-control text-ink outline-none ${FOCUS_RING}`}
+      className={`vam-tap h-[24px] w-[72px] rounded px-1.5 text-center font-mono text-control outline-none ${FIELD} ${FOCUS_RING}`}
     />
   );
 }
@@ -2611,7 +2624,7 @@ function FontFamilySelect({
       aria-label={name}
       value={value}
       onChange={(event) => onCommit(event.target.value)}
-      className={`vam-tap h-[28px] w-full max-w-[280px] rounded border border-ink-faint bg-well px-2 text-body text-ink outline-none ${FOCUS_RING}`}
+      className={`vam-tap h-[28px] w-full max-w-[280px] rounded px-2 text-body outline-none ${FIELD} ${FOCUS_RING}`}
     >
       <option value="">{t('settings.fontFamily.systemDefault')}</option>
       {withMigrated.map((family) => (
@@ -2694,7 +2707,9 @@ function Stepper({
   };
   return (
     <div className="flex items-center">
-      <div className="inline-flex h-[30px] items-center rounded-[8px] border border-ink-faint bg-well p-[3px] has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-ink has-[:focus-visible]:outline-offset-2">
+      <div
+        className={`inline-flex h-[30px] items-center rounded-[8px] p-[3px] ${FIELD} has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-ink has-[:focus-visible]:outline-offset-2`}
+      >
         {/* The ring is on the pill, not the field: at `outline-offset-2` around
             a field inset by 3px it would land on the pill's own border and read
             as a thicker border rather than as a cursor. */}

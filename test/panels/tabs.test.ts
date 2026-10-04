@@ -125,9 +125,11 @@ describe('PRs — withdrawn from the phone, because a phone is for prompting and
     expect(visibleTabs(false, false, true)).toEqual(['Response', 'Agents']);
   });
 
-  it('withdraws PRs and ONLY PRs — the other two flags keep their own answers', () => {
-    expect(visibleTabs(true, true, true)).toEqual(['Response', 'Terminal', 'Agents', 'Files']);
-    expect(visibleTabs(true, false, true)).toEqual(['Response', 'Terminal', 'Agents']);
+  it('withdraws PRs and Terminal on a phone — Files keeps its own answer', () => {
+    // Edited case: Terminal was pinned on a phone; it is now withdrawn there
+    // whatever `terminal` says (terminal-withdrawn.test.tsx).
+    expect(visibleTabs(true, true, true)).toEqual(['Response', 'Agents', 'Files']);
+    expect(visibleTabs(true, false, true)).toEqual(['Response', 'Agents']);
     expect(visibleTabs(false, true, true)).toEqual(['Response', 'Agents', 'Files']);
   });
 
@@ -144,14 +146,14 @@ describe('PRs — withdrawn from the phone, because a phone is for prompting and
    * withdrawal (A5.4/A15.6). A withdrawn name must not make the names after it
    * slide up a digit. A phone has no chord layer at all — `Canvas` returns
    * before installing one — but `tabForDigit` is SHARED, so the property is
-   * asserted against a phone list too: digit 2 REFUSES, and 3/4/5 still mean
-   * Terminal/Agents/Files rather than sliding one place left into 2/3/4.
+   * asserted against a phone list too: digits 2 and 3 REFUSE, and 4/5 still mean
+   * Agents/Files rather than sliding left into 2/3.
    */
-  it('does not renumber a single digit: 2 refuses, and 3/4/5 keep their own names', () => {
+  it('does not renumber a single digit: 2 and 3 refuse, and 4/5 keep their own names', () => {
     const drawn = visibleTabs(true, true, true);
     expect(tabForDigit(drawn, 1)).toBe('Response');
     expect(tabForDigit(drawn, 2)).toBeUndefined();
-    expect(tabForDigit(drawn, 3)).toBe('Terminal');
+    expect(tabForDigit(drawn, 3)).toBeUndefined();
     expect(tabForDigit(drawn, 4)).toBe('Agents');
     expect(tabForDigit(drawn, 5)).toBe('Files');
     expect(tabForDigit(drawn, 6)).toBeUndefined();

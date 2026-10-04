@@ -188,6 +188,7 @@ export type CollectedQuestions = {
 export function collectQuestions(located: readonly Located[]): CollectedQuestions {
   const asked: { effectiveId: string; question: AgentQuestion }[] = [];
   const answers = new Map<string, string | null>();
+  const errored = new Set<string>();
   const occurrences = new Map<string, number>();
   const pending = new Map<string, string[]>();
   const offsets = new Map<string, number>();
@@ -216,12 +217,15 @@ export function collectQuestions(located: readonly Located[]): CollectedQuestion
         // Present-but-unreadable still CLOSES the question: the answer was
         // given, and drawing it as still waiting is the worse error.
         answers.set(effectiveId, resultText(part));
+        if (part['is_error'] === true) errored.add(effectiveId);
       }
     }
   }
 
-  const questions = asked.map(({ effectiveId, question }) =>
-    answers.has(effectiveId) ? { ...question, answer: answers.get(effectiveId) ?? '' } : question,
-  );
+  const questions = asked.map(({ effectiveId, question }) => {
+    if (!answers.has(effectiveId)) return question;
+    const closed = { ...question, answer: answers.get(effectiveId) ?? '' };
+    return errored.has(effectiveId) ? { ...closed, cancelled: true as const } : closed;
+  });
   return { questions, offsets };
 }

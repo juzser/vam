@@ -303,7 +303,9 @@ describe('the poll keeps arriving while the operator reads back', () => {
     // The tail is a BYTE window: a new turn arrives and the oldest falls out of
     // it. The pages the operator asked for are not the tail's to drop.
     view.rerender(sessionWith([turn('t10'), turn('t9')]));
-    expect(turnIds()).toEqual(['t6', 't7', 't9', 't10']);
+    // Operator event #71: t8 rendered here, so it stays when the window slides
+    // past it. OLD: expect(turnIds()).toEqual(['t6', 't7', 't9', 't10']).
+    expect(turnIds()).toEqual(['t6', 't7', 't8', 't9', 't10']);
     expect(new Set(turnIds()).size).toBe(turnIds().length);
   });
 
@@ -320,9 +322,14 @@ describe('the poll keeps arriving while the operator reads back', () => {
       more()?.click();
     });
     await waitFor(() => expect(turnIds()).toEqual(['t7', 't8', 't9']));
-    view.rerender(sessionWith([turn('vam-pending-1'), turn('t9'), turn('t8')]));
+    view.rerender(
+      sessionWith([{ ...turn('vam-pending-1'), unconfirmed: true }, turn('t9'), turn('t8')]),
+    );
     expect(turnIds()).toEqual(['t7', 't8', 't9', 'vam-pending-1']);
     view.rerender(sessionWith([turn('t9'), turn('t8')]));
+    // Operator event #71 keeps what the source reported; the phantom is marked
+    // `unconfirmed` (vam painted it), so it is still retracted. This line is
+    // the same text as before the retention change.
     expect(turnIds()).toEqual(['t7', 't8', 't9']);
   });
 

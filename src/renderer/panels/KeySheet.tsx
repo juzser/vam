@@ -20,22 +20,31 @@
  * overlay that drops focus on the body leaves a keyboard-first app with no
  * cursor at all.
  *
- * ── THE SHAPE, WHICH THE OPERATOR ASKED FOR IN ONE SENTENCE ───────────────
+ * ── THE SHAPE: TWO COLUMNS OF WHOLE SECTIONS, LABEL LEFT, KEY RIGHT ───────
  *
- * Translated: "the shortcut table when you press `?` needs a search box,
- * clearer section separation, and a one-column layout with the label on one
- * side and the shortcut on the other."
+ * The operator once asked for "a one-column layout with the label on one side
+ * and the shortcut on the other", and that is what this sheet was: one column
+ * reads down the CAPTIONS, the question an operator actually has ("how do I
+ * …"). It grew to a hundred rows, though, and a single 620px column made the
+ * sheet a scroll of two screens with most of the width empty. So the choice is
+ * reversed, and only the SECTIONS are laid side by side — never the rows of
+ * one: a row is still a caption on the left and its key on the right, and it
+ * keeps the whole width of its column, which the half-page rows need because
+ * they disclose a second keystroke in prose.
  *
- * ONE COLUMN, LABEL LEFT, KEY RIGHT. It was two columns of `chip label` pairs,
- * which put a key in the middle of the sheet and made a caption the thing that
- * had to fit around it. One column reads down the CAPTIONS, which is the
- * question an operator actually has ("how do I …"), and it gives a caption the
- * whole width — which the half-page rows need, because they disclose a second
- * keystroke in prose and a narrow column is what would tempt a truncation.
+ * FROM `lg` UP (a 1024px viewport), the sections sit in two grid columns in the
+ * registry's own order, cut where the two columns' row counts are closest —
+ * chosen here rather than by CSS columns because the first section of column 2
+ * must lose its top rule like the first of column 1, and CSS cannot style
+ * "first in its column". Whole sections, so a heading never lands alone under
+ * a column. Below `lg` the two wrappers are `contents` and the single column
+ * applies, which is also what zoom reflow needs.
+ * No list of sections lives here: the grouping is `keysheet.ts`'s, so the
+ * sheet and the bindings cannot drift.
  *
  * SECTIONS THAT READ AS SECTIONS: a rule above each heading and real space
- * around it, rather than two columns of headings at whatever height the
- * previous group happened to end.
+ * around it, rather than headings at whatever height the previous group
+ * happened to end.
  *
  * ── THE SEARCH BOX HOLDS THE KEYBOARD, AND WHAT FOLLOWS FROM THAT ─────────
  *
@@ -69,12 +78,35 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { buildFilesSheet, buildKeySheet, filterSheet } from '../keyboard/keysheet.js';
+import {
+  buildFilesSheet,
+  buildKeySheet,
+  filterSheet,
+  type SheetGroup,
+} from '../keyboard/keysheet.js';
 import { ChordGlyphs } from '../keyboard/ShortcutTip.js';
 
 export type KeySheetProps = {
   readonly onClose: () => void;
 };
+
+/** Where column 2 starts: the cut that leaves the two columns' weights closest. */
+function splitIndex(groups: readonly SheetGroup[]): number {
+  const weight = (g: SheetGroup) => g.rows.length + 2;
+  const total = groups.reduce((sum, g) => sum + weight(g), 0);
+  let best = groups.length;
+  let bestGap = Number.POSITIVE_INFINITY;
+  let left = 0;
+  for (let i = 1; i < groups.length; i++) {
+    left += weight(groups[i - 1] as SheetGroup);
+    const gap = Math.abs(total - 2 * left);
+    if (gap < bestGap) {
+      best = i;
+      bestGap = gap;
+    }
+  }
+  return best;
+}
 
 export function KeySheet({ onClose }: KeySheetProps) {
   const box = useRef<HTMLInputElement | null>(null);
@@ -95,6 +127,7 @@ export function KeySheet({ onClose }: KeySheetProps) {
   // Built once rather than per keystroke — the filter is what the query moves.
   const all = useMemo(() => [...buildKeySheet(), ...buildFilesSheet()], []);
   const groups = useMemo(() => filterSheet(all, query), [all, query]);
+  const cut = splitIndex(groups);
   const total = useMemo(() => all.reduce((count, group) => count + group.rows.length, 0), [all]);
 
   return (
@@ -126,9 +159,9 @@ export function KeySheet({ onClose }: KeySheetProps) {
           screen while a hundred rows scroll under it. It was one scrolling
           block, which would have carried the search box away on the first
           wheel. */}
-      <div className="relative flex max-h-[80vh] w-[min(620px,92vw)] flex-col overflow-hidden rounded-md border border-line bg-panel">
+      <div className="relative flex max-h-[85vh] w-[min(1040px,94vw)] flex-col overflow-hidden rounded-md border border-line bg-panel">
         <div className="flex flex-none items-baseline gap-2 border-line border-b px-4 py-3">
-          <h2 className="font-semibold text-heading text-ink">keyboard</h2>
+          <h2 className="font-semibold text-heading text-ink">Keyboard</h2>
           <span className="text-ink-faint text-meta">
             every binding there is — generated from the key tables
           </span>
@@ -153,11 +186,14 @@ export function KeySheet({ onClose }: KeySheetProps) {
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             aria-label="search the shortcuts"
-            placeholder="search by what it does, or by the key…"
+            placeholder="Search by what it does, or by the key…"
             className="w-full bg-transparent text-body text-ink outline-none placeholder:text-ink-faint"
           />
         </div>
-        <div data-key-sheet-groups className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        <div
+          data-key-sheet-groups
+          className="min-h-0 flex-1 overflow-y-auto px-4 py-3 lg:grid lg:grid-cols-2 lg:items-start lg:gap-x-8"
+        >
           {groups.length === 0 ? (
             // NOT A BLANK SHEET. A list that empties under a keystroke reads
             // as a broken surface; this names what was searched for, says how
@@ -166,45 +202,56 @@ export function KeySheet({ onClose }: KeySheetProps) {
             <p
               data-key-sheet-empty
               role="status"
-              className="vam-sentence py-6 text-center text-control text-ink-dim"
+              className="vam-sentence py-6 text-center text-control text-ink-dim lg:col-span-2"
             >
               no key matches “{query}” — clear the box to see all {total}
             </p>
           ) : (
-            groups.map((group) => (
-              // A RULE AND REAL SPACE ABOVE EACH HEADING, and none above the
-              // first: a boundary between two things needs one line, not one
-              // before the first thing on the sheet.
-              <section
-                key={group.group}
-                className="mt-4 border-line border-t pt-3 first:mt-0 first:border-0 first:pt-0"
-              >
-                <h3
-                  data-key-sheet-group={group.group}
-                  className="mb-1.5 font-semibold text-ink-dim text-meta uppercase tracking-wide"
-                >
-                  {group.title}
-                </h3>
-                <ul>
-                  {group.rows.map((row) => (
-                    // Keyed by everything that distinguishes a row, not by its
-                    // keystroke: one key already yields a row PER MODE, and a
-                    // key two actions claim yields one row each. Keyed by
-                    // `row.keys` alone they collided, and React reconciled
-                    // them by position.
-                    <li
-                      key={`${row.keys}·${row.mode ?? ''}·${row.label}`}
-                      className="flex items-baseline gap-3 py-[3px] text-control"
+            [groups.slice(0, cut), groups.slice(cut)].map((column, c) => (
+              <div key={c === 0 ? 'left' : 'right'} className="contents lg:block">
+                {column.map((group, i) => {
+                  const top = c === 0 && i === 0;
+                  const colTop = c === 1 && i === 0;
+                  return (
+                    // A RULE AND REAL SPACE ABOVE EACH HEADING, and none above the
+                    // first: a boundary between two things needs one line, not one
+                    // before the first thing on the sheet.
+                    <section
+                      key={group.group}
+                      className={`break-inside-avoid ${
+                        top
+                          ? ''
+                          : colTop
+                            ? 'mt-4 border-line border-t pt-3 lg:mt-0 lg:border-0 lg:pt-0'
+                            : 'mt-4 border-line border-t pt-3'
+                      }`}
                     >
-                      {/* THE ACTION FIRST — in document order, which is both
+                      <h3
+                        data-key-sheet-group={group.group}
+                        className="mb-1.5 font-semibold text-ink-dim text-meta uppercase tracking-wide"
+                      >
+                        {group.title}
+                      </h3>
+                      <ul>
+                        {group.rows.map((row) => (
+                          // Keyed by everything that distinguishes a row, not by its
+                          // keystroke: one key already yields a row PER MODE, and a
+                          // key two actions claim yields one row each. Keyed by
+                          // `row.keys` alone they collided, and React reconciled
+                          // them by position.
+                          <li
+                            key={`${row.keys}·${row.mode ?? ''}·${row.label}`}
+                            className="flex items-baseline gap-3 py-[3px] text-control"
+                          >
+                            {/* THE ACTION FIRST — in document order, which is both
                           the reading order a screen reader takes and the side
                           the operator asked for. `min-w-0` lets a long caption
                           wrap inside its own cell instead of pushing the key
                           off the row. */}
-                      <span data-key-sheet-label className="min-w-0 flex-1 text-ink-dim">
-                        {row.label}
-                      </span>
-                      {/* IN WORDS, not only in the strikethrough beside it:
+                            <span data-key-sheet-label className="min-w-0 flex-1 text-ink-dim">
+                              {row.label}
+                            </span>
+                            {/* IN WORDS, not only in the strikethrough beside it:
                           what an operator cannot work out for themselves is
                           WHO took the key, and a struck-through chip does not
                           say it. The row stays rather than being dropped —
@@ -212,32 +259,35 @@ export function KeySheet({ onClose }: KeySheetProps) {
                           sheet altogether, which is the hiding this is the fix
                           for. It rides with the label, so the key column is
                           the one thing every row has. */}
-                      {row.dead === null ? null : (
-                        <span data-key-sheet-dead className="shrink-0 text-waiting">
-                          dead — {row.dead} has this key
-                        </span>
-                      )}
-                      <kbd
-                        data-key-sheet-keys
-                        className={`shrink-0 rounded border border-line px-1 text-center font-mono ${
-                          row.dead === null
-                            ? 'bg-raised text-ink'
-                            : 'bg-transparent text-ink-dim line-through'
-                        }`}
-                      >
-                        {/* THE SYMBOLS ARE PAINTED HERE AND NOWHERE EARLIER.
+                            {row.dead === null ? null : (
+                              <span data-key-sheet-dead className="shrink-0 text-waiting">
+                                dead — {row.dead} has this key
+                              </span>
+                            )}
+                            <kbd
+                              data-key-sheet-keys
+                              className={`shrink-0 rounded border border-line px-1 text-center font-mono ${
+                                row.dead === null
+                                  ? 'bg-raised text-ink'
+                                  : 'bg-transparent text-ink-dim line-through'
+                              }`}
+                            >
+                              {/* THE SYMBOLS ARE PAINTED HERE AND NOWHERE EARLIER.
                             `row.keys` is the grammar's own spelling — the
                             string `buildKeySheet` judged `isSelectOnlyChord`
                             against and keyed `row.dead` by — and
                             `ChordGlyphs` is what a person reads: ⌘ on a Mac,
                             `Ctrl` off one, its modifier glyphs a size bigger
                             than the key beside them. */}
-                        <ChordGlyphs chord={row.keys} />
-                      </kbd>
-                    </li>
-                  ))}
-                </ul>
-              </section>
+                              <ChordGlyphs chord={row.keys} />
+                            </kbd>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  );
+                })}
+              </div>
             ))
           )}
         </div>

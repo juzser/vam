@@ -29,7 +29,7 @@
  * smaller the way `IconPicker`'s own rows do.
  */
 
-import { Monitor } from 'lucide-react';
+import { Monitor, Plus } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import { IconMark, parseIcon } from '../panels/icon-value.js';
 
@@ -104,7 +104,7 @@ export function SessionCreatePicker({ choices, onPick, onClose }: SessionCreateP
         className="relative z-10 flex max-h-[380px] w-[340px] flex-col overflow-hidden rounded-[var(--radius-lg)] border border-line bg-panel shadow-[var(--shadow-node)]"
       >
         <div className="flex items-center gap-2 border-line border-b px-3 py-2">
-          <span className="text-meta text-ink-faint">new session in</span>
+          <span className="text-meta text-ink-faint">New session in</span>
         </div>
         {choices.length === 0 ? (
           // Unreachable from the FAB today -- `PhoneShell.tsx` only draws the
@@ -115,12 +115,12 @@ export function SessionCreatePicker({ choices, onPick, onClose }: SessionCreateP
         ) : (
           <ul className="flex flex-col gap-0.5 overflow-y-auto p-1">
             {choices.map((choice) => (
-              <li key={choice.id}>
+              <li key={choice.id} className="flex items-center gap-0.5">
                 <button
                   type="button"
                   data-project-choice-create={choice.id}
                   onClick={() => onPick(choice.id)}
-                  className="flex min-h-[44px] w-full cursor-pointer items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim active:bg-raised"
+                  className="flex min-h-[44px] min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim active:bg-raised"
                 >
                   <span className="flex h-[16px] w-[16px] flex-none items-center justify-center text-ink-faint">
                     <IconMark
@@ -138,6 +138,20 @@ export function SessionCreatePicker({ choices, onPick, onClose }: SessionCreateP
                       pane only
                     </span>
                   )}
+                </button>
+                <button
+                  type="button"
+                  data-project-choice-plus={choice.id}
+                  aria-label={`New session in ${choice.name}`}
+                  onClick={() => onPick(choice.id)}
+                  className="vam-tap flex h-[44px] w-[44px] flex-none cursor-pointer items-center justify-center rounded-[6px] text-ink-dim active:bg-raised"
+                >
+                  <span
+                    data-tap-skin
+                    className="flex items-center justify-center border border-line"
+                  >
+                    <Plus size={16} strokeWidth={2} aria-hidden="true" />
+                  </span>
                 </button>
               </li>
             ))}

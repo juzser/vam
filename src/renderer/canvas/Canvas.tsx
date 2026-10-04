@@ -90,15 +90,12 @@ import {
   isAgentWorktreeSession,
   isEnded,
   isForeign,
-  isHiddenByAgentWorktreeFilter,
-  isHiddenByEndedFilter,
   isHiddenByForeignFilter,
-  isHiddenByIdleFilter,
-  isHiddenByOriginFilters,
   isIdle,
   isUnprompted,
 } from '../domain/session-filter.js';
 import { isOutsideVamScope } from '../domain/session-ownership.js';
+import { statusTally, visibleSessions } from '../domain/session-view.js';
 import { ErrorLogPanel } from '../errors/ErrorLogPanel.js';
 import { loggedEvents, noteFailure, recordRefusal, subscribeEvents } from '../errors/log.js';
 import {
@@ -116,7 +113,9 @@ import {
   answeringKeys,
   cursorModeAt,
   focusInsertStop,
+  insertStopHeld,
   releaseInsert,
+  restoreInsertStop,
 } from '../keyboard/focus-scope.js';
 import { type CursorMode, MODE_TITLES } from '../keyboard/keysheet.js';
 import { ChordGlyphs, primaryChord, ShortcutTip, TipProvider } from '../keyboard/ShortcutTip.js';
@@ -1020,11 +1019,12 @@ function TabStripRow({
  * -- something is happening -- and `aria-live` is what says it to a reader who
  * cannot see it start.
  *
- * IT DOES NOT SAY HOW LONG. vam has nothing to wait on and no measured
- * distribution to promise against: `tmux new-session -d` returns immediately
- * and the agent registers on its own schedule. A progress bar would be an
- * invented number, and "a few seconds" would be a guess the operator could
- * catch vam getting wrong.
+ * IT DOES NOT SAY HOW LONG. vam has no measured distribution to promise
+ * against: `tmux new-session -d` returns immediately and the agent registers
+ * on its own schedule. A progress bar would be an invented number, and "a few
+ * seconds" would be a guess the operator could catch vam getting wrong. The
+ * wait is still bounded (`START_PANE_WAIT_TIMEOUT_MS`, `beginStarting`), but
+ * silently: the indicator just goes away.
  */
 function StartingSession({ projectName }: { readonly projectName: string }) {
   return (
@@ -2166,8 +2166,9 @@ function CanvasInner({
    * THE WAIT HAS TWO PARTS AND VAM ONLY EVER HINTED AT THE SECOND.
    * `tmux new-session -d` returns as soon as the session EXISTS, and the agent
    * inside registers where vam can see it later, on its own schedule. So this
-   * outlives the write: it is cleared by a row ARRIVING, not by a promise
-   * resolving.
+   * outlives the write: it is cleared by an OWN row ARRIVING (a foreign row
+   * never ends it), not by a promise resolving; failing that, `beginStarting`'s
+   * timer ends it at `START_PANE_WAIT_TIMEOUT_MS`.
    *
    * STATE, NOT A REF, because it is drawn. And deliberately NOT a `Session` in
    * the model: a placeholder inside `allEntries` would become a tab of a pane,
@@ -2194,6 +2195,38 @@ function CanvasInner({
      *  against that moment rather than against whatever is there on arrival. */
     readonly known: ReadonlySet<string>;
   } | null>(null);
+  /**
+   * THE BOUND ON THAT WAIT, one timer per create, started where the create
+   * calls this instead of `setStarting` -- before the write, because the bound
+   * is on the visible wait and must also end a write that never settles (the
+   * catch paths run only on a rejection). At `START_PANE_WAIT_TIMEOUT_MS` it
+   * clears `starting` silently (no new copy) and disarms `pendingNewTab`, each
+   * only while it still holds THIS create's record: `pendingAction` refuses a
+   * second create only while the first write is in flight, so create #2 can
+   * replace both records inside create #1's window. `pendingNewTab` is matched
+   * by its `known` set, which is unique per create. Returns whether the
+   * deadline has passed, so a slow write never arms the pane afterwards. An
+   * own row arriving after the bound opens on `viewSeed`.
+   */
+  const startingTimers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  const beginStarting = useCallback((record: NonNullable<typeof starting>) => {
+    let expired = false;
+    setStarting(record);
+    const handle = setTimeout(() => {
+      expired = true;
+      startingTimers.current.delete(handle);
+      setStarting((current) => (current === record ? null : current));
+      if (pendingNewTab.current?.known === record.known) pendingNewTab.current = null;
+    }, START_PANE_WAIT_TIMEOUT_MS);
+    startingTimers.current.add(handle);
+    return () => expired;
+  }, []);
+  useEffect(() => {
+    const timers = startingTimers.current;
+    return () => {
+      for (const handle of timers) clearTimeout(handle);
+    };
+  }, []);
   /**
    * Two derived values, mirrored into refs during render, so
    * `setFocusedSessionId` below can read them and still be the
@@ -2604,12 +2637,31 @@ function CanvasInner({
     if (phone) return;
     const onFocusIn = (event: FocusEvent) => setMode(cursorModeAt(event.target));
     const onFocusOut = (event: FocusEvent) => setMode(cursorModeAt(event.relatedTarget));
+    // AN APP SWITCH TAKES THE KEYBOARD AWAY AND DOES NOT GIVE IT BACK. On
+    // `blur` remember the insert stop that held it; on `focus`, if the window
+    // came back with the keyboard nowhere and that stop is still in the
+    // document, put it back there. A select-mode blur remembers nothing, so
+    // select stays select.
+    let awayFrom: HTMLElement | null = null;
+    const onWindowBlur = () => {
+      awayFrom = insertStopHeld(document.activeElement);
+    };
+    const onWindowFocus = () => {
+      const stop = awayFrom;
+      awayFrom = null;
+      if (stop !== null) restoreInsertStop(stop);
+      setMode(cursorModeAt(document.activeElement));
+    };
     document.addEventListener('focusin', onFocusIn);
     document.addEventListener('focusout', onFocusOut);
+    window.addEventListener('blur', onWindowBlur);
+    window.addEventListener('focus', onWindowFocus);
     setMode(cursorModeAt(document.activeElement));
     return () => {
       document.removeEventListener('focusin', onFocusIn);
       document.removeEventListener('focusout', onFocusOut);
+      window.removeEventListener('blur', onWindowBlur);
+      window.removeEventListener('focus', onWindowFocus);
     };
   }, [phone]);
   /** Same per-session shape as the composer state above, and the same reason:
@@ -2824,8 +2876,8 @@ function CanvasInner({
    * PAST THIS, NOTHING IS WORTH WAITING FOR SILENTLY -- the operator's own
    * bound (`START_PANE_WAIT_TIMEOUT_MS` above), and `StartingSession`'s
    * neighbour rather than its twin: that indicator (new session, a pane that
-   * does not exist yet) deliberately names no duration because vam has
-   * nothing to measure against; THIS wait is for a pane the operator can
+   * does not exist yet) shares the bound but ends silently and names no
+   * duration, because vam has nothing to measure against; THIS wait is for a pane the operator can
    * already see and can already reach by hand (the Terminal view), so a
    * bound that hands them that door is honest where a bare "still waiting"
    * forever would not be.
@@ -3664,107 +3716,38 @@ function CanvasInner({
     [prefs, hiddenProjects, vamListingGap, source.kind],
   );
 
-  const entries = useMemo(() => {
-    // THE FILTERED SET, in an IIFE so both of its own early-return branches
-    // (the listing-gap short-circuit below, and the ordinary tail) stay
-    // exactly as they were -- `applyViewOrder` is the one step every path
-    // through this memo now shares, applied ONCE, after the set is decided
-    // rather than threaded through each branch separately. `entries` is what
-    // `j`/`k`/`gt`/`gT`/`f` all step through (`sessionIds`, `stepProject`
-    // below), so the sidebar's Group-by/Sort-by choice has to land HERE, not
-    // as a second, SessionList-local reorder the keyboard would disagree
-    // with -- the same discipline PR 475 already holds for the foreign/
-    // dismissed filter one layer up. `allEntries` (tab membership) is never
+  /**
+   * THE VIEW CONTEXT `visibleSessions` reads. One object so the list and the
+   * pill counts below are fed identical inputs; `statusFilter` is the only
+   * field the tally overrides, once per pill.
+   */
+  const viewContext = useMemo(
+    () => ({
+      ownershipScope,
+      query,
+      matches,
+      prefs,
+      vamListingGap,
+      // The demo is exempt from `hideForeign` only: its fixture sets
+      // `vamControlled: false` on purpose, to show a row vam did not start.
+      foreignFilterApplies: source.kind !== 'demo',
+    }),
+    [ownershipScope, query, matches, prefs, vamListingGap, source.kind],
+  );
+
+  const entries = useMemo(
+    // `entries` is what `j`/`k`/`gt`/`gT`/`f` and the command palette all step
+    // through, so the filtered set (decided in `domain/session-view.ts`) and the
+    // Group-by/Sort-by order (`applyViewOrder`, applied once, after the set is
+    // decided) both have to land HERE. `allEntries` (tab membership) is never
     // touched: a display preference must not change which sessions are tabs.
-    const filtered = ((): SessionEntry[] => {
-      // FIRST, and not only in the sidebar. A removed project whose cards stayed
-      // drawn would leave `j` stepping onto a session with no row -- the exact
-      // defect the note below this memo describes, reintroduced by a different
-      // route. The three views agree on the SET.
-      const visible = allEntries.filter((e) => !isOutsideVamScope(e, ownershipScope));
-      const byText =
-        query.trim() === '' ? visible : visible.filter((e) => matches.includes(e.session.id));
-      const byStatus =
-        statusFilter === 'all' ? byText : byText.filter((e) => e.session.status === statusFilter);
-      // Both origin rules only ever exclude something vam POSITIVELY classified
-      // — see `session-filter.ts`. A session whose timeline has not arrived is
-      // `unknown` and survives both, because hiding what you did not check is
-      // how a filter loses work rather than narrowing it.
-      const byOrigin = byStatus.filter((e) => !isHiddenByOriginFilters(e.session, prefs.filters));
-      // THIS IS ALSO WHAT THE COMMAND PALETTE SEES. `entries` is what is handed
-      // to `CommandPalette` below, so the palette's groups are drawn from the
-      // list this line has already narrowed — which is why ended sessions are a
-      // filter here and not the third palette group
-      // `docs/design/reopening-a-session.md` proposed. Such a group would be fed
-      // by this array and so would be empty in exactly the state it exists for.
-      //
-      // DISMISSED IS ALWAYS APPLIED, EVEN WHILE `vamListingGap` STANDS THE
-      // OTHER TWO DOWN. Dismissal is not a guess about ownership the way
-      // `isEnded`/`isForeign` are -- it is the operator's own explicit "get
-      // this off my screen", `docs/design/vam-owns-the-session.md` §5's "Dismiss
-      // is the safe fallback" -- so an unreadable tmux listing has no more
-      // reason to stand it down than it does `hiddenProjects` above.
-      // `isSessionDismissed` reads `session.activity` FRESH on every entry,
-      // which is what lifts a dismissal the moment a resumed session shows
-      // activity newer than what vam saw when it was hidden -- never a
-      // snapshot taken once and reused.
-      const byDismissed = byOrigin.filter(
-        (e) =>
-          !isSessionDismissed(
-            prefs,
-            e.session.source ?? e.project.source ?? 'unknown',
-            e.session.id,
-            e.session.activity,
-          ),
-      );
-      // TMUX ITSELF COULD NOT BE READ THIS LOAD: neither rule below can be
-      // trusted, because both proxy a fact only vam's own tmux spine can
-      // answer -- whether a row is currently vam's. `docs/design/vam-owns-the-
-      // session.md`'s own trap: "an unreadable tmux listing must not empty the
-      // sidebar. The fallback is to show everything, with the reason on
-      // screen." Standing BOTH rules down here, rather than one, is what makes
-      // that literally true rather than true for one axis and silently false
-      // for the other.
-      if (vamListingGap !== null) return byDismissed;
-      // AND THE SAME DISCIPLINE FOR ENDINGS AND FOR OWNERSHIP. `isEnded` is a
-      // fact a source has positively reported: the Codex source reads it off a
-      // writer lock it probed, and says `idle` rather than `done` wherever it
-      // could not look. `isForeign` is the same discipline for `vamControlled`
-      // — see `session-filter.ts` for why the two are separate rules rather
-      // than one boolean standing for both claims.
-      //
-      // THE DEMO IS EXEMPT FROM `hideForeign`, AND ONLY FROM THIS ONE RULE.
-      // `?demo=1`'s own fixture was built around the two OLDER origin rules by
-      // never tripping them at all -- no demo session carries `startedBy:
-      // 'agent'` or `ended: true`, so `hideAgentStarted` and `hideEnded` narrow
-      // nothing there and needed no carve-out. `vamControlled: false` cannot
-      // get the same treatment: `fixtures/demo.ts`'s `vam-build-1` row sets it
-      // DELIBERATELY, to demonstrate the UI a session vam did not start draws
-      // (no Submit, no terminal) -- the very thing `docs/design/reopening-a-
-      // session.md` and a dozen guards under `e2e/` read that row for. The same
-      // field now also drives `isForeign`, and there is no way to keep the one
-      // meaning without tripping the other. `demo`'s whole purpose is the
-      // public showcase "vam is public, and every real session on this machine
-      // is somebody's work" (`sidebar-seam-shots.mjs`'s own words) -- showing
-      // the FULL breadth of what a row can be, not one operator's own narrowed
-      // default -- so it is the demo that gives way, the same way
-      // `sendPromptFor` already branches on `source.kind === 'demo'` above.
-      const foreignFilterApplies = source.kind !== 'demo';
-      return byDismissed.filter(
-        (e) =>
-          !isHiddenByEndedFilter(e.session, prefs.filters, statusFilter) &&
-          !isHiddenByIdleFilter(e.session, prefs.filters, statusFilter) &&
-          !isHiddenByAgentWorktreeFilter(e.session, prefs.filters) &&
-          (!foreignFilterApplies || !isHiddenByForeignFilter(e.session, prefs.filters)),
-      );
-    })();
-    return applyViewOrder(filtered, prefs.viewOptions);
-    // `prefs` ITSELF, not only `prefs.filters`/`prefs.dismissedSessions`
-    // separately: `isSessionDismissed` reads `prefs.dismissedSessions`, and a
-    // dependency array naming a nested field the memo does not otherwise use
-    // is a staleness bug waiting for the next field this filter chain grows.
-    // The same argument covers `prefs.viewOptions` now too.
-  }, [allEntries, ownershipScope, matches, query, statusFilter, prefs, vamListingGap, source.kind]);
+    () =>
+      applyViewOrder(
+        visibleSessions(allEntries, { ...viewContext, statusFilter }),
+        prefs.viewOptions,
+      ),
+    [allEntries, viewContext, statusFilter, prefs.viewOptions],
+  );
 
   /**
    * EVERY SESSION OF THE ACTIVE PROJECT VAM HAS NOT POSITIVELY EXCLUDED --
@@ -3893,10 +3876,11 @@ function CanvasInner({
    * there are sessions in vam, don't show the getting-started screen
    * prematurely."
    *
-   * Read by the getting-started screen's own trigger below, the tab strip's
-   * "no sessions yet" caption, and `SessionList`'s two mirrors of the same
-   * screen (its own empty-list line, and the phone's copy of this one) --
-   * one fact, so the four surfaces can never contradict each other about it.
+   * Read by the tab strip's "no sessions yet" caption and `SessionList`'s two
+   * mirrors of the getting-started screen (its own empty-list line, and the
+   * phone's copy of it). The desktop screen's own trigger is `gettingStartedOn`,
+   * which does not read this: it follows what the panes and the filtered
+   * entries show.
    *
    * CASE (b) FROM PR 467 SURVIVES UNCHANGED: every entry foreign (`isForeign`
    * true for all of them, or the set is simply empty) still reads `false`
@@ -3907,22 +3891,15 @@ function CanvasInner({
    */
   const hasOwnSession = useMemo(() => allEntries.some((e) => !isForeign(e.session)), [allEntries]);
 
-  /** The pill counts are off the UNFILTERED list — a count that moved when you
-      clicked it would be a count of your own click. */
-  const tally = useMemo(() => {
-    const of = (status: SessionStatus) =>
-      allEntries.filter((e) => e.session.status === status).length;
-    return {
-      all: allEntries.length,
-      running: of('running'),
-      waiting: of('waiting'),
-      idle: of('idle'),
-      unstarted: of('unstarted'),
-      terminal: of('terminal'),
-      done: of('done'),
-      failed: of('failed'),
-    };
-  }, [allEntries]);
+  /**
+   * Each pill reads what selecting it would list: the same pipeline as
+   * `entries`, run once per status. No count reads `statusFilter`, so
+   * clicking a pill moves no number.
+   */
+  const tally = useMemo(
+    () => statusTally(allEntries, { ...viewContext, statusFilter: 'all' }),
+    [allEntries, viewContext],
+  );
 
   /**
    * What `hjkl`, `f` and `gg` may land on: every session in view, no filter
@@ -4334,7 +4311,9 @@ function CanvasInner({
     if (pendingTab === null) {
       return;
     }
-    const arrived = allEntries.find((entry) => !pendingTab.known.has(entry.session.id));
+    const arrived = allEntries.find(
+      (entry) => !pendingTab.known.has(entry.session.id) && !isForeign(entry.session),
+    );
     if (arrived === undefined) {
       return;
     }
@@ -5957,7 +5936,7 @@ function CanvasInner({
       // THE WAIT BECOMES VISIBLE HERE, before the write is even issued --
       // "immediately" in the operator's request is this line. `paneId` is the
       // pane the `+` was pressed in; `o` has none and means the focused one.
-      setStarting({
+      const expired = beginStarting({
         projectId,
         projectName,
         paneId: paneId ?? focusedPaneIdRef.current,
@@ -5969,7 +5948,7 @@ function CanvasInner({
       setStatus(`starting a new session in ${projectName}…`);
       try {
         await route.write.createSession?.(projectId, projectName);
-        if (paneId !== undefined) {
+        if (paneId !== undefined && !expired()) {
           pendingNewTab.current = { paneId, known };
         }
         // The write resolves when the SESSION exists, not when the agent
@@ -5992,7 +5971,7 @@ function CanvasInner({
         setPendingAction(null);
       }
     },
-    [source, pendingAction, setStatus],
+    [source, pendingAction, setStatus, beginStarting],
   );
 
   /**
@@ -6000,13 +5979,25 @@ function CanvasInner({
    *
    * Its own effect rather than a branch of `pendingNewTab`'s: that one is
    * armed only for the pane `+` and only after the write, so the keyboard path
-   * would have had an indicator nothing could clear. Any entry the operator
-   * had not already seen ends the wait; vam cannot know which id the CLI
-   * chose, and the set was captured before the write for exactly that reason.
+   * would have had an indicator nothing could clear. Any own (not `isForeign`)
+   * entry the operator had not already seen ends the wait; vam cannot know
+   * which id the CLI chose, and the set was captured before the write for
+   * exactly that reason. A foreign row is another tool's: it neither ends the
+   * wait nor gets vam's Response record.
    */
   useEffect(() => {
     if (starting === null) return;
-    if (allEntries.some((entry) => !starting.known.has(entry.session.id))) {
+    const arrived = allEntries.filter(
+      (entry) => !starting.known.has(entry.session.id) && !isForeign(entry.session),
+    );
+    if (arrived.length > 0) {
+      // A session vam just created opens on Response, not `viewSeed`, unless
+      // the operator already picked a view. `prefs.detailTab` is not written.
+      setViewBySession((current) => {
+        const next = { ...current };
+        for (const entry of arrived) next[entry.session.id] ??= 'Response';
+        return next;
+      });
       setStarting(null);
     }
   }, [allEntries, starting]);
@@ -6078,7 +6069,12 @@ function CanvasInner({
       // captures it there: "which row is new" has to be measured against what
       // existed when the operator picked the directory.
       const known = new Set(entriesByIdRef.current.keys());
-      setStarting({ projectId: null, projectName: name, paneId: focusedPaneIdRef.current, known });
+      beginStarting({
+        projectId: null,
+        projectName: name,
+        paneId: focusedPaneIdRef.current,
+        known,
+      });
       // The first half of one sentence, exactly as `createSession` says it:
       // "starting…" here, "started … it may take a moment to appear" below.
       setStatus(`starting a new session in ${name}…`);
@@ -6101,7 +6097,7 @@ function CanvasInner({
       // turns a clear one into an apparent hang.
       setPendingAction(null);
     }
-  }, [source, pendingAction, setStatus]);
+  }, [source, pendingAction, setStatus, beginStarting]);
 
   /** The caption both `+` controls wear: the refusal, or nothing to say. */
   const newSessionDecline = useMemo(() => {
@@ -6259,6 +6255,23 @@ function CanvasInner({
     },
     [entries, focusedEntry, focusSession, setStatus],
   );
+
+  // Still waiting for the FIRST answer, on whichever transport.
+  const sidebarLoading =
+    source.kind === 'connecting'
+      ? source.error === undefined || source.error === null
+      : source.kind === 'session'
+        ? source.loading === true
+        : source.kind === 'live'
+          ? source.status === 'loading'
+          : false;
+
+  // Get started: first load answered, no session visible anywhere (no filtered
+  // entry, no pane drawing one). Gates the screen, the switcher and `pickView`.
+  const gettingStartedOn =
+    entries.length === 0 &&
+    !sidebarLoading &&
+    !leaves(panes).some((leaf) => leaf.sessionId !== null && entriesById.has(leaf.sessionId));
 
   /**
    * Every `KeyAction` the grammar can produce, run — the ONE place a
@@ -6561,6 +6574,7 @@ function CanvasInner({
           // means this route cannot become the one that disagrees if that ever
           // changes. `tabs.ts` is where a view's presence is decided; this is
           // a caller reporting which shell it is, not deciding anything.
+          if (gettingStartedOn) return;
           const drawn = visibleTabs(terminalTab, filesTab, phone);
           const view = tabForDigit(drawn, action.digit);
           if (view === undefined) {
@@ -6980,7 +6994,7 @@ function CanvasInner({
           // turns would otherwise look like a key that did nothing.
           setStatus(
             next
-              ? 'focus view on — each turn’s working is folded, ··· brings one back'
+              ? 'focus view on — each turn’s working is folded, the arrow brings one back'
               : 'focus view off — every turn draws its working again',
           );
           return;
@@ -7014,6 +7028,16 @@ function CanvasInner({
           // and `beginComposing` is the one place that says so.
           if (paneComposer(focusedPaneId) !== null) {
             beginComposing();
+            // `DetailPanel` focuses the box when `composing` CHANGES, so a
+            // flag already true (left over from a blur that cleared nothing)
+            // would never re-run that effect and `i` would do nothing. The
+            // microtask lands the caret after this keydown has returned, so no
+            // composition crosses the move, and only when nothing else has.
+            const paneId = focusedPaneId;
+            queueMicrotask(() => {
+              if (cursorModeAt(document.activeElement) === 'insert') return;
+              paneComposer(paneId)?.querySelector<HTMLElement>('textarea')?.focus();
+            });
             return;
           }
           /**
@@ -7102,6 +7126,7 @@ function CanvasInner({
       projectTabIds,
       sessionIds,
       entries,
+      gettingStartedOn,
       matches,
       query,
       copyAllCommands,
@@ -7151,6 +7176,13 @@ function CanvasInner({
     // closes a session nobody meant to close.
     if (phone) return;
     function onKeyDown(event: KeyboardEvent) {
+      // A KEYDOWN THAT BELONGS TO AN IME COMPOSITION IS NOT A KEY. Under a
+      // Vietnamese (Telex/VNI) input method the key that starts or extends a
+      // composition arrives with `isComposing` set, or with the legacy
+      // `keyCode` 229, and acting on it (`i`, Esc, `j`...) moves focus or
+      // cancels in the middle of a word -- the stray first character of the
+      // operator's report. The composition owns it, in either mode.
+      if (event.isComposing || event.keyCode === 229) return;
       const target = event.target;
       const typing = target instanceof HTMLElement && /^(INPUT|TEXTAREA)$/.test(target.tagName);
       // A Cmd/Ctrl chord is never text entry — no layout produces a character
@@ -7614,26 +7646,6 @@ function CanvasInner({
   );
 
   /**
-   * The two panels’ props, lifted out of the JSX.
-   *
-   * A mechanical extraction with no behaviour of its own: the phone shell
-   * (`PhoneShell`) is handed the SAME two objects the columns are built from,
-   * so there is one assembly of each panel’s props and not a second one that
-   * could drift from it.
-   */
-  // Still asking for the FIRST answer, on whichever transport this canvas has:
-  // 'connecting' and 'session' carry it from `useSourceModel`, 'live' has its
-  // own `status`, 'demo' never loads.
-  const sidebarLoading =
-    source.kind === 'connecting'
-      ? source.error === undefined || source.error === null
-      : source.kind === 'session'
-        ? source.loading === true
-        : source.kind === 'live'
-          ? source.status === 'loading'
-          : false;
-
-  /**
    * Whether THIS BUILD can open a native directory picker at all --
    * `window.api?.dialog?.chooseDirectory`, the same bridge `newProject` and
    * `buildDetailProps`'s own `prRepo` read at their call sites rather than
@@ -7646,6 +7658,14 @@ function CanvasInner({
    */
   const hasDirectoryPicker = globalThis.window?.api?.dialog?.chooseDirectory !== undefined;
 
+  /**
+   * The two panels’ props, lifted out of the JSX.
+   *
+   * A mechanical extraction with no behaviour of its own: the phone shell
+   * (`PhoneShell`) is handed the SAME two objects the columns are built from,
+   * so there is one assembly of each panel’s props and not a second one that
+   * could drift from it.
+   */
   const sidebarProps: ComponentProps<typeof SessionList> = {
     // The line at this column's top edge, off the SAME `mode` the status
     // bar's word reads. Select is the sidebar's mode and only the
@@ -7698,10 +7718,6 @@ function CanvasInner({
     onFilterMenuToggle: setFilterMenuOpen,
     originFilters: prefs.filters,
     onOriginFilters: onSidebarOriginFilters,
-    // The Sessions settings switch -- both the desktop column below and
-    // `PhoneShell` (which reuses this SAME object, `sidebar={sidebarProps}`
-    // a few lines down) draw the countdown off this one flag.
-    cacheTimerEnabled: prefs.cacheTimer,
     viewOptions: prefs.viewOptions,
     onViewOptions: onSidebarViewOptions,
     hiddenCounts: hiddenCounts,
@@ -7998,19 +8014,17 @@ function CanvasInner({
         // (`entries`, the same filtered set the sidebar and the tab strip
         // already agree is "what's visible right now" -- unchanged from
         // before: a sibling pane or another project with something visible
-        // still counts), AND the app truly owns none, `entries.length === 0`
-        // alone -- `hasOwnSession`'s own header explains why a session vam
-        // started that is merely hidden by dismiss/filters must not reach
-        // this screen. NOR BEFORE THE FIRST LOAD HAS ANSWERED: `sidebarLoading`
+        // still counts), i.e. `gettingStartedOn`: the filtered `entries` are
+        // empty and no pane draws a live entry. NOR BEFORE THE FIRST LOAD HAS ANSWERED: `sidebarLoading`
         // reads `EMPTY: CanvasModel` the exact same shape as a genuinely
         // empty workspace, and without this guard the screen flashed on at
         // every launch before `useSourceModel`'s first answer landed. Unlike
         // `onStartSession`/`onResumeInPane` above, whose absence follows
         // THIS pane's own `entry`, this is an APP-WIDE fact -- a pane can
         // hold nothing while a sibling pane, or another project, still has a
-        // real session, and only the truly-empty state gets this screen.
+        // visible session, and only that empty state gets this screen.
         gettingStarted:
-          entry !== null || entries.length > 0 || hasOwnSession || sidebarLoading
+          entry !== null || !gettingStartedOn
             ? undefined
             : {
                 onNewProject: () => void newProject(),
@@ -8056,7 +8070,7 @@ function CanvasInner({
         // (operator instruction) — the SAME fact `viewNote` above is gated
         // on, which is the point: a pane that cannot consume an `Alt+<digit>`
         // should not be showing the row that names one.
-        paneFocused: isFocused,
+        paneFocused: isFocused && !gettingStartedOn,
         // THIS SESSION'S VIEW, not this pane's and not the app's. `undefined`
         // for a pane showing no session at all -- there is no per-session fact
         // to name, so the panel falls back to owning its own, seeded the same
@@ -8065,7 +8079,13 @@ function CanvasInner({
         // `sendFailureBySession`. `null` for a pane showing no session: there
         // is nothing that could have failed in it.
         sendFailure: sessionId === null ? null : (sendFailureBySession[sessionId] ?? null),
-        tab: sessionId === null ? undefined : (viewBySession[sessionId] ?? viewSeed),
+        // Get started only draws on Response: force it over the seeded view.
+        tab:
+          sessionId === null
+            ? gettingStartedOn
+              ? 'Response'
+              : undefined
+            : (viewBySession[sessionId] ?? viewSeed),
         initialTab: viewSeed,
         onTabChange: (next) => {
           // Re-narrowed rather than cast. `onTabChange` is typed `string`
@@ -8103,8 +8123,9 @@ function CanvasInner({
         // to write anywhere.
         onStopComposing: () => {
           if (sessionId === null) return;
+          // The draft is KEPT: leaving Insert is not cancelling what was
+          // typed. Only a send clears it (the submit path's own write).
           setComposingFor(sessionId, false);
-          setDraftFor(sessionId, '');
         },
         width: undefined,
         resizeHandle: null,
@@ -8134,14 +8155,12 @@ function CanvasInner({
       resumeInPane,
       setViewFor,
       mode,
-      entries,
       newProject,
       newSessionDecline,
       hasDirectoryPicker,
       foreignHiddenCount,
       onSidebarOriginFilters,
-      hasOwnSession,
-      sidebarLoading,
+      gettingStartedOn,
       pendingAction,
       clearStartingPane,
     ],
@@ -8239,15 +8258,7 @@ function CanvasInner({
               paneFocused={isFocused}
               drafts={draftsBySession}
               pending={pending}
-              // See `emptyText`'s own comment: "pick one from the sidebar" is
-              // only true while the sidebar has a row to pick. `entries` and
-              // `hasOwnSession` are the SAME two facts `gettingStarted`'s own
-              // condition reads a few hundred lines below -- the operator's
-              // own finding, reading the first screenshot, was this line
-              // contradicting that screen's "no sessions yet" 40px below it;
-              // `hasOwnSession` is what keeps it from making the SAME claim
-              // early, before the first load answers, or over a session vam
-              // started that is merely dismissed or filtered out of view.
+              // No entries, no own session (`hasOwnSession`) and the sidebar not loading (see `emptyText`).
               emptyText={
                 entries.length === 0 && !hasOwnSession && !sidebarLoading
                   ? 'no sessions yet'

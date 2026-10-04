@@ -72,6 +72,7 @@ await page.addInitScript(() => {
     ['/work/atlas/src/db/pool.ts', 'export const pool = 1;\n'],
     ['/work/atlas/src/db/migrate.ts', 'export const migrate = 1;\n'],
     ['/work/atlas/src/routes/health.ts', 'export const health = 1;\n'],
+    ['/work/atlas/dist/server.js', 'exports.server = 1;\n'],
   ]);
   const sig = (p) => ({ size: files.get(p).length, mtimeMs: 1, sha256: 'a'.repeat(64) });
   const unavailable = () => ({
@@ -128,7 +129,12 @@ await page.addInitScript(() => {
           const [first, ...rest] = file.slice(base.length + 1).split('/');
           entries.set(first, rest.length > 0 ? 'dir' : 'file');
         }
-        return { root, dir: base, entries: [...entries].map(([name, kind]) => ({ name, kind })) };
+        // `dist` stands in for a git-ignored entry, marked as the main process would.
+        return {
+          root,
+          dir: base,
+          entries: [...entries].map(([name, kind]) => ({ name, kind, ...(name === 'dist' ? { ignored: true } : {}) })),
+        };
       },
       read: async (path) =>
         files.has(path)
@@ -152,6 +158,13 @@ await page.waitForTimeout(400);
 const out = `${outDir}/files-tab.png`;
 await page.screenshot({ path: out });
 console.log(out);
+
+// Muted rows (.env, git-ignored dist), tree only, in both themes.
+for (const theme of ['light', 'dark']) {
+  await page.evaluate((t) => document.documentElement.classList.toggle('light', t === 'light'), theme);
+  await page.locator('[data-files-tree]').screenshot({ path: `${outDir}/files-tab-muted-${theme}.png` });
+}
+await page.evaluate(() => document.documentElement.classList.remove('light'));
 
 // The one assertion this script makes, kept out of the picture above: at the tree's 7.5rem floor a
 // directory row's chevron is still inside the row's box and the name is what gives way.

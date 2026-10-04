@@ -162,13 +162,15 @@ export function drawsProgressLine(focusView: boolean, turn: TurnProgressFacts): 
  * comes to have no way back on the one case nobody thought about -- and a fold
  * with no way back is a deletion.
  *
- * IT IS NOT DRAWN WHEN THE LINE IS. A control offering to restore something
- * already on screen is a control that does nothing, which is the same defect
- * as one that cannot act. Nor when focus view is off: there is nothing folded
- * to restore.
+ * IT IS A TOGGLE, SO IT READS THE FACTS WITH `unfolded` FALSE. It is drawn for
+ * exactly the turns focus view folds, whether the operator has opened one or
+ * not: once open, the same control folds it again, and a control that vanished
+ * on the first press left no way to undo it. It is not drawn where the line is
+ * kept on other grounds (a failure, the newest turn's present) -- there is
+ * nothing to fold -- nor when focus view is off.
  */
 export function drawsUnfoldControl(focusView: boolean, turn: TurnProgressFacts): boolean {
-  return focusView && !drawsProgressLine(focusView, turn);
+  return focusView && !drawsProgressLine(focusView, { ...turn, unfolded: false });
 }
 
 /**

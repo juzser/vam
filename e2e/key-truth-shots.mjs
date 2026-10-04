@@ -1454,7 +1454,13 @@ await page.addInitScript(() => {
     createSession: async () => {},
     createSessionIn: async () => {},
     pickImageAttachment: async () => null,
-    history: async () => ({ kind: 'unavailable' }),
+    // `shared/history.ts`: an unavailable read carries its `SourceError`. The pane
+    // walks back on open and renders `error.code`, so a bare `{ kind }` is not a
+    // value the bridge can return.
+    history: async () => ({
+      kind: 'unavailable',
+      error: { kind: 'unreachable', code: 'stub', message: 'stub source' },
+    }),
     agentWork: async () => ({ kind: 'unavailable' }),
     applyWaivers: async () => {},
     transitionLesson: async () => {},
@@ -1468,6 +1474,12 @@ await page.addInitScript(() => {
       // shows up in the sentence on screen rather than only in this array.
       answer: async (projectId, request, rowId) => {
         globalThis.window.__answered.push({ projectId, request, rowId });
+        // IN FLIGHT FOR A MOMENT, as a real picker read-back is: the Enter-Enter
+        // check below exists to prove the `sending` gate holds while the first
+        // call is outstanding. An instant resolve lets the gate reopen between
+        // two keypresses -- and this stub never answers the question itself, so
+        // Submit stays reachable -- so the second Enter would be a fresh, legal send.
+        await new Promise((resolve) => setTimeout(resolve, 300));
         return { kind: 'sent', answer: request.steps.map((s) => s.labels.join(', ')).join('; ') };
       },
       prompt: async () => ({ kind: 'unavailable' }),
@@ -1516,6 +1528,7 @@ check(
 );
 check('and the session row this pane is actually on', answered[0]?.rowId === 'asking-1');
 
+await page.waitForSelector('[data-question-outcome]', { timeout: 4000 });
 const outcome = await page.evaluate(
   () => document.querySelector('[data-question-outcome]')?.textContent ?? '',
 );
@@ -1726,7 +1739,10 @@ for (const theme of ['dark', 'light']) {
   // do) needs no second question and no different content to confound it —
   // a taller or shorter LABEL would move this number for a reason that has
   // nothing to do with the marker.
-  const rowHeights = await wide.$$eval('[data-question-option]', (els) =>
+  // THE QUESTION'S OWN OFFERS: the terminal's free-text row is also a
+  // `[data-question-option]` (task 4, "card matches terminal") and has no
+  // preview or description by design.
+  const rowHeights = await wide.$$eval('[data-question-option]:not([data-question-free-text])', (els) =>
     els.map((el) => Math.round(el.getBoundingClientRect().height)),
   );
   check(
@@ -1894,7 +1910,7 @@ for (const theme of ['dark', 'light']) {
 
   const aligned = await page2.evaluate(() => {
     const left = (el) => (el === null ? null : el.getBoundingClientRect().left);
-    return [...document.querySelectorAll('[data-question-option]')].map((option) => ({
+    return [...document.querySelectorAll('[data-question-option]:not([data-question-free-text])')].map((option) => ({
       label: option.querySelector('[data-question-label]')?.textContent ?? null,
       labelLeft: left(option.querySelector('[data-question-label]')),
       descriptionLeft: left(option.querySelector('[data-question-description]')),

@@ -997,17 +997,23 @@ describe('a turn that has genuinely scrolled out of the window', () => {
       focusNodeId: 's1',
     });
 
-    expect(document.body.textContent ?? '').toContain('scrolled out');
+    // Operator event #71 (history vanished from the Response view): d1 rendered
+    // in this pane, so the pane keeps it when the window slides past it and the
+    // pick is never missing. OLD: expect(...).toContain('scrolled out').
+    expect(document.body.textContent ?? '').not.toContain('scrolled out');
     // NOT MARKED AS THE ONE BEING READ. `d5` is on screen -- it is a turn of
     // this session and the column draws every turn it has, which is not a
     // substitution. The substitution this refuses is the pane pointing at
     // `d5` and calling it the turn the operator was reading, so what is
     // asserted is that NOTHING is marked while the pick is missing, that the
     // pane says so in words, and that it hid nothing to say it.
-    expect(all('[data-column-turn][data-turn-current="true"]')).toHaveLength(0);
-    expect(markedTurnId()).toBeNull();
-    expect(all('[data-progress-turn-missing]')).toHaveLength(1);
-    expect(all('[data-column-turn]')).toHaveLength(2);
+    // Operator event #71: the pick is still on screen (retained), so it IS
+    // marked and nothing is missing. OLD: toHaveLength(0) / toBeNull() /
+    // toHaveLength(1) / toHaveLength(2).
+    expect(all('[data-column-turn][data-turn-current="true"]')).toHaveLength(1);
+    expect(markedTurnId()).toBe('d1');
+    expect(all('[data-progress-turn-missing]')).toHaveLength(0);
+    expect(all('[data-column-turn]')).toHaveLength(5);
   });
 
   it('offers a way back to the turn the canvas is actually showing', () => {
@@ -1026,11 +1032,14 @@ describe('a turn that has genuinely scrolled out of the window', () => {
     });
 
     const back = q<HTMLButtonElement>('[data-progress-turn-return]');
-    expect(back).not.toBeNull();
+    // Operator event #71: d1 is retained, so there is nothing to go back from.
+    // OLD: expect(back).not.toBeNull().
+    expect(back).toBeNull();
     act(() => back?.click());
+    // Operator event #71: the pick stays d1. OLD: toContain('ask d5').
     expect(
       q<HTMLElement>('[data-column-turn][data-turn-current="true"]')?.textContent ?? '',
-    ).toContain('ask d5');
+    ).toContain('ask d1');
     expect(all('[data-progress-turn-missing]')).toHaveLength(0);
   });
 });
@@ -2721,7 +2730,7 @@ describe('the Agents tab', () => {
       await act(async () => {});
       const detail = q<HTMLElement>('[data-agent-detail]');
       expect(detail?.textContent).toContain('the brief the parent wrote');
-      expect(detail?.textContent).toContain('no answer yet');
+      expect(detail?.textContent).toContain('No answer yet');
     });
 
     it('says an agent has done nothing vam could read, when that is the reading', async () => {
@@ -4048,7 +4057,7 @@ describe('the live line stands beside the answer, not instead of it', () => {
  * find out, on the operator's behalf and with the operator's credentials.
  *
  * What is pinned here is mostly the same thing the module underneath pins:
- * "this branch has no pull request" and "vam could not ask" must not look
+ * "no pull requests match these filters" and "vam could not ask" must not look
  * alike. A pane that renders a failure as an empty list would be telling the
  * operator there is nothing to see, on the strength of never having found
  * out. Every fixture below is invented.
@@ -4129,7 +4138,7 @@ describe('the PRs tab', () => {
     expect(all('[data-pr-row]')).toHaveLength(0);
     expect(q('[data-prs-empty]')).not.toBeNull();
     expect(q('[data-prs-unavailable]')).toBeNull();
-    expect(body()).toContain('no pull request');
+    expect(body()).toContain('No pull requests match these filters.');
   });
 
   it('says vam could not ask, in gh’s own terms, and never calls that "none"', () => {

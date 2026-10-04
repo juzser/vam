@@ -3,7 +3,10 @@
  *
  * The operator, translated: "the shortcut table when you press `?` needs a
  * search box, clearer section separation, and a one-column layout with the
- * label on one side and the shortcut on the other."
+ * label on one side and the shortcut on the other." Since vam-ux-3 the sheet
+ * is two columns of whole sections from `lg` (1024px) up and one column below
+ * it: the one-column assertions run at 900x800, the two-column ones at
+ * 1280x800.
  *
  * ── WHY THIS CANNOT BE A UNIT TEST ────────────────────────────────────────
  *
@@ -43,7 +46,7 @@ function check(label, ok, detail) {
   failures.push(label);
 }
 
-const page = await browser.newPage({ viewport: { width: 1200, height: 800 } });
+const page = await browser.newPage({ viewport: { width: 900, height: 800 } });
 page.on('pageerror', (err) => console.error('PAGE ERROR:', err));
 
 await page.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
@@ -117,7 +120,7 @@ check(
   `only ${first.rows.length} rows`,
 );
 
-/* ── ONE COLUMN ──────────────────────────────────────────────────────────── */
+/* ── ONE COLUMN, BELOW `lg` (900x800) ─────────────────────────────────────── */
 {
   const lefts = [...new Set(first.rows.map((row) => row.left))];
   const widths = [...new Set(first.rows.map((row) => row.width))];
@@ -244,6 +247,52 @@ check(
 
 await page.screenshot({ path: `${outDir}/key-sheet-column.png` });
 console.log(`${outDir}/key-sheet-column.png`);
+
+/* ── TWO COLUMNS, FROM `lg` (1280x800) ───────────────────────────────────── */
+{
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.waitForTimeout(120);
+  const wide = await page.evaluate(() => {
+    const round = (n) => Math.round(n * 100) / 100;
+    const panel = document.querySelector('[data-key-sheet] > div:not([aria-label])');
+    const sections = [...document.querySelectorAll('[data-key-sheet-groups] section')].map((s) => ({
+      title: s.querySelector('h3')?.textContent ?? '',
+      lefts: [...new Set([...s.querySelectorAll('li')].map((li) => round(li.getBoundingClientRect().left)))],
+      headLeft: round(s.querySelector('h3')?.getBoundingClientRect().left ?? -1),
+      rule: getComputedStyle(s).borderTopWidth,
+      pad: getComputedStyle(s).paddingTop,
+      head: round(s.querySelector('h3')?.getBoundingClientRect().top ?? -1),
+    }));
+    return { panelWidth: round(panel?.getBoundingClientRect().width ?? 0), sections };
+  });
+  const columns = [...new Set(wide.sections.map((section) => section.headLeft))];
+  console.log(`wide: panel ${wide.panelWidth}px, section columns at ${columns.join(', ')}`);
+  check('the panel is 1040px wide at 1280', Math.abs(wide.panelWidth - 1040) < 1, `${wide.panelWidth}`);
+  check('the sections sit in two columns', columns.length === 2, `${columns.length} column lefts`);
+  const split = wide.sections.filter((section) => section.lefts.length !== 1);
+  check(
+    'and no section is split across the column break',
+    split.length === 0,
+    split.map((section) => section.title).join(' | '),
+  );
+  {
+    const starts = columns.map((left) => wide.sections.find((section) => section.headLeft === left));
+    check(
+      'the first section of each column paints no top rule and no top padding',
+      starts.every((section) => section && section.rule === '0px' && section.pad === '0px'),
+      JSON.stringify(starts.map((section) => section && [section.title, section.rule, section.pad])),
+    );
+    check(
+      'and both columns start at the same height',
+      starts.every((section) => section && Math.abs(section.head - starts[0].head) < 1),
+      JSON.stringify(starts.map((section) => section?.head)),
+    );
+  }
+  await page.screenshot({ path: `${outDir}/key-sheet-two-columns.png` });
+  console.log(`${outDir}/key-sheet-two-columns.png`);
+  await page.setViewportSize({ width: 900, height: 800 });
+  await page.waitForTimeout(120);
+}
 
 /* ── THE SEARCH BOX ──────────────────────────────────────────────────────── */
 {

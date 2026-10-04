@@ -172,6 +172,11 @@ export function drawsComposer(tab: Tab): boolean {
  * mounts the pane -- went on believing the view was offered. A row that draws
  * no icon over a pane that would still mount one is not a withdrawal.
  *
+ * TERMINAL IS WITHDRAWN ON A PHONE FOR THE SAME REASON, decided in the same
+ * filter: the remote server serves no pane (`UNSERVED.terminal`), yet callers
+ * pass `terminal !== false`, so an undefined or true capability leaked the tab
+ * onto the phone shell's view row. `phone` now overrides `terminal`.
+ *
  * ITS POLARITY IS THE OTHER WAY ROUND FROM THE OTHER TWO, deliberately.
  * `terminal` and `files` ask "can this source or this build OFFER it"; `phone`
  * asks "which shell is this", and a caller answering `true` is not offering
@@ -184,7 +189,7 @@ export function drawsComposer(tab: Tab): boolean {
 export function visibleTabs(terminal: boolean, files: boolean, phone: boolean): readonly Tab[] {
   return TABS.filter(
     (name) =>
-      (name !== 'Terminal' || terminal) &&
+      (name !== 'Terminal' || (terminal && !phone)) &&
       (name !== 'Files' || files) &&
       (name !== 'PRs' || !phone),
   );

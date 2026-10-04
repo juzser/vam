@@ -223,6 +223,7 @@ await page.addInitScript(() => {
     ['/work/demo/README.md', { content: README, rev: 0 }],
     ['/work/demo/CODE.md', { content: CODE, rev: 0 }],
     ['/work/demo/.env', { content: '# service\nPORT=8787\n', rev: 0 }],
+    ['/work/demo/settings.ini', { content: 'port = 8787\n', rev: 0 }],
     ['/work/demo/package.json', { content: '{\n  "name": "atlas"\n}\n', rev: 0 }],
     ['/work/demo/Makefile', { content: 'build:\n\techo build\n', rev: 0 }],
     ['/work/demo/assets/logo.svg', { content: '<svg />\n', rev: 0 }],
@@ -383,7 +384,7 @@ check(
 check(
   'and the families are the ones the classifier named',
   glyphs.find((g) => g.path === '/work/demo/README.md')?.shape === 'doc' &&
-    glyphs.find((g) => g.path === '/work/demo/.env')?.shape === 'config' &&
+    glyphs.find((g) => g.path === '/work/demo/settings.ini')?.shape === 'config' &&
     glyphs.find((g) => g.path === '/work/demo/package.json')?.shape === 'json' &&
     glyphs.find((g) => g.path === '/work/demo/Makefile')?.shape === 'plain' &&
     glyphs.find((g) => g.path === '/work/demo/src')?.shape === 'directory',
@@ -394,7 +395,7 @@ const grey = glyphs.find((g) => g.path === '/work/demo/Makefile')?.colour;
 check(
   'the four hued families are really painted, and none of them is the grey',
   grey !== null &&
-    ['/work/demo/README.md', '/work/demo/.env', '/work/demo/package.json', '/work/demo/src'].every(
+    ['/work/demo/README.md', '/work/demo/settings.ini', '/work/demo/package.json', '/work/demo/src'].every(
       (path) => {
         const found = glyphs.find((g) => g.path === path);
         return found !== undefined && found.colour !== null && found.colour !== grey;
@@ -405,7 +406,7 @@ check(
 check(
   'and they are four DISTINCT colours — one token pointed at another is a swatch that lies',
   new Set(
-    ['/work/demo/README.md', '/work/demo/.env', '/work/demo/package.json', '/work/demo/src'].map(
+    ['/work/demo/README.md', '/work/demo/settings.ini', '/work/demo/package.json', '/work/demo/src'].map(
       (path) => glyphs.find((g) => g.path === path)?.colour,
     ),
   ).size === 4,
@@ -607,6 +608,10 @@ const corner = await page.evaluate(() => {
     preview: r('[data-files-preview]'),
     format: r('[data-files-format]'),
     header: r('[data-files-header]'),
+    column: r('[data-files-editor-column]'),
+    tree: r('[data-files-tree]'),
+    // The first text line lives at the top of whichever content box is drawn.
+    text: r('[data-files-editor]') ?? r('[data-files-preview-view]'),
     icons: document.querySelectorAll('[data-view-overlay] [data-view]').length,
   };
 });
@@ -621,17 +626,46 @@ check(
   JSON.stringify(corner),
 );
 check(
-  'and every control in the row clears the view pill entirely, not just at its centre',
+  'and every control clears the view pill entirely, from the top band of the editor column, not just at its centre',
   corner.overlay !== null &&
-    [corner.preview, corner.format].every((b) => b !== null && b.right <= corner.overlay.left),
+    corner.column !== null &&
+    [corner.preview, corner.format].every(
+      (b) =>
+        b !== null &&
+        (b.right <= corner.overlay.left || b.top >= corner.overlay.bottom) &&
+        b.bottom <= corner.column.top + 40,
+    ),
   JSON.stringify(corner),
 );
+const hit = (a, b) =>
+  a !== null &&
+  b !== null &&
+  a.left < b.right &&
+  b.left < a.right &&
+  a.top < b.bottom &&
+  b.top < a.bottom;
+const controlGap = (corner.format?.left ?? 0) - (corner.preview?.right ?? 0);
 check(
-  'and neither is taller than the row that reserves the corner’s height',
-  corner.header !== null &&
-    [corner.preview, corner.format].every(
-      (b) => b !== null && b.top >= corner.header.top && b.bottom <= corner.header.bottom,
-    ),
+  'the horizontal gap between the toggle and Tidy is at least one strip gap step (gap-1.5, 6px)',
+  corner.preview !== null && corner.format !== null && controlGap >= 6,
+  `measured ${controlGap}px`,
+);
+check(
+  'Tidy sits against the right edge of the editor column (within 1px, no inset)',
+  corner.format !== null &&
+    corner.column !== null &&
+    Math.abs(corner.column.right - corner.format.right) <= 1,
+  `Tidy right ${corner.format?.right}, column right ${corner.column?.right}`,
+);
+check(
+  'neither control intersects the tree, the corner pill or the first text line',
+  [corner.preview, corner.format].every(
+    (b) =>
+      b !== null &&
+      !hit(b, corner.tree) &&
+      !hit(b, corner.overlay) &&
+      (corner.text === null || b.bottom <= corner.text.top),
+  ),
   JSON.stringify(corner),
 );
 /**
@@ -1235,6 +1269,7 @@ const narrowHeader = await page.evaluate(() => {
       left: Math.round(b.left),
       right: Math.round(b.right),
       top: Math.round(b.top),
+      bottom: Math.round(b.bottom),
       height: Math.round(b.height),
     };
   };
@@ -1266,7 +1301,8 @@ check(
   'and neither control sits under the floating view-icon pill',
   narrowHeader.overlay !== null &&
     [narrowHeader.preview, narrowHeader.format].every(
-      (b) => b !== null && b.right <= narrowHeader.overlay.left,
+      (b) =>
+        b !== null && (b.right <= narrowHeader.overlay.left || b.top >= narrowHeader.overlay.bottom),
     ),
   JSON.stringify(narrowHeader),
 );

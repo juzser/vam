@@ -567,8 +567,19 @@ check(
   'the Format button clears the view pill entirely, not just at its centre',
   pillBox.format !== null &&
     pillBox.overlay !== null &&
-    pillBox.format.right <= pillBox.overlay.left,
+    (pillBox.format.right <= pillBox.overlay.left || pillBox.format.top >= pillBox.overlay.bottom),
   `format ends at ${pillBox.format?.right}, pill starts at ${pillBox.overlay?.left}`,
+);
+check(
+  'the Format button sits in the top band of the editor column, against its right edge, clear of the tree',
+  pillBox.format !== null &&
+    pillBox.editorColumn !== null &&
+    pillBox.tree !== null &&
+    pillBox.format.top >= pillBox.editorColumn.top &&
+    pillBox.format.bottom <= pillBox.editorColumn.top + 40 &&
+    Math.abs(pillBox.editorColumn.right - pillBox.format.right) <= 1 &&
+    (pillBox.format.right <= pillBox.tree.left || pillBox.format.left >= pillBox.tree.right),
+  JSON.stringify({ format: pillBox.format, column: pillBox.editorColumn, tree: pillBox.tree }),
 );
 check(
   'and so does the file path beside it',
@@ -662,27 +673,6 @@ check(
   (await page.locator('[data-files-dirty]').count()) > 0,
 );
 
-const dotGap = await page.evaluate(() => {
-  const r = (sel) => {
-    const e = document.querySelector(sel);
-    if (e === null) return null;
-    const b = e.getBoundingClientRect();
-    return { left: b.left, right: b.right };
-  };
-  return { dot: r('[data-files-dirty]'), format: r('[data-files-format]') };
-});
-check(
-  'Format really does trail the dot directly for a .env — nothing else sits between them',
-  dotGap.dot !== null && dotGap.format !== null && dotGap.format.left >= dotGap.dot.right,
-  JSON.stringify(dotGap),
-);
-const dotFormatGap = (dotGap.format?.left ?? 0) - (dotGap.dot?.right ?? 0);
-check(
-  'and a visible gap separates them — at least one toolbar gap unit (the row’s own gap-1.5, 6px)',
-  dotFormatGap >= 6,
-  `measured ${dotFormatGap}px between the dot and Format`,
-);
-
 /** The real paint of a CSS custom property, off a throwaway probe node — the
  *  same technique `tree-icon-shots.mjs` uses for the icon tones: a class name
  *  naming a token proves nothing about what the cascade actually resolved. */
@@ -714,7 +704,7 @@ for (const theme of ['dark', 'light']) {
   // THE OPERATOR'S OWN ASK, LOOKED AT — not just measured. Clipped to the
   // header row alone (dot, gap, Format) rather than the whole pane: this is
   // the one control the report is about, and a full-page shot would bury it.
-  await page.locator('[data-files-header]').screenshot({ path: `${outDir}/files-dirty-${theme}.png` });
+  await page.locator('[data-files-editor-column]').screenshot({ path: `${outDir}/files-dirty-${theme}.png` });
   console.log(`${outDir}/files-dirty-${theme}.png`);
 }
 // Restored before anything below relies on the file's own dark default.

@@ -47,6 +47,7 @@
  * bad branch must not blank the whole picture.
  */
 
+import { type GitIgnoreRunner, gitIgnoredNames } from './git-ignored.js';
 import type { FileDirEntry, FileListResult } from './types.js';
 
 export type { FileListResult };
@@ -125,17 +126,32 @@ export async function listFiles(
  * never descended into (node_modules included), and a symlink is neither
  * `isDirectory()` nor `isFile()`, so it drops out exactly as in `listFiles`.
  * The caller is responsible for authorising `dir` first; a read error throws.
+ *
+ * Entries git ignores carry `ignored: true`, from ONE batched `git
+ * check-ignore` call per listing (`git-ignored.ts`); any git failure just
+ * leaves the marks off.
  */
 export async function listDirectory(
   root: string,
   dir: string,
   readDir: ReadDir,
+  runGit?: GitIgnoreRunner,
 ): Promise<readonly FileDirEntry[]> {
-  const entries = await readDir(dir === '' ? root : `${root}/${dir}`);
+  const cwd = dir === '' ? root : `${root}/${dir}`;
+  const entries = await readDir(cwd);
   const out: FileDirEntry[] = [];
   for (const entry of [...entries].sort((a, b) => a.name.localeCompare(b.name))) {
     if (entry.isDirectory()) out.push({ name: entry.name, kind: 'dir' });
     else if (entry.isFile()) out.push({ name: entry.name, kind: 'file' });
   }
-  return out;
+  if (out.length === 0) return out;
+  const ignored = await gitIgnoredNames(
+    cwd,
+    out.map((entry) => entry.name),
+    runGit,
+  );
+  if (ignored.size === 0) return out;
+  return out.map((entry) =>
+    ignored.has(entry.name) ? { ...entry, ignored: true as const } : entry,
+  );
 }

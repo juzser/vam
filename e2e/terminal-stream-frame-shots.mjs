@@ -43,7 +43,7 @@
  *   - the RESOLVED colour of the RED/GRN/BLU markers: the sixteen-ANSI claim,
  *     falsified directly rather than trusted because both read the same
  *     scheme store.
- *   - the status rule: the session name, same text.
+ *   - no status strip and no visible session name under either screen (EC-21).
  *   - the cursor: a steady block on both -- `TerminalTab.tsx` never blinks
  *     (its own header explains why) and `TerminalStreamTab.tsx` is
  *     configured to match it (`cursorBlink: false` at construction).
@@ -396,14 +396,9 @@ check(
   `${off.redColor} vs ${on.redColor}`,
 );
 check(
-  'the same tmux session name',
-  off.nameText === TMUX_NAME && on.nameText === TMUX_NAME,
-  `${off.nameText} vs ${on.nameText}`,
-);
-check(
-  'both status rules are one line tall',
-  off.statusHeight > 8 && off.statusHeight < 40 && on.statusHeight > 8 && on.statusHeight < 40,
-  `${off.statusHeight}px vs ${on.statusHeight}px`,
+  'neither screen draws a status strip or a visible session name (EC-21)',
+  off.nameText === null && on.nameText === null && off.statusHeight === null && on.statusHeight === null,
+  `${off.nameText}/${off.statusHeight} vs ${on.nameText}/${on.statusHeight}`,
 );
 check('the streaming cursor is a block', on.cursorBlock, JSON.stringify(on));
 check(

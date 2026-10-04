@@ -26,10 +26,34 @@
  * Run by hand, or by `e2e/run-web-guards.mjs`:
  *   node e2e/transcript-column-shots.mjs http://localhost:5522 docs/ui
  */
+import { spawnSync } from 'node:child_process';
 import { chromium } from 'playwright-core';
 
 const origin = process.argv[2] ?? 'http://localhost:5522';
 const outDir = process.argv[3] ?? 'docs/ui';
+
+/**
+ * EVERY CHECK AND EVERY SHOT RUNS IN BOTH THEMES. The script is one long
+ * top-level flow, so the theme loop is the process itself: without
+ * `VAM_E2E_THEME` it re-runs itself once per theme and fails if either run
+ * does; with it, it is a single-theme run whose pages all seed that theme
+ * through `localStorage` (as phone-question-shots.mjs does) and whose
+ * screenshot names carry it.
+ */
+const THEMES = ['light', 'dark'];
+const theme = process.env.VAM_E2E_THEME;
+if (theme === undefined) {
+  let failed = false;
+  for (const t of THEMES) {
+    console.log(`=== theme: ${t} ===`);
+    const r = spawnSync(process.execPath, process.argv.slice(1), {
+      stdio: 'inherit',
+      env: { ...process.env, VAM_E2E_THEME: t },
+    });
+    if (r.status !== 0) failed = true;
+  }
+  process.exit(failed ? 1 : 0);
+}
 
 /** The demo session's turns, oldest first — the order the column must draw. */
 const OLDEST_INPUT = "What's the factory's status right now?";
@@ -40,6 +64,16 @@ const DEMO_TURNS = 7;
 const MAX_DECISIONS = 3276;
 
 const browser = await chromium.launch();
+const newPageOrig = browser.newPage.bind(browser);
+browser.newPage = async (opts) => {
+  const p = await newPageOrig(opts);
+  await p.addInitScript((t) => {
+    if (window.localStorage.getItem('vam.prefs.v1') === null) {
+      window.localStorage.setItem('vam.prefs.v1', JSON.stringify({ theme: t }));
+    }
+  }, theme);
+  return p;
+};
 const page = await browser.newPage({ viewport: { width: 1100, height: 620 } });
 page.on('pageerror', (err) => console.error('PAGE ERROR:', err));
 page.on('console', (msg) => {
@@ -314,8 +348,8 @@ const moreText = ((await more.innerText()) ?? '').toLowerCase();
 console.log(`  no-pager note: ${JSON.stringify(await more.innerText())}`);
 // THE FIFTH ANSWER, ON FILE. Nothing else in this repo can produce a picture
 // of it: the state is unreachable from any source vam assembles.
-await page.screenshot({ path: `${outDir}/transcript-column-no-pager.png` });
-console.log(`${outDir}/transcript-column-no-pager.png`);
+await page.screenshot({ path: `${outDir}/transcript-column-no-pager-${theme}.png` });
+console.log(`${outDir}/transcript-column-no-pager-${theme}.png`);
 check(
   'in words, not only in an attribute',
   /cannot read further back/.test(moreText),
@@ -495,9 +529,17 @@ const overlaps = (a, b) => a.x < b.right && a.right > b.x && a.y < b.bottom && a
 let sawBoth = 0;
 let sawGap = Number.POSITIVE_INFINITY;
 let filledTheWidth = 0;
+// MORE THAN ONE NARROW WIDTH: where a prose line breaks depends on the font's
+// advance widths, which differ between this machine and the CI runner, so a
+// single 700px sweep can land every line short of the edge on one of them and
+// prove nothing. Several widths a few dozen px apart make a full line certain.
 for (const size of [
   { width: 1100, height: 620 },
   { width: 700, height: 520 },
+  { width: 660, height: 520 },
+  { width: 740, height: 520 },
+  { width: 780, height: 520 },
+  { width: 620, height: 520 },
 ]) {
   await page.setViewportSize(size);
   await page.waitForTimeout(200);
@@ -648,20 +690,20 @@ await column.evaluate((el) => {
   el.scrollTop = el.scrollHeight;
 });
 await page.waitForTimeout(200);
-await page.screenshot({ path: `${outDir}/transcript-column-bottom.png` });
-console.log(`${outDir}/transcript-column-bottom.png`);
+await page.screenshot({ path: `${outDir}/transcript-column-bottom-${theme}.png` });
+console.log(`${outDir}/transcript-column-bottom-${theme}.png`);
 await column.evaluate((el) => {
   el.scrollTop = Math.round(el.scrollHeight * 0.35);
 });
 await page.waitForTimeout(200);
-await page.screenshot({ path: `${outDir}/transcript-column-scrolled.png` });
-console.log(`${outDir}/transcript-column-scrolled.png`);
+await page.screenshot({ path: `${outDir}/transcript-column-scrolled-${theme}.png` });
+console.log(`${outDir}/transcript-column-scrolled-${theme}.png`);
 await column.evaluate((el) => {
   el.scrollTop = 0;
 });
 await page.waitForTimeout(200);
-await page.screenshot({ path: `${outDir}/transcript-column-top.png` });
-console.log(`${outDir}/transcript-column-top.png`);
+await page.screenshot({ path: `${outDir}/transcript-column-top-${theme}.png` });
+console.log(`${outDir}/transcript-column-top-${theme}.png`);
 
 // ------------------------------------- 8. A JUMP MOVES, AND HIDES NOTHING
 //
@@ -809,8 +851,8 @@ check(
     : volumeState === 'more-read' && /\d/.test(volumeText),
   `${mounted} of ${MAX_DECISIONS} mounted, boundary says ${volumeState}`,
 );
-await volume.screenshot({ path: `${outDir}/transcript-column-volume.png` });
-console.log(`${outDir}/transcript-column-volume.png`);
+await volume.screenshot({ path: `${outDir}/transcript-column-volume-${theme}.png` });
+console.log(`${outDir}/transcript-column-volume-${theme}.png`);
 
 // --------------------------------------------------- 11. READING FURTHER BACK
 //
@@ -1007,8 +1049,8 @@ const sawRefusal = await settles(
 check('a read that could not be made settles into a state of its own', sawRefusal);
 const refused = await columnState();
 console.log(`  refusal: ${refused.start}/${refused.more} — ${JSON.stringify(refused.moreText)}`);
-await back.screenshot({ path: `${outDir}/transcript-column-unavailable.png` });
-console.log(`${outDir}/transcript-column-unavailable.png`);
+await back.screenshot({ path: `${outDir}/transcript-column-unavailable-${theme}.png` });
+console.log(`${outDir}/transcript-column-unavailable-${theme}.png`);
 check(
   'a read that failed is drawn as a failure, not as an ending',
   refused.more === 'unavailable' && refused.start === 'read-limit',
@@ -1061,8 +1103,8 @@ const inFlight = await back.evaluate(() => ({
   said: document.querySelector('[data-column-more]')?.textContent?.trim() ?? '',
 }));
 console.log(`  in flight: ${JSON.stringify(inFlight)}`);
-await back.screenshot({ path: `${outDir}/transcript-column-reading.png` });
-console.log(`${outDir}/transcript-column-reading.png`);
+await back.screenshot({ path: `${outDir}/transcript-column-reading-${theme}.png` });
+console.log(`${outDir}/transcript-column-reading-${theme}.png`);
 check(
   'while a read is in flight the column says so',
   inFlight.more === 'reading' && /reading/i.test(inFlight.said),
@@ -1222,10 +1264,10 @@ await back.evaluate(() => {
   col.scrollTop = 0;
 });
 await back.waitForTimeout(200);
-await back.screenshot({ path: `${outDir}/transcript-column-session-start.png` });
-console.log(`${outDir}/transcript-column-session-start.png`);
-await back.screenshot({ path: `${outDir}/transcript-column-read-back.png` });
-console.log(`${outDir}/transcript-column-read-back.png`);
+await back.screenshot({ path: `${outDir}/transcript-column-session-start-${theme}.png` });
+console.log(`${outDir}/transcript-column-session-start-${theme}.png`);
+await back.screenshot({ path: `${outDir}/transcript-column-read-back-${theme}.png` });
+console.log(`${outDir}/transcript-column-read-back-${theme}.png`);
 
 // ------------------------------------------------- 12. CONCISE MODE, COLLAPSED
 //
@@ -1280,7 +1322,9 @@ async function conciseIn(mode, viewport = { width: 1100, height: 620 }, panes = 
       // browser, and seeding the new boolean here would make the migration
       // untested at the only place it can be seen working.
       JSON.stringify(
-        panes === undefined ? { turnProgress: mode } : { turnProgress: mode, panes },
+        panes === undefined
+          ? { turnProgress: mode, theme }
+          : { turnProgress: mode, panes, theme },
       ),
     ],
   );
@@ -1381,8 +1425,8 @@ check(
   JSON.stringify(collapsed.texts),
 );
 await toOldest(foldedPage);
-await foldedPage.screenshot({ path: `${outDir}/concise-collapsed.png` });
-console.log(`${outDir}/concise-collapsed.png`);
+await foldedPage.screenshot({ path: `${outDir}/concise-collapsed-${theme}.png` });
+console.log(`${outDir}/concise-collapsed-${theme}.png`);
 
 // --- 12.2 IT IS A FOLD, NOT A CLASS NAME. The same session at the same
 // viewport, launched in the other mode: the column has to be TALLER. jsdom
@@ -1406,8 +1450,8 @@ check(
 // line there and the line's presence is not a verdict.
 check('shown draws no unreadable-failures caveat at all', shown.caveat === null, String(shown.caveat));
 await toOldest(openPage);
-await openPage.screenshot({ path: `${outDir}/concise-shown.png` });
-console.log(`${outDir}/concise-shown.png`);
+await openPage.screenshot({ path: `${outDir}/concise-shown-${theme}.png` });
+console.log(`${outDir}/concise-shown-${theme}.png`);
 await openPage.close();
 
 // --- 12.3 TWO DIFFERENT UNKNOWNS, ON SCREEN. Collapsed, the ABSENCE of a line
@@ -1465,8 +1509,8 @@ check(
     cannotLook.caveatBox.top >= cannotLook.countBox.bottom - 0.5,
   `count ${cannotLook.countBox?.height}px tall, caveat top ${cannotLook.caveatBox?.top} vs count bottom ${cannotLook.countBox?.bottom}`,
 );
-await narrow.screenshot({ path: `${outDir}/concise-unreadable-failures.png` });
-console.log(`${outDir}/concise-unreadable-failures.png`);
+await narrow.screenshot({ path: `${outDir}/concise-unreadable-failures-${theme}.png` });
+console.log(`${outDir}/concise-unreadable-failures-${theme}.png`);
 await narrow.close();
 
 await openSession(foldedPage, 'crosscheck-2');
@@ -1509,7 +1553,7 @@ check(
 // folding is reversible; without this the setting reads as a delete.
 check(
   'and that the folded working comes back',
-  promised !== null && /···/.test(promised) && /comes back/i.test(promised),
+  promised !== null && /arrow/.test(promised) && /comes back/i.test(promised),
   String(promised),
 );
 check(
@@ -1522,8 +1566,8 @@ check(
 // meant to show.
 await foldedPage.locator('[data-focus-view-note]').scrollIntoViewIfNeeded();
 await foldedPage.waitForTimeout(150);
-await foldedPage.screenshot({ path: `${outDir}/concise-settings-row.png` });
-console.log(`${outDir}/concise-settings-row.png`);
+await foldedPage.screenshot({ path: `${outDir}/concise-settings-row-${theme}.png` });
+console.log(`${outDir}/concise-settings-row-${theme}.png`);
 await foldedPage.locator('[data-switch="focus-view"]').click();
 // Escape rather than the backdrop button: the backdrop is `inset-0` UNDER the
 // panel, so a click at its centre lands on the panel instead, and Escape is
@@ -1537,6 +1581,384 @@ check(
   afterPick.lines === DEMO_TURNS,
   `${afterPick.lines} lines`,
 );
+
+/** The composer's Tab offer (event #30) and its draft after Esc (event #47); the pane read is stubbed. */
+const SUGGEST_SCREEN = `\n${'─'.repeat(40)}\n❯ \u001b[2mrun the test\u001b[22m\n${'─'.repeat(40)}\n`;
+const composerPage = await browser.newPage({ viewport: { width: 1100, height: 620 } });
+composerPage.on('pageerror', (err) => console.error('PAGE ERROR (composer):', err));
+await composerPage.addInitScript(
+  ([key, payload]) => window.localStorage.setItem(key, payload),
+  [CONCISE_PREFS, JSON.stringify({ theme })],
+);
+await composerPage.goto(`${origin}/?demo=1&history=off`, { waitUntil: 'networkidle' });
+await composerPage.waitForSelector('[data-tab-strip]');
+await openSession(composerPage, 'notes-1');
+// Stubbed AFTER boot: a `window.api` at load would swap the demo for the desktop bridge.
+await composerPage.evaluate((screen) => {
+  window.api = {
+    terminal: {
+      read: async () => ({
+        kind: 'ok',
+        name: 'vam-demo',
+        text: screen,
+        cursor: { row: 0, col: 0 },
+      }),
+    },
+  };
+}, SUGGEST_SCREEN);
+const composerBox = composerPage.locator('textarea[aria-label="prompt to session"]');
+await composerBox.focus();
+// A keystroke and its undo re-render the panel, picking the stub up.
+await composerBox.fill('x');
+await composerBox.fill('');
+await composerPage.waitForSelector('[data-prompt-suggestion-ghost]', { timeout: 6_000 });
+await composerPage.screenshot({ path: `${outDir}/composer-tab-offer-${theme}.png` });
+console.log(`${outDir}/composer-tab-offer-${theme}.png`);
+await composerPage.keyboard.press('Tab');
+await composerPage.waitForTimeout(150);
+await composerPage.screenshot({ path: `${outDir}/composer-tab-filled-${theme}.png` });
+console.log(`${outDir}/composer-tab-filled-${theme}.png`);
+await composerBox.fill('a draft I typed');
+await composerPage.waitForTimeout(150);
+check(
+  'the offer is withdrawn once the draft carries text',
+  (await composerPage.locator('[data-prompt-suggestion-ghost]').count()) === 0,
+);
+await composerPage.screenshot({ path: `${outDir}/composer-draft-typed-${theme}.png` });
+console.log(`${outDir}/composer-draft-typed-${theme}.png`);
+await composerPage.keyboard.press('Escape');
+await composerPage.waitForTimeout(150);
+check(
+  'Escape leaves Insert and keeps the draft',
+  (await composerBox.inputValue()) === 'a draft I typed',
+);
+await composerPage.screenshot({ path: `${outDir}/composer-draft-kept-${theme}.png` });
+console.log(`${outDir}/composer-draft-kept-${theme}.png`);
+await composerPage.close();
+
+/**
+ * Task-18: every composer popover open, once, and each measured against its
+ * own trigger (EC-41). The slash popover and the icon picker are framed too.
+ * Menus: 1280x800 and a 700px pane; a menu may flip to right-aligned only when
+ * left-aligned would overflow, and never spans the composer.
+ */
+const POPOVER_VIEWPORTS = [
+  { name: 'desktop', width: 1280, height: 800 },
+  { name: 'pane-700', width: 700, height: 800 },
+];
+// The demo source reports no terminal and no prompt delivery, so the model and mode
+// triggers never render on a plain ?demo=1 build. Force both capabilities in the served
+// bundle (same patterns as model-picker-shots.mjs); throw if they stop matching.
+const POP_TERMINAL = /[\w$]+\.kind===`session`&&[\w$]+\([^()]*\)\.capabilities\.terminal/g;
+const POP_DELIVERS = /[\w$]+\.kind===`session`&&[\w$]+\([^()]*\)\.capabilities\.deliverPrompt/g;
+const forceCapabilities = async (pg) => {
+  let patched = 0;
+  await pg.route('**/assets/*.js', async (route) => {
+    const response = await route.fetch();
+    const body = await response.text();
+    const t = new RegExp(POP_TERMINAL.source).test(body);
+    const d = new RegExp(POP_DELIVERS.source).test(body);
+    if (t !== d) throw new Error(`bundle carries only one capability expression (terminal: ${t}, deliverPrompt: ${d})`);
+    if (t) patched += 1;
+    await route.fulfill({ response, body: t ? body.replace(POP_TERMINAL, '!0').replace(POP_DELIVERS, '!0') : body });
+  });
+  return () => {
+    if (patched === 0) throw new Error('no chunk carried the capability expressions; the popover menus would not render');
+  };
+};
+/**
+ * Task-44. Option rows' heights, and the mode menu's copy and label edges. Base
+ * (28d36402) row heights, measured: model rows 24px at 1280 and at the 700px
+ * pane, mode rows 40px.
+ */
+const BASE_ROW_HEIGHT = { 'desktop-model': 24, 'pane-700-model': 24, 'desktop-mode': 40, 'pane-700-mode': 40 };
+const MODE_MENU_MAX_WIDTH = 260;
+const measureOptions = (pg, sel) =>
+  pg.evaluate(
+    (s) => [...document.querySelectorAll(s)].map((el) => ({ height: el.getBoundingClientRect().height })),
+    sel,
+  );
+/** EC-72 + EC-75: copy whole, menu <= 260, one left edge, 12px glyphs. */
+async function assertModeLayout(pg, where) {
+  const r = await pg.evaluate(() => ({
+    menuWidth: document.querySelector('[data-mode-picker]').getBoundingClientRect().width,
+    descriptions: [...document.querySelectorAll('[data-mode-description]')].map((d) => ({
+      text: d.textContent,
+      scrollWidth: d.scrollWidth,
+      clientWidth: d.clientWidth,
+    })),
+    labelLefts: [...document.querySelectorAll('[data-mode-option]')].map(
+      (o) => o.querySelector('[data-mode-description]').previousElementSibling.getBoundingClientRect().left,
+    ),
+    descLefts: [...document.querySelectorAll('[data-mode-description]')].map((d) => d.getBoundingClientRect().left),
+    glyphWidths: [...document.querySelectorAll('[data-mode-picker] [data-mode-glyph]')].map(
+      (g) => g.getBoundingClientRect().width,
+    ),
+  }));
+  console.log(`mode layout @${where}:`, JSON.stringify(r));
+  check(
+    `${where}: every mode description reads whole (no ellipsis)`,
+    r.descriptions.length === 3 && r.descriptions.every((d) => d.scrollWidth <= d.clientWidth),
+    r.descriptions.map((d) => `${d.scrollWidth}>${d.clientWidth} "${d.text}"`).join('; '),
+  );
+  check(`${where}: the mode menu is at most ${MODE_MENU_MAX_WIDTH}px wide`, r.menuWidth <= MODE_MENU_MAX_WIDTH + 0.5, `${r.menuWidth}px`);
+  const spread = (xs) => Math.max(...xs) - Math.min(...xs);
+  check(`${where}: Auto, Manual and Plan labels share one left edge`, spread(r.labelLefts) <= 1, `edges ${r.labelLefts}`);
+  check(`${where}: descriptions share the label's left edge`, spread([...r.labelLefts, ...r.descLefts]) <= 1, `edges ${r.descLefts}`);
+  check(`${where}: every mode glyph is 12px wide`, r.glyphWidths.length === 3 && r.glyphWidths.every((w) => Math.abs(w - 12) <= 0.5), `widths ${r.glyphWidths}`);
+}
+for (const vp of POPOVER_VIEWPORTS) {
+  const popPage = await browser.newPage({ viewport: { width: vp.width, height: vp.height } });
+  const assertForced = await forceCapabilities(popPage);
+  popPage.on('pageerror', (err) => console.error('PAGE ERROR (popover):', err));
+  await popPage.addInitScript(
+    ([key, payload]) => window.localStorage.setItem(key, payload),
+    [CONCISE_PREFS, JSON.stringify({ theme })],
+  );
+  await popPage.goto(`${origin}/?demo=1&history=off`, { waitUntil: 'networkidle' });
+  await popPage.waitForSelector('[data-tab-strip]');
+  assertForced();
+  await openSession(popPage, 'notes-1');
+  const popBox = popPage.locator('textarea[aria-label="prompt to session"]');
+  await popBox.focus();
+  await popBox.fill('/');
+  await popPage.waitForSelector('[data-slash-suggest-heading]', { timeout: 6_000 });
+  check(
+    `${vp.name}: the slash popover opens with its heading first`,
+    await popPage.evaluate(
+      () =>
+        document.querySelector('[data-slash-suggest]')?.firstElementChild?.hasAttribute(
+          'data-slash-suggest-heading',
+        ) === true,
+    ),
+  );
+  await popPage.screenshot({ path: `${outDir}/composer-popover-slash-${vp.name}-${theme}.png` });
+  console.log(`${outDir}/composer-popover-slash-${vp.name}-${theme}.png`);
+  await popBox.fill('');
+  for (const [root, menuSel] of [
+    ['provider', '[data-provider-picker]'],
+    ['model', '[data-model-picker-menu]'],
+    ['mode', '[data-mode-picker]'],
+  ]) {
+    const trigger = popPage.locator(`[data-popover-root="${root}"] button[aria-haspopup="listbox"]`);
+    if ((await trigger.count()) === 0) {
+      check(`${vp.name}: the ${root} trigger is on screen`, false);
+      continue;
+    }
+    await trigger.first().click();
+    await popPage.waitForSelector(menuSel);
+    await popPage.waitForTimeout(100);
+    const m = await popPage.evaluate(
+      ([r, sel]) => {
+        const anchor = document.querySelector(`[data-popover-root="${r}"] [data-popover-anchor]`)
+          ?? document.querySelector(`[data-popover-root="${r}"][data-popover-anchor]`);
+        const menu = document.querySelector(sel);
+        const bar = document.querySelector('[data-composer-bar]');
+        if (!anchor || !menu || !bar) return null;
+        const a = anchor.getBoundingClientRect();
+        const b = menu.getBoundingClientRect();
+        const c = bar.getBoundingClientRect();
+        return {
+          aLeft: a.left, aRight: a.right, aTop: a.top,
+          mLeft: b.left, mRight: b.right, mBottom: b.bottom, mWidth: b.width,
+          barLeft: c.left, barRight: c.right, barWidth: c.width,
+          vw: window.innerWidth,
+        };
+      },
+      [root, menuSel],
+    );
+    console.log(`${root} menu @${vp.name}:`, JSON.stringify(m));
+    check(`${vp.name}: the ${root} menu and its anchor were measured`, m !== null);
+    if (m !== null) {
+      check(
+        `${vp.name}: the ${root} menu sits above its own trigger, not the composer`,
+        m.mBottom <= m.aTop + 0.5,
+        `menu bottom ${m.mBottom}, trigger top ${m.aTop}`,
+      );
+      check(
+        `${vp.name}: the ${root} menu does not span the composer`,
+        m.mWidth < m.barWidth - 16 || m.barWidth < 400,
+        `menu ${m.mWidth}px in a ${m.barWidth}px bar`,
+      );
+      const hangsLeft = Math.abs(m.mLeft - m.aLeft) <= 1;
+      const hangsRight = Math.abs(m.mRight - m.aRight) <= 1;
+      check(
+        `${vp.name}: the ${root} menu is aligned to its trigger and flips only on overflow`,
+        hangsLeft || (hangsRight && m.aLeft + m.mWidth > Math.min(m.barRight, m.vw) - 8),
+        `menu ${m.mLeft}..${m.mRight}, trigger ${m.aLeft}..${m.aRight}`,
+      );
+      check(
+        `${vp.name}: the ${root} menu stays inside the viewport`,
+        m.mLeft >= -0.5 && m.mRight <= m.vw + 0.5,
+      );
+      if (root === 'model') {
+        // Task-44 EC-74: the model menu flips and caps like the other two.
+        console.log(`model menu @${vp.name} rects:`, JSON.stringify({ mLeft: m.mLeft, mRight: m.mRight, barRight: m.barRight }));
+        check(
+          `${vp.name}: the model menu's right edge is at most the bar's right edge minus 8`,
+          m.mRight <= m.barRight - 8 + 0.5,
+          `menu right ${m.mRight}, bar right ${m.barRight}`,
+        );
+      }
+    }
+    if (root === 'model' || root === 'mode') {
+      const rows = await measureOptions(popPage, root === 'model' ? '[data-model-option]' : '[data-mode-option]');
+      console.log(`${root} option rows @${vp.name}:`, JSON.stringify(rows.map((r) => r.height)));
+      const base = BASE_ROW_HEIGHT[`${vp.name}-${root}`];
+      check(
+        `${vp.name}: every ${root} option row keeps its base height ${base}px`,
+        base === undefined || rows.every((r) => Math.abs(r.height - base) <= 1),
+        `heights ${rows.map((r) => r.height)}`,
+      );
+    }
+    if (root === 'mode') {
+      await assertModeLayout(popPage, vp.name);
+    }
+    await popPage.screenshot({
+      path: `${outDir}/composer-popover-${root}-${vp.name}-${theme}.png`,
+    });
+    console.log(`${outDir}/composer-popover-${root}-${vp.name}-${theme}.png`);
+    await popPage.keyboard.press('Escape');
+    await popPage.waitForTimeout(100);
+  }
+  if (vp.name === 'desktop') {
+    const projectIcon = popPage.locator('[data-project-icon]');
+    if ((await projectIcon.count()) > 0) {
+      await projectIcon.first().click();
+      await popPage.waitForSelector('[data-icon-picker-heading]');
+      check(
+        'the icon picker heading reads "Icon for"',
+        (await popPage.locator('[data-icon-picker-heading] span').first().innerText()).trim() ===
+          'Icon for',
+      );
+      await popPage.screenshot({ path: `${outDir}/composer-popover-icon-picker-${theme}.png` });
+      console.log(`${outDir}/composer-popover-icon-picker-${theme}.png`);
+    } else {
+      check('the icon picker can be opened from a project icon', false);
+    }
+  }
+  await popPage.close();
+}
+
+/**
+ * Task-44 EC-73 + EC-76 (+ EC-72/75 on phone): the 390x844 phone shell. Every
+ * menu keeps 12px from both viewport edges, every model and mode option row is
+ * at least 44px tall, and the mode menu reads whole. The provider menu is only
+ * opened when the build lists two providers.
+ */
+const PHONE_MARGIN = 12;
+/**
+ * Base (28d36402) widths of the phone menus, measured at 390x844 on macOS.
+ * The model menu's width is its CONTENT's width, and a font's advance widths
+ * differ between macOS and the CI runner's Linux (the same menu is 153.02px
+ * there), so a constant is only right on the machine that measured it. `null`
+ * means "measure the menu's own max-content width in this run instead" -- the
+ * same fact (the phone cap and the 12px margin leave the menu its natural
+ * size), asked of this machine's font.
+ */
+const BASE_PHONE_WIDTH = { model: null, mode: 260 };
+{
+  const ph = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  const assertForcedPhone = await forceCapabilities(ph);
+  ph.on('pageerror', (err) => console.error('PAGE ERROR (phone popover):', err));
+  await ph.addInitScript(
+    ([key, payload]) => window.localStorage.setItem(key, payload),
+    [CONCISE_PREFS, JSON.stringify({ theme })],
+  );
+  await ph.goto(`${origin}/?demo=1&history=off`, { waitUntil: 'networkidle' });
+  await ph.waitForSelector('[data-phone-shell="list"]');
+  assertForcedPhone();
+  await ph.locator('[data-session-row="notes-1"]').first().click();
+  await ph.waitForSelector('[data-phone-shell="session"]');
+  await ph.waitForSelector('textarea[aria-label="prompt to session"]');
+  check(
+    'phone: the composer is inside the .vam-phone shell',
+    await ph.evaluate(() => document.querySelector('[data-composer-bar]')?.closest('.vam-phone') != null),
+  );
+  const rectOf = (sel) =>
+    ph.evaluate((s) => {
+      const el = document.querySelector(s);
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { left: r.left, right: r.right, width: r.width, vw: window.innerWidth };
+    }, sel);
+  const openOverflow = async () => {
+    await ph.locator('[data-composer-overflow]').first().click();
+    await ph.waitForSelector('[data-composer-overflow-menu]');
+  };
+  const margins = (name, r) => {
+    console.log(`phone ${name} menu rect:`, JSON.stringify(r));
+    check(`phone: the ${name} menu is measured`, r !== null);
+    if (r === null) return;
+    check(
+      `phone: the ${name} menu keeps ${PHONE_MARGIN}px from both viewport edges`,
+      r.left >= PHONE_MARGIN - 0.5 && r.vw - r.right >= PHONE_MARGIN - 0.5,
+      `left ${r.left}, right gap ${r.vw - r.right}`,
+    );
+  };
+  await openOverflow();
+  margins('overflow', await rectOf('[data-composer-overflow-menu]'));
+  await ph.screenshot({ path: `${outDir}/composer-popover-overflow-phone-${theme}.png` });
+  console.log(`${outDir}/composer-popover-overflow-phone-${theme}.png`);
+  await ph.keyboard.press('Escape');
+  for (const [name, rowSel, menuSel, optSel] of [
+    ['provider', '[data-composer-overflow-provider]', '[data-provider-picker]', null],
+    ['model', '[data-composer-overflow-model]', '[data-model-picker-menu]', '[data-model-option]'],
+    ['mode', '[data-composer-overflow-mode]', '[data-mode-picker]', '[data-mode-option]'],
+  ]) {
+    await openOverflow();
+    if ((await ph.locator(rowSel).count()) === 0) {
+      console.log(`phone ${name} menu: dormant (the build lists no such row)`);
+      await ph.keyboard.press('Escape');
+      continue;
+    }
+    await ph.locator(rowSel).first().click();
+    await ph.waitForSelector(menuSel);
+    await ph.waitForTimeout(100);
+    const r = await rectOf(menuSel);
+    margins(name, r);
+    if (optSel !== null) {
+      const rows = await measureOptions(ph, optSel);
+      console.log(`phone ${name} option rows:`, JSON.stringify(rows.map((o) => o.height)));
+      check(
+        `phone: every ${name} option row is at least 44px tall`,
+        rows.length > 0 && rows.every((o) => o.height >= 43.5),
+        `heights ${rows.map((o) => o.height)}`,
+      );
+      const base =
+        BASE_PHONE_WIDTH[name] ??
+        (await ph.evaluate((sel) => {
+          const menu = document.querySelector(sel);
+          const kept = { width: menu.style.width, maxWidth: menu.style.maxWidth };
+          menu.style.width = 'max-content';
+          menu.style.maxWidth = 'none';
+          const natural = menu.getBoundingClientRect().width;
+          menu.style.width = kept.width;
+          menu.style.maxWidth = kept.maxWidth;
+          return natural;
+        }, menuSel));
+      if (base !== null && r !== null) {
+        // The mode menu is sized by its content up to 260px, so EC-72's shorter copy
+        // narrows it on purpose: it may only be narrower than base, never wider.
+        const widthOk =
+          name === 'mode'
+            ? r.width <= Math.min(base, r.vw - 2 * PHONE_MARGIN) + 1
+            : Math.abs(r.width - Math.min(base, r.vw - 2 * PHONE_MARGIN)) <= 1;
+        check(
+          `phone: the ${name} menu width is its base width ${base}px (mode: at most, the shorter copy narrows it)`,
+          widthOk,
+          `${r.width}px`,
+        );
+      }
+    }
+    if (name === 'mode') await assertModeLayout(ph, 'phone');
+    await ph.screenshot({ path: `${outDir}/composer-popover-${name}-phone-${theme}.png` });
+    console.log(`${outDir}/composer-popover-${name}-phone-${theme}.png`);
+    await ph.keyboard.press('Escape');
+    await ph.waitForTimeout(100);
+  }
+  await ph.close();
+}
 
 await browser.close();
 

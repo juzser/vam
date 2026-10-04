@@ -294,6 +294,18 @@ describe('the phone shell’s hit areas', () => {
     expect([cs.minHeight, cs.minWidth]).toEqual(['44px', '44px']);
   });
 
+  it('gives the project list row + a 44px hit', async () => {
+    render(<Canvas model={MODEL} source={phoneSource({ createSession: async () => {} })} />);
+    await act(async () => {
+      fireEvent.click(document.querySelector('[data-phone-fab]') as Element);
+    });
+    const plus = document.querySelector('[data-project-choice-plus]') as Element;
+    expect(plus).not.toBeNull();
+    expect(plus.classList.contains('vam-tap')).toBe(true);
+    const cs = getComputedStyle(plus);
+    expect([cs.minHeight, cs.minWidth]).toEqual(['44px', '44px']);
+  });
+
   it('sets 16px on every box you type in, which is the iOS zoom threshold', () => {
     phone();
     act(() => {

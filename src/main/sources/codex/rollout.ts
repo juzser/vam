@@ -126,18 +126,30 @@ const isObject = (v: unknown): v is Record<string, unknown> =>
  * line; this covers the trailing one and anything else.
  */
 export function parseRolloutLines(text: string): readonly Line[] {
+  return parseWithOffsets(text, 0).lines;
+}
+
+/** `parseRolloutLines` plus each kept line's absolute byte offset (`text` begins at `start`). */
+function parseWithOffsets(text: string, start: number): { lines: Line[]; offsets: number[] } {
   const lines: Line[] = [];
+  const offsets: number[] = [];
+  let position = start;
   for (const raw of text.split('\n')) {
+    const offset = position;
+    position += Buffer.byteLength(raw) + 1;
     if (raw.trim() === '') continue;
     try {
       const parsed: unknown = JSON.parse(raw);
-      if (isObject(parsed)) lines.push(parsed);
+      if (isObject(parsed)) {
+        lines.push(parsed);
+        offsets.push(offset);
+      }
     } catch {
       // Deliberately silent. See above: this is the common case at both ends
       // of a window, not an error about the transcript.
     }
   }
-  return lines;
+  return { lines, offsets };
 }
 
 /** `[{type:'text'|'Text', text:'…'}]` -- both spellings are real in the corpus. */
@@ -183,8 +195,16 @@ function itemOf(line: Line): { item: Item; turnId: string | null } | null {
  *
  * `decisionIdPrefix` namespaces the ids, so two threads' turns never collide
  * in a map keyed by decision id.
+ *
+ * A TURN'S ID DOES NOT MOVE WITH THE WINDOW: `<prefix>-<turn_id>`, else
+ * `<prefix>:@<offset>` (opening line's absolute byte offset, from `offsets`),
+ * else positional. A `UserMessage` with the open turn's `turn_id` joins it.
  */
-export function turnsFromLines(lines: readonly Line[], decisionIdPrefix: string): RolloutFacts {
+export function turnsFromLinesAt(
+  lines: readonly Line[],
+  decisionIdPrefix: string,
+  offsets?: readonly number[],
+): RolloutFacts {
   type Open = {
     input: string;
     output: string | null;
@@ -192,26 +212,49 @@ export function turnsFromLines(lines: readonly Line[], decisionIdPrefix: string)
     errorCount: number;
     promptedAt: string | null;
     latestAt: string | null;
-    index: number;
+    id: string;
+    turnId: string | null;
+    openedMidTurn: boolean;
   };
   const turns: Open[] = [];
   let current: Open | null = null;
   let activity: string | null = null;
   let sawMessage = false;
   let index = 0;
+  const taken = new Set<string>();
+  const idOf = (turnId: string | null, offset: number | undefined): string => {
+    index += 1;
+    const own = turnId === null ? null : `${decisionIdPrefix}-${turnId}`;
+    const id =
+      own !== null && !taken.has(own)
+        ? own
+        : offset === undefined
+          ? `${decisionIdPrefix}-${index}`
+          : `${decisionIdPrefix}:@${offset}`;
+    taken.add(id);
+    return id;
+  };
 
   const at = (line: Line): string | null => {
     const value = line['timestamp'];
     return typeof value === 'string' && value !== '' ? value : null;
   };
 
-  for (const line of lines) {
+  for (const [position, line] of lines.entries()) {
     const found = itemOf(line);
     if (found === null) continue;
-    const { item } = found;
+    const { item, turnId } = found;
     if (item.type === 'UserMessage') {
       sawMessage = true;
-      index += 1;
+      if (current !== null && turnId !== null && current.turnId === turnId) {
+        // Input steered into the running turn: it joins, it does not open one.
+        const steered = textOf(item.content);
+        if (steered !== '') {
+          current.input = current.input === '' ? steered : `${current.input}\n\n${steered}`;
+        }
+        current.latestAt = at(line) ?? current.latestAt;
+        continue;
+      }
       current = {
         input: textOf(item.content),
         output: null,
@@ -219,7 +262,9 @@ export function turnsFromLines(lines: readonly Line[], decisionIdPrefix: string)
         errorCount: 0,
         promptedAt: at(line),
         latestAt: at(line),
-        index,
+        id: idOf(turnId, offsets?.[position]),
+        turnId,
+        openedMidTurn: false,
       };
       turns.push(current);
       continue;
@@ -229,7 +274,6 @@ export function turnsFromLines(lines: readonly Line[], decisionIdPrefix: string)
       const answer = textOf(item.content);
       if (current === null) {
         // An answer whose question is above the window. Said, never dropped.
-        index += 1;
         current = {
           input: '',
           output: answer,
@@ -237,7 +281,9 @@ export function turnsFromLines(lines: readonly Line[], decisionIdPrefix: string)
           errorCount: 0,
           promptedAt: null,
           latestAt: at(line),
-          index,
+          id: idOf(turnId, offsets?.[position]),
+          turnId,
+          openedMidTurn: true,
         };
         turns.push(current);
       } else {
@@ -257,7 +303,7 @@ export function turnsFromLines(lines: readonly Line[], decisionIdPrefix: string)
     current.latestAt = at(line) ?? current.latestAt;
     if (step.failed) current.errorCount += 1;
     current.steps.push({
-      id: `${decisionIdPrefix}-${current.index}-step-${current.steps.length + 1}`,
+      id: `${current.id}-step-${current.steps.length + 1}`,
       label: step.label,
       failed: step.failed,
     });
@@ -267,7 +313,7 @@ export function turnsFromLines(lines: readonly Line[], decisionIdPrefix: string)
     .slice(-MAX_TURNS)
     .reverse()
     .map((turn) => ({
-      id: `${decisionIdPrefix}-${turn.index}`,
+      id: turn.id,
       label: 'codex',
       input: turn.input,
       output: turn.output,
@@ -278,8 +324,14 @@ export function turnsFromLines(lines: readonly Line[], decisionIdPrefix: string)
       // A READING, NOT AN ABSENCE: zero means vam looked at every call in the
       // window and none of them came back non-zero. See `Decision.errorCount`.
       errorCount: turn.errorCount,
+      ...(turn.openedMidTurn ? { openedMidTurn: true } : {}),
     }));
   return { decisions, activity, starved: !sawMessage };
+}
+
+/** `turnsFromLinesAt` with no offsets: positional ids. */
+export function turnsFromLines(lines: readonly Line[], decisionIdPrefix: string): RolloutFacts {
+  return turnsFromLinesAt(lines, decisionIdPrefix);
 }
 
 /**
@@ -350,6 +402,7 @@ export async function readRolloutTail(
   // Oldest first at the end: `turnsFromLines` reads positionally, so the order
   // it is handed is the order the FILE is in, never the order it was read in.
   const collected: Line[] = [];
+  const offsets: number[] = [];
   let boundary = size;
   let spent = 0;
   let sawUser = false;
@@ -360,13 +413,14 @@ export async function readRolloutTail(
     const window = await source.read(from, boundary);
     spent += boundary - from;
     if (window.text !== '') {
-      const lines = parseRolloutLines(window.text);
+      const { lines, offsets: windowOffsets } = parseWithOffsets(window.text, window.start);
       for (const line of lines) {
         const found = itemOf(line);
         if (found?.item.type === 'UserMessage') sawUser = true;
         if (found?.item.type === 'AgentMessage') sawAgent = true;
       }
       collected.unshift(...lines);
+      offsets.unshift(...windowOffsets);
     }
     // The stop rule is the raw material of one turn -- a question and an
     // answer -- exactly as `claude-code/tail.ts` states it. The byte ceiling
@@ -384,5 +438,5 @@ export async function readRolloutTail(
     if (spent + stride > budget) break;
   }
 
-  return turnsFromLines(collected, decisionIdPrefix);
+  return turnsFromLinesAt(collected, decisionIdPrefix, offsets);
 }

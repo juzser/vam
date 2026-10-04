@@ -660,23 +660,6 @@ describe('Escape leaves the pane again, and Tab still does too', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it('says where the exit is, but only while the pane has focus', async () => {
-    // An exit nobody can find is not an exit. It rides the session name on the
-    // rule under the screen and is appended only while the pane has focus,
-    // which is the only moment the question is asked.
-    await open();
-    await enter();
-    expect(q('[data-terminal-exit-hint]')?.textContent).toContain('Esc');
-    expect(q('[data-terminal-exit-hint]')?.textContent).toContain('Tab');
-    expect(q('[data-terminal-exit-hint]')?.closest('[data-terminal-status]')).not.toBeNull();
-
-    fireEvent.blur(pane() as HTMLElement);
-    await settle();
-    expect(q('[data-terminal-exit-hint]')).toBeNull();
-    // The identity does NOT go with it. That was the whole defect.
-    expect(q('[data-terminal-badge]')?.textContent).toContain('vam-atlas-a1b2c3');
-  });
-
   it('names the exit in the accessible name too, for a reader that cannot see a corner', async () => {
     await open();
     expect(pane()?.getAttribute('aria-label')).toContain('Esc');
@@ -796,47 +779,6 @@ describe('a pairing vam cannot use is said as that, not as an absence', () => {
 });
 
 describe('the pane says whether what is typed is going anywhere', () => {
-  it('shows which session this is, VISIBLY, without being focused or read aloud', async () => {
-    // THE DEFECT THIS PINS. When the two lines came off, the name went into
-    // the pane's `aria-label` -- true for a screen reader, invisible to the
-    // person looking at the terminal, who then reported that switching to
-    // this tab tells them nothing about the session they are in.
-    //
-    // So the assertion is on what is DRAWN. `textContent` of the tab is what
-    // a person can read; an `aria-label` assertion is exactly the test that
-    // would have passed all along while the screen said nothing.
-    await open();
-    fireEvent.blur(pane() as HTMLElement);
-    await settle();
-    expect(q<HTMLElement>('[data-terminal]')?.textContent).toContain('vam-atlas-a1b2c3');
-  });
-
-  it('costs ONE row to say it, under the screen rather than over it', async () => {
-    await open();
-    const badge = q<HTMLElement>('[data-terminal-badge]');
-    // THE BARGAIN CHANGED, AND THIS IS WHERE IT IS RECORDED. It used to be
-    // absolutely positioned over the pane's bottom-right corner and was
-    // defended as costing no row. It cost no row and it covered the corner a
-    // terminal prints its last line into, in the faintest ink vam has. It is
-    // now a segment of the rule under the screen: one row, spent once, for a
-    // name that can actually be read -- and the row was being spent anyway,
-    // because the branch is on it.
-    expect(badge?.closest('[data-terminal-status]')).not.toBeNull();
-    expect(badge?.getAttribute('class')).not.toContain('absolute');
-    // And still OUTSIDE the scrolling box: inside, it would be laid out
-    // against the content and scroll out of sight with the first screenful.
-    expect(badge?.closest('[data-terminal-pane]')).toBeNull();
-    // Still no flow chrome ABOVE the pane -- the rule is under it, which is
-    // the half of the operator's request that has not changed.
-    expect(q('[data-terminal-name]')).toBeNull();
-    expect(q('[data-terminal-typing]')).toBeNull();
-    const tab = q<HTMLElement>('[data-terminal]') as HTMLElement;
-    const kids = [...tab.children];
-    expect(kids.indexOf(q<HTMLElement>('[data-terminal-status]') as HTMLElement)).toBe(
-      kids.length - 1,
-    );
-  });
-
   it('draws no chrome above the pane at all, which is the space the operator asked for', async () => {
     await open();
     // The two lines that stood here: the session's name, and a caption saying

@@ -362,6 +362,11 @@ function baseApiStub() {
   await page.waitForSelector('[data-avatar-bar]');
   await page.getByLabel('usage').click();
   await page.waitForSelector('[data-usage-panel]', { timeout: 5_000 });
+  // UsagePopover lazy-loads UsagePopoverPanel inside Suspense, so the panel
+  // shell can appear before its provider sections do: wait for what is read.
+  const before = await page.locator('[data-usage-provider]').count();
+  await page.waitForSelector('[data-usage-provider="codex"]', { timeout: 5_000 });
+  console.log('usage providers before wait:', before);
   const providers = await page
     .locator('[data-usage-provider]')
     .evaluateAll((nodes) => nodes.map((n) => n.getAttribute('data-usage-provider')));
@@ -561,6 +566,12 @@ function baseApiStub() {
   await page.addInitScript(installWorktrees, { projectId: PROJECT_ID, worktrees: [INITIAL_WORKTREE] });
   await page.goto(`${origin}/`, { waitUntil: 'networkidle' });
   await page.waitForSelector('[data-session-row]', { timeout: 10_000 });
+  // `hideWorktrees` ships ON (no Worktrees section is drawn), so turn "Show
+  // worktrees" on from the filter popover first, as `worktrees-shots.mjs` does.
+  await page.locator('button[aria-label="filter sessions"]').click();
+  await page.waitForSelector('[data-origin-toggle="worktrees"]', { timeout: 5_000 });
+  await page.locator('[data-origin-toggle="worktrees"]').click();
+  await page.locator('button[aria-label="filter sessions"]').click();
   await page.waitForSelector('[data-worktree-row]', { timeout: 5_000 });
 
   await page.locator('button[aria-label="filter sessions"]').click();
@@ -779,12 +790,12 @@ function baseApiStub() {
   await page.locator('button[aria-label="settings"]').first().click();
   await page.waitForSelector('[data-settings-nav]', { timeout: 5_000 });
   await page.locator('[data-settings-nav-item="integrations"]').click();
-  await page.waitForSelector('[data-github-status]', { timeout: 5_000 });
-  await page.waitForSelector('[data-gitlab-status]', { timeout: 5_000 });
+  await page.waitForSelector('[data-github-status-pill]', { timeout: 5_000 });
+  await page.waitForSelector('[data-gitlab-status-pill]', { timeout: 5_000 });
 
   const shape = await page.evaluate(() => ({
-    github: document.querySelector('[data-github-status]')?.textContent ?? null,
-    gitlab: document.querySelector('[data-gitlab-status]')?.textContent ?? null,
+    github: document.querySelector('[data-github-account-line]')?.textContent ?? null,
+    gitlab: document.querySelector('[data-gitlab-account-line]')?.textContent ?? null,
   }));
   console.log('integrations:', JSON.stringify(shape));
   assert('both GitHub and GitLab cards are drawn', shape.github !== null && shape.gitlab !== null, JSON.stringify(shape));

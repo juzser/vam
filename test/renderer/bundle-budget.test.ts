@@ -222,8 +222,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * under it, more than either feature alone needed.
  *
  * THE CACHE-TIMER COUNTDOWN THEN MERGED IN TOO, on top of the ADHD-card +
- * Integrations tree above: `domain/cache-timer.ts`, `panels/
- * CacheCountdown.tsx`, `panels/cache-timer-clock.ts`, three new `Session`
+ * Integrations tree above: the countdown's domain module, row
+ * component and shared clock (all since deleted), three new `Session`
  * fields threaded through `SessionList.tsx`, and the sidebar's first-ever
  * use of lucide's `Timer` glyph, eager by necessity -- it draws in the
  * sidebar, which every load already pays for, so there is no lazy boundary
@@ -778,6 +778,86 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * (218,289 B) plus ~411 B (~0.2%) of the slack the thirteenth paragraph
  * showed a different machine's zlib can eat. `ENTRY_BUDGET_BYTES` is NOT
  * moved: 727,087 B still clears 728,700 by 1,613 B.
+ *
+ * A FIFTEENTH, EPIC-WIDE ALLOWANCE: THE REMAINING UI TASKS. The entry grows
+ * with every renderer task the vam-ux-3 epic still has to land, the phone
+ * terminal and create-plus task first: merged onto the integration branch it
+ * failed BOTH budgets above (entry 728,731 B against 728,700, gzip 218,716 B
+ * against 218,700), by 31 B and 16 B. Because the epic's other UI tasks grow
+ * the entry too, the budget is sized once for the epic here instead of being
+ * bumped at every merge. Measured, `electron-vite build --mode production`
+ * (this machine's `darwin` zlib), the way this test measures it:
+ *
+ *     integration 70278b8c            entry 728,231 B  (218,640 B gzip)
+ *     integration + phone terminal    entry 728,731 B  (218,716 B gzip)
+ *     integration + phone terminal
+ *       + the four held heads         entry 729,147 B  (218,875 B gzip)
+ *
+ * Wave 1's 8 renderer tasks grew the entry by a mean of 181.4 B raw and
+ * 53.5 B gzip each. Sixteen renderer tasks remain that can grow it, so the
+ * projection is 16 x 181.4 = +2,902 B raw and 16 x 53.5 = +856 B gzip on top
+ * of the 729,147 B / 218,875 B base (integration + phone terminal + the four
+ * held heads, planner-measured; the 728,731 B / 218,716 B line above is
+ * integration + phone terminal alone): 732,049 B / 219,731 B (an estimate from the wave-1
+ * mean, not a measurement), plus ~0.2% slack for another machine's zlib, the
+ * thirteenth paragraph's lesson. `ENTRY_BUDGET_BYTES` moves 728,700 ->
+ * 733,600 and `ENTRY_GZIP_BUDGET_BYTES` moves 218,700 -> 220,200. This is an
+ * epic-wide allowance, not headroom any one PR may assume: the next PR to
+ * land here still re-measures rather than assuming there is room.
+ *
+ * A SIXTEENTH, SMALL GROWTH, FROM vam-ux-3/task-4-card-matches-terminal: the
+ * question card now draws the terminal's own free-text row and follows the
+ * pane's step, all eager `DetailPanel.tsx` code. Measured, `electron-vite
+ * build --mode production` (this machine's `darwin` zlib), the way this test
+ * measures it: entry 733,717 B (over 733,600 by 117 B); gzip 220,218 B (over
+ * 220,200 by 18 B). `ENTRY_BUDGET_BYTES` moves 733,600 -> 733,900 and
+ * `ENTRY_GZIP_BUDGET_BYTES` moves 220,200 -> 220,350: the measured figures
+ * plus ~180 B / ~130 B of slack, inside the epic allowance's 734,000 /
+ * 220,400 ceiling. After the merge queue rebased this task onto integration
+ * with task-21, the same measurement read entry 734,798 B and gzip 220,648 B:
+ * the extra growth arrived with task-21 on integration, not from this task.
+ * Plan v17 allows up to 735,200 / 220,800, so `ENTRY_BUDGET_BYTES` moves
+ * 733,900 -> 735,000 and `ENTRY_GZIP_BUDGET_BYTES` moves 220,350 -> 220,750
+ * (~200 B / ~100 B of slack over the post-rebase figures).
+ *
+ * A SEVENTEENTH, FROM vam-ux-3/task-16-prs-view-filter-and-sort: the PRs
+ * tab's filter bar, its count line and the filter state in `DetailPanel.tsx`
+ * are all eager code. Measured, `electron-vite build --mode production`
+ * (this machine's `darwin` zlib), the way this test measures it: entry
+ * 738,703 B (over 735,000 by 3,703 B); gzip 221,774 B (over 220,750 by
+ * 1,024 B). `ENTRY_BUDGET_BYTES` moves 735,000 -> 739,000 and
+ * `ENTRY_GZIP_BUDGET_BYTES` moves 220,750 -> 221,924: the measured figures
+ * plus ~297 B / ~150 B of slack, inside plan v19's 739,500 / 222,100 ceiling.
+ *
+ * AN EIGHTEENTH, FROM vam-ux-3/task-17-composer-tab-suggestion: the Tab KeyTag,
+ * suggestion overlay and pane reader are eager code. Measured the way this test
+ * measures it: entry 740,863 B, gzip 222,495 B. The budgets move 739,000 ->
+ * 741,163 and 221,924 -> 222,645, inside plan v20's 741,200 / 222,650 ceiling.
+ *
+ * A NINETEENTH, FROM vam-ux-3/task-18-composer-popovers (2026-10-02): the
+ * ProviderIcon glyph record, the mode descriptions and the slash-popover
+ * heading are all eager in DetailPanel. Measured the way this test measures
+ * it, on that task's head (fa78b3a2 plus the task): entry 742,591 B (over
+ * 741,163 by 1,428 B), gzip 221,980 B (under 222,645, so unchanged).
+ * `ENTRY_BUDGET_BYTES` moves 741,163 -> 743,500: the measured figure plus
+ * 909 B of slack, inside plan v23's 2,000 B allowance.
+ *
+ * A TWENTIETH, FROM vam-ux-3/task-24-history-survives-idle (operator events
+ * #71 and #896 A2): retention across a window slide, the pager reset after a
+ * capped retain and the Bash `!` source are eager code. Measured the way this
+ * test measures it: entry 743,283 B at 07819140, 743,844 B at the first cut and
+ * 744,270 B at head after trimming (the shared command-candidate helper in
+ * `commandsInColumn`, the single skip set and the one-line offset parse in
+ * `retainLeft`); that still exceeds 743,500, so the raise stands.
+ * `ENTRY_BUDGET_BYTES` moves 743,500 -> 744,500 (+1,000 B, inside the 1,024 B
+ * allowance). `ENTRY_GZIP_BUDGET_BYTES` is unchanged at 222,645 (head: 222,643).
+ *
+ * A TWENTY-FIRST, FROM MAIN (PR #566, not this branch): the three eager
+ * `settings.update.lastCheck*` strings in `i18n/strings.ts`. Merged with main,
+ * CI measured gzip 222,688 B (43 B over 222,645); this branch alone was 2 B
+ * under it, so nothing of the branch's own grew. `ENTRY_GZIP_BUDGET_BYTES`
+ * moves 222,645 -> 222,850 (the measured figure plus 162 B of slack, the same
+ * order as the earlier raises). `ENTRY_BUDGET_BYTES` is unchanged.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -788,8 +868,8 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 // depends on is even present, decided BEFORE anything tries to build.
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
-const ENTRY_BUDGET_BYTES = 728_700;
-const ENTRY_GZIP_BUDGET_BYTES = 218_700;
+const ENTRY_BUDGET_BYTES = 744_500;
+const ENTRY_GZIP_BUDGET_BYTES = 222_850;
 
 // The one string this repo's markdown stack ships that nothing else in the
 // dependency graph or vam's own source does: `gfmTable`, the extension name

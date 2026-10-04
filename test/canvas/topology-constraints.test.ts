@@ -189,8 +189,11 @@ describe('epic.md section 13: standing constraints, made permanent and checkable
    * operator reported at the sidebar's top corner, and the same rule drawn
    * hundreds of pixels wide across a horizontal split divider.
    *
-   * The three drag handles now take that decision from one place
-   * (`RESIZE_HANDLE_RESET`), which is what this scans for. An `<hr>` that
+   * The `<hr>` drag handles (`FilesTab.tsx` and `PaneResizer.tsx`) take that
+   * decision from one place (`RESIZE_HANDLE_RESET`), which is what this scans
+   * for. `SplitResizer`'s handle is a `<div role="separator">` holding the
+   * seam, so this scan no longer sees it; its own test below pins the same
+   * reset on it. An `<hr>` that
    * WANTS a rule — the markdown one in `out-markdown.tsx` — satisfies the same
    * question by declaring a `border-` utility of its own. What cannot pass is
    * an `<hr>` that answers neither, because that is a border nobody chose.
@@ -236,7 +239,8 @@ describe('epic.md section 13: standing constraints, made permanent and checkable
       }
     }
     // Both halves of the corpus, asserted rather than printed. Four `<hr>`
-    // elements exist: three resize handles and the markdown rule. A rename
+    // elements exist: the handles in FilesTab.tsx and PaneResizer.tsx, and the
+    // markdown rules in out-markdown.tsx and files-markdown.tsx. A rename
     // that stopped the pattern matching would otherwise leave this green.
     expect(
       found.length,
@@ -245,11 +249,21 @@ describe('epic.md section 13: standing constraints, made permanent and checkable
     expect(
       composing.length,
       `only ${composing.length} <hr> compose RESIZE_HANDLE_RESET: ${composing.join(', ')}`,
-    ).toBeGreaterThanOrEqual(3);
+    ).toBeGreaterThanOrEqual(2);
     expect(
       undecided,
       `an <hr> takes preflight's 1px top border by default:\n${undecided.join('\n')}`,
     ).toEqual([]);
+  });
+
+  it('the split separator takes the shared handle reset', () => {
+    const text = readFileSync(join(SRC_DIR, 'renderer/panels/SplitResizer.tsx'), 'utf8');
+    // From the separator's opening tag to its first handler: the attributes
+    // and the class list, not the seam child that follows.
+    const m = /role="separator"[\s\S]*?onKeyDown=/.exec(text);
+    expect(m, 'SplitResizer.tsx has no role="separator" element').not.toBeNull();
+    const element = (m?.[0] ?? '').replace(/\/\/[^\n]*/g, '');
+    expect(element).toMatch(/\$\{RESIZE_HANDLE_RESET\}/);
   });
 
   it('this file documents its own blind spot, so a future editor cannot silently strip it', () => {

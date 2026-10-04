@@ -61,7 +61,6 @@ import {
   useRef,
   useState,
 } from 'react';
-import { cacheTimerFor } from '../domain/cache-timer.js';
 import type { Group, Project, Session, SessionStatus, SourceId } from '../domain/model.js';
 import type {
   GroupBy,
@@ -83,10 +82,8 @@ import {
 import type { EffectiveTheme } from '../prefs/prefs.js';
 import { markRegisterOf, SourceMark } from '../sources/provider-marks.js';
 import { StatsPopover } from '../stats/StatsPopover.js';
-import { CacheCountdown } from './CacheCountdown.js';
 import { ConfirmRemoveProject } from './ConfirmRemoveProject.js';
 import { ContextMenu, type ContextMenuItem } from './ContextMenu.js';
-import { useCacheTimerClockDriver } from './cache-timer-clock.js';
 import { GettingStarted } from './GettingStarted.js';
 import { IconMark, parseIcon } from './icon-value.js';
 import { Note } from './Note.js';
@@ -352,31 +349,6 @@ function splitBranch(branch: string): { head: string; tail: string } {
   return cut === -1
     ? { head: '', tail: branch }
     : { head: branch.slice(0, cut + 1), tail: branch.slice(cut + 1) };
-}
-
-/**
- * Is there a cache timer worth MOUNTING `CacheCountdown` for on this row at
- * all -- the gate at each render site, so a row this feature can say nothing
- * about never subscribes to the shared clock (`cache-timer-clock.ts`'s own
- * "cheap to render" argument: a subscription that never fires is still one
- * more listener in the set every tick walks).
- *
- * DELIBERATELY NOT THE WHOLE OF `cacheTimerFor`'s OWN GATE: this never reads
- * a clock, so it cannot answer "expired yet" -- only "could this row ever
- * have an answer". `CacheCountdown` still runs `cacheTimerFor` itself on
- * every tick for the live phase; this only decides whether that component
- * exists in the tree at all.
- */
-function hasCacheTimerData(
-  session: Pick<Session, 'status' | 'lastCacheActivityAt' | 'cacheTtlMs'>,
-  rowSource: SourceId | null,
-): boolean {
-  return (
-    rowSource === 'claude-code' &&
-    (session.status === 'idle' || session.status === 'waiting') &&
-    session.lastCacheActivityAt != null &&
-    session.cacheTtlMs != null
-  );
 }
 
 /**
@@ -1147,18 +1119,6 @@ export type SessionListProps = {
   readonly width?: number;
   /** `PaneResizer`, positioned by the caller — kept out of this file's own concerns. */
   readonly resizeHandle: ReactNode;
-  /**
-   * The Sessions settings switch (`prefs.cacheTimer`) -- draw a countdown to
-   * when a Claude Code session's prompt cache expires, beside its age.
-   * `CacheCountdown.tsx` is the row; `cache-timer-clock.ts` is the one shared
-   * `setInterval` every row's countdown ticks off, driven once by this pane
-   * regardless of how many rows carry one.
-   *
-   * Optional, defaulting to `false` — like every flag on this pane, most
-   * tests that render it are about something else, and a required prop would
-   * have edited every one of them for a feature they do not exercise.
-   */
-  readonly cacheTimerEnabled?: boolean;
 };
 
 /**
@@ -1536,32 +1496,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     onToggleTheme,
     width,
     resizeHandle,
-    cacheTimerEnabled = false,
   } = props;
-
-  // ONE DRIVER FOR THE WHOLE PANE, never one per row -- `cache-timer-
-  // clock.ts`'s own header. `enabled` is the setting COMPOSED WITH "does any
-  // visible row currently hold a live (not yet expired) countdown" --
-  // `anyLiveCountdown` below -- not the setting alone: a pane where every
-  // row has already expired has nothing left for a tick to redraw, and
-  // ticking one anyway was the running-forever defect this composition
-  // fixes. Recomputed each render off `entries`, which is exactly as often
-  // as a fresh poll can change the answer -- this never reads a live clock
-  // on every SECOND, only on every POLL, so it costs nothing on the ticks
-  // themselves and never re-renders this list off one (`cacheTimerFor`'s own
-  // read of `Date.now()` here is one call per poll, not per tick).
-  const anyLiveCountdown = useMemo(() => {
-    if (!cacheTimerEnabled) return false;
-    const now = Date.now();
-    for (const entry of entries) {
-      const rowSource = entry.session.source ?? entry.project.source ?? null;
-      if (!hasCacheTimerData(entry.session, rowSource)) continue;
-      const state = cacheTimerFor(entry.session, now, cacheTimerEnabled);
-      if (state !== null && state.phase !== 'expired') return true;
-    }
-    return false;
-  }, [entries, cacheTimerEnabled]);
-  useCacheTimerClockDriver(cacheTimerEnabled && anyLiveCountdown);
 
   /**
    * What a control wears while its own action is running: it cannot be pressed
@@ -2343,7 +2278,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     <input
       data-group-draft
       value={groupDraftName}
-      placeholder="project name"
+      placeholder="Project name"
       aria-label="project name"
       ref={(node) => {
         if (node !== null && document.activeElement !== node) {
@@ -2372,7 +2307,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     <input
       data-project-draft
       value={projectDraftName}
-      placeholder="repo name"
+      placeholder="Repo name"
       aria-label="repo name"
       ref={(node) => {
         if (node !== null && document.activeElement !== node) {
@@ -2843,9 +2778,6 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                       </span>
                     </>
                   )}
-                  {cacheTimerEnabled && hasCacheTimerData(session, rowSource) && (
-                    <CacheCountdown session={session} enabled={cacheTimerEnabled} />
-                  )}
                 </span>
               )}
               {/* The waiting row's third line: what is being
@@ -3141,9 +3073,6 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                       </span>
                     )}
                   </span>
-                  {cacheTimerEnabled && hasCacheTimerData(session, rowSource) && (
-                    <CacheCountdown session={session} enabled={cacheTimerEnabled} />
-                  )}
                 </span>
               )}
             </button>
@@ -3487,24 +3416,16 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
             <span className="flex-1" />
           </>
         )}
-        {/* The layer above: a group of the projects vam already knows, named
-            "project" because that is the operator's word for it (see the
-            vocabulary table in `domain/model.ts`). LEFT of the directory
-            picker, untouched and unmoved. Both are the same 26px square.
-
-            THE ACCESSIBLE NAME STAYS QUALIFIED; renaming it would ripple into
-            `screen.getByLabelText` in the canvas's own new-session tests, well
-            past the two controls the operator actually looked at. So the
-            TOOLTIP -- what a sighted or keyboard-focused person reads -- does
-            the disambiguating instead: "a group of repos" says plainly this
-            button makes the OUTER layer, not the same thing as the button
-            beside it. */}
+        {/* Group = the outer layer above projects (the operator's word for it
+            is in the vocabulary table in `domain/model.ts`). LEFT of the
+            directory picker, untouched and unmoved. Both are the same 26px
+            square. */}
         {onCreateGroup !== undefined && (
-          <ShortcutTip label="New project (a group of repos)">
+          <ShortcutTip label="New group">
             <button
               type="button"
               data-new-group
-              aria-label="new project (a group of repos)"
+              aria-label="new group"
               onClick={() => {
                 setGroupDraftName('');
                 setGroupDraft({ kind: 'new' });
@@ -3534,17 +3455,10 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
             </button>
           </ShortcutTip>
         )}
-        {/* Choose a directory, start a session in it — the only thing this
-            button does; a project is derived from the cwd of a live session,
-            so there is nothing to create and nothing to store. THE TOOLTIP
-            NAMES THE ACTION, NOT "project": the accessible name stays "new
-            project" (see the button above), but the words a person reads on
-            focus never repeat the word the group button just used for
-            something else. */}
-        <ShortcutTip
-          label={newSessionDecline ?? 'Choose a directory and start a session in it'}
-          action={NEW_PROJECT_ACTION}
-        >
+        {/* Project = the directory picker: choose a directory and start a
+            session in it; a project is derived from the cwd of a live
+            session, so there is nothing to create or store. */}
+        <ShortcutTip label={newSessionDecline ?? 'New project'} action={NEW_PROJECT_ACTION}>
           <button
             type="button"
             data-new-project

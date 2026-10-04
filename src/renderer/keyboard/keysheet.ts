@@ -26,7 +26,9 @@ import {
   isSelectOnlyChord,
   type KeyAction,
   type KeyBindings,
+  PREFIXES,
   parseChord,
+  RESERVED_KEYS,
 } from './chords.js';
 
 /**
@@ -353,7 +355,7 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
   // settings row they may never open.
   toggleFocusView: {
     group: 'panes',
-    label: () => 'focus view — fold each turn’s working away, ··· brings it back',
+    label: () => 'focus view — fold each turn’s working away, the arrow brings it back',
   },
   splitPane: {
     group: 'panes',
@@ -416,7 +418,11 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
         a.delta === 1
           ? 'half a screen down this pane’s transcript — Ctrl+D and Cmd+D both'
           : 'half a screen up this pane’s transcript (Ctrl+U or Cmd+U) — its head reads further back',
-      insert: 'nothing here — whatever you are typing in keeps Ctrl-D, Cmd+D and Ctrl-U',
+      // What `isSelectOnly` proves and no more: vam stands down under a caret,
+      // so the key stays with whatever holds the keyboard.
+      insert: `vam does not scroll here — the key stays with whatever holds the keyboard. To scroll half a screen ${
+        a.delta === 1 ? 'down' : 'up'
+      }, leave Insert, then press the same key`,
     }),
   },
   // NAMES THE TURN, NOT A STEP NO CARD DRAWS ANY MORE. `copyAllCommands`
@@ -500,7 +506,7 @@ type SheetRow = {
  */
 export type SheetGroupId = ActionGroup | 'files';
 
-type SheetGroup = {
+export type SheetGroup = {
   readonly group: SheetGroupId;
   readonly title: string;
   readonly rows: readonly SheetRow[];
@@ -570,13 +576,65 @@ export type BindingRow = {
    * dead key with no culprit leaves them hunting.
    */
   readonly dead: Readonly<Record<string, string>>;
+  /**
+   * A fixed key the grammar answers ahead of every table (`RESERVED_KEYS`), shown
+   * read-only in the Settings mode section named by `reservedMode`. The `?`
+   * sheet never shows these rows.
+   */
+  readonly reserved?: true;
+  readonly reservedMode?: CursorMode;
 };
 
 export type BindingGroup = {
   readonly group: ActionGroup;
   readonly title: string;
   readonly rows: readonly BindingRow[];
+  /**
+   * The read-only reserved rows, carried by the first group only. Kept apart
+   * from `rows` so every consumer that walks the editable rows (conflict
+   * checks, label lookup, the `?` sheet) never meets a row that has no action.
+   */
+  readonly reserved?: readonly BindingRow[];
 };
+
+/**
+ * What each reserved key does, per mode where it does something. The keys come
+ * from `RESERVED_KEYS` minus `PREFIXES` (a prefix acts only as the first key of
+ * chords that already have rows); a key with no entry for a mode has no row
+ * there. `Mod-[` acts only where a pane holds the keyboard (Insert), and
+ * `resolveChord` answers null for it in Select.
+ */
+const RESERVED_LABELS: Readonly<Record<string, Readonly<Partial<Record<CursorMode, string>>>>> = {
+  Escape: {
+    select:
+      'close whatever is open — palette, settings, filter, rename — and return to the session list',
+    insert: 'Leave Insert',
+  },
+  'Mod-[': { insert: 'Leave Insert' },
+};
+
+function reservedRows(): readonly BindingRow[] {
+  const keys = RESERVED_KEYS.filter((key) => !(PREFIXES as readonly string[]).includes(key));
+  return CURSOR_MODES.flatMap((mode) =>
+    keys.flatMap((key) => {
+      const label = RESERVED_LABELS[key]?.[mode];
+      return label === undefined
+        ? []
+        : [
+            {
+              id: `reserved:${key}:${mode}`,
+              label,
+              byMode: null,
+              keys: [key],
+              overridden: false,
+              dead: {},
+              reserved: true as const,
+              reservedMode: mode,
+            },
+          ];
+    }),
+  );
+}
 
 /**
  * The editor's model: one row per ACTION, grouped like the sheet.
@@ -614,10 +672,15 @@ export function buildBindingSheet(
     });
     byGroup.set(group, rows);
   }
-  return GROUP_ORDER.flatMap((group) => {
+  const groups: BindingGroup[] = GROUP_ORDER.flatMap((group) => {
     const rows = byGroup.get(group);
     return rows === undefined ? [] : [{ group, title: GROUP_TITLES[group], rows }];
   });
+  // The reserved rows ride on the first group so the Settings page reads one
+  // source; `buildKeySheet` reads `rows` only, so the `?` sheet never sees them.
+  return groups.map((group, index) =>
+    index === 0 ? { ...group, reserved: reservedRows() } : group,
+  );
 }
 
 /**

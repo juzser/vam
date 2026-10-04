@@ -21,6 +21,7 @@
  * worth a screen. Every path here ends in "then draw the default layout".
  */
 
+import { DEFAULT_PR_FILTERS, type PrFilters, parsePrFilters } from '../../shared/pr-filters.js';
 import { DEFAULT_PROVIDER_ID, type ProviderId, readProviderId } from '../../shared/providers.js';
 import { clampUiZoomPercent, DEFAULT_UI_ZOOM } from '../../shared/ui-zoom.js';
 import type { CanvasModel, SourceId } from '../domain/model.js';
@@ -39,7 +40,6 @@ import {
   readAgentPermissions,
 } from './agent-permissions.js';
 import { DEFAULT_AUTO_TAB_TITLES, readAutoTabTitles } from './auto-tab-titles.js';
-import { DEFAULT_CACHE_TIMER, readCacheTimer } from './cache-timer.js';
 import { DEFAULT_CONCISE_OUTPUT, readConciseOutput } from './concise-output.js';
 import { DEFAULT_AGENT_DEFAULT, type DefaultAgent, readDefaultAgent } from './default-agent.js';
 import {
@@ -758,18 +758,6 @@ export type Prefs = {
    */
   readonly notifyWaiting: boolean;
   /**
-   * Whether the sidebar draws a countdown to when a Claude Code session's
-   * prompt cache expires. `prefs/cache-timer.ts` carries the default and the
-   * operator's own ask; `domain/cache-timer.ts` is the rule this gates and
-   * `panels/CacheCountdown.tsx` the row it gates.
-   *
-   * GLOBAL and per device, the same fact `notifyWaiting` is: a countdown is
-   * a reading preference about the machine looking at the sidebar, not
-   * about the session it counts down for. Exempt from the icon TTL for the
-   * same reason.
-   */
-  readonly cacheTimer: boolean;
-  /**
    * Which face a `.md` file opens wearing in the Files tab: the rendered
    * document, or the raw text. `prefs/files-markdown-view.ts` carries the
    * default and the direction it is normalised in; this is the one field
@@ -926,7 +914,6 @@ export const EMPTY_PREFS: Prefs = {
   narrowViews: DEFAULT_NARROW_VIEWS,
   conciseOutput: DEFAULT_CONCISE_OUTPUT,
   notifyWaiting: DEFAULT_NOTIFY_WAITING,
-  cacheTimer: DEFAULT_CACHE_TIMER,
   filesMarkdownView: DEFAULT_FILES_MARKDOWN_VIEW,
   streamingTerminal: DEFAULT_STREAMING_TERMINAL,
   // A truly empty payload has nothing to migrate FROM -- it already reads
@@ -979,7 +966,63 @@ export function readPrefs(
   now: Date = new Date(),
   migrateSource: SourceId = 'factory',
 ): Prefs {
+  activePrFilters = loadPrFilters(storage);
   return activatePrefs(parsePrefs(storage, now, migrateSource));
+}
+
+/**
+ * THE PRs VIEW'S FILTER SET, KEPT OUTSIDE `Prefs` ON PURPOSE. `Canvas` holds
+ * the live `Prefs` object and writes all of it on every unrelated save; a
+ * field inside it would be reverted by the next such save whenever the PRs
+ * tab (which does not own `Canvas`'s state) changed it. So the set lives here
+ * as module state, `writePrefs` re-stamps it into every write, and
+ * `changePrFilters` persists it on its own. Defaults are never stored.
+ */
+let activePrFilters: PrFilters = DEFAULT_PR_FILTERS;
+const prFilterListeners = new Set<() => void>();
+
+/** The set in force. A stable reference until it changes (`useSyncExternalStore`). */
+export const getPrFilters = (): PrFilters => activePrFilters;
+
+export function subscribePrFilters(listener: () => void): () => void {
+  prFilterListeners.add(listener);
+  return () => prFilterListeners.delete(listener);
+}
+
+const isDefaultPrFilters = (filters: PrFilters): boolean =>
+  filters.author === DEFAULT_PR_FILTERS.author &&
+  filters.state === DEFAULT_PR_FILTERS.state &&
+  filters.sort === DEFAULT_PR_FILTERS.sort;
+
+function loadPrFilters(storage: StorageLike | null): PrFilters {
+  try {
+    const raw = storage?.getItem(KEY);
+    const record = raw == null ? null : (JSON.parse(raw) as Record<string, unknown> | null);
+    return parsePrFilters(record?.['prFilters']);
+  } catch {
+    return DEFAULT_PR_FILTERS;
+  }
+}
+
+/** The operator changed the filters: put them in force, push them to main, store them. */
+export function changePrFilters(next: unknown, storage: StorageLike | null): void {
+  activePrFilters = parsePrFilters(next);
+  for (const listener of prFilterListeners) listener();
+  pushPrFilters();
+  try {
+    const raw = storage?.getItem(KEY);
+    const record = (raw == null ? {} : JSON.parse(raw)) as Record<string, unknown>;
+    if (isDefaultPrFilters(activePrFilters)) delete record['prFilters'];
+    else record['prFilters'] = activePrFilters;
+    storage?.setItem(KEY, JSON.stringify(record));
+  } catch {
+    // Same bargain as `writePrefs`: the in-memory choice still works.
+  }
+}
+
+/** Fire and forget, like the other pushes: absent in the browser build. */
+function pushPrFilters(): void {
+  globalThis.window?.api?.prefs?.setPrFilters?.(activePrFilters)?.catch?.(() => {});
 }
 
 function parsePrefs(
@@ -1241,9 +1284,6 @@ function parsePrefs(
     // Per field like every line above it; a boolean is a choice and anything
     // else is the default, which is ON (`./notify.ts` says why).
     notifyWaiting: readNotifyWaiting((parsed as { notifyWaiting?: unknown }).notifyWaiting),
-    // Per field like every line above it; a boolean is a choice and anything
-    // else is the default, which is ON (`./cache-timer.ts` says why).
-    cacheTimer: readCacheTimer((parsed as { cacheTimer?: unknown }).cacheTimer),
     // Per field like every line above it, and normalised in the direction
     // `files-markdown-view.ts` argues at length: unlike every sibling here,
     // the safe default for an UNREADABLE value is the NEW behaviour
@@ -1944,12 +1984,6 @@ export function setNotifyWaiting(prefs: Prefs, on: unknown): Prefs {
   return { ...prefs, notifyWaiting: readNotifyWaiting(on) };
 }
 
-/** Normalised on the way in as well as on the way out, like `setNotifyWaiting`
- *  above it. The one caller is the Sessions settings row's own switch. */
-export function setCacheTimer(prefs: Prefs, on: unknown): Prefs {
-  return { ...prefs, cacheTimer: readCacheTimer(on) };
-}
-
 /** Normalised on the way in as well as on the way out, like every setter
  *  above it. The one caller is `Canvas.tsx`'s `onFilesMarkdownView`, itself
  *  called from `FilesTab.tsx`'s own toggle -- the only place this preference
@@ -2119,7 +2153,12 @@ export function writePrefs(storage: StorageLike | null, prefs: Prefs): void {
     return;
   }
   try {
-    storage.setItem(KEY, JSON.stringify(prefs));
+    storage.setItem(
+      KEY,
+      JSON.stringify(
+        isDefaultPrFilters(activePrFilters) ? prefs : { ...prefs, prFilters: activePrFilters },
+      ),
+    );
   } catch {
     // Quota, or a browser that hands out a Storage and then refuses to use it.
     // The in-memory prefs still work for this session; only the memory is lost.
@@ -3121,6 +3160,8 @@ export function activatePrefs(prefs: Prefs): Prefs {
    * app (`shared/ui-zoom.ts`, `main/zoom-ipc.ts`).
    */
   globalThis.window?.api?.prefs?.setUiZoom?.(prefs.uiZoom)?.catch?.(() => {});
+  /** The PRs view's filter set, the third crossing: see `activePrFilters`. */
+  pushPrFilters();
   return prefs;
 }
 

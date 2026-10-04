@@ -341,7 +341,7 @@ type Band = { readonly top: number; readonly bottom: number; readonly h: number 
  * the 140px keyboard cap (`styles.css`) still bites. `column` reads the
  * Response view's own scroller (`data-detail-column`), which now holds BOTH
  * the transcript and — when a question is open — the inline question as its
- * newest item (`data-question-bar-inline`, `sticky bottom-0`, no cap of its
+ * newest item (`data-question-bar-inline`, in flow as the last child, no cap of its
  * own): AC-3's "one continuous scroll region" means there is no longer a
  * SEPARATE capped sub-scroll to measure there, only the one shared scroller.
  */
@@ -740,7 +740,12 @@ test.describe('the card names controls that exist', () => {
     // carry. Step two of this call is the multi-select, so this is the real
     // worst case rather than a long string invented for the test.
     await page.locator('[data-phone-shell] [data-question-step]').nth(1).click();
-    const options = page.locator('[data-phone-shell] [data-question-option]');
+    // THE QUESTION'S OWN OFFERS ONLY: the terminal's free-text row is also a
+    // `[data-question-option]`, but choosing it hands the whole set to the
+    // terminal and marks nothing, so it is not one of the marks this builds.
+    const options = page.locator(
+      '[data-phone-shell] [data-question-option]:not([data-question-free-text])',
+    );
     // `toHaveCount` and not `count()`: stepping unmounts one question's
     // options and mounts the next one's, and a bare read can land mid-render
     // and report zero -- a corpus assertion failing for the one reason that is

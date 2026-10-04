@@ -43,9 +43,11 @@ import {
 } from '../../prefs/terminal-scheme.js';
 import { preparePastedText } from '../terminal-paste.js';
 import {
+  TERMINAL_FAST_SCROLL_FACTOR,
   TERMINAL_STREAM_HIGH_WATER_MARK,
   TERMINAL_STREAM_LOW_WATER_MARK,
   TERMINAL_STREAM_SCROLLBACK,
+  TERMINAL_WHEEL_LINES_PER_NOTCH,
 } from './terminal-stream-tuning.js';
 
 /**
@@ -237,16 +239,6 @@ export function TerminalStreamTab(props: {
   const streamIdRef = useRef<string | null>(null);
   const [refusal, setRefusal] = useState<RefusalReason | null>(null);
   const [down, setDown] = useState<StreamDownEvent | null>(null);
-  /**
-   * THE RESOLVED TMUX SESSION NAME, once the stream has actually opened --
-   * `null` until then, on purpose: `TerminalTab.tsx`'s own status rule never
-   * draws a name it has not confirmed either (its `view` starts `null` for
-   * the identical reason, see that file's header). `StreamOpenResult.name`
-   * (`main/terminal/stream-ipc.ts`) is the SAME `targetSession` pairing that
-   * file's `view.name` comes from -- the one fact this tab could not
-   * otherwise say, since the stream itself carries bytes, not a name.
-   */
-  const [name, setName] = useState<string | null>(null);
 
   const bridge = globalThis.window?.api?.terminalStream;
   const fontSize = useSyncExternalStore(subscribeTerminalFontSize, activeTerminalFontSize);
@@ -320,7 +312,6 @@ export function TerminalStreamTab(props: {
       const myGeneration = generation;
       setRefusal(null);
       setDown(null);
-      setName(null);
 
       // A FRESH TERMINAL MUST TELL TMUX ITS REAL SIZE BEFORE THE STREAM'S
       // OWN SEED IS EVER CAPTURED (a review finding, chasing the cursor-
@@ -367,6 +358,9 @@ export function TerminalStreamTab(props: {
           lineHeight: TERMINAL_STREAM_LINE_HEIGHT,
           fontFamily: TERMINAL_FONT_FAMILY,
           scrollback: TERMINAL_STREAM_SCROLLBACK,
+          // ONE NOTCH = 3 LINES, ALT = 5x THAT (see the constants' own header).
+          scrollSensitivity: TERMINAL_WHEEL_LINES_PER_NOTCH,
+          fastScrollSensitivity: TERMINAL_FAST_SCROLL_FACTOR,
           // A STEADY BLOCK, NOT A BLINK -- matching `TerminalTab.tsx`'s own
           // cursor exactly (that file's header: "IT DOES NOT BLINK"). That
           // file's reason (a poll cannot honestly animate liveness) does not
@@ -624,7 +618,6 @@ export function TerminalStreamTab(props: {
       }
       const { streamId } = result;
       streamIdRef.current = streamId;
-      setName(result.name);
 
       if (!freshTerm) {
         // A RECONNECT, NOT A FIRST CONNECT: always reseed, on the same
@@ -814,7 +807,7 @@ export function TerminalStreamTab(props: {
 
   return (
     /* THE SAME OUTER SHAPE `TerminalTab.tsx`'s own return draws -- a
-       flex-column with the pane above and a one-row status rule below,
+       flex-column holding the pane frame alone (no status rule under it),
        `font-mono` ambient and the operator's chosen size on the root so
        anything drawn in `em`/`ch` inside it (there is nothing today, but
        `TerminalTab.tsx`'s own comment names this as the reason it carries
@@ -892,29 +885,6 @@ export function TerminalStreamTab(props: {
           >
             {downText(down)}
           </p>
-        )}
-      </div>
-      {/* THE STATUS RULE, the same one row `TerminalTab.tsx` draws under its
-         own screen -- the tmux session's name pushed to the right (`aria-hidden`: the pane's own
-         accessible name already carries it, via `term.textarea`'s
-         `aria-label`... which this tab does not set yet, see the design
-         doc). `name` is `null` until the stream actually opens
-         (`StreamOpenResult.name`), which is what keeps this from ever
-         inventing an identity before one is confirmed -- `TerminalTab.tsx`'s
-         own `view` starts `null` for the identical reason. */}
-      <div
-        data-terminal-stream-status
-        className="flex min-h-[21px] flex-none items-center gap-2 border-line border-t pt-1 font-mono text-meta text-ink-faint"
-      >
-        <span className="flex-1" />
-        {name !== null && (
-          <span
-            data-terminal-stream-badge
-            aria-hidden="true"
-            className="max-w-[60%] flex-none truncate text-ink-quiet"
-          >
-            {name}
-          </span>
         )}
       </div>
     </div>

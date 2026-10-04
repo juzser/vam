@@ -389,6 +389,9 @@ check(
   drawn !== null && drawn.includes('tieeng'),
   `the pane drew ${JSON.stringify(drawn)}`,
 );
+// The stub's cursor is `unreadable`, so no caret is drawn: this frame is the
+// candidate on its own, bottom-left of the pane.
+await page.screenshot({ path: `${outDir}/ime-composing-no-caret.png` });
 
 await keyDown('n');
 await keyDown('Enter', 'Enter', 13);

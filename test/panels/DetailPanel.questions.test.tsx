@@ -84,7 +84,7 @@ describe('an open question is drawn, with everything the record carries', () => 
     expect(q('[data-question]')).not.toBeNull();
     expect(text()).toContain('Which providers should vam support beyond Claude Code?');
     expect(text()).toContain('Providers');
-    expect(all('[data-question-option]')).toHaveLength(2);
+    expect(all('[data-question-option]:not([data-question-free-text])')).toHaveLength(2);
     expect(text()).toContain('Codex CLI');
     // The description is the half that says why you would pick it.
     expect(text()).toContain('a second CLI agent, read the same way');
@@ -286,7 +286,9 @@ describe('a digit picks the option beside it', () => {
   it('shows the number beside every option, in order', () => {
     draw([THREE]);
     expect(
-      all('[data-question-option]').map((o) => o.getAttribute('data-question-number')),
+      all('[data-question-option]:not([data-question-free-text])').map((o) =>
+        o.getAttribute('data-question-number'),
+      ),
     ).toEqual(['1', '2', '3']);
   });
 
@@ -313,7 +315,7 @@ describe('a digit picks the option beside it', () => {
       description: null,
     }));
     draw([{ ...THREE, options: many }]);
-    const numbers = all('[data-question-option]').map((o) =>
+    const numbers = all('[data-question-option]:not([data-question-free-text])').map((o) =>
       o.getAttribute('data-question-number'),
     );
     expect(numbers.slice(0, 9)).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9']);
@@ -420,7 +422,7 @@ describe('the composer stands down while a question is open', () => {
 
   it('is the LAST entry, and is not one of the recorded options', () => {
     draw([QUESTION]);
-    const marked = all('[data-question-option]');
+    const marked = all('[data-question-option]:not([data-question-free-text])');
     expect(marked).toHaveLength(2); // the two the transcript recorded
     expect(chat()?.getAttribute('data-question-synthetic')).toBe('true');
     expect(chat()?.getAttribute('role')).not.toBe('option');
@@ -547,8 +549,8 @@ describe('the question block draws only when there is a question', () => {
   it('renders no empty bar when nothing is being asked', () => {
     draw([]);
     expect(bar()).toBeNull();
-    // And the composer keeps the seam, exactly as it did before the split.
-    expect(composerBar()?.className).toContain('border-t');
+    // The composer draws no rule above the input: the bottom fade stands in.
+    expect(composerBar()?.className).not.toContain('border-t');
   });
 
   it('renders the bar, and takes the seam, when a question is open', () => {

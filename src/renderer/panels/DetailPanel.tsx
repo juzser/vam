@@ -72,6 +72,7 @@ import {
   Box,
   Check,
   ChevronDown,
+  ChevronRight,
   ChevronsDown,
   ChevronsUp,
   Circle,
@@ -105,6 +106,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -114,6 +116,12 @@ import {
 import type { AgentWork } from '../../shared/agent-work.js';
 import type { AnswerRequest, AnswerResult, PanePrompt, PromptView } from '../../shared/answer.js';
 import type { PrAction } from '../../shared/pr-action.js';
+import {
+  DEFAULT_PR_FILTERS,
+  PR_LIMIT,
+  type PrFilters,
+  prFilterKey,
+} from '../../shared/pr-filters.js';
 import {
   CAN_CHOOSE_PROVIDER,
   PROVIDERS,
@@ -150,6 +158,12 @@ import { questionKeys, resolveQuestionKey } from '../keyboard/question-keys.js';
 import { ChordGlyphs, ShortcutTip } from '../keyboard/ShortcutTip.js';
 import { usePhoneViewport } from '../phone/viewport.js';
 import { type AgentPermissions, isDesktopShell } from '../prefs/agent-permissions.js';
+import {
+  browserStorage,
+  changePrFilters,
+  getPrFilters,
+  subscribePrFilters,
+} from '../prefs/prefs.js';
 import {
   activeFocusView,
   drawsProgressLine,
@@ -197,6 +211,7 @@ import {
   StartShortcuts,
   TERMINAL_ONLY_SHORTCUT_ROWS,
 } from './GettingStarted.js';
+import { KeyTag } from './KeyTag.js';
 import {
   MODEL_CHOICES,
   modelButtonLabel,
@@ -207,6 +222,8 @@ import {
 import { Note } from './Note.js';
 import { type OutActionResult, OutActionsProvider } from './out-actions.js';
 import { OUT_MARKDOWN, OUT_URL_TRANSFORM } from './out-markdown.js';
+import { PrFilterBar } from './PrFilterBar.js';
+import { ProviderIcon } from './ProviderIcon.js';
 import { newestSet, toolUseOf } from './question-set.js';
 import { sendKeyRemote } from './send-key-remote.js';
 import { registerStartSession } from './start-session-registry.js';
@@ -221,9 +238,12 @@ import {
   cursorToAsk,
   moreState,
   type PagerState,
+  pagerAfterRetain,
   RESTING_PAGER,
+  retainLeft,
   walkOlder,
 } from './transcript-history.js';
+import { usePaneSuggestion } from './use-pane-suggestion.js';
 
 // `react-markdown` + `remark-gfm`, in their own lazy chunk: see
 // `LazyMarkdown.tsx`'s own header for the measured cost and why the split
@@ -538,28 +558,26 @@ const SUGGEST_BOX =
 /**
  * `provider`/`model`/`mode`: three short option lists, each opened off its
  * own small toggle in `data-prompt-tools` -- the row directly under the
- * textarea. `bottom-full left-0` used to resolve against that toggle's own
- * `position: relative` wrapper, so a popover of any real height grew upward
- * into the textarea it sits a `gap-2.5` above (`src/shared/providers.ts`'s
- * own measurement: "99x34 overlapping the textarea by 28px"). Their wrapper
- * no longer carries `position: relative` (search `data-popover-root`), so
- * `bottom-full` here resolves against `data-composer-bar` instead -- the
- * same ancestor `SUGGEST_LAYER` floats against -- and the popover clears the
- * WHOLE composer rather than only the toggle it hangs off.
+ * textarea. Each toggle sits in its own `relative` anchor
+ * (`data-popover-anchor`), so `bottom-full left-0` resolves against THAT
+ * trigger and the menu opens flush above the button it belongs to, not above
+ * the whole composer. (It used to resolve against `data-composer-bar`, which
+ * put a short menu a full input-height away from the control that opened it.)
  *
- * `left-0` still means "this popover's own containing block", which moved
- * with the rest of it: today that reads as the composer's own left padding
- * edge rather than the toggle's, which is the one visible trade-off this
- * takes -- a provider/model/mode popover no longer opens flush against its
- * own button. `SUGGEST_LAYER`'s boxes have drawn from that same left edge
- * all along, so this is not a new idiom, only a third and fourth control
- * joining the first two.
+ * `left-0` is the default; `popoverFit` swaps it for `right-0` when the menu
+ * would run past the composer's right edge, once per open.
  *
  * `vam-no-scrollbar overflow-y-auto` plus a measured `maxHeight`
  * (`suggestMaxHeight`) are what `SUGGEST_BOX` already does for the typeahead
  * lists -- the same cap, so a table that outgrows the room above the
  * composer scrolls instead of pushing past the top of the screen.
  */
+/** Breathing room between an open composer menu and the composer's right edge. */
+export const POPOVER_EDGE_GUTTER = 8;
+
+/** The mode menu's own width ceiling, so a description truncates instead of widening it. */
+const MODE_MENU_MAX_WIDTH = 260;
+
 const COMPOSER_POPOVER_MENU =
   'absolute bottom-full left-0 z-10 mb-2 flex flex-col gap-0.5 overflow-y-auto rounded-[10px] border border-line-strong bg-card p-1 shadow-sm vam-no-scrollbar';
 
@@ -595,13 +613,37 @@ export function commandsInColumn(
 ): readonly Command[] {
   const seen = new Set<string>();
   const out: Command[] = [];
+  const add = (command: Command) => {
+    if (seen.has(command.command)) return;
+    seen.add(command.command);
+    out.push(command);
+  };
+  const own = (id: string, command: string) =>
+    add({ id, label: command.split(' ')[0] ?? command, command });
+  // `!cmd` and `> !cmd`: the text after the marker, as a candidate of its own.
+  const lift = (turn: Decision, text: string, quoted: RegExp) =>
+    text.split('\n').forEach((line) => {
+      const command = quoted.exec(line.trim())?.[1];
+      if (command) own(`${turn.id}:bang:${command}`, command);
+    });
   const turns = focused === null ? column : [focused, ...column.filter((t) => t.id !== focused.id)];
+  // WHAT THE AGENT RAN FIRST: a Bash tool call's `input.command`
+  // (`Decision.bash`), newest turn first and, within a turn, the last call first.
   for (const turn of turns) {
-    for (const command of turn.commands) {
-      if (seen.has(command.command)) continue;
-      seen.add(command.command);
-      out.push(command);
+    for (const command of [...(turn.bash ?? [])].reverse()) {
+      own(`${turn.id}:bash:${command}`, command);
     }
+  }
+  // THEN THE OPERATOR'S OWN `!cmd` TURNS: a command they typed and sent is the
+  // likeliest one to be reached for again.
+  for (const turn of turns) lift(turn, turn.input, /^!\s*(\S.*)$/);
+  // THEN WHAT THE AGENT PROPOSED: the lines `commands.ts` extracted (fenced,
+  // `! ` marker), and the lines it cannot see because a blockquote `>` or a
+  // list marker comes before the `!`. The composer's line-start rule
+  // (`bangQuery`) is not touched.
+  for (const turn of turns) {
+    for (const command of turn.commands) add(command);
+    lift(turn, turn.output ?? '', /^(?:(?:>|[-*+]\s|\d+[.)]\s)\s*)+!\s*(\S.*)$/);
   }
   return out;
 }
@@ -1245,9 +1287,23 @@ export { TABS, type Tab } from './tabs.js';
  * a small popover over it, the pattern the provider picker beside it already
  * set, rather than a second idea of what a chooser looks like in this row.
  */
-const MODES = ['Auto', 'Manual', 'Plan'] as const;
+export const MODES = ['Auto', 'Manual', 'Plan'] as const;
 
 type Mode = (typeof MODES)[number];
+
+/**
+ * ONE LINE UNDER EACH MODE in its popover. The mode is a REQUEST written into
+ * the prompt (`setModeRequest` puts a leading `mode: <Mode>` line in the
+ * draft), never a provider flag, so each line says what the agent is asked to
+ * do, and each is short enough to read whole under `MODE_MENU_MAX_WIDTH`.
+ * `MODE_SKIN[mode].means` is the tooltip's gloss of the same three modes.
+ * Exhaustive over `MODES` at compile time.
+ */
+export const MODE_DESCRIPTIONS: Readonly<Record<Mode, string>> = {
+  Auto: 'Decides its own next step.',
+  Manual: 'Asks you before each step.',
+  Plan: 'Writes a plan before acting.',
+};
 
 /**
  * HOW EACH MODE IS DRAWN AND WHAT IT MEANS — one row per mode, because the
@@ -1351,7 +1407,7 @@ function ModeGlyph({ mode }: { readonly mode: Mode }) {
       size={12}
       fill={skin.fill}
       strokeWidth={skin.strokeWidth}
-      className={skin.ink}
+      className={`${skin.ink} shrink-0`}
     />
   );
 }
@@ -1712,9 +1768,12 @@ function PullRequestsTab({
   sessionId,
   bridge,
   reserveCornerHeight = 0,
+  branch = null,
   now = () => new Date(),
 }: {
   readonly pullRequests: PullRequestList | undefined;
+  /** The session's git branch: the row whose head is this one is marked. */
+  readonly branch?: string | null;
   readonly repo?: DetailPanelProps['prRepo'];
   /** The project whose git remote names the repository when nothing is overridden. */
   readonly projectId?: string;
@@ -1881,9 +1940,20 @@ function PullRequestsTab({
         </button>
       </div>
     );
-  const framed = (body: ReactNode) => (
+  /**
+   * THE FILTER SET IN FORCE. Module state in `prefs.ts`, not a prop and not
+   * `Canvas`'s `Prefs` (see `activePrFilters` there). The renderer only draws
+   * the choice: main puts it into the `gh pr list` query.
+   */
+  const filters = useSyncExternalStore(subscribePrFilters, getPrFilters, getPrFilters);
+  const filterKey = prFilterKey(filters);
+  const storage = useMemo(() => browserStorage(), []);
+  const change = (next: PrFilters) => changePrFilters(next, storage);
+  const filtersAreDefault = prFilterKey(DEFAULT_PR_FILTERS) === filterKey;
+  const framed = (body: ReactNode, withBar = true) => (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
       {heading}
+      {withBar ? <PrFilterBar filters={filters} onChange={change} /> : null}
       {body}
     </div>
   );
@@ -1892,6 +1962,7 @@ function PullRequestsTab({
       <p data-prs data-prs-absent className="text-control text-ink-faint">
         This source does not report pull requests for a session.
       </p>,
+      false,
     );
   }
   if (pullRequests.kind === 'unavailable') {
@@ -1907,16 +1978,46 @@ function PullRequestsTab({
       </p>,
     );
   }
-  if (pullRequests.prs.length === 0) {
+  /* A list for ANOTHER filter set is never drawn as this one's: until main
+     answers the new key the rows are unmounted. A list that carries no key
+     (an older reader) is drawn as is. */
+  if (pullRequests.filterKey !== undefined && pullRequests.filterKey !== filterKey) {
     return framed(
-      <p data-prs data-prs-empty className="text-control text-ink-faint">
-        This branch has no pull request on GitHub.
+      <p data-prs data-prs-loading role="status" className="text-control text-ink-faint">
+        Asking GitHub for these pull requests…
       </p>,
     );
   }
+  if (pullRequests.prs.length === 0) {
+    return framed(
+      <div
+        data-prs
+        data-prs-empty
+        data-prs-empty-filtered
+        className="flex flex-col items-start gap-2"
+      >
+        <p className="text-control text-ink-faint">No pull requests match these filters.</p>
+        {filtersAreDefault ? null : (
+          <button
+            type="button"
+            data-pr-filters-clear
+            onClick={() => change(DEFAULT_PR_FILTERS)}
+            className={`vam-hit-24 cursor-pointer rounded border border-line px-2 py-0.5 text-ink-dim text-meta hover:border-line-loud hover:text-ink ${FOCUS_RING}`}
+          >
+            Clear filters
+          </button>
+        )}
+      </div>,
+    );
+  }
   const at = now();
+  const count = pullRequests.prs.length;
   return framed(
     <>
+      <p data-prs-count aria-live="polite" className="flex-none select-text text-ink-dim text-meta">
+        {count === 1 ? '1 pull request' : `${count} pull requests`}
+        {count === PR_LIMIT ? ` (the ${PR_LIMIT} most recently ${filters.sort})` : ''}
+      </p>
       <ul
         data-prs
         /**
@@ -1951,6 +2052,7 @@ function PullRequestsTab({
             key={pr.number}
             pr={pr}
             now={at}
+            current={branch !== null && pr.headRefName === branch}
             /* WITHDRAWN, NOT DISABLED, three times over: no bridge (the
                browser build), nothing to open (an address vam would refuse,
                which the reader already turned into `null`), and no session to
@@ -2254,10 +2356,13 @@ const PR_ACTION_SKIN =
 function PullRequestRow({
   pr,
   now,
+  current,
   onOpen,
   onAsk,
 }: {
   readonly pr: PullRequest;
+  /** Its head is the session's own branch: marked, never reordered. */
+  readonly current: boolean;
   readonly now: Date;
   readonly onOpen: ((url: string) => void) | null;
   readonly onAsk: ((pending: PendingPrAction) => void) | null;
@@ -2311,8 +2416,22 @@ function PullRequestRow({
           that reads it, AND on `title=` for an eye -- a truncated name with
           nowhere to read the rest is information the pane had and threw away,
           which is the same bargain `data-pr-branches` makes below. */}
-      <span data-pr-title title={pr.title} className="block truncate text-left text-body text-ink">
-        {pr.title}
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span
+          data-pr-title
+          title={pr.title}
+          className="block min-w-0 truncate text-left text-body text-ink"
+        >
+          {pr.title}
+        </span>
+        {current ? (
+          <span
+            data-pr-current
+            className="flex-none rounded border border-line px-1 text-ink-dim text-meta"
+          >
+            This branch
+          </span>
+        ) : null}
       </span>
       {/* THE META LINE, AND THE AGE IS ON IT NOW.
           `3h` used to be the third quantity on the rail's number line, sharing
@@ -2637,6 +2756,7 @@ function PullRequestRow({
       data-pr-row
       data-pr-state={pr.state}
       data-pr-checks={pr.checks}
+      data-prs-row-current={current ? 'true' : undefined}
       /* THE QUERY CONTAINER IS THE ROW AND THE RESPONDING BOX IS INSIDE IT. A
          container query does not apply to the element that DECLARES the
          container, so `@container` and `@min-[356px]:flex-row` on one element
@@ -2834,7 +2954,7 @@ function AgentTurn({ turn }: { readonly turn: Decision }) {
         {/* ABSENT IS ITS OWN SENTENCE. An agent that has been asked and has
             not answered is the commonest live case, and a blank space there
             reads as an agent that answered with nothing. */}
-        {turn.output ?? <span className="text-ink-faint italic">no answer yet</span>}
+        {turn.output ?? <span className="text-ink-faint italic">No answer yet</span>}
       </div>
       {steps.length > 0 && (
         <ul
@@ -4753,12 +4873,29 @@ function isPersistentPermissionOption(label: string): boolean {
  *  the operator's visit to this question. */
 const ARM_TIMEOUT_MS = 3000;
 
+/** The terminal's own free-text row: drawn, never sent. */
+const FREE_TEXT_LABEL = 'Type something.';
+
+/** A recorded set is read only when it has several questions and a step open. */
+function followsPane(set: readonly AgentQuestion[]): boolean {
+  return set.length > 1 && set.some((one) => one.answer === null);
+}
+
+/** Whether the pane's title is THIS question (whitespace-blind; a folded title is a tail). */
+function paneAsks(question: AgentQuestion, title: string): boolean {
+  const asked = question.question.replace(/\s+/g, '');
+  const shown = title.replace(/\s+/g, '');
+  return shown !== '' && asked.endsWith(shown);
+}
+
 function QuestionCard({
   questions,
   firstOptionRef,
   onChat,
   onAnswer,
   onSuggest,
+  pane = null,
+  freeText = false,
   phone = false,
 }: {
   /**
@@ -4793,6 +4930,10 @@ function QuestionCard({
    * branch.
    */
   readonly onSuggest?: (label: string | null) => void;
+  /** The pane's prompt, read for this set; the card follows only a title of THIS set. */
+  readonly pane?: PanePrompt | null;
+  /** Draw the terminal's free-text row after each question's options (a recorded set omits it). */
+  readonly freeText?: boolean;
   /**
    * Draws the phone-inline skin instead of the desktop's fixed-block card
    * (docs/design/phone-core-loop.md §3.3): the same internals (state,
@@ -4889,6 +5030,20 @@ function QuestionCard({
    * all. Submit resumes at the first step the picker has not taken.
    */
   const [taken, setTaken] = useState<readonly string[]>([]);
+  /** Steps with the free-text row chosen, by question id: a choice, never a mark. */
+  const terminalNoteId = useId();
+  const [free, setFree] = useState<Readonly<Record<string, boolean>>>({});
+  /** The step the terminal is on (-1 if none); followed once per change, and earlier steps count as taken. */
+  const liveAt = pane === null ? -1 : questions.findIndex((one) => paneAsks(one, pane.title));
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only a change of the pane's step re-runs this; `questions` is a fresh array each render.
+  useEffect(() => {
+    if (liveAt < 0) return;
+    setShowing(liveAt);
+    const before = questions.slice(0, liveAt).filter((one) => one.answer === null).length;
+    setTaken((already) =>
+      already.length >= before ? already : new Array<string>(before).fill(''),
+    );
+  }, [liveAt]);
 
   // One `tool_result` closes a whole call, so a part-answered set is not
   // something Claude Code produces -- but the model permits it, and a step
@@ -4912,6 +5067,8 @@ function QuestionCard({
   const picked = question === undefined ? [] : (marks[question.id] ?? []);
   /** What is left to send: every open step the picker has not already taken. */
   const pending = openSteps.slice(taken.length);
+  /** Free text on any step still to send turns Submit off; a step the terminal already took no longer counts. */
+  const freeChosen = pending.some((one) => free[one.id] === true);
   /** The pending steps still waiting for a mark -- what Submit is short of. */
   const unmarked = pending.filter((one) => (marks[one.id] ?? []).length === 0);
   const takenIds = new Set(openSteps.slice(0, taken.length).map((one) => one.id));
@@ -4921,7 +5078,7 @@ function QuestionCard({
    * them, because that is all the composer can carry -- text.
    */
   const suggested =
-    question === undefined || question.answer !== null
+    question === undefined || question.answer !== null || free[question.id] === true
       ? null
       : picked.length > 0
         ? picked.join(', ')
@@ -5144,6 +5301,13 @@ function QuestionCard({
       // questions are behind the CLI's own cursor now.
       const got = result.kind === 'sent' ? undefined : result.committed;
       if (got !== undefined) setTaken((already) => [...already, ...got]);
+    } catch {
+      // A rejected bridge call used to end the click silently. The message is
+      // a constant on purpose: an IPC error string is internals, not advice.
+      // The refusal is the only result drawn: a stop outcome from an earlier
+      // send would otherwise stay beside it.
+      setOutcome(null);
+      setRefusal('not sent — vam could not reach the session. Press Submit to try again.');
     } finally {
       // Cleared here ONLY -- resolve or throw, never a timer, never
       // optimistically -- so a slow write still blocks a second send for
@@ -5180,12 +5344,34 @@ function QuestionCard({
    * copy that could drift from the first.
    */
   const trySend = () => {
+    // Free text is answered in the terminal: nothing of this set is sent.
+    if (freeChosen) return;
     const short = unmarked[0];
     if (short === undefined) {
       void send();
       return;
     }
     refuse(short);
+  };
+
+  /** The free-text row's index and label (the screen's own wording when the pane is on this question). */
+  const freeAt = freeText && question !== undefined ? question.options.length : -1;
+  const paneFreeLabel =
+    pane !== null &&
+    question !== undefined &&
+    paneAsks(question, pane.title) &&
+    question.options.every((option, at) => pane.options[at] === option.label)
+      ? pane.options[question.options.length]
+      : undefined;
+  const freeLabel = paneFreeLabel ?? FREE_TEXT_LABEL;
+  /** Choosing the row clears the step's marks; `keep` is Enter's, never an unchoose. */
+  const chooseFree = (keep = false) => {
+    if (question === undefined) return;
+    const id = question.id;
+    const choosing = keep || free[id] !== true;
+    setRefusal(null);
+    setFree((current) => ({ ...current, [id]: choosing }));
+    if (choosing && !question.multiSelect) setMarks((current) => ({ ...current, [id]: [] }));
   };
 
   const toggle = (label: string, viaPointer = false) => {
@@ -5203,6 +5389,9 @@ function QuestionCard({
       return;
     }
     if (armedLabel === label) disarm();
+    if (question !== undefined && free[question.id] === true) {
+      setFree((current) => ({ ...current, [question.id]: false }));
+    }
     // The refusal named a missing mark. Marking anything is the operator
     // answering it, so it stops being on screen -- a refusal that outlives
     // its cause is the next thing to be ignored.
@@ -5258,9 +5447,13 @@ function QuestionCard({
           [question.id]: question.multiSelect ? [...picked, option.label] : [option.label],
         };
     if (!already) setMarks(nextMarks);
+    if (free[question.id] === true) setFree((current) => ({ ...current, [question.id]: false }));
     const short = pending.find((one) => (nextMarks[one.id] ?? []).length === 0);
     if (short === undefined) {
-      void send(nextMarks);
+      // Another step still on free text keeps the whole set in the terminal.
+      if (!pending.some((one) => one.id !== question.id && free[one.id] === true)) {
+        void send(nextMarks);
+      }
       return;
     }
     refuse(short);
@@ -5311,6 +5504,12 @@ function QuestionCard({
       return;
     }
     if (action.kind === 'mark') {
+      if (action.at === freeAt) {
+        event.preventDefault();
+        chooseFree();
+        buttons[action.at]?.focus();
+        return;
+      }
       const option = question?.options[action.at];
       if (option === undefined) return;
       event.preventDefault();
@@ -5382,6 +5581,11 @@ function QuestionCard({
      * has already been answered.
      */
     if (action.kind === 'toggle') {
+      if (at === freeAt) {
+        event.preventDefault();
+        chooseFree();
+        return;
+      }
       const option = question?.options[at];
       if (option === undefined) return;
       event.preventDefault();
@@ -5392,6 +5596,12 @@ function QuestionCard({
     // `confirm` decides submit-or-walk itself; see its own comment for why
     // that decision cannot be made by reading `marks` back after the mark.
     if (action.kind === 'confirm') {
+      if (at === freeAt) {
+        // Enter on the free-text row only chooses it.
+        event.preventDefault();
+        chooseFree(true);
+        return;
+      }
       const option = question?.options[at];
       if (option === undefined) return;
       event.preventDefault();
@@ -5576,8 +5786,14 @@ function QuestionCard({
         // answered and offers nothing to mark; the set's Submit below is for
         // whatever is still open. `break-words`: the same rule as the
         // question/header above -- an answer is free text too.
-        <span data-question-answer className="break-words text-control text-ink-dim">
-          resolved — {question.answer}
+        // A set closed by an is_error tool_result reads as cancelled, never
+        // as an answer: the text it carries is the error, not a choice.
+        <span
+          data-question-answer
+          data-question-cancelled={question.cancelled === true ? 'true' : undefined}
+          className="break-words text-control text-ink-dim"
+        >
+          {question.cancelled === true ? 'cancelled' : `resolved — ${question.answer}`}
         </span>
       ) : (
         <>
@@ -5770,6 +5986,51 @@ function QuestionCard({
                     </button>
                   );
                 })}
+                {freeAt >= 0 && (
+                  /* THE TERMINAL'S OWN ROW, drawn and never sent. It is a real
+                     option of the list because the terminal lists it as one;
+                     choosing it hands the whole set to the terminal
+                     (`freeChosen`). */
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={free[question.id] === true}
+                    data-question-option
+                    data-question-free-text
+                    data-question-number={NUMBERED_OPTIONS[freeAt]}
+                    data-picked={free[question.id] === true ? 'true' : undefined}
+                    onClick={() => chooseFree()}
+                    className={[
+                      'group vam-tap flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] border px-1.5 py-1 text-left',
+                      OPTION_FOCUS_RING,
+                      free[question.id] === true
+                        ? `border-running ${OPTION_FILL}`
+                        : `border-line hover:${OPTION_FILL}`,
+                    ].join(' ')}
+                  >
+                    <span className="flex max-w-full items-baseline gap-1.5 text-control text-ink">
+                      {free[question.id] === true && (
+                        <Check
+                          aria-hidden="true"
+                          size={13}
+                          strokeWidth={2.5}
+                          className="flex-none text-running"
+                        />
+                      )}
+                      {NUMBERED_OPTIONS[freeAt] !== undefined && (
+                        <span className={`text-meta tabular-nums ${OPTION_QUIET_INK}`}>
+                          {NUMBERED_OPTIONS[freeAt]}
+                        </span>
+                      )}
+                      <span data-question-label className="min-w-0 break-words">
+                        {freeLabel}
+                      </span>
+                    </span>
+                    <span className={`min-w-0 break-words text-meta ${OPTION_QUIET_INK}`}>
+                      Typed in the terminal.
+                    </span>
+                  </button>
+                )}
               </div>
               {/* THE PANEL: the FULL preview of `activeOption` -- focused,
                   else marked, else the first option that has one -- never the
@@ -5900,12 +6161,11 @@ function QuestionCard({
           <button
             type="button"
             data-question-submit
-            /* `sending` ONLY. It used to read `unmarked.length > 0 ||
-               sending`, which took the click, the focus and the explanation
-               away together -- see `refusal`. The in-flight half stays: a
-               second Submit while the first is out would type into a picker
-               that is already moving. */
-            disabled={sending}
+            /* `sending` OR a free-text choice -- never a missing mark (see
+               `refusal`); `data-question-terminal-note` says why. */
+            disabled={sending || freeChosen}
+            aria-disabled={freeChosen ? true : undefined}
+            aria-describedby={freeChosen ? terminalNoteId : undefined}
             /* What the control is short of, as a fact rather than as a
                colour, for anything that has to check the state without
                reading a sentence. */
@@ -5913,7 +6173,7 @@ function QuestionCard({
             onClick={trySend}
             className={[
               'flex items-center gap-1.5 rounded-[6px] border px-1.5 py-1 text-control',
-              sending
+              sending || freeChosen
                 ? 'cursor-default border-line text-ink-faint'
                 : `cursor-pointer border-running text-ink hover:${OPTION_FILL}`,
             ].join(' ')}
@@ -5952,14 +6212,28 @@ function QuestionCard({
               submits"), and a control that already carries its own key need
               not be repeated beside it. */}
           <span data-question-progress className="text-meta text-ink-faint">
-            {pending.length > 1
-              ? unmarked.length > 0
-                ? `${pending.length - unmarked.length} of ${pending.length} marked`
-                : null
-              : unmarked.length > 0
-                ? 'not marked yet — pick an option above'
-                : null}
+            {freeChosen
+              ? null
+              : pending.length > 1
+                ? unmarked.length > 0
+                  ? `${pending.length - unmarked.length} of ${pending.length} marked`
+                  : null
+                : unmarked.length > 0
+                  ? 'not marked yet — pick an option above'
+                  : null}
           </span>
+          {freeChosen && (
+            /* Set-level, apart from `refusal`: a status, not an alert. */
+            <p
+              id={terminalNoteId}
+              data-question-terminal-note
+              role="status"
+              className="basis-full break-words text-control text-waiting"
+            >
+              Free text is typed in the terminal. Answer this whole set there; Submit is off so
+              nothing is sent from here.
+            </p>
+          )}
         </div>
       )}
       {refusal !== null && (
@@ -5968,12 +6242,19 @@ function QuestionCard({
            are separate elements for the same reason they are separate state
            -- an operator must be able to tell "vam did not send this" from
            "the picker said no". */
-        <p data-question-refusal className="text-control text-waiting">
+        <p data-question-refusal role="alert" className="text-control text-waiting">
           {refusal}
         </p>
       )}
       {outcome !== null && (
-        <p data-question-outcome data-outcome={outcome.kind} className="text-control text-ink-dim">
+        <p
+          data-question-outcome
+          data-outcome={outcome.kind}
+          // A stop is the operator's Submit not happening, so it takes the
+          // waiting ink and an assertive live region; a sent is confirmation.
+          role={outcome.kind === 'sent' ? 'status' : 'alert'}
+          className={`text-control ${outcome.kind === 'sent' ? 'text-ink-dim' : 'text-waiting'}`}
+        >
           {outcomeWording(outcome)}
         </p>
       )}
@@ -6076,6 +6357,16 @@ function StepRow({ step }: { readonly step: TurnStep }) {
 }
 
 /**
+ * THE UNFOLD ARROW'S TOOLTIP: the cheapest stat already on the turn, its step
+ * count. A source that lists no steps (`steps` absent) has no count to give, so
+ * the tip says what pressing the arrow will do instead.
+ */
+function unfoldTip(steps: readonly TurnStep[] | undefined, unfolded: boolean): string {
+  if (steps === undefined || steps.length === 0) return unfolded ? 'Hide working' : 'Show working';
+  return steps.length === 1 ? '1 step' : `${steps.length} steps`;
+}
+
+/**
  * ONE TURN OF THE TRANSCRIPT, as a block of the column.
  *
  * The pane used to draw exactly one of these -- whichever turn `selectedId`
@@ -6116,7 +6407,10 @@ const TurnBlock = memo(function TurnBlock({
   onUnfold,
   onPromptMenu,
   onAnswerMenu,
+  phone = false,
 }: {
+  /** Phone: the column reserves no jump gutter, so the pinned prompt gives none back. */
+  readonly phone?: boolean;
   readonly decision: Decision;
   /** Is this the turn the picker (or the canvas) has landed on? */
   readonly marked: boolean;
@@ -6174,9 +6468,10 @@ const TurnBlock = memo(function TurnBlock({
   /**
    * AND THE WAY BACK, FROM THE SAME PAIR OF PREDICATES. Not `!showProgress`:
    * that would draw one on every turn while focus view is off, where nothing
-   * is folded and there is nothing to restore. `drawsUnfoldControl` is the
-   * complement of the line WITHIN focus view, written once so the two cannot
-   * drift into a turn that has neither.
+   * is folded and there is nothing to restore. `drawsUnfoldControl` is a
+   * TOGGLE's rule: the control is drawn for every turn focus view folds,
+   * whether the operator has unfolded it or not, so the same arrow that
+   * opens a turn folds it again. Its drawn part is a chevron in a 24px box.
    */
   const showUnfold = drawsUnfoldControl(focusView, turnFacts);
   /**
@@ -6272,7 +6567,7 @@ const TurnBlock = memo(function TurnBlock({
           event.preventDefault();
           onPromptMenu(decision.id, { x: event.clientX, y: event.clientY });
         }}
-        className="-ml-3.5 -mr-11 sticky top-0 z-10 flex max-h-[45cqh] min-h-0 flex-none flex-col gap-1 bg-pane pt-1.5 pr-11 pb-1.5 pl-3.5"
+        className={`-ml-3.5 ${phone ? '-mr-3.5 pr-3.5' : '-mr-11 pr-11'} sticky top-0 z-10 flex max-h-[45cqh] min-h-0 flex-none flex-col gap-1 bg-pane pt-1.5 pb-1.5 pl-3.5`}
       >
         {/* The region's name, announced and not drawn. */}
         <span className="sr-only">in</span>
@@ -6336,9 +6631,21 @@ const TurnBlock = memo(function TurnBlock({
              fill (3.718:1) and must not be used here. The guard measures the
              ink this element is really painted with, so that constraint is
              enforced rather than noted. */
-          className="min-h-0 min-w-0 overflow-y-auto rounded-[10px] bg-in-bubble px-2.5 py-2"
+          className="max-w-[90%] min-h-0 min-w-0 self-end overflow-y-auto rounded-[10px] bg-in-bubble px-2.5 py-2"
         >
-          <p className="whitespace-pre-wrap break-words text-body text-ink">
+          {/* PHONE ONLY: THE JUMP PILL'S CLEARANCE. The pill's painted circle
+              sits 8px to 36px in from the column's right edge, and this
+              bubble's text box ends 24px in (14px gutter, 10px padding), so
+              the last glyph of a right-aligned prompt ran under it. 16px of
+              right padding on the paragraph, never on the band or the
+              scroller (the phone gutter is pinned), puts the text 40px in:
+              4px clear of the circle. Padding and not the desktop's float:
+              a float tall enough to span the pill's rows would also stretch
+              a one-line bubble to that height. */}
+          <p
+            data-detail-pill-reserve={phone ? '' : undefined}
+            className={`whitespace-pre-wrap break-words text-body text-ink${phone ? ' pr-4' : ''}`}
+          >
             {/* THE RESERVED CORNER, audit F1's obligation. A float rather than
                 padding because only the FIRST LINE meets the pill: padding
                 would indent all 300 lines of a long prompt to clear something
@@ -6415,14 +6722,17 @@ const TurnBlock = memo(function TurnBlock({
           "Folded activity stays one click away" -- and the setting this
           replaces had no such clause, which is why it was a deletion with a
           preference in front of it rather than a fold. So a folded turn is
-          never left with nothing: it draws this instead, in the same place,
-          and pressing it puts that turn's line back.
+          never left with nothing: it draws this toggle, in the same place.
+          Pressing it opens that turn's working in place, and pressing it
+          again folds the turn; it is drawn for every turn focus view folds,
+          unfolded or not.
 
           A BUTTON, NAMED IN WORDS. A control that cannot be found is the same
           defect as one that cannot act, so this is not a hover affordance and
           not a bare glyph: it takes a tab stop and its accessible name says
           what pressing it produces. The drawn part is deliberately almost
-          nothing -- an ellipsis at the progress line's own size and ink -- so
+          nothing -- a chevron in a 24px box, in the progress line's own ink,
+          turned a quarter turn once the turn is open -- so
           that folding still BUYS the operator the quiet page they asked for.
           A chip as loud as the line it replaced would be the setting doing
           nothing at all.
@@ -6432,12 +6742,14 @@ const TurnBlock = memo(function TurnBlock({
           that unfolded everything would be a second copy of the setting
           reached from a place that promised something smaller. */}
       {showUnfold && (
-        <button
-          type="button"
-          data-turn-unfold={decision.id}
-          onClick={() => onUnfold(decision.id)}
-          aria-label={`show this turn's working — ${decision.label}`}
-          /* IN FLOW, WHERE THE WORKING WAS -- and that is a reversal, so the
+        <ShortcutTip label={unfoldTip(decision.steps, unfolded)} align="start">
+          <button
+            type="button"
+            data-turn-unfold={decision.id}
+            aria-expanded={unfolded}
+            onClick={() => onUnfold(decision.id)}
+            aria-label={`${unfolded ? 'hide' : 'show'} this turn's working — ${decision.label}`}
+            /* IN FLOW, WHERE THE WORKING WAS -- and that is a reversal, so the
              history is kept. The first cut put this OUT of flow, absolutely
              positioned in the article's top-right corner, so that it cost no
              height: vam then folded ONE line per turn, and a way back that
@@ -6452,8 +6764,8 @@ const TurnBlock = memo(function TurnBlock({
 
              SO IT STANDS EXACTLY WHERE THE PROGRESS REGION STANDS when it is
              back: between the prompt block and the answer, flush with the
-             answer's left edge. An ellipsis means "something is elided HERE";
-             drawn there, the click replaces the mark with the working in
+             answer's left edge. A chevron there says "something is folded HERE";
+             the click replaces the mark with the working in
              place rather than inserting rows somewhere else on the page.
              Document order was already this (the button precedes the region,
              `test/panels/DetailPanel.turn-progress.test.tsx` pins it); only
@@ -6480,19 +6792,25 @@ const TurnBlock = memo(function TurnBlock({
              only thing there is to read. Measured at 7.25:1 on the pane, the
              same ink the step rows wear; the corner, not the ink, was what
              made it hard to find. */
-          /* `vam-tap` grows this to the phone's 44 (`styles.css`), which is a
+            /* `vam-tap` grows this to the phone's 44 (`styles.css`), which is a
              floor 24 does not meet -- five of these draw on one folded
              screen, and this is the ONLY route back to a folded turn's
              working. In flow, the same `-my-1.5` makes that 32px net. */
-          className={`vam-tap -my-1.5 flex h-6 w-6 flex-none cursor-pointer items-center justify-center self-start rounded font-mono text-ink-quiet text-meta leading-none hover:text-ink ${FOCUS_RING}`}
-        >
-          {/* The phone's other half: hit 44, PAINT 30, the pattern the view
+            className={`vam-tap -my-1.5 flex h-6 w-6 flex-none cursor-pointer items-center justify-center self-start rounded text-ink-quiet hover:text-ink ${FOCUS_RING}`}
+          >
+            {/* The phone's other half: hit 44, PAINT 30, the pattern the view
               icons and the keystroke strip already use. On the desktop this
               span is unstyled and the box stays 24. */}
-          <span data-tap-skin aria-hidden="true">
-            ···
-          </span>
-        </button>
+            <span data-tap-skin aria-hidden="true">
+              <ChevronRight
+                size={15}
+                strokeWidth={1.8}
+                aria-hidden="true"
+                className={`transition-transform duration-150 ease-out motion-reduce:transition-none ${unfolded ? 'rotate-90' : ''}`}
+              />
+            </span>
+          </button>
+        </ShortcutTip>
       )}
       {showProgress && (
         <section data-detail-block="progress" className="flex flex-none flex-col gap-1">
@@ -6870,12 +7188,13 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
    *  - and it is per-pane state that nothing outside this pane renders from,
    *    which is the same test `cycleNote` and the tab already pass.
    *
-   * ONLY THE OLDER HALF IS REMEMBERED, and `transcript-history.ts` carries the
+   * THE OLDER HALF IS WHAT IS REMEMBERED, and `transcript-history.ts` carries the
    * argument in full: the live list is used exactly as the poll delivered it,
    * so this pane holds no second opinion about a turn the poll is still
    * carrying, and `Canvas.tsx`'s optimistic paint -- with the retraction that
    * follows a refused write -- stays the poll's business rather than becoming a
-   * phantom this pane preserves.
+   * phantom this pane preserves. What `older` holds is the turns the pager
+   * walked AND the turns the live window has since slid past (`retainLeft`).
    */
   const [older, setOlder] = useState<readonly Decision[]>(NO_TURNS);
   const [pager, setPager] = useState<PagerState>(RESTING_PAGER);
@@ -6893,12 +7212,40 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
   // for THIS render -- the state updates queued here land on the next one, and
   // drawing the old session's history for one frame is the half-read flash
   // `focusKey` has always existed to avoid.
+  const liveDecisions = entry?.session.decisions ?? NO_TURNS;
+  /**
+   * THE LIVE LIST THE LAST RENDER DREW, so a turn the poll has stopped carrying
+   * can be told from one it never had. The live window is a byte window and it
+   * slides: a turn that rendered here and then left it is kept in `older`
+   * (`retainLeft`), because the reset rule below is the only thing allowed to
+   * drop a turn and it keys on the SESSION ID ALONE -- never on the entry's
+   * identity, which the poll rebuilds every ten seconds, or on a listing field.
+   * State rather than a ref, the render-phase pattern React documents: a ref
+   * written during render is lost on a discarded render.
+   */
+  const [drawnLive, setDrawnLive] = useState<readonly Decision[]>(liveDecisions);
+  let olderNext = older;
+  let pagerNext = pager;
   if (sessionChanged) readingRef.current = null;
   if (sessionChanged && older.length > 0) setOlder(NO_TURNS);
   if (sessionChanged && pager !== RESTING_PAGER) setPager(RESTING_PAGER);
-  const olderNow = sessionChanged ? NO_TURNS : older;
-  const pagerNow = sessionChanged ? RESTING_PAGER : pager;
-  const liveDecisions = entry?.session.decisions ?? NO_TURNS;
+  // A poll that carries no turns for the SAME session is a gap, not a window
+  // slide: it must not become the previous list, or the turn that comes back
+  // under a moved id meets an empty previous (`sameTurnUnderANewId`).
+  if (drawnLive !== liveDecisions && (liveDecisions.length || sessionChanged)) {
+    setDrawnLive(liveDecisions);
+    if (!sessionChanged) {
+      olderNext = retainLeft(drawnLive, liveDecisions, older);
+      if (olderNext !== older) {
+        setOlder(olderNext);
+        // The cap dropped turns off the old end: the pager must not skip them.
+        pagerNext = pagerAfterRetain(pager, older, olderNext);
+        setPager(pagerNext);
+      }
+    }
+  }
+  const olderNow = sessionChanged ? NO_TURNS : olderNext;
+  const pagerNow = sessionChanged ? RESTING_PAGER : pagerNext;
   // Memoized on the two inputs `columnOf` actually reads: an unrelated
   // re-render (a sibling pane's keystroke, a focus flip) must reuse the
   // previous array rather than rebuilding a Set, a filter and a spread over
@@ -8202,15 +8549,10 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
    * `bottom-full` pins that layer's bottom edge to `data-composer-bar`'s top,
    * so the two numbers were always equal and `composerBarRef.top` says the
    * same thing without requiring the SUGGEST layer to be the one open. That
-   * substitution is what let `provider`/`model`/`mode` join this cap: three
-   * `absolute bottom-full` popovers that used to anchor to their OWN small
-   * toggle -- a wrapper sitting in `data-prompt-tools`, directly under the
-   * textarea with only a `gap-2.5` between them -- and grew upward into
-   * exactly the box they hang off (`src/shared/providers.ts`'s own
-   * measurement: "99x34 overlapping the textarea by 28px"). Un-anchoring
-   * their wrapper's own `position: relative` (search `data-popover-root`
-   * below) lets their `absolute` resolve against `data-composer-bar`
-   * instead, the same ancestor `SUGGEST_LAYER` already floats against.
+   * substitution is what let `provider`/`model`/`mode` join this cap. Those
+   * three now hang off their own trigger (`data-popover-anchor`), whose top
+   * is below the composer bar's, so the cap is a safe over-estimate for them:
+   * a menu clamped to the room above the bar still fits above its trigger.
    *
    * `null` while nothing is open, which draws no `style` at all and costs the
    * common case (no popover) nothing.
@@ -8242,6 +8584,57 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
     globalThis.addEventListener('resize', measure);
     return () => globalThis.removeEventListener('resize', measure);
   }, [composerPopoverOpen]);
+  /**
+   * WHERE THE OPEN provider/model/mode MENU SITS HORIZONTALLY, decided ONCE
+   * per open: it opens left-aligned to its trigger (`left-0`), and flips to
+   * `right-0` only when that would run past the composer's right edge. A menu
+   * wider than the bar is also capped to the bar's width. Never re-decided
+   * while open, so it cannot flip back and forth. Phone has no per-trigger
+   * anchor (its menus open from the "+" overflow row), so nothing is measured.
+   */
+  const [popoverFit, setPopoverFit] = useState<{
+    readonly flip: boolean;
+    readonly maxWidth: number | null;
+  }>({ flip: false, maxWidth: null });
+  useLayoutEffect(() => {
+    const menu =
+      phone || openPopover === null
+        ? null
+        : document.querySelector<HTMLElement>(
+            `[data-popover-root="${openPopover}"] [data-composer-menu]`,
+          );
+    const bar = composerBarRef.current;
+    if (menu === null || bar === null) {
+      setPopoverFit((previous) =>
+        previous.flip || previous.maxWidth !== null ? { flip: false, maxWidth: null } : previous,
+      );
+      return;
+    }
+    const barRect = bar.getBoundingClientRect();
+    const right = Math.min(barRect.right, globalThis.innerWidth) - POPOVER_EDGE_GUTTER;
+    setPopoverFit({
+      flip: menu.getBoundingClientRect().right > right,
+      maxWidth: Math.max(0, barRect.width - 2 * POPOVER_EDGE_GUTTER),
+    });
+  }, [openPopover, phone]);
+  /**
+   * PHONE: the anchor is not `relative` there, so `left-0` resolves against a
+   * wider ancestor and the menu sat 1px from the screen edge, 12px left of the
+   * composer pill. `ml-3` is the 12px side margin (phone-core-loop.md).
+   */
+  const phoneMenuMargin = phone ? ' ml-3' : '';
+  const popoverMenuClass =
+    (popoverFit.flip ? COMPOSER_POPOVER_MENU.replace('left-0', 'right-0') : COMPOSER_POPOVER_MENU) +
+    phoneMenuMargin;
+  /** The shared height cap plus the width cap, `cap` being the menu's own ceiling. */
+  const popoverMenuStyle = (cap?: number) => {
+    const widths = [cap, popoverFit.maxWidth].filter(
+      (w): w is number => w !== undefined && w !== null,
+    );
+    const maxWidth = widths.length === 0 ? undefined : Math.min(...widths);
+    if (suggestMaxHeight === null && maxWidth === undefined) return undefined;
+    return { maxHeight: suggestMaxHeight ?? undefined, maxWidth };
+  };
   /**
    * The question the card draws: the newest OPEN one, and only if there is
    * none, the newest answered one -- what is still being asked outranks what
@@ -8286,12 +8679,14 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
    * established, which is not permission. So for every other row nothing is
    * read at all -- vam does not look into a pane it may not act in -- and the
    * waiting note above stays the whole of what is offered.
+   * A recorded set is read too, but only one with a step to follow
+   * (`followsPane`).
    */
   const readable =
     prompt !== undefined &&
     entry !== null &&
     waitingFor !== undefined &&
-    recorded.length === 0 &&
+    (recorded.length === 0 || followsPane(recorded)) &&
     entry.session.vamControlled === true;
   const [paneAsk, setPaneAsk] = useState<PanePrompt | null>(null);
   const projectId = entry?.project.id ?? '';
@@ -8384,6 +8779,8 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
           },
         ];
   const newestQuestion = newestQuestions[0] ?? null;
+  // The phone Response view draws the question inline, as the column's end.
+  const inlineQuestionEnds = phone && current === 'Response' && newestQuestion !== null;
   /* FOUR THINGS HAVE TO BE TRUE before a Submit is drawn: the source really
      delivers prompts, the shell really has the bridge (there is none in the
      browser build), there is a row to aim at, and VAM STARTED THAT ROW'S
@@ -8449,8 +8846,8 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
       },
       // `root`: the SCROLLER, not the viewport -- the default target for a
       // plain `IntersectionObserver` is the browser viewport, which this
-      // element never leaves (it is `position: sticky` inside a pane that
-      // itself never scrolls the WINDOW). What it leaves is `outRef`'s own
+      // element never leaves (it sits in flow inside a pane that itself
+      // never scrolls the WINDOW). What it leaves is `outRef`'s own
       // scrolled content, so that is what has to be the root.
       { root, threshold: 0 },
     );
@@ -8488,8 +8885,21 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
    * recorded or sent is the existing button's business, and the card goes on
    * saying that a pick is only a mark.
    */
-  const promptSuggestion =
-    suggestion !== null && suggestion !== '' && draft === '' ? suggestion : null;
+  const cardSuggestion = suggestion !== null && suggestion !== '' ? suggestion : null;
+  // The TUI's own suggestion, read off the pane; the card's offer has priority.
+  const paneSuggestion = usePaneSuggestion({
+    // A pane can exist only for a session vam holds (as the other pane work does).
+    read:
+      entry?.session.vamControlled === true ? globalThis.window?.api?.terminal?.read : undefined,
+    projectId: entry?.project.id ?? null,
+    rowId: entry?.session.id,
+    phone,
+    tab,
+    status: entry?.session.status ?? null,
+    draft,
+    cardSuggestion,
+  });
+  const promptSuggestion = draft === '' ? (cardSuggestion ?? paneSuggestion) : null;
   // `records === false` is a source that has no route to record a prompt at
   // all -- a read-only server, where `/api/record-prompt` is not registered
   // and 404s. The box is then not DRAWN, rather than drawn and refused on tap:
@@ -8870,7 +9280,8 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
   const unfold = useCallback((id: string) => {
     setUnfolded((open) => {
       const next = new Set(open);
-      next.add(id);
+      // A toggle: the same control that opened a turn folds it again.
+      if (!next.delete(id)) next.add(id);
       return next;
     });
   }, []);
@@ -9069,7 +9480,11 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
         // was one swatch for two surfaces. `--vam-pane` starts on that same
         // measured value in both themes (styles.css), so nothing moved; what
         // changed is that either can move alone now.
-        'relative flex h-full min-w-0 flex-col border-line border-l bg-pane',
+        // `min-h-0` BESIDE `min-w-0`: a flex item's `min-height: auto` is its
+        // content's min size, and the Files gutter is in flow and as tall as
+        // the file is long, so without it the pane could not shrink and the
+        // document grew a shell scrollbar.
+        'relative flex h-full min-h-0 min-w-0 flex-col border-line border-l bg-pane',
         // No width given means nobody is sizing this pane -- the phone shell's
         // case -- so it fills its host instead of refusing to shrink.
         width === undefined ? 'w-full' : 'shrink-0',
@@ -9415,6 +9830,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                reason it is: a column at the pane's right edge cannot be
                cleared by right-hand padding. */
             reserveCornerHeight={cornerReserveHeight}
+            branch={entry?.session.branch ?? null}
           />
         ) : current === 'Files' ? // Drawn by the ALWAYS-MOUNTED `FilesTab` sibling below instead --
         // see its own comment for why. This slot contributes nothing so the
@@ -9571,7 +9987,9 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                  resolves to nothing inside the per-turn wrapper and the pinned
                  prompt can cover the answer again (audit F2). `TurnBlock`'s
                  own comment carries the measurement. */
-              className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pl-3.5 pr-11 [container-type:size]"
+              className={`vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pl-3.5 [container-type:size] ${
+                phone ? 'pr-3.5' : 'pr-11'
+              }`}
             >
               {/*
               WHAT THE TOP OF THE COLUMN IS — said, not left to be inferred.
@@ -9656,8 +10074,8 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                  is. One `-mx-3.5` would leave it 30px short of the right edge
                  -- invisible here, since this block paints no ground, and a
                  trap for whoever gives it one. */
-                className={`-ml-3.5 -mr-11 flex flex-none flex-col gap-0.5 pt-3 pb-1 pl-3.5 font-mono text-meta text-ink-faint ${
-                  cornerOverlay ? '' : 'pr-11'
+                className={`-ml-3.5 ${phone ? '-mr-3.5' : '-mr-11'} flex flex-none flex-col gap-0.5 pt-3 pb-1 pl-3.5 font-mono text-meta text-ink-faint ${
+                  cornerOverlay ? '' : phone ? 'pr-3.5' : 'pr-11'
                 }`}
                 style={cornerOverlay ? { paddingRight: cornerReserve } : undefined}
               >
@@ -9944,6 +10362,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                   onUnfold={unfold}
                   onPromptMenu={openPromptMenu}
                   onAnswerMenu={openAnswerMenu}
+                  phone={phone}
                 />
               ))}
               {/* PHONE, RESPONSE VIEW ONLY (docs/design/phone-core-loop.md
@@ -9951,12 +10370,13 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                 THIS SAME scroller instead of `DetailPanel`'s fixed footer
                 block below (`data-question-bar`, `!phone` there). AC-1: one
                 scrollable container holds both a prior turn's text and
-                `[data-question-option]`. `sticky bottom-0` (not `flex-none`,
-                per AC-2) so it reads as "the thing demanding attention" at
-                the bottom of the scroll content without being pinned
-                outside it -- scrolling UP into history lets it scroll out
-                of view like any other message, which is what the jump-to-
-                question pill (§3.2 deviation) answers. `QuestionCard`'s own
+                `[data-question-option]`. In normal flow as the column's last
+                child (not `flex-none`, per AC-2, and not pinned: a pinned
+                card's containing block is the whole scroll content, so it
+                never left the view and the pill never drew) -- scrolling UP
+                into history lets it scroll out of view like any other
+                message, which is what the jump-to-question pill (§3.2
+                deviation) answers. `QuestionCard`'s own
                 internals are UNCHANGED -- `phone` only swaps its root
                 classes; see that prop's own doc. */}
               {phone && current === 'Response' && newestQuestion !== null && (
@@ -9964,7 +10384,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                   ref={questionInlineRef}
                   data-question-bar-inline
                   {...insertScopeMark}
-                  className="sticky bottom-0 flex flex-col bg-pane pt-1.5"
+                  className="flex flex-col bg-pane pt-1.5"
                 >
                   <QuestionCard
                     key={setId}
@@ -9973,11 +10393,37 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                     onChat={startChat}
                     onAnswer={questionOnAnswer}
                     onSuggest={setSuggestion}
+                    pane={recorded.length > 0 ? paneAsk : null}
+                    freeText={recorded.length > 0}
                     phone
                   />
                 </div>
               )}
+              {/* The breathing room at the scroll end is a trailing SPACER, not
+                scroller padding. Skipped while the phone inline question is
+                drawn: that card is an ordinary in-flow block at the end of
+                the column, so it is the end and sits flush there; it scrolls
+                with the transcript and the jump pill shows while it is out
+                of view. */}
+              {!inlineQuestionEnds && (
+                <div
+                  data-detail-spacer
+                  aria-hidden="true"
+                  className={`flex-none ${phone ? 'h-[max(6rem,20vh)]' : 'h-[max(12rem,33vh)]'}`}
+                />
+              )}
             </div>
+            {/* Decoration only, and derived from the SAME `hasContentBelow`
+                slack as the jump below it: it stands in for the rule that used
+                to sit above the composer. It sits before the jumps so they
+                paint over it. */}
+            {jumps.below && !inlineQuestionEnds && (
+              <div
+                data-detail-fade-bottom
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-x-0 bottom-0 z-0 h-10 bg-[linear-gradient(to_top,var(--color-pane),transparent)]"
+              />
+            )}
             {/* THE JUMPS, FLOATING OVER THE COLUMN — what is left of the bar
                 that used to hold them, and of two more controls that went with
                 it (the turn-list chevron, and the `<select>` that jumped to a
@@ -10282,6 +10728,8 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                 onChat={startChat}
                 onAnswer={questionOnAnswer}
                 onSuggest={setSuggestion}
+                pane={recorded.length > 0 ? paneAsk : null}
+                freeText={recorded.length > 0}
               />
             )}
           </div>
@@ -10341,7 +10789,6 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
             // once the textarea itself stopped over-measuring (§4.7's own
             // postmortem, followed up).
             phone ? 'gap-1.5 pt-1 pb-2' : 'gap-2.5 py-3',
-            newestQuestion === null ? 'border-line border-t' : '',
             // NARROWED WITH THE TRANSCRIPT, on the operator's own instruction
             // -- see the body's comment for the decision and the seam argument
             // on the question bar above for why the rule has to move with it.
@@ -10556,9 +11003,16 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                   className={SUGGEST_BOX}
                   style={suggestMaxHeight === null ? undefined : { maxHeight: suggestMaxHeight }}
                 >
-                  <p className="px-1.5 pb-0.5 text-control text-ink-faint">
-                    the provider's own commands — Enter picks one, Esc keeps what you typed
-                  </p>
+                  <div
+                    data-slash-suggest-heading
+                    className="flex flex-wrap items-center gap-x-1 gap-y-0.5 border-line border-b px-1.5 pb-1.5 text-meta text-ink-faint"
+                  >
+                    <span>The provider's own commands —</span>
+                    <KeyTag>Enter</KeyTag>
+                    <span>picks one,</span>
+                    <KeyTag>Esc</KeyTag>
+                    <span>keeps what you typed</span>
+                  </div>
                   {slashMatches.map((command, index) => (
                     <button
                       key={command.id}
@@ -10715,10 +11169,22 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
             wrapper contributes no box of its own (`display: contents`) so its
             one child -- the textarea -- becomes the pill's own flex item;
             see `data-prompt-input` just above for that pill's own comment. */}
-              <div className={phone ? 'contents' : 'flex items-start gap-2'}>
+              <div className={phone ? 'contents' : 'relative flex items-start gap-2'}>
+                {/* The offer as a key before its text: an overlay, so the textarea stays the one input. */}
+                {promptSuggestion !== null && !phone && (
+                  <div
+                    data-prompt-suggestion-ghost
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-x-0 top-0 flex items-baseline gap-1.5 overflow-hidden text-body text-ink-faint"
+                  >
+                    <KeyTag>Tab</KeyTag>
+                    <span className="truncate">{promptSuggestion}</span>
+                  </div>
+                )}
                 <textarea
                   ref={setInputRef}
                   rows={phone ? 1 : 2}
+                  aria-keyshortcuts={promptSuggestion !== null && !phone ? 'Tab' : undefined}
                   value={draft}
                   readOnly={!composing}
                   onFocus={() => {
@@ -10943,7 +11409,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                     entry === null
                       ? 'Pick a session first'
                       : promptSuggestion !== null && !phone
-                        ? `${promptSuggestion} — Tab to use`
+                        ? promptSuggestion
                         : phone
                           ? // PHONE ONLY, SHORTER: the desktop sentence wraps to
                             // three lines at the merged row's own width, cramped
@@ -10987,6 +11453,8 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                    Desktop is unaffected: both classes are phone-only. */
                   className={[
                     'vam-no-scrollbar vam-tap min-w-0 flex-1 resize-none bg-transparent text-body text-ink outline-none placeholder:text-ink-faint',
+                    // The ghost above is what is seen; the placeholder is accessible text only.
+                    promptSuggestion !== null && !phone ? 'placeholder:text-transparent' : '',
                     // `py-3` (12px a side) centres the one line in the 44px
                     // box: with no vertical padding the text sat flush
                     // against the pill's top border (item 19, measured).
@@ -11225,7 +11693,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                       role="menu"
                       aria-label="composer tools"
                       onKeyDown={dismissPopoverOnEscape}
-                      className={COMPOSER_POPOVER_MENU}
+                      className={`${COMPOSER_POPOVER_MENU}${phoneMenuMargin}`}
                       style={
                         suggestMaxHeight === null ? undefined : { maxHeight: suggestMaxHeight }
                       }
@@ -11498,84 +11966,87 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                    only one of them would dismiss on a press inside the very
                    thing being pressed. */
                 <div data-popover-root="provider" className="flex-none">
-                  {/* PHONE: the toggle moves into the "+" overflow's "Provider"
+                  {/* `data-popover-anchor`: the menu's own positioning
+                      context, holding this trigger and nothing else. Phone
+                      has no trigger here (the "+" row opens the listbox), so
+                      it stays un-`relative` and the menu keeps resolving
+                      against the composer bar there. */}
+                  <div
+                    data-popover-anchor
+                    className={phone ? 'flex shrink-0' : 'relative flex shrink-0'}
+                  >
+                    {/* PHONE: the toggle moves into the "+" overflow's "Provider"
                       row, which opens this SAME listbox by setting the shared
                       `openPopover` state directly -- see `data-composer-overflow`
                       below. This wrapper and the listbox stay unconditional so
                       that row has something to open. */}
-                  {!phone && (
-                    <Note text="the agent NEW sessions start with — not this one, which is already running">
-                      <button
-                        type="button"
-                        data-provider-picker-toggle
-                        onKeyDown={dismissPopoverOnEscape}
-                        aria-haspopup="listbox"
-                        aria-expanded={providerPickerOpen}
-                        aria-label={`default provider for new sessions: ${currentProvider.label} — change`}
-                        onClick={() => togglePopover('provider')}
-                        className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center text-ink-dim hover:text-ink"
-                      >
-                        <span
-                          aria-hidden="true"
-                          data-tap-skin
-                          className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-card hover:bg-line-strong"
+                    {!phone && (
+                      <Note text="the agent NEW sessions start with — not this one, which is already running">
+                        <button
+                          type="button"
+                          data-provider-picker-toggle
+                          onKeyDown={dismissPopoverOnEscape}
+                          aria-haspopup="listbox"
+                          aria-expanded={providerPickerOpen}
+                          aria-label={`default provider for new sessions: ${currentProvider.label} — change`}
+                          onClick={() => togglePopover('provider')}
+                          className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center text-ink-dim hover:text-ink"
                         >
-                          {(() => {
-                            const mark = PROVIDER_MARKS[currentProvider.id];
-                            return mark === undefined ? (
-                              <Box size={12} strokeWidth={1.7} />
-                            ) : (
-                              <mark.Glyph size={12} />
-                            );
-                          })()}
-                        </span>
-                      </button>
-                    </Note>
-                  )}
-                  {providerPickerOpen && (
-                    <div
-                      data-provider-picker
-                      role="listbox"
-                      onKeyDown={dismissPopoverOnEscape}
-                      aria-label="default provider for new sessions"
-                      className={COMPOSER_POPOVER_MENU}
-                      style={
-                        suggestMaxHeight === null ? undefined : { maxHeight: suggestMaxHeight }
-                      }
-                    >
-                      {PROVIDERS.map((provider) => {
-                        const selected = provider.id === currentProvider.id;
-                        return (
-                          <button
-                            key={provider.id}
-                            type="button"
-                            data-provider-option={provider.id}
-                            role="option"
-                            aria-selected={selected}
-                            onClick={() => {
-                              onSetDefaultProvider(provider.id);
-                              setOpenPopover(null);
-                            }}
-                            /* `vam-tap`: a popover row is a touch target too,
+                          <span
+                            aria-hidden="true"
+                            data-tap-skin
+                            className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-card hover:bg-line-strong"
+                          >
+                            <ProviderIcon id={currentProvider.id} />
+                          </span>
+                        </button>
+                      </Note>
+                    )}
+                    {providerPickerOpen && (
+                      <div
+                        data-provider-picker
+                        data-composer-menu
+                        role="listbox"
+                        onKeyDown={dismissPopoverOnEscape}
+                        aria-label="default provider for new sessions"
+                        className={popoverMenuClass}
+                        style={popoverMenuStyle()}
+                      >
+                        {PROVIDERS.map((provider) => {
+                          const selected = provider.id === currentProvider.id;
+                          return (
+                            <button
+                              key={provider.id}
+                              type="button"
+                              data-provider-option={provider.id}
+                              role="option"
+                              aria-selected={selected}
+                              onClick={() => {
+                                onSetDefaultProvider(provider.id);
+                                setOpenPopover(null);
+                              }}
+                              /* `vam-tap`: a popover row is a touch target too,
                                and this one measured 89x24 at 390px the first
                                time a census ever opened the popover it lives
                                in. Dormant while `PROVIDERS` has one row and
                                this whole control is withdrawn -- and that is
                                the point of putting it here now rather than
                                with the row that brings it back. */
-                            className={[
-                              'vam-tap flex cursor-pointer items-center whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control',
-                              selected
-                                ? 'bg-line-strong text-ink'
-                                : 'text-ink-dim hover:bg-line-strong hover:text-ink',
-                            ].join(' ')}
-                          >
-                            {provider.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
+                              className={[
+                                'vam-tap flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control',
+                                selected
+                                  ? 'bg-line-strong text-ink'
+                                  : 'text-ink-dim hover:bg-line-strong hover:text-ink',
+                              ].join(' ')}
+                            >
+                              <ProviderIcon id={provider.id} />
+                              {provider.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
               {/* THE MODEL CONTROL, IN THREE STATES -- `modelControlState`
@@ -11668,6 +12139,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
               {modelControl === 'picker' && (
                 <div
                   data-popover-root="model"
+                  data-popover-anchor
                   /* `min-w-0 shrink` AND NOT `flex-none`, AND `flex` -- three
                      classes that only work together, each of which was put
                      here by a measurement at 520px (the button's own comment
@@ -11690,15 +12162,13 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                      shrinks WITH it, and the guard now measures the button
                      against its wrapper rather than trusting the row.
 
-                     NOT `relative` ANY MORE: it was this wrapper's own
-                     positioning context for `[data-model-picker-menu]`'s
-                     `absolute bottom-full`, which is what grew the popover
-                     upward into the textarea (`COMPOSER_POPOVER_MENU`'s own
-                     comment). Removing it does not touch the shrink fix
-                     above -- `position` plays no part in that measurement --
-                     and lets the popover resolve against `data-composer-bar`
-                     instead. */
-                  className="flex min-w-0 shrink"
+                     AND `relative` AGAIN, on purpose: this wrapper is
+                     `[data-model-picker-menu]`'s anchor
+                     (`data-popover-anchor`), so the menu opens above the
+                     model button rather than above the whole composer.
+                     `position` plays no part in the shrink measurement
+                     above. */
+                  className={phone ? 'flex min-w-0 shrink' : 'relative flex min-w-0 shrink'}
                 >
                   {/* THE NOTE SAYS WHAT THE ONE ROUTE COSTS, which is nothing
                       beyond this session. An ALIAS is walked onto the CLI's own
@@ -11816,7 +12286,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                           data-tap-skin
                           className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-card px-1.5 font-mono text-control hover:bg-line-strong"
                         >
-                          <span data-model-label className="truncate">
+                          <span data-model-label className="truncate text-meta">
                             {modelButtonLabel(running?.name ?? null)}
                           </span>
                           {/* The chevron never gives way: a picker with no
@@ -11829,10 +12299,9 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                   {modelPickerOpen && (
                     <div
                       data-model-picker-menu
-                      className={COMPOSER_POPOVER_MENU}
-                      style={
-                        suggestMaxHeight === null ? undefined : { maxHeight: suggestMaxHeight }
-                      }
+                      data-composer-menu
+                      className={popoverMenuClass}
+                      style={popoverMenuStyle()}
                     >
                       {/* THE FIVE, as a listbox of their own rather than the
                           popover being one. That began as a necessity -- a
@@ -11874,7 +12343,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                               setOpenPopover(null);
                               void sendModel(choice.id);
                             }}
-                            className="flex cursor-pointer items-center gap-3 whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                            className="vam-tap flex cursor-pointer items-center gap-3 whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
                           >
                             <span data-model-name>{choice.label}</span>
                             {/* THE TICK ON THE MODEL THIS SESSION IS RUNNING,
@@ -12093,7 +12562,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                           and a model id a source recorded can be longer than
                           the word it replaces. The whole name is one hover or
                           one Tab away, in the note and the accessible name. */}
-                      <span data-model-label className="truncate">
+                      <span data-model-label className="truncate text-meta">
                         {running?.name ?? recordedModel ?? 'model'}
                       </span>
                       <ChevronDown size={11} strokeWidth={2} className="flex-none" />
@@ -12136,81 +12605,93 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
               thing that can disagree with the text actually recorded. */}
               {canCycleMode && (
                 <div data-popover-root="mode" className="flex-none">
-                  {/* PHONE: the toggle moves into the "+" overflow's "Mode"
+                  <div
+                    data-popover-anchor
+                    className={phone ? 'flex shrink-0' : 'relative flex shrink-0'}
+                  >
+                    {/* PHONE: the toggle moves into the "+" overflow's "Mode"
                       row, which opens this SAME listbox by setting the shared
                       `openPopover` state directly -- see the model toggle's
                       own comment above for the identical pattern. */}
-                  {!phone && (
-                    <Note
-                      text={`mode: ${currentMode} — ${MODE_SKIN[currentMode].means}. Your pick goes into the prompt; ${chordSymbols('Shift-Tab')} cycles the session’s own.`}
-                    >
-                      <button
-                        type="button"
-                        data-mode-toggle
-                        onKeyDown={dismissPopoverOnEscape}
-                        aria-haspopup="listbox"
-                        aria-expanded={modePickerOpen}
-                        aria-label={`mode: ${currentMode} — change, or ${chordSymbols('Shift-Tab')} to cycle the session's own`}
-                        onClick={() => togglePopover('mode')}
-                        className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center"
+                    {!phone && (
+                      <Note
+                        text={`mode: ${currentMode} — ${MODE_SKIN[currentMode].means}. Your pick goes into the prompt; ${chordSymbols('Shift-Tab')} cycles the session’s own.`}
                       >
-                        {/* The glyph carries the ink now (`MODE_SKIN`), so the
+                        <button
+                          type="button"
+                          data-mode-toggle
+                          onKeyDown={dismissPopoverOnEscape}
+                          aria-haspopup="listbox"
+                          aria-expanded={modePickerOpen}
+                          aria-label={`mode: ${currentMode} — change, or ${chordSymbols('Shift-Tab')} to cycle the session's own`}
+                          onClick={() => togglePopover('mode')}
+                          className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center"
+                        >
+                          {/* The glyph carries the ink now (`MODE_SKIN`), so the
                             button no longer sets one: `text-ink-dim
                             hover:text-ink` here would have been a second opinion
                             about the same pixels, settled by source order rather
                             than by intent. The hover affordance stays on the
                             chip, which is where it was already drawn. */}
-                        <span
-                          aria-hidden="true"
-                          data-tap-skin
-                          className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-card hover:bg-line-strong"
-                        >
-                          <ModeGlyph mode={currentMode} />
-                        </span>
-                      </button>
-                    </Note>
-                  )}
-                  {modePickerOpen && (
-                    <div
-                      data-mode-picker
-                      role="listbox"
-                      onKeyDown={dismissPopoverOnEscape}
-                      aria-label="mode for this prompt"
-                      className={COMPOSER_POPOVER_MENU}
-                      style={
-                        suggestMaxHeight === null ? undefined : { maxHeight: suggestMaxHeight }
-                      }
-                    >
-                      {MODES.map((mode) => {
-                        const selected = mode === currentMode;
-                        return (
-                          <button
-                            key={mode}
-                            type="button"
-                            data-mode-option={mode.toLowerCase()}
-                            role="option"
-                            aria-selected={selected}
-                            onClick={() => {
-                              onDraftChange(setModeRequest(draft, mode));
-                              setOpenPopover(null);
-                            }}
-                            className={[
-                              'flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control',
-                              selected
-                                ? 'bg-line-strong text-ink'
-                                : 'text-ink-dim hover:bg-line-strong hover:text-ink',
-                            ].join(' ')}
+                          <span
+                            aria-hidden="true"
+                            data-tap-skin
+                            className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-card hover:bg-line-strong"
                           >
-                            {/* Coloured here too: the picker is the one place
+                            <ModeGlyph mode={currentMode} />
+                          </span>
+                        </button>
+                      </Note>
+                    )}
+                    {modePickerOpen && (
+                      <div
+                        data-mode-picker
+                        data-composer-menu
+                        role="listbox"
+                        onKeyDown={dismissPopoverOnEscape}
+                        aria-label="mode for this prompt"
+                        className={popoverMenuClass}
+                        style={popoverMenuStyle(MODE_MENU_MAX_WIDTH)}
+                      >
+                        {MODES.map((mode) => {
+                          const selected = mode === currentMode;
+                          return (
+                            <button
+                              key={mode}
+                              type="button"
+                              data-mode-option={mode.toLowerCase()}
+                              role="option"
+                              aria-selected={selected}
+                              onClick={() => {
+                                onDraftChange(setModeRequest(draft, mode));
+                                setOpenPopover(null);
+                              }}
+                              className={[
+                                'vam-tap flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control',
+                                selected
+                                  ? 'bg-line-strong text-ink'
+                                  : 'text-ink-dim hover:bg-line-strong hover:text-ink',
+                              ].join(' ')}
+                            >
+                              {/* Coloured here too: the picker is the one place
                                 all three modes appear at once, so it is the
                                 only legend the hues have. */}
-                            <ModeGlyph mode={mode} />
-                            {mode}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
+                              <ModeGlyph mode={mode} />
+                              <span className="flex min-w-0 flex-col items-start">
+                                <span>{mode}</span>
+                                <span
+                                  data-mode-description
+                                  className="max-w-full truncate text-meta text-ink-faint"
+                                >
+                                  {MODE_DESCRIPTIONS[mode]}
+                                </span>
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
               {/* WHAT THE ⇧Tab PRESS DID, and the only channel that says so:

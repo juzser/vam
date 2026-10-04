@@ -62,7 +62,7 @@ describe('status', () => {
       ),
     });
     setup({ api });
-    await waitFor(() => expect(status()).toMatch(/octocat/));
+    await waitFor(() => expect(account()?.textContent).toMatch(/octocat/));
     expect(api.authStatus).toHaveBeenCalledTimes(1);
   });
 
@@ -373,7 +373,7 @@ describe('tokens never rendered, never logged', () => {
       ),
     });
     setup({ api });
-    await waitFor(() => expect(status()).toMatch(/octocat/));
+    await waitFor(() => expect(account()?.textContent).toMatch(/octocat/));
     expect(document.body.textContent ?? '').not.toMatch(/glpat-/);
   });
 });

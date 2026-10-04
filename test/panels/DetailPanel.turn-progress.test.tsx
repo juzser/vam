@@ -313,7 +313,9 @@ describe('folded activity stays one click away', () => {
       // second copy of the setting, reachable from a place that promised
       // something smaller.
       expect(lines()).toHaveLength(1);
-      expect(unfolds()).toHaveLength(2);
+      // Three now, not two: the arrow stays on the opened turn (event 49).
+      expect(unfolds()).toHaveLength(3);
+      expect(unfolds()[0]?.getAttribute('aria-expanded')).toBe('true');
       expect(labels().map((l) => l.label)).toEqual(['turn-c']);
     });
   });
@@ -343,15 +345,17 @@ describe('folded activity stays one click away', () => {
     });
   });
 
-  it('takes its own control away once the working is back', () => {
-    // A control offering to restore something already on screen is a control
-    // that does nothing -- the same defect as one that cannot act.
+  it('keeps its control once the working is back, and folds the turn again on a second press', () => {
+    // It is a toggle (operator event 49): the arrow that opened the turn is
+    // the one that closes it.
     inMode('collapsed', () => {
       draw([turn('a')]);
-      const control = unfolds()[0];
-      fireEvent.click(control as HTMLElement);
+      fireEvent.click(unfolds()[0] as HTMLElement);
       expect(lines()).toHaveLength(1);
-      expect(unfolds()).toHaveLength(0);
+      expect(unfolds()).toHaveLength(1);
+      expect(unfolds()[0]?.getAttribute('aria-expanded')).toBe('true');
+      fireEvent.click(unfolds()[0] as HTMLElement);
+      expect(lines()).toHaveLength(0);
     });
   });
 

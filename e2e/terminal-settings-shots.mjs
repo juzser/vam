@@ -34,7 +34,10 @@
  *      every label on the panel clear WCAG 1.4.3's 4.5:1 -- the bar the app
  *      palette's swatch labels already meet -- and every swatch ring, the
  *      slider's thumb and track, and the pressed chip's edge clear 1.4.11's
- *      3:1 against the surface they identify the control on.
+ *      3:1 against the surface they identify the control on. The hex field's
+ *      edge is the exception: it follows the shared input style (EC-50,
+ *      operator #42), so it is held to being visible (not the panel's own
+ *      colour), not to 3:1 (operator decision #1542).
  *
  * ── THE BRIDGE IS A STUB ──────────────────────────────────────────────────
  * Injected with `page.addInitScript`, exactly as `terminal-scheme-shots.mjs`
@@ -610,6 +613,7 @@ async function checkGroup(label, all, want) {
 async function checkContrast(label, all) {
   const dim = [];
   const edges = [];
+  const hexEdges = [];
   for (const key of KEYS) {
     const s = all.swatches[key];
     const hexOnFill = ratio(s.hexInk, s.hexFill);
@@ -620,14 +624,15 @@ async function checkContrast(label, all) {
     else if (ratio(s.ring.colour, s.ringGround) < 3) {
       edges.push(`${key} ring ${ratio(s.ring.colour, s.ringGround).toFixed(2)}`);
     }
-    if (ratio(s.hexEdge, s.labelGround) < 3) edges.push(`${key} hex edge ${ratio(s.hexEdge, s.labelGround).toFixed(2)}`);
+    if (s.hexEdge === s.labelGround) hexEdges.push(`${key} hex edge is the panel's own colour`);
   }
   const first = all.swatches[KEYS[0]];
   console.log(
     `  ${label}: hex ink on fill ${ratio(first.hexInk, first.hexFill).toFixed(2)}:1, label on panel ${ratio(first.labelInk, first.labelGround).toFixed(2)}:1, resting ring ${ratio(first.ring.colour, first.ringGround).toFixed(2)}:1, hex edge ${ratio(first.hexEdge, first.labelGround).toFixed(2)}:1`,
   );
   check(`${label}: every hex field and every swatch label clears 4.5:1`, dim.length === 0, dim.join('; '));
-  check(`${label}: every swatch ring and hex field edge clears 3:1 on the panel`, edges.length === 0, edges.join('; '));
+  check(`${label}: every swatch ring clears 3:1 on the panel`, edges.length === 0, edges.join('; '));
+  check(`${label}: every hex field keeps a visible edge, a colour other than the panel's`, hexEdges.length === 0, hexEdges.join('; '));
 
   const chips = [];
   for (const chip of all.chips) {

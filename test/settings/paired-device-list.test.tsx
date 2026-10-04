@@ -63,7 +63,7 @@ describe('the paired device list', () => {
     expect(rows[0]?.getAttribute('data-you')).toBe('true');
     expect(rows[1]?.getAttribute('data-you')).toBe('false');
     // Announced, not only painted: the mark is a fact a screen reader needs.
-    expect(rows[0]?.textContent).toContain('this device');
+    expect(rows[0]?.textContent).toContain('This device');
   });
 
   it('offers no control that removes anything', async () => {

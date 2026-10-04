@@ -82,6 +82,13 @@ export const CHANNELS = {
    */
   setPrRepos: 'vam:source:set-pr-repos',
   /**
+   * DESKTOP-ONLY, the same standing as `setPrRepos`: the PRs view's filter and
+   * sort set, pushed from the renderer's prefs into main, where it becomes the
+   * `gh pr list` query. Never a member of `PreloadSourceApi`; validated in main
+   * (`parsePrFilters`).
+   */
+  setPrFilters: 'vam:source:set-pr-filters',
+  /**
    * DESKTOP-ONLY, the same standing as `setPrRepos` above and for the
    * identical reason: it carries the operator's UI zoom preference from the
    * renderer's `prefs` into main, where `webContents.setZoomFactor` lives.
@@ -768,6 +775,14 @@ export const CHANNELS = {
   adhdSkillStatus: 'vam:skills:adhd-status',
   adhdSkillInstall: 'vam:skills:adhd-install',
   adhdSkillRemove: 'vam:skills:adhd-remove',
+  /**
+   * THE SKILL ROW'S STAR COUNT, beside the three above: one anonymous GitHub
+   * read in main (`src/main/skills/repo-stats.ts`), cached, answering
+   * `{ stars }` or `null`, never rejecting. Takes NO argument -- the repo is
+   * `ADHD_SKILL_SOURCE_REPO`, nothing a renderer sends reaches the request.
+   * Desktop-only like its neighbours: no route on `remote/server.ts`'s table.
+   */
+  adhdSkillStars: 'vam:skills:adhd-stars',
   /**
    * THE STATS & USAGE SCREEN'S ONE CHANNEL. Answers bare (a `StatsResult`,
    * never an `IpcResult`), like `usageGet` — a scan failure is not a

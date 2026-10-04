@@ -84,7 +84,7 @@ async function openIntegrations(status, theme) {
   await page.locator('button[aria-label="settings"]').first().click();
   await page.waitForSelector('[data-settings-nav]', { timeout: 5_000 });
   await page.locator('[data-settings-nav-item="integrations"]').click();
-  await page.waitForSelector('[data-github-status]', { timeout: 5_000 });
+  await page.waitForSelector('[data-github-status-pill]', { timeout: 5_000 });
   return page;
 }
 
@@ -118,7 +118,8 @@ for (const theme of ['dark', 'light']) {
       `  [${theme}/${name}] status="${state.status}" pill=${state.pillKind} account=${state.account}`,
     );
 
-    if (state.status === null || state.status === '') {
+    // Logged in, the account line carries the login and the sentence row is not drawn.
+    if (name !== 'logged-in' && (state.status === null || state.status === '')) {
       throw new Error(`[${theme}/${name}] the Integrations panel drew no status line at all`);
     }
     // THE SKILLS-CARD SHAPE'S OWN PILL (item F), painted -- not merely typed.

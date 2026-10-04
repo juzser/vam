@@ -203,20 +203,25 @@ describe('the way back', () => {
   it('draws the line again once the operator asks for it', () => {
     const opened = { ...QUIET, unfolded: true };
     expect(drawsProgressLine(true, opened)).toBe(true);
-    // And the control goes with it: it said "show this turn's working", and
-    // the working is now shown.
-    expect(drawsUnfoldControl(true, opened)).toBe(false);
+    // And the control STAYS: it is a toggle now (operator event 49), so the
+    // same arrow that opened the turn is what folds it again.
+    expect(drawsUnfoldControl(true, opened)).toBe(true);
   });
 
   it('never leaves a turn with neither, which is what a deletion looks like', () => {
     // THE INVARIANT THE WHOLE FEATURE RESTS ON, swept over every combination
     // of the facts the rule reads rather than over the three cases above. A
-    // fold with no way back is not a fold.
+    // fold with no way back is not a fold. The control is a toggle, so both
+    // appear together for exactly one kind of turn: one focus view folds and
+    // the operator opened.
     const bools = [true, false];
     const counts = [undefined, 0, 1];
     const strings = [null, 'editing'];
     let checked = 0;
     const stranded: string[] = [];
+    const misplaced: string[] = [];
+    const wrongControl: string[] = [];
+    const wrongLine: string[] = [];
     for (const focus of bools) {
       for (const errorCount of counts) {
         for (const newest of bools) {
@@ -227,11 +232,21 @@ describe('the way back', () => {
                 checked += 1;
                 const line = drawsProgressLine(focus, turn);
                 const way = drawsUnfoldControl(focus, turn);
-                // Exactly one of the two, always. Neither is a deletion; both
-                // is a control that undoes nothing.
-                if (line === way) {
-                  stranded.push(`${focus ? 'focus' : 'full'} ${JSON.stringify(turn)}`);
-                }
+                const name = `${focus ? 'focus' : 'full'} ${JSON.stringify(turn)}`;
+                // THE ORACLE IS WRITTEN OUT HERE and calls neither predicate:
+                // a sweep that derived its expectation from the code under
+                // test would pass whatever that code did.
+                const foldEligible =
+                  focus &&
+                  !((errorCount ?? 0) > 0) &&
+                  !(newest && (activity !== null || waitingCause !== null));
+                if (way !== foldEligible) wrongControl.push(name);
+                if (line !== (!foldEligible || unfolded)) wrongLine.push(name);
+                // Neither is a deletion.
+                if (!line && !way) stranded.push(name);
+                // Both is right only for a turn focus view folds and the
+                // operator unfolded.
+                if (line && way && !(foldEligible && unfolded)) misplaced.push(name);
               }
             }
           }
@@ -240,7 +255,13 @@ describe('the way back', () => {
     }
     // 2 x 3 x 2 x 2 x 2 x 2. The literal is the point: a sweep that examined
     // nothing would satisfy the emptiness check forever.
-    expect({ checked, stranded }).toEqual({ checked: 96, stranded: [] });
+    expect({ checked, stranded, misplaced, wrongControl, wrongLine }).toEqual({
+      checked: 96,
+      stranded: [],
+      misplaced: [],
+      wrongControl: [],
+      wrongLine: [],
+    });
   });
 });
 
