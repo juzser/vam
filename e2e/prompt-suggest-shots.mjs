@@ -52,8 +52,17 @@ if (offered !== 'Server-sent events') {
   fail(`the box offers "${offered}", expected the showing question's first option.`);
 }
 if (before !== '') fail(`the draft is "${before}" before Tab — the offer is a ghost, not a draft.`);
-if (!(placeholder ?? '').includes('Tab')) {
-  fail(`the placeholder is "${placeholder}" — it must name the key that accepts it.`);
+// THE KEY IS NAMED BY THE GHOST'S OWN TAB KEY TAG, NOT BY THE PLACEHOLDER: since
+// EC-36 the placeholder holds the offer alone (accessible text, transparent on
+// desktop) and the visible "Tab" tag stands before it, with `aria-keyshortcuts`
+// carrying the same key to a screen reader. The guard's intent -- the box says
+// which key accepts the offer -- is read from those.
+const ghostTag = await page.locator('[data-prompt-suggestion-ghost] [data-key-tag]').innerText();
+const shortcuts = await boxEl.getAttribute('aria-keyshortcuts');
+if (ghostTag !== 'Tab' || shortcuts !== 'Tab') {
+  fail(
+    `the offer names the key "${ghostTag}" / aria-keyshortcuts "${shortcuts}" — it must name the key that accepts it.`,
+  );
 }
 await page.screenshot({ path: `${outDir}/prompt-suggestion-offered.png` });
 console.log(`${outDir}/prompt-suggestion-offered.png`);

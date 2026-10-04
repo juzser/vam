@@ -851,6 +851,13 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * `retainLeft`); that still exceeds 743,500, so the raise stands.
  * `ENTRY_BUDGET_BYTES` moves 743,500 -> 744,500 (+1,000 B, inside the 1,024 B
  * allowance). `ENTRY_GZIP_BUDGET_BYTES` is unchanged at 222,645 (head: 222,643).
+ *
+ * A TWENTY-FIRST, FROM MAIN (PR #566, not this branch): the three eager
+ * `settings.update.lastCheck*` strings in `i18n/strings.ts`. Merged with main,
+ * CI measured gzip 222,688 B (43 B over 222,645); this branch alone was 2 B
+ * under it, so nothing of the branch's own grew. `ENTRY_GZIP_BUDGET_BYTES`
+ * moves 222,645 -> 222,850 (the measured figure plus 162 B of slack, the same
+ * order as the earlier raises). `ENTRY_BUDGET_BYTES` is unchanged.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -862,7 +869,7 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
 const ENTRY_BUDGET_BYTES = 744_500;
-const ENTRY_GZIP_BUDGET_BYTES = 222_645;
+const ENTRY_GZIP_BUDGET_BYTES = 222_850;
 
 // The one string this repo's markdown stack ships that nothing else in the
 // dependency graph or vam's own source does: `gfmTable`, the extension name

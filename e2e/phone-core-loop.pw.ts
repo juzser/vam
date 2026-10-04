@@ -740,7 +740,12 @@ test.describe('the card names controls that exist', () => {
     // carry. Step two of this call is the multi-select, so this is the real
     // worst case rather than a long string invented for the test.
     await page.locator('[data-phone-shell] [data-question-step]').nth(1).click();
-    const options = page.locator('[data-phone-shell] [data-question-option]');
+    // THE QUESTION'S OWN OFFERS ONLY: the terminal's free-text row is also a
+    // `[data-question-option]`, but choosing it hands the whole set to the
+    // terminal and marks nothing, so it is not one of the marks this builds.
+    const options = page.locator(
+      '[data-phone-shell] [data-question-option]:not([data-question-free-text])',
+    );
     // `toHaveCount` and not `count()`: stepping unmounts one question's
     // options and mounts the next one's, and a bare read can land mid-render
     // and report zero -- a corpus assertion failing for the one reason that is

@@ -529,9 +529,17 @@ const overlaps = (a, b) => a.x < b.right && a.right > b.x && a.y < b.bottom && a
 let sawBoth = 0;
 let sawGap = Number.POSITIVE_INFINITY;
 let filledTheWidth = 0;
+// MORE THAN ONE NARROW WIDTH: where a prose line breaks depends on the font's
+// advance widths, which differ between this machine and the CI runner, so a
+// single 700px sweep can land every line short of the edge on one of them and
+// prove nothing. Several widths a few dozen px apart make a full line certain.
 for (const size of [
   { width: 1100, height: 620 },
   { width: 700, height: 520 },
+  { width: 660, height: 520 },
+  { width: 740, height: 520 },
+  { width: 780, height: 520 },
+  { width: 620, height: 520 },
 ]) {
   await page.setViewportSize(size);
   await page.waitForTimeout(200);
@@ -1839,8 +1847,16 @@ for (const vp of POPOVER_VIEWPORTS) {
  * opened when the build lists two providers.
  */
 const PHONE_MARGIN = 12;
-/** Base (28d36402) widths of the phone menus, measured at 390x844. */
-const BASE_PHONE_WIDTH = { model: 155.75, mode: 260 };
+/**
+ * Base (28d36402) widths of the phone menus, measured at 390x844 on macOS.
+ * The model menu's width is its CONTENT's width, and a font's advance widths
+ * differ between macOS and the CI runner's Linux (the same menu is 153.02px
+ * there), so a constant is only right on the machine that measured it. `null`
+ * means "measure the menu's own max-content width in this run instead" -- the
+ * same fact (the phone cap and the 12px margin leave the menu its natural
+ * size), asked of this machine's font.
+ */
+const BASE_PHONE_WIDTH = { model: null, mode: 260 };
 {
   const ph = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
   const assertForcedPhone = await forceCapabilities(ph);
@@ -1909,7 +1925,18 @@ const BASE_PHONE_WIDTH = { model: 155.75, mode: 260 };
         rows.length > 0 && rows.every((o) => o.height >= 43.5),
         `heights ${rows.map((o) => o.height)}`,
       );
-      const base = BASE_PHONE_WIDTH[name];
+      const base =
+        BASE_PHONE_WIDTH[name] ??
+        (await ph.evaluate((sel) => {
+          const menu = document.querySelector(sel);
+          const kept = { width: menu.style.width, maxWidth: menu.style.maxWidth };
+          menu.style.width = 'max-content';
+          menu.style.maxWidth = 'none';
+          const natural = menu.getBoundingClientRect().width;
+          menu.style.width = kept.width;
+          menu.style.maxWidth = kept.maxWidth;
+          return natural;
+        }, menuSel));
       if (base !== null && r !== null) {
         // The mode menu is sized by its content up to 260px, so EC-72's shorter copy
         // narrows it on purpose: it may only be narrower than base, never wider.
