@@ -1,15 +1,13 @@
 /**
  * THE README'S OWN SCREENSHOTS, RETAKEN AGAINST THE CURRENT BUILD.
  *
- * Eleven pictures, all `docs/assets/readme/`, all `?demo=1` fixture data or an
+ * Ten pictures, all `docs/assets/readme/`, all `?demo=1` fixture data or an
  * in-page `window.api` stub whose every value is invented (the same
  * technique `start-screen-shots.mjs`, `usage-popover-shots.mjs`,
  * `settings-chrome-shots.mjs`, `integrations-github-shots.mjs` and
  * `worktrees-shots.mjs` already use, each cited at its own block below) --
  * never a real session, path, token or account name:
  *
- *   start-flow.png       the new-session flow — provider pick, the per-
- *                        session Manual/Yolo permission picker.
  *   status-usage.png     the avatar bar's usage popover, Claude + Codex.
  *   question-card.png    an AskUserQuestion card, open mid-conversation.
  *   sidebar-filters.png  Workspace options — group/sort/status filters and
@@ -20,9 +18,7 @@
  *   settings-overlay.png the full-window Settings overlay and its section
  *                        list.
  *   integrations.png     the GitHub (`gh`) and GitLab (`glab`) cards.
- *   keyboard-today.png   the `?` shortcuts sheet, generated from the key
- *                        tables (post-#553: Escape leaves Insert, Mod-.
- *                        interrupts).
+ *   command-suggest.png  the `!` command-suggestion list open in the prompt.
  *   keyboard-settings.png Settings → Keyboard, a contested chord's red
  *                        conflict dot with its tooltip open (PR #553).
  *   hero.png             the tab shell itself — sidebar, sessions as tabs,
@@ -134,126 +130,6 @@ function baseApiStub() {
     load: async () => [],
     subscribe: () => () => {},
   };
-}
-
-// ── 1. THE START FLOW + PER-SESSION MANUAL/YOLO PICKER ──────────────────────
-// `?demo=1` alone never reaches this: the picker is gated by `isDesktopShell()`
-// (`isDesktopShell() &&` guard, `DetailPanel.tsx`), which reads `window.api`'s
-// presence -- `App.tsx` swaps to `DesktopCanvas` the instant that exists, so
-// `demo.ts`'s OWN unstarted fixture row (`pane:vam-notes-k3f9zq`, `notes`
-// project, `status: 'unstarted'`) is reached instead through the identical
-// stub `start-screen-shots.mjs` already carries and names as fabricated
-// fixture data, not a real session -- every string below is invented, the
-// same rule that file's own header states.
-{
-  const ROW = 'pane:vam-notes-k3f9zq';
-  const PANE = 'vam-notes-k3f9zq';
-  function stubStartFlow({ row, pane }) {
-    globalThis.window.api = {
-      describe: async () => ({
-        id: 'claude-code',
-        label: 'Claude Code',
-        capabilities: {
-          liveUpdates: false,
-          recordPrompt: true,
-          deliverPrompt: true,
-          promptAttachments: false,
-          slashCommands: false,
-          renameSession: false,
-          closeSession: true,
-          createSession: true,
-          governance: false,
-          pullRequests: false,
-          terminal: true,
-          agentRoster: false,
-          resumeSession: false,
-        },
-        declines: {},
-        viewerScope: { kind: 'connection', note: 'stub' },
-      }),
-      load: async () => [
-        {
-          id: 'notes',
-          name: 'notes',
-          source: 'claude-code',
-          sessions: [
-            {
-              id: row,
-              title: pane,
-              pane,
-              epic: null,
-              branch: null,
-              status: 'unstarted',
-              runningAgents: 0,
-              activity: null,
-              age: null,
-              decisions: [],
-              source: 'claude-code',
-              vamControlled: true,
-            },
-          ],
-        },
-      ],
-      subscribe: () => () => {},
-      recordPrompt: async () => {},
-      renameSession: async () => {},
-      closeSession: async () => {},
-      createSession: async () => {},
-      createSessionIn: async () => {},
-      pickImageAttachment: async () => null,
-      history: async () => ({
-        kind: 'unavailable',
-        error: { kind: 'unreachable', code: 'stub', message: 'stub source' },
-      }),
-      agentWork: async () => ({
-        kind: 'unavailable',
-        error: { kind: 'unreachable', code: 'stub', message: 'stub source' },
-      }),
-      applyWaivers: async () => {},
-      transitionLesson: async () => {},
-      usage: { get: async () => ({ kind: 'unavailable' }) },
-      terminal: {
-        read: async () => ({ kind: 'unavailable' }),
-        resize: async () => true,
-        send: async () => 'sent',
-        answer: async () => ({ kind: 'unavailable' }),
-        prompt: async () => ({ kind: 'unavailable' }),
-        startScreen: async () => ({ kind: 'unavailable' }),
-        answerTrust: async () => null,
-      },
-    };
-  }
-
-  const page = await browser.newPage({ viewport: DESKTOP, deviceScaleFactor: RETINA });
-  page.on('pageerror', (err) => console.error('START-FLOW PAGE ERROR:', err));
-  await page.addInitScript(stubStartFlow, { row: ROW, pane: PANE });
-  await page.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
-  await page.waitForSelector('[data-tab-strip]');
-  await page.locator(`[data-session-row="${ROW}"]`).first().click();
-  await page.waitForSelector('[data-start-permission]', { timeout: 5_000 });
-
-  const shape = await page.evaluate(() => ({
-    providers: document.querySelectorAll('[data-start-provider]').length,
-    permission: document.querySelector('[data-start-permission]') !== null,
-    manualPressed:
-      document.querySelector('[data-start-permission-option="manual"]')?.getAttribute('aria-pressed'),
-    yoloPressed:
-      document.querySelector('[data-start-permission-option="yolo"]')?.getAttribute('aria-pressed'),
-  }));
-  console.log('start flow:', JSON.stringify(shape));
-  assert('two providers are offered', shape.providers === 2, JSON.stringify(shape));
-  assert('the permission picker is drawn', shape.permission);
-  assert(
-    'Manual is preselected, Yolo is not',
-    shape.manualPressed === 'true' && shape.yoloPressed === 'false',
-    JSON.stringify(shape),
-  );
-
-  await page.waitForTimeout(150);
-  await freeze(page);
-  await page.screenshot({ path: `${outDir}/start-flow.png` });
-  console.log(`${outDir}/start-flow.png`);
-  await page.close();
 }
 
 // ── 2. STATUS & USAGE — the avatar bar's popover, Claude + Codex together ──
@@ -807,28 +683,36 @@ function baseApiStub() {
   await page.close();
 }
 
-// ── 9. KEYBOARD, TRUE TODAY — the generated shortcuts sheet ─────────────────
-// Pure `?demo=1`: `?` opens the sheet the same way `key-sheet-shots.mjs`
-// does. PR #553 (merged): `Escape` now leaves Insert instead of reaching the
-// pane, and `Mod-.` is the new way to send Escape INTO a running session —
-// this sheet is generated straight from the same key tables, so it already
-// reads the post-#553 bindings with no changes needed here.
+// ── 9b. COMMAND SUGGESTION — `!` plus a partial command, list open ─────────
+// Pure `?demo=1`, `prompt-suggest-shots.mjs`'s own route: `vam-build-1` asks a
+// question, "Chat about this" is the way to a box, and typing `!` there lists
+// the shell commands earlier turns proposed (`data-bang-suggest`), narrowing as
+// more is typed. Typed one key at a time, as a person does.
 {
   const page = await browser.newPage({ viewport: DESKTOP, deviceScaleFactor: RETINA });
-  page.on('pageerror', (err) => console.error('KEYBOARD-TODAY PAGE ERROR:', err));
+  page.on('pageerror', (err) => console.error('COMMAND-SUGGEST PAGE ERROR:', err));
   await page.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
-  await page.waitForSelector('[data-session-row]');
-  await page.keyboard.press('?');
-  await page.waitForSelector('[data-key-sheet]', { timeout: 5_000 });
+  await page.waitForSelector('[data-tab-strip]');
+  await page.locator('[data-session-row="vam-build-1"]').first().click();
+  await page.waitForTimeout(200);
+  const chat = page.locator('[data-question-chat]');
+  if ((await chat.count()) > 0) await chat.click();
+  await page.waitForSelector('[data-prompt-box] textarea');
+  const box = page.locator('[data-prompt-box] textarea');
+  await box.click();
+  await page.keyboard.type('!pnpm', { delay: 12 });
+  await page.waitForSelector('[data-bang-suggest]', { timeout: 5_000 });
 
-  const rows = await page.locator('[data-key-sheet] li').count();
-  console.log(`keyboard-today: ${rows} shortcut rows`);
-  assert('the shortcuts sheet lists rows', rows > 0, `${rows}`);
+  const rows = await page
+    .locator('[data-bang-suggestion] [data-bang-command]')
+    .allTextContents();
+  console.log('command suggestion rows:', JSON.stringify(rows));
+  assert('the ! list offers commands from the session', rows.length > 0, JSON.stringify(rows));
 
   await page.waitForTimeout(150);
   await freeze(page);
-  await page.screenshot({ path: `${outDir}/keyboard-today.png` });
-  console.log(`${outDir}/keyboard-today.png`);
+  await page.screenshot({ path: `${outDir}/command-suggest.png` });
+  console.log(`${outDir}/command-suggest.png`);
   await page.close();
 }
 
@@ -909,6 +793,10 @@ function baseApiStub() {
   assert('3 tabs are open for the hero', tabCount >= 3, `${tabCount}`);
   await page.keyboard.press(`${MOD}+[`);
   await page.waitForTimeout(300);
+  // The hero is the product's face, so the "demo data -- every write is
+  // refused" readout (`[data-source]`, `SourceReadout` in Canvas.tsx) is hidden
+  // here by a style injected into this shot's page alone; no product code.
+  await page.addStyleTag({ content: '[data-source] { visibility: hidden !important; }' });
   await freeze(page);
   await page.screenshot({ path: `${outDir}/hero.png` });
   console.log(`${outDir}/hero.png`);
