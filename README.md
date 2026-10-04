@@ -50,7 +50,6 @@ started itself.
 | `j` `k` | Walk the session list | Walk a question's options |
 | `h` `l` | Cycle the project's open tabs | `h` back to Select, `l` next step of a multi-question call |
 | `Enter` | | Mark the option and send once every step is marked; opens the prompt if no question is on screen |
-| `Space` | | Mark an option without sending |
 | `1` ... `9` | Show a view (Response, PRs, Terminal, Agents, Files) | Text |
 | `Mod-.` | Send a literal Escape into the session's pane (works in either mode) | |
 | `Mod-k` | Command palette | |
@@ -64,7 +63,7 @@ started itself.
 Every binding is in [docs/keyboard.md](docs/keyboard.md), which a unit test holds against
 the key tables.
 
-## Highlights
+## Features
 
 <table>
 <tr>
@@ -73,7 +72,7 @@ the key tables.
 ### Select option
 
 An agent's question (`AskUserQuestion`, a permission prompt) lands as a card in the
-transcript. Press `i`, walk the options with `j` / `k`, mark with `Space` or `Enter`, send
+transcript. Press `i`, walk the options with `j` / `k`, mark with `Enter`, send
 with `Enter` or `Mod-Enter`. A multi-question call is answered one `Enter` per question.
 vam never answers for you.
 
@@ -87,8 +86,7 @@ vam never answers for you.
 
 Type `/` at the start of a line in the prompt and vam lists the session's slash commands:
 Claude Code's built-ins, plus your own from `~/.claude/commands` and the project's
-`.claude/commands`. Move with the arrow keys, accept with `Enter`, close with `Escape`.
-
+`.claude/commands`. Accept one with `Enter`.
 
 </td>
 <td><img src="docs/assets/readme/keyboard-today.png" alt="The searchable shortcuts sheet, Select and Insert side by side" /></td>
@@ -123,12 +121,8 @@ run by anyone else. A quick-key strip supplies the keys a touch screen lacks.
   every tool call, **Yolo** skips the provider's prompts) per session.
 - **Splits and tabs.** `zs` / `zv` split a tab, `Mod-1` ... `Mod-9` pick a tab,
   `Mod-Shift-[` and `]` cycle them.
-- **Focus view.** `zf` folds each turn's tool calls away, leaving prompts and answers.
 - **Files tab.** Browse, edit and save a session's files with vim-style `j` `k` `h` `l` in
   the tree.
-- **Usage and worktrees.** A usage popover for both providers' rate limits, and worktrees
-  nested under their project.
-- **Self-update.** Installed builds check for a newer release once a day (Settings → Update).
 
 ## 📦 Download
 
