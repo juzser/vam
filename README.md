@@ -17,7 +17,7 @@
 ---
 
 <div align="center">
-  <img src="docs/assets/readme/hero.png" alt="vam, dark theme: three sessions open as tabs across two projects, the sidebar grouped by project, and a waiting session's Response view with its permission prompt on screen" width="900" />
+  <img src="docs/assets/readme/hero.png" alt="vam, dark theme: three sessions open as tabs, the sidebar grouped into three projects, and a waiting session's Response view with its permission prompt on screen" width="900" />
 </div>
 
 ## Why vam
@@ -77,7 +77,7 @@ with `Enter` or `Mod-Enter`. A multi-question call is answered one `Enter` per q
 vam never answers for you.
 
 </td>
-<td><img src="docs/assets/readme/start-flow.png" alt="Starting a session: provider, permission mode, Start session" /></td>
+<td><img src="docs/assets/readme/question-card.png" alt="An open question card: four options, a Chat about this row, and the note that vam never answers for you" /></td>
 </tr>
 <tr>
 <td width="42%" valign="middle">
@@ -89,7 +89,7 @@ proposed earlier in the session, narrowing as you type. `Up` / `Down` move, `Ent
 the command, `Esc` closes the list; vam never runs it. (`/` at line start lists slash commands.)
 
 </td>
-<td><img src="docs/assets/readme/keyboard-today.png" alt="The searchable shortcuts sheet, Select and Insert side by side" /></td>
+<td><img src="docs/assets/readme/command-suggest.png" alt="Typing !pnpm in the prompt opens a list of the shell command the agent proposed earlier" /></td>
 </tr>
 <tr>
 <td width="42%" valign="middle">
@@ -103,7 +103,7 @@ run by anyone else. A quick-key strip supplies the keys a touch screen lacks.
 </td>
 <td>
 <img src="docs/assets/readme/phone-pairing.png" alt="Settings → Remote: the phone-access address and pairing QR" /><br/>
-<img src="docs/assets/readme/phone-session.png" alt="The same question card, inline in the transcript on a 390px phone" width="220" />
+<img src="docs/assets/readme/phone-session.png" alt="The question card from Select option, inline in the transcript on a 390px phone" width="220" />
 </td>
 </tr>
 </table>
